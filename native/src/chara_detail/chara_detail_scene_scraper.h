@@ -89,7 +89,7 @@ struct FrameDescriptor {
     Frame scroll_bar_frame;  // full-width scrollbar band: scrollbar geometry only
     // The frame the two crops above were cut from, at full resolution, carried WITH them rather than beside
     // them. The descriptor that becomes fragment #0 is judged on it and published at full size -- Rule 3's
-    // reference and its header row need pixels the crops do not contain -- and it is not always the current
+    // reference needs pixels the crops do not contain -- and it is not always the current
     // frame: the motion exit latches one captured several updates earlier. Pairing source with crops at
     // CONSTRUCTION is what makes handing over a descriptor and a frame that do not belong together
     // unexpressible. Empty only for descriptors synthesised from crops alone (scroll-bar arithmetic in the
@@ -102,46 +102,205 @@ struct FrameDescriptor {
 
 // WHETHER A SCROLL AREA IS AT THE HEAD OF ITS CONTENT, as one named fact with the unmeasurable case named.
 //
-// Re-typed as an expression at each call site, it lets the sites disagree: one reads a missing top-margin as
-// "not at the top" (`has_value() && value <= T`), another as "at the top" (`!has_value() || value <= T`). Both
-// are defensible -- that direction IS the false-alarm / miss trade -- but it must be stated rather than decided
-// by which `||` someone types, so the third state has a name here and a consumer supplies its answer for it as
-// data (see TopOfContentPolicy).
+// This used to be an expression re-typed at each call site, and the sites did not agree: two of them read a
+// missing top-margin as "not at the top" (`has_value() && value <= T`) while a third read it as "at the top"
+// (`!has_value() || value <= T`). Both are defensible -- that direction IS the false-alarm / miss trade -- but
+// it was decided by which `||` someone typed rather than stated anywhere, so the third state has a name here
+// and each call site supplies its answer for it as an argument (see TopOfContentPolicy).
 enum class TopOfContent {
     AtTop,
     Scrolled,
-    Unknown,  // no reading at all: the tab is not built yet, or this frame shows no measurable scroll bar (A tab BUILT for a page with no scroll bar never gets
-    //     here through CharaDetailSceneScraper::topOfContent: its structure answers first.)
-
+    // No reading at all -- the sensor this verdict was derived from had nothing to say. Only one derivation
+    // produces it today: a top-margin reading (topOfContentFromTopMargin below), where it is a per-frame fact --
+    // the tab is not built yet, or this frame shows no measurable scroll bar. (A tab BUILT for a page with no
+    // scroll bar never gets here through CharaDetailSceneScraper::topOfContent: its structure answers first.)
+    // Every tab passes it on, the factor tab included: its judgment (factorHeadReading) reads the thumb first
+    // and returns the thumb's Unknown as it is. The green header can only turn a thumb's AtTop into Scrolled.
+    // It never answers for a thumb that has no reading, so a factor frame whose header cannot be read, under
+    // a thumb at the head, is Scrolled.
+    // The caller owes an answer for it; TopOfContentPolicy::resolve is how a consumer gives one.
+    Unknown,
 };
 
 // The wire / log word for a verdict. Deliberately not a Japanese or user-facing string: the front end maps it.
 [[nodiscard]] const char *topOfContentTag(TopOfContent verdict);
 
-// WHICH SENSOR PRODUCED a reading (see CharaDetailSceneScraper::topOfContent). Nothing branches on it and
-// nothing may: it is a TRACE of what answered, carried out so a diagnostic can state it without re-deriving it.
+// WHICH SENSOR PRODUCED a composite reading (see CharaDetailSceneScraper::topOfContent). Nothing branches on
+// it and nothing may: it is a TRACE of the arm the composition actually took, carried out so a diagnostic can
+// state it without re-deriving the choice from the inputs. A caller that re-derived it would be a second copy
+// of the composition, and the two copies would disagree the first time the composition changed.
 enum class TopOfContentSensor {
     // Not a sensor at all: the tab's interpreter was built for a page with no scroll bar
     // (ScrapingInterpreter::scrollable), so no frame is read for the answer.
     NoScrollBar,
-    ScrollThumb,  // the scroll thumb's top margin
+    FactorHeader,  // the factor tab's green header (scraper_impl::factorHeadReading, c1/c2) decided
+    ScrollThumb,   // the coarse sensor: the scroll thumb's top margin
 };
 
 // The log word for a sensor, in the same idiom as topOfContentTag.
 [[nodiscard]] const char *topOfContentSensorTag(TopOfContentSensor sensor);
 
-// One reading: the verdict, and the sensor that produced it. Deliberately still UNRESOLVED -- the Unknown case
-// is the consumer's to answer (TopOfContentPolicy::resolve).
+// One composite reading: the verdict, and the sensor that produced it. Deliberately still UNRESOLVED -- the
+// Unknown case is the consumer's to answer (TopOfContentPolicy::resolve), and one reading is shared by several
+// consumers whose answers differ, so resolving it here would pick one of them for everybody.
 struct TopOfContentReading {
     TopOfContent verdict;
     TopOfContentSensor sensor;
 };
 
 // THE HEAD-OF-CONTENT QUESTION, as something a tab's interpreter can ask about the frame it is about to latch.
-// The only shipped one is CharaDetailSceneScraper::topOfContent bound to a tab (makeTabScraper), so the
-// interpreter carries no copy of the judgment. It is handed in, and not a TabPage branch inside the
-// interpreter, because which tab judges its head how is the scraper's data.
+// The only shipped one is CharaDetailSceneScraper::topOfContent bound to a tab (makeTabScraper): the composition
+// -- structure, then the thumb, and on the factor tab the green header behind the thumb's AtTop -- is written
+// there once, and
+// fragment-#0 acceptance asks it rather than carrying a second copy of any part of it. It is handed in, and not
+// a TabPage branch inside the interpreter, because which tab judges its head how is the scraper's data.
 using TopOfContentJudge = std::function<TopOfContentReading(const Frame &frame)>;
+
+// THE FACTOR TAB'S HEAD OF CONTENT: THE THUMB DECIDES, AND THE GREEN HEADER CHECKS ITS "AT THE HEAD" CLOSELY.
+//
+// The two sensors do different jobs, so their order is the structure of the judgment. It was not picked
+// for cost:
+//   * THE THUMB IS THE HEAD SENSOR, as on every other tab (CharaDetailSceneScraper::thumbTopOfContent). Its
+//     Unknown stays Unknown and its Scrolled stays Scrolled. The factor tab resolves neither of them
+//     differently from the skill and campaign tabs.
+//   * THE GREEN HEADER (the factor list header: the green bar at the top of the list, which the recognizer
+//     calls the banner) IS A PRECISION SENSOR NEAR THE HEAD. It is asked only when the thumb reads AtTop. The
+//     factor list is long, so one thumb pixel stands for many content pixels (kExposedTrackTopMargin puts it at
+//     ~27 px on the shortest thumb in the material). A pre-scroll that small does not move the thumb, but it
+//     does move the header against the recognizer's own window. The header has two conditions:
+//       (c1) the banner search the recognizer reads the record by (FactorRowReader::findBanner) finds the
+//            header's top at a row in [1, factorHeadLastRow] (factorBannerInWindow);
+//       (c2) the non-background run that starts at that row contains the first row that the green sensor
+//            (CharaDetailSceneScraper::factorHeaderTopY) reads as header green (factorBannerReachesGreen).
+//     AtTop needs both. Either one failing is Scrolled.
+//
+// THE GREEN HEADER NEEDS THE THUMB TO TELL IT FROM THE 継承履歴 HEADER. At the end of a long list, the
+// inheritance-history header (the green "継承履歴" bar) comes up to the top of the scroll area. It is the
+// same green, so on those frames c1 and c2 both hold. The only thing that refuses them is the thumb reading
+// Scrolled (test_factor_header_band.cpp, "the inheritance-history bar ..."). That refusal is certain only while
+// the thumb reads Scrolled on every frame where the history header could be inside the window:
+//   * For the history header to be inside the window, the list has moved by at least D - factorHeadLastRow.
+//     D is the content distance from the green header's top to the history header's top. The game always
+//     keeps D at no less than about 0.176 of the width (~130 px at a 736 px unit), even for a one-row list.
+//     That figure is the sum of three steps the pipeline itself relies on:
+//       - vertical_banner_bottom_delta (0.0537), from the header's top to where the first factor row is
+//         searched;
+//       - 0.0722, from a row's top to the bottom of its star cell (factor_rank in
+//         chara_detail_recognizer_builder.h);
+//       - the fixed ~0.05 gap between the last factor and the history header (kFactorEndGreenSearchSpan in
+//         the .cpp).
+//   * The thumb reads Scrolled once the list has moved by about two thumb pixels' worth of content. One
+//     thumb pixel is viewport_px / thumb_px content pixels (ScrollBarOffsetEstimator::position). One of the
+//     two pixels is the reading's floor (kExposedTrackTopMargin); the other is the whole-pixel tip.
+//   * So the refusal holds while one thumb pixel stands for less than about (D - factorHeadLastRow) / 2
+//     content pixels: ~47 px at 736 (window 1..35). For the friend layout that means a thumb longer than about
+//     9 px (0.553 * 736 / 47). The shortest thumb in the material is ~15 px.
+//   * THE GAME DOES NOT GUARANTEE A MINIMUM THUMB LENGTH. The history list stops at 100 entries, but the
+//     factor list can still grow. A list long enough to shrink the thumb past that point would let the history
+//     header through.
+//   Nothing here guards against that. If it ever has to, the fix is a finer thumb reading (sub-pixel tips, as
+//   scrollGuess uses). A wider or narrower header window would not fix it.
+//
+// A COVERED HEADER IS NOT A CASE HERE. That is deliberate, not an oversight: the way the two readings are
+// taken already covers it. There is no occlusion branch, and none should be added:
+//   * The banner search (c1) reads ONE column -- the recognizer's factor left_rect left edge, 0.2426 of the
+//     anchor unit -- and stops at the first pixel outside the factor tab's background. The record's read
+//     (FactorTabRecognizer::recognize) runs the same function on the same pixels: fragment #0 is this frame's
+//     scroll area pasted unscaled (see test_scene_stitcher.cpp). So if something is drawn over the header in
+//     that column, this judgment and the record's read find the same row. Whatever this accepts, the record
+//     reads from the same place. Whatever this refuses for want of a header, the record could not have read
+//     either.
+//   * The green sensor (c2) reads a BAND, [band_start, band_end] = [0.12, 0.93] of the crop width. The band
+//     contains that column, and a row needs more than green_fraction_threshold of the band green. An overlay
+//     that leaves the column clear loses the header only once it covers enough of the band. (A tap effect up to
+//     ~368 px wide at a 736 px unit is survived; see factorHeader() in the builder.) The header then reads
+//     absent and c2 refuses. That refusal is one the user sees -- the tab is refused, or Rule 3 does not judge
+//     the frame -- and never a silent acceptance.
+
+// The last header row (c1) still read as the head of the list, for a banner search of `search_rows` rows
+// (BannerHit::search_rows, i.e. the recognizer's own window L) with `reserve` (FactorHeaderConfig::
+// banner_window_reserve) of it held back: L - 1 - ceil(reserve * L). L - 1 is the last row on which the
+// recognizer can find the header at all, so a fragment #0 accepted up to that row is still read from its
+// header. The reserve is the policy margin the config explains. The bound is taken from the search's own L
+// rather than recomputed from the config, so it cannot drift from the window the recognizer actually scans.
+[[nodiscard]] inline int factorHeadLastRow(int search_rows, double reserve) {
+    return search_rows - 1 - static_cast<int>(std::ceil(reserve * static_cast<double>(search_rows)));
+}
+
+// (c1) The header's top row lies in [1, factorHeadLastRow]. Row 0 is refused because a header cut by the
+// scroll area's top edge cannot be told from one that sits further up.
+[[nodiscard]] inline bool factorBannerInWindow(const recognizer_impl::BannerHit &hit, double reserve) {
+    return hit.row >= 1 && hit.row <= factorHeadLastRow(hit.search_rows, reserve);
+}
+
+// (c2) The run the search found at the header row, [row, run_end_row), contains the green sensor's first row.
+// There is no threshold: the run and the green row are both facts of this frame, and that containment is
+// exactly the statement "the thing the recognizer found is the green header".
+[[nodiscard]] inline bool
+factorBannerReachesGreen(const recognizer_impl::BannerHit &hit, const std::optional<int> &green_row) {
+    return green_row.has_value() && green_row.value() >= hit.row && green_row.value() < hit.run_end_row;
+}
+
+// THE FACTOR TAB'S HEAD-OF-CONTENT JUDGMENT, in the structure described above: the thumb's reading, and only
+// when that reading is AtTop, the green header's c1 and then c2. The header readings are callables, so a
+// frame the thumb has already decided costs no banner search and no green scan:
+//   thumb              TopOfContent           the thumb's reading (thumbTopOfContent), taken by the caller
+//   banner()        -> std::optional<recognizer_impl::BannerHit>   findBanner's result (c1, c2)
+//   green_row(hit)  -> std::optional<int>     the green sensor's first row. The caller may bound the scan to
+//                                             hit.run_end_row, because a row at or past it fails c2 either way.
+// Both rows count from the same origin: the scroll area's top edge on the frame (mapToFrame(rect).top()). The
+// banner search starts there, and the green sensor's crop begins there.
+// The sensor trace is ScrollThumb when the thumb decided and FactorHeader when the header did.
+template <typename Banner, typename GreenRow>
+[[nodiscard]] TopOfContentReading
+factorHeadReading(TopOfContent thumb, const Banner &banner, const GreenRow &green_row, double reserve) {
+    if (thumb != TopOfContent::AtTop) {
+        return {thumb, TopOfContentSensor::ScrollThumb};
+    }
+    const std::optional<recognizer_impl::BannerHit> hit = banner();
+    if (!hit.has_value() || !factorBannerInWindow(hit.value(), reserve)) {
+        return {TopOfContent::Scrolled, TopOfContentSensor::FactorHeader};
+    }
+    if (!factorBannerReachesGreen(hit.value(), green_row(hit.value()))) {
+        return {TopOfContent::Scrolled, TopOfContentSensor::FactorHeader};
+    }
+    return {TopOfContent::AtTop, TopOfContentSensor::FactorHeader};
+}
+
+// THE GREEN SENSOR'S SCAN (c2's reading): the first row of the scroll-area crop `area` whose share of header
+// green across [band_start, band_end] of the crop width exceeds green_fraction_threshold, over rows
+// [0, row_limit) -- all rows when row_limit is nullopt. Free so that the footage cases measure with this very
+// scan rather than a copy of it (CharaDetailSceneScraper::factorHeaderTopY crops and calls it).
+[[nodiscard]] inline std::optional<int> firstHeaderGreenRow(
+    const Frame &area, const scraper_config::FactorHeaderConfig &header, std::optional<int> row_limit) {
+    const int height = row_limit.has_value() ? std::clamp(row_limit.value(), 0, area.height()) : area.height();
+    for (int y = 0; y < height; y++) {
+        // The band x-range is a fraction of the crop width; y maps back to this same row (the anchor scales both
+        // axes by the crop width, so scaleFromPixels(y) * width == y).
+        const double normalized_y = area.anchor().scaleFromPixels(y);
+        const Line<double> row = {{header.band_start, normalized_y}, {header.band_end, normalized_y}};
+        if (area.fractionIn(header.color_range, row) > header.green_fraction_threshold) {
+            return y;
+        }
+    }
+    return std::nullopt;
+}
+
+// The same judgment on readings already taken -- the form a test can call. It is Unknown exactly when the
+// thumb reads Unknown, as on every other tab. When the thumb reads AtTop, it is AtTop or Scrolled by the
+// header.
+[[nodiscard]] inline TopOfContent factorHeadVerdict(
+    TopOfContent thumb,
+    const std::optional<recognizer_impl::BannerHit> &banner,
+    const std::optional<int> &green_row,
+    double reserve) {
+    return factorHeadReading(
+               thumb,
+               [&banner] { return banner; },
+               [&green_row](const recognizer_impl::BannerHit &) { return green_row; },
+               reserve)
+        .verdict;
+}
 
 // The single derivation of TopOfContent from a top-margin reading (ScrollBarOffsetEstimator::topMargin),
 // against a threshold. Free, and not a member of TopOfContentPolicy, because the READING and the answer for an
@@ -159,11 +318,18 @@ topOfContentFromTopMargin(const std::optional<double> &top_margin, double thresh
 
 // THE ONE DECISION A CONSUMER OF A READING STILL MAKES: what an absent reading (Unknown) means to it.
 // resolve() applies it; the reading itself stays unresolved on the way in, so a caller that wants to report WHY
-// it refused can still tell Unknown from Scrolled.
+// it refused can still tell Unknown from Scrolled. The shipped policy is named for the direction it takes
+// rather than for the call site it was introduced at (see kMissingReadingIsScrolled). The OPPOSITE direction
+// is still shipped, but not in this process: the capture card resolves an unreadable frame fail-open in Dart,
+// on the verdict on_scroll_position carries unresolved.
 //
-// THE POLICY CARRIES NO THRESHOLD. Fragment-#0 acceptance inside ScrollableScrapingInterpreter asks the
-// scraper's judgment (TopOfContentJudge) rather than reading the thumb itself, so nothing outside the scraper
-// compares a top margin against anything.
+// THE POLICY CARRIES NO THRESHOLD. No call site needs one handed to it: fragment-#0 acceptance inside
+// ScrollableScrapingInterpreter asks the scraper's composite judgment (TopOfContentJudge) rather than reading
+// the thumb itself, so every reading is taken in CharaDetailSceneScraper::topOfContent and nothing outside it compares a top margin against anything;
+// a threshold held here would be a second place the comparison could be made, used by nothing but its tests.
+//
+// A value handed in at construction, so "which way does absent evidence fall at this call site" is data rather
+// than a comparison re-typed per site.
 class TopOfContentPolicy {
 public:
     constexpr explicit TopOfContentPolicy(TopOfContent unknown_verdict)
@@ -765,12 +931,14 @@ public:
 
     [[nodiscard]] bool ready() const override;
 
-    // ALWAYS nullopt, and deliberately not a policy this interpreter is handed. This interpreter is built
+    // ALWAYS nullopt, and deliberately not a judgment this interpreter is handed. This interpreter is built
     // exactly when the page has no scroll bar at all (SceneScraper::build asks hasScrollbar first), and such a
-    // page is structurally unscrollable -- the skill tab of an inheritance-only record really has none. Asking
-    // a top-margin policy about it would produce Unknown on every frame, which the fragment-#0 policy resolves
-    // to "scrolled": handing one in would refuse those tabs every single time. Expressing that by NOT ASKING
-    // beats expressing it as an unknown-policy branch, because there is then no value anyone can set wrongly.
+    // page is structurally unscrollable -- the skill tab of an inheritance-only record really has none. There is
+    // nothing to ask: the scraper's composite judgment would answer AtTop from this very interpreter's structure
+    // (see ScrapingInterpreter::scrollable), and any per-frame sensor it could consult instead is wrong here by
+    // definition (no thumb reads Unknown, which fail-closed acceptance resolves to "scrolled"; a covered banner
+    // reads Scrolled). Expressing that by NOT ASKING beats expressing it as a branch, because there is then no
+    // value anyone can set wrongly.
     [[nodiscard]] std::optional<TopOfContent> refusal() const override;
 
     // ALWAYS false: this interpreter is built exactly when the page has no scroll bar. See the base declaration.
@@ -842,10 +1010,13 @@ private:
     // exits reach it, so a consumer that needs "the frame fragment #0 is made of" gets it from every exit
     // instead of from whichever one happens to also announce itself.
     //
-    // The judgement lives HERE, and not in the caller or in a per-frame monitor, because this is the only
+    // The judgement is ASKED here, and not in the caller or in a per-frame monitor, because this is the only
     // place that names the pixels fragment #0 is made of. updateBefore reaches it by two paths and one of them
     // hands over `initial_descriptor`, captured several updates earlier; a check anywhere else would judge
-    // whichever frame happened to be current, which is a different frame chosen by frame timing.
+    // whichever frame happened to be current, which is a different frame chosen by frame timing. What is asked
+    // is not decided here: `judge_head` is the scraper's one composite judgment (the thumb, checked on the factor
+    // tab by the green header), put to the descriptor's own full frame, and `head_policy` resolves an
+    // Unknown reading. The refusal keeps the reading unresolved, so its reason can still say "unknown".
     void startScrolling(const FrameDescriptor &valid_descriptor, bool cue_owed);
 
     void updateScrolling(const Frame &frame);
@@ -1124,25 +1295,60 @@ private:
 
     // Top-edge pixel row of the green "因子" section header, relative to the scroll-area crop (so it tracks the
     // content, not the scroll thumb). Scans the config band top-down for the first row that is mostly header
-    // green. nullopt when the header is scrolled off or mid-animation (not flush), which maybeResetOnFactorChange
-    // treats as "not at the top". Never throws on a scrolled-away frame. Compared against the reference in pixels,
-    // valid because both are taken on same-size frames.
-    [[nodiscard]] std::optional<int> factorHeaderTopY(const Frame &frame) const;
+    // green, over the crop's rows [0, row_limit) -- the whole crop when row_limit is nullopt. nullopt when no
+    // scanned row is header green -- the header has scrolled out of the crop, lies at or past the limit, or
+    // something is drawn over it. Never throws on a scrolled-away frame.
+    //
+    // THE LIMIT IS WHAT KEEPS THE HEAD JUDGMENT CHEAP on a frame that shows no header: condition c2 only asks
+    // whether the green row falls inside the banner's run (BannerHit::run_end_row), so nothing past the run's end
+    // can change its answer, and the judgment passes that end here instead of paying the whole crop.
+    [[nodiscard]] std::optional<int> factorHeaderTopY(const Frame &frame, std::optional<int> row_limit) const;
 
-    // WHETHER THIS TAB'S CONTENT IS FLUSH WITH THE TOP OF ITS SCROLL AREA on `frame`, composed from the tab's
-    // structure and the scroll thumb:
+    // THE ONE ANSWER to "is this tab's content flush with the top of its scroll area", composed from the tab's
+    // structure and this scraper's sensors, so no call site re-types the composition:
     //
     //   STRUCTURE -- the tab was built for a page with no scroll bar (SceneScraper::scrollable). Such a page
     //            cannot be anywhere but the head of its content, so the answer is AtTop and no sensor is read.
     //            Every tab: a skill, factor and campaign page can each be built this way, and nothing here
-    //            names which. Asked of the class and not of this frame, for the reason
-    //            ScrapingInterpreter::scrollable states. A tab not built yet has no structure to ask.
-    //   THUMB -- the scroll thumb's top margin, read by thumbTopOfContent. A tab with no scraper, or a frame
-    //            with no measurable scroll bar, reads Unknown, and each consumer's policy answers it.
+    //            names which.
+    //   FACTOR TAB -- scraper_impl::factorHeadReading: the thumb, as on the other tabs. An Unknown or a
+    //            Scrolled from the thumb is the answer. Only a thumb at the head goes on to the green header,
+    //            a precision sensor near the head: the banner search the recognizer reads the record by must
+    //            find the header inside its window less the reserve (c1), AND the run it found must reach the
+    //            green sensor's row (c2). Otherwise the answer is Scrolled. The sensor trace is ScrollThumb when
+    //            the thumb decided and FactorHeader when the header did. Why the roles are not symmetric, and
+    //            what the header relies on the thumb for, is written at factorHeadReading.
+    //   OTHER TABS -- the scroll thumb's top margin against kExposedTrackTopMargin (topOfContentFromTopMargin).
+    //            Its travel is compressed by viewport/content, so its resolution floor is tens of content pixels.
     //
-    // Handed to every tab's interpreter as its TopOfContentJudge (makeTabScraper), so fragment-#0 acceptance
-    // asks the scraper and holds no threshold; taken once per frame in update() and shared by the UI position
-    // report and Rule 3 whenever its header comparison cannot answer.
+    // THE STRUCTURE GOES FIRST, AHEAD OF THE BANNER, because on a page that cannot scroll every sensor answer
+    // other than AtTop is wrong by definition: a banner partly covered or cut by an animation reads Scrolled,
+    // and there is no thumb to consult -- and Rule 3, which acts only on AtTop, would stop judging a page the
+    // user can switch on. Asked of the class and not of this frame, for the reason ScrapingInterpreter::
+    // scrollable states. A tab not built yet has no structure to ask and goes to the sensors, where its thumb
+    // reads Unknown -- on the factor tab too, so the answer is Unknown and the header is not read.
+    //
+    // UNDER A THUMB AT THE HEAD, A MISSING HEADER IS A REFUSAL, NOT AN ABSENCE OF EVIDENCE. The window it
+    // judges is the recognizer's own (see factorHeadLastRow), so "the header is not in it" is exactly "the
+    // record would not be read from this frame's header". Why a covered header is not a case is written at
+    // the judgment (factorHeadReading).
+    //
+    // The returned verdict is three-valued on every scrollable tab: resolving Unknown is the CONSUMER's
+    // decision (TopOfContentPolicy::resolve), and the consumers of one frame's reading do not resolve it the same
+    // way.
+    //
+    // ITS CONSUMERS: fragment-#0 acceptance (every tab's interpreter is handed this function bound to its tab,
+    // see makeTabScraper), Rule 3's flush gate, and the position word on the wire. The early duplicate probe
+    // consumes it too, indirectly: it is armed only by a latch this function accepted.
+    //
+    // CALL THIS ONCE PER FRAME AND SHARE THE RESULT, which is what the per-frame consumers do (see update()). Each
+    // call reads the thumb (a copy of the scroll-bar rect) and, on the factor tab, runs a banner search and a
+    // bounded green scan; two calls per frame would pay that twice for a value that cannot have changed. The
+    // one second call is fragment-#0 acceptance, once per latch: it has to judge the frame it LATCHES, which on
+    // the motion exit is not the frame update() is handling, so it cannot take the shared reading.
+    //
+    // RE-ENTERED from inside the tab's own update (startScrolling runs under SceneScraper::update), so it must
+    // stay const and read the tab only through accessors that do not assert a state (scrollable, topMargin).
     [[nodiscard]] scraper_impl::TopOfContentReading topOfContent(TabPage tab_page, const Frame &frame) const;
 
     void resetMonitors();
@@ -1231,8 +1437,9 @@ private:
     //  * its UPPER edge was a misdiagnosis. The commit that introduced 0.02 recorded the failure it fixed as
     //    "the inheritance history lazily loading re-scales the thumb to ~0.027 while the content changes";
     //    the excursion was in fact about 75 content px of REAL scroll, which a threshold has no business
-    //    absorbing. What actually separates that case from a character switch is the fine sensor, which this
-    //    scraper now composes in (topOfContent) rather than a band on the coarse one.
+    //    absorbing. What actually separates that case from a character switch is the factor tab's green
+    //    header, which this scraper now composes in behind the thumb (topOfContent) rather than a band on the
+    //    coarse one.
     // The retirement is what leaves a policy with nothing left to decide but unknown_verdict -- and, once the
     // two directions stopped differing in anything else, what let the fail-open one move out of this process
     // to the consumer that wanted it (see kMissingReadingIsScrolled).
@@ -1257,45 +1464,58 @@ private:
     // 15 =~ 27 content px can be pre-scrolled and still read as upper_gap == 0. This is a property of the
     // widget geometry, not a defect in this threshold: 0 is already the floor a whole-pixel reading can
     // resolve, so no retuning of this constant closes the gap. Only a second, finer-grained measurement axis
-    // could close it further; the factor tab already has one (FactorHeaderConfig / factorHeaderTopY, whose
-    // top edge moves 1:1 with the content instead of being compressed by viewport/thumb_length), but it is
-    // wired only into maybeResetOnFactorChange's character-switch gate, not into this fragment-#0 acceptance
-    // check. This comment exists so the gap is written down rather than rediscovered.
+    // closes it further, and the factor tab -- where that friend list lives -- has one: its green header, a
+    // precision sensor asked behind this threshold's AtTop (scraper_impl::factorHeadReading). topOfContent
+    // composes it in, and EVERY consumer of the question asks topOfContent, fragment-#0 acceptance included
+    // (makeTabScraper hands each tab's interpreter topOfContent). On that tab a pre-scroll the thumb cannot
+    // show still moves the header against the recognizer's window and is refused. The
+    // skill and campaign tabs have no such axis and keep this floor; their downstream tolerance is unmeasured,
+    // so nothing here tightens or loosens them.
     static constexpr double kExposedTrackTopMargin = 0.0;
 
 public:
-    // THE THUMB'S READING, as fragment-#0 acceptance takes it: a top margin against kExposedTrackTopMargin, still
-    // unresolved. Public so a test pins the shipped threshold through the derivation production uses, while the
-    // raw constant stays private.
+    // THE THUMB'S READING, as every consumer here takes it: a top margin against kExposedTrackTopMargin, still
+    // unresolved. The coarse arm of topOfContent and nothing else; public so a test pins the shipped threshold
+    // through the derivation production uses, while the raw constant stays private.
     [[nodiscard]] static constexpr scraper_impl::TopOfContent thumbTopOfContent(
         const std::optional<double> &top_margin) {
         return scraper_impl::topOfContentFromTopMargin(top_margin, kExposedTrackTopMargin);
     }
 
-    // PUBLIC for the same reason factorChangeRatio / isFactorChanged are: the decision this encodes -- which way
-    // an unmeasurable reading falls -- is the entire content of premature-scroll detection, and a whole-clip
-    // golden cannot state it (a golden sees a missing record, not a verdict).
-    // THE ONE ANSWER THIS PROCESS SHIPS to "which way does a reading that could not be taken fall". A policy is
-    // named for that and not after a call site -- the question has exactly two answers, and a new consumer
-    // picks one of them rather than inventing a third combination.
+    // PUBLIC for the same reason factorChangeRatio / isFactorChanged are: the decision these encode -- which
+    // way an unmeasurable reading falls -- is the entire content of premature-scroll detection, and a
+    // whole-clip golden cannot state it (a golden sees a missing record, not a verdict).
+    // THE ONE ANSWER THIS PROCESS STILL SHIPS to "which way does a reading that could not be taken fall". The
+    // reading itself is topOfContent's; a policy decides only this, and is named for it rather than after a
+    // call site -- the question
+    // "which way does absent evidence fall here" has exactly two answers, and a new consumer picks one of them
+    // rather than inventing a third combination.
     //
     // FAIL-CLOSED, for every consumer whose "at top" claim COSTS something when it is wrong: fragment-#0
-    // acceptance (accepting a list whose head may be missing) and Rule 3's content gate when its header
-    // comparison cannot answer (discarding a captured session). A page with no scroll bar at all never reaches
-    // this policy: not through fragment-#0 acceptance (NonScrollableScrapingInterpreter is not given one), and
-    // not through Rule 3's gate either, because topOfContent answers such a page AtTop from its structure -- a
-    // certain answer, not absent evidence -- so there is no Unknown left for this policy to resolve on it.
+    // acceptance (accepting a list whose head may be missing) and Rule 3's content gate (discarding a captured
+    // session). Every scrollable tab can hand it an Unknown to resolve, the factor tab included: its judgment
+    // passes an unreadable thumb on as Unknown.
+    // A page with no scroll bar at all never reaches this policy: not through fragment-#0
+    // acceptance (NonScrollableScrapingInterpreter is not given one), and not through Rule 3's gate either, because
+    // topOfContent answers such a page AtTop from its structure -- a certain answer, not absent evidence -- so
+    // there is no Unknown left for this policy to resolve on it.
     //
-    // THE FAIL-OPEN DIRECTION LIVES IN DART, NOT HERE. Its one consumer is the capture card ("a tab that cannot
-    // scroll has nothing to have scrolled away from"), which lives behind on_scroll_position, and that wire
-    // carries the verdict UNRESOLVED because the front end has a second consumer (the duplicate-probe hint gate)
-    // whose direction is the opposite one; the green character-switch arrows are not a consumer of this word at
-    // all. The card states fail-open for itself, in Dart (TopOfContent in lib/src/core/platform_controller.dart).
-    // A constant here for a direction nothing here takes would be a constant kept alive by its own test, which is
-    // why there is no kMissingReadingIsAtTop; TopOfContentPolicy itself still carries unknown_verdict as a
-    // parameter, and both of its directions are pinned on locally built policies in test_scraper_estimators.cpp.
+    // THE FAIL-OPEN DIRECTION IS NOT MISSING, IT MOVED. Its one consumer was the capture card ("a frame nobody
+    // could read has not been shown to be scrolled away"), which lives behind on_scroll_position, and that
+    // wire now carries the verdict UNRESOLVED because the front end has a second consumer (the
+    // duplicate-probe hint gate) whose direction is the opposite one -- unlike the green character-switch
+    // arrows, which are not a consumer of this word at all and read only whether the factor tab is shown,
+    // never its scroll position. The card states fail-open for itself, in
+    // Dart (TopOfContent in lib/src/core/platform_controller.dart). A constant here for a direction nothing
+    // here takes would be a constant kept alive by its own test, which is why there is no kMissingReadingIsAtTop
+    // any more; TopOfContentPolicy itself still carries unknown_verdict as a parameter, and both of its
+    // directions are pinned on locally built policies in test_scraper_estimators.cpp.
     static constexpr scraper_impl::TopOfContentPolicy kMissingReadingIsScrolled{
         scraper_impl::TopOfContent::Scrolled};
+
+    // The factor tab's head-of-content judgment is scraper_impl::factorHeadReading / factorHeadVerdict (free and
+    // public in scraper_impl for the reason the policies above are: a whole-clip golden sees a missing record,
+    // not a verdict).
 
 private:
     // How long an inferred-switch signal (record-type change, factor content change) must
@@ -1403,10 +1623,6 @@ private:
     // the tab's capture and the session's completion on purpose, because its presence is what keeps Rule 3 the
     // switch detector of the captured tab (watchesFactorContent).
     std::optional<scraper_impl::FactorSwitchReference> factor_switch_reference;
-    // Header top-edge pixel row (see factorHeaderTopY) captured at the same latch as factor_switch_reference;
-    // topOfContent compares the current header row against it in pixels. Not replaced when the reference is:
-    // a divergence read as the same record does not move the list, so the head row is still the head row.
-    std::optional<int> reference_header_y;
     // Last top-of-content verdict put on the wire, with the tab it described. Held as the three-valued verdict
     // rather than as the emitted word, because the word is a rendering of it and comparing renderings would
     // make the edge depend on the tag table.

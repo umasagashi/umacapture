@@ -579,10 +579,26 @@ class CharaDetailCaptureState {
   /// Whether the factor tab is currently displayed at the head of its list -- the condition Rule 3's
   /// character-switch gate is made of. Derived from the single (currentTab, [topOfContent]) fact.
   ///
-  /// **FAIL-CLOSED, the opposite of [status], and that is what this answer is for.** Only a MEASURED
-  /// "at top" counts; [TopOfContent.unknown] answers false. It is the same direction Rule 3 itself resolves
-  /// an unreadable frame in (`kMissingReadingIsScrolled`), so this answer and the rule it promises agree on
-  /// every frame, including the ones no sensor could read.
+  /// [topOfContent] is the core's one composite answer to "is this tab flush with the head of its
+  /// content". It is not a bare scroll-thumb reading. On the factor tab the scroll thumb decides
+  /// first, as on every tab, and an unreadable thumb is [TopOfContent.unknown] there too. When the
+  /// thumb reads the head, the green 因子 header then checks it closely, with two per-frame facts:
+  /// the same banner search the recognizer reads the record by finds the header's top row inside its
+  /// own search window (less a reserve held back as a policy margin, not a calibrated pixel offset),
+  /// and that run reaches the green header row.
+  ///
+  /// So this tracks Rule 3's own gate rather than approximating it. Near the head, the tolerance is
+  /// the recognizer's own safe range rather than one thumb pixel: a displaced fragment #0 that the
+  /// header accepts is still read from its header, in exchange for no longer being tight to a single
+  /// pixel. The header cannot tell itself from the 継承履歴 bar at the end of the list. The thumb's
+  /// `scrolled` is what separates the two, and that holds only while the thumb is long enough; the
+  /// core states the limit at `factorHeadReading` in `chara_detail_scene_scraper.h`.
+  ///
+  /// **FAIL-CLOSED, the opposite of [status].** Only a MEASURED "at top" counts;
+  /// [TopOfContent.unknown] answers false. It is the same direction Rule 3 itself resolves an
+  /// unreadable frame in (`kMissingReadingIsScrolled`), so this reads exactly the gate the rule reads,
+  /// including on the frames no sensor could read. Nothing on this side writes the position but the
+  /// core's `onScrollPosition`, so no local assertion stands between the two either.
   ///
   /// **Used by the duplicate-probe hint gate in [status] only.** The hint stands where the probe fired,
   /// at the factor top, and degrades to the ordinary phase once the user scrolls or leaves the tab.

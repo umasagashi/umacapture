@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -497,6 +498,53 @@ void fill(cv::Mat mat, const Color &color) {
     mat.setTo(cv::Scalar(color.b(), color.g(), color.r()));
 }
 
+// THE FACTOR TAB'S HEAD, AS THIS FILE'S SCRAPER READS IT. The scraper judges the factor tab at its head when the
+// thumb reads the head and, behind it, the banner search of ITS FactorRowReader -- the harness's, under
+// readerScanConfig -- finds the banner at a row in [1, factorHeadLastRowOn(frame)] and the run found there
+// contains the green sensor's first row (scraper_impl::factorHeadReading). readerScanConfig's background is a colour no other pixel
+// here has, so a frame that paints nothing in it gives the banner search row 0 -- a cut banner, refused. A head
+// frame therefore paints the rows above the banner in that background.
+//
+// kFactorHeadRow is where the harness paints the banner at the head of the list: inside the window with room on
+// both sides (real 540 px footage puts it at row 8, too), so no case here rests on an edge of the window unless it
+// says so.
+constexpr int kFactorHeadRow = 8;
+// The header's measured height at these capture widths.
+constexpr int kFactorHeaderRows = 24;
+
+// The last banner row the harness's scraper reads as the head on a frame of this size: its reader's banner
+// search window, less the shipped reserve. Derived the way the judgment derives it, from the same two numbers.
+int factorHeadLastRowOn(const Frame &frame) {
+    const int search_rows = frame.anchor().scaleToPixels(readerScanConfig().vertical_banner_upper_gap);
+    return scraper_impl::factorHeadLastRow(
+        search_rows, shippedScraperConfig().factor_header.banner_window_reserve);
+}
+
+// `frame` with the green "因子" SECTION HEADER's top at `crop_row` of `layout`'s scroll area, `header_rows` tall,
+// and the rows above it in the harness reader's background. Both are painted from the scroll area's left edge
+// to the probe band's right end (band_end, 0.93 of the crop width): that covers the reader's banner column
+// (0.10 of the width) and the green sensor's band, and stays clear of the scroll bar's scan line (0.9693), so
+// the thumb reading -- `exposed_rows` -- is untouched and still decides c3 independently.
+Frame withFactorHeaderAt(
+    const Frame &frame,
+    int crop_row,
+    const scraper_config::SceneScraperConfig &layout = shippedScraperConfig().common,
+    int header_rows = kFactorHeaderRows) {
+    const auto &config = shippedScraperConfig();
+    cv::Mat pixels = frame.data().clone();
+    const Rect<int> band = frame.anchor().mapToFrame(layout.scroll_area_rect);
+    // Solidly inside the configured range ({70,150,0}..{190,255,85}), so the row's green FRACTION is 1.0 over
+    // the probe band and the threshold is not what is being tested here.
+    const Color green{130, 200, 40};
+    const int right = band.left() + static_cast<int>(std::lround(config.factor_header.band_end * band.width()));
+    if (crop_row > 0) {
+        fill(pixels(cv::Rect(band.left(), band.top(), right - band.left(), crop_row)),
+             readerScanConfig().bg_color.min());
+    }
+    fill(pixels(cv::Rect(band.left(), band.top() + crop_row, right - band.left(), header_rows)), green);
+    return Frame(pixels, frame.timestamp());
+}
+
 // A 540x960 frame carrying a RENDERED SCROLL BAR inside the shipped scroll-bar rect, so the estimator has
 // something real to measure. `exposed_rows` is how many rows of placeholder track are visible above the
 // thumb's own cap: 0 is a genuine head-of-list (the thumb's cap occludes the track's cap, as on real
@@ -508,13 +556,15 @@ void fill(cv::Mat mat, const Color &color) {
 // `nonce` must differ between consecutive frames. It repaints everything ABOVE the band, which is where the
 // tab-button rect lives, so that catcher never latches and no scraped image is ever written to disk (the same
 // device solidFrameAt uses, and the reason these tests need no filesystem). It cannot disturb the scroll area,
-// which is the band itself. The header banner is absent on every frame, so the base-frame catcher likewise
+// which is the band itself. The title-bar banner is absent on every frame, so the base-frame catcher likewise
 // never latches.
 // [layout] is the shipped coordinate set the session under test resolved -- `common` for every record type
 // but one, `friend_common` for a friend's full record, whose scroll area sits ~136 px lower (and whose tab
 // bar sits ~133 px lower -- the two are separate measurements, see friendCommon in the builder). The
 // bar has to be painted where THAT layout looks for it, or the frame is simply a bar-less one.
-Frame scrollBarFrameIn(
+//
+// This one draws NO factor header: see scrollBarFrameIn for the frame a factor tab at its head shows.
+Frame bareScrollBarFrameIn(
     const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int exposed_rows, int nonce) {
     cv::Mat pixels(960, 540, CV_8UC3, cv::Scalar(kNoBanner.b(), kNoBanner.g(), kNoBanner.r()));
     // Ask the frame itself where the config rect lands, rather than restating pixel coordinates that would
@@ -534,6 +584,15 @@ Frame scrollBarFrameIn(
     fill(band.row(thumb_cap), kBarThumbCap);
     fill(band(cv::Rect(0, thumb_cap + 1, band.cols, kThumbRows)), kBarThumb);
     return Frame(pixels, timestamp);
+}
+
+// The same frame with the factor header at the head of the list (kFactorHeadRow). This is what every factor-tab
+// frame of this file shows unless a case says otherwise: a factor frame without it is not at the head of its
+// content, whatever the thumb says. The header lies left of the scroll bar's scan line, so `exposed_rows` still
+// decides the thumb's reading on its own.
+Frame scrollBarFrameIn(
+    const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int exposed_rows, int nonce) {
+    return withFactorHeaderAt(bareScrollBarFrameIn(layout, timestamp, exposed_rows, nonce), kFactorHeadRow, layout);
 }
 
 Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
@@ -557,6 +616,7 @@ Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
 // [layout] as in scrollBarFrameIn: the texture goes where THAT layout's scroll area is.
 // `frame` with that texture painted over `layout`'s scroll area, shifted by `content_shift`. Whatever the frame
 // carries in the scroll bar's scan column is left as it was, so a frame with no scroll bar keeps having none.
+// The texture covers whatever header the frame carried; a caller that wants one paints it afterwards.
 Frame withContentTexture(const Frame &frame, const scraper_config::SceneScraperConfig &layout, int content_shift) {
     cv::Mat pixels = frame.data().clone();
     const Rect<int> band_rect = frame.anchor().mapToFrame(layout.scroll_area_rect);
@@ -570,9 +630,15 @@ Frame withContentTexture(const Frame &frame, const scraper_config::SceneScraperC
     return Frame(pixels, frame.timestamp());
 }
 
+// A textured frame of a factor list at its head: the texture is the list, and the header sits above it at
+// kFactorHeadRow, where it stays whatever `content_shift` is (the texture below it is what the offset estimator
+// matches).
 Frame scrollingBandFrameIn(
     const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
-    return withContentTexture(scrollBarFrameIn(layout, timestamp, exposed_rows, nonce), layout, content_shift);
+    return withFactorHeaderAt(
+        withContentTexture(bareScrollBarFrameIn(layout, timestamp, exposed_rows, nonce), layout, content_shift),
+        kFactorHeadRow,
+        layout);
 }
 
 Frame scrollingBandFrameAt(uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
@@ -580,22 +646,26 @@ Frame scrollingBandFrameAt(uint64 timestamp, int content_shift, int exposed_rows
 }
 
 // A head-of-list frame ON WHICH THE HARNESS'S READER FINDS NO ROWS: the same texture region as
-// scrollingBandFrameAt, filled instead with readerScanConfig's background colour, so the banner search runs out
-// of span without leaving the background and the reading comes back empty. The scroll bar is untouched, so the
-// frame is still flush at the top, and against a scroll-bar reference it is still a large pixel change.
+// scrollingBandFrameAt, filled instead with readerScanConfig's background colour, with a header only a few rows
+// tall at the head row. The banner search finds the header and the judgment reads the frame at its head, but
+// the first factor row is looked for below the header's end (vertical_banner_bottom_delta is 11 rows here), in
+// the background, so the reading comes back empty. The scroll bar is untouched, so the frame is still flush at
+// the top, and against a scroll-bar reference it is still a large pixel change.
 Frame emptyReadingFrameAt(uint64 timestamp, int nonce) {
-    const Frame bar = scrollBarFrameAt(timestamp, /*exposed_rows=*/0, nonce);
+    const Frame bar = bareScrollBarFrameIn(shippedScraperConfig().common, timestamp, /*exposed_rows=*/0, nonce);
     cv::Mat pixels = bar.data().clone();
     const Rect<int> band_rect = bar.anchor().mapToFrame(shippedScraperConfig().common.scroll_area_rect);
     fill(pixels(cv::Rect(band_rect.left(), band_rect.top(), band_rect.width() * 9 / 10, band_rect.height())),
          readerScanConfig().bg_color.min());
-    return Frame(pixels, timestamp);
+    constexpr int kThinHeaderRows = 4;
+    return withFactorHeaderAt(
+        Frame(pixels, timestamp), kFactorHeadRow, shippedScraperConfig().common, kThinHeaderRows);
 }
 
 // The same frame with NO SCROLL BAR AT ALL: the band is uniformly the near-white page margin, so the
 // background run down the scan line never reaches a thumb and hasScrollbar answers false. That is the real
 // shape of an inheritance-only record's skill tab, and it is what makes SceneScraper::build install the
-// non-scrollable interpreter -- the one that is handed no scroll-ready sender.
+// non-scrollable interpreter -- the one that is handed no scroll-ready sender. No factor header either.
 Frame noScrollBarFrameAt(uint64 timestamp, int nonce) {
     cv::Mat pixels(960, 540, CV_8UC3, cv::Scalar(kNoBanner.b(), kNoBanner.g(), kNoBanner.r()));
     const Rect<int> band_rect =
@@ -606,30 +676,11 @@ Frame noScrollBarFrameAt(uint64 timestamp, int nonce) {
     return Frame(pixels, timestamp);
 }
 
-// The crop row the tests paint the green "因子" header on. Which row does not matter to the header sensor, which
-// compares the row it finds against the row the factor probe read on the same page; it only has to be one row
-// for every frame of a page that has not moved, and inside the crop.
-constexpr int kHeaderCropRow = 12;
-
-// `frame` with the green "因子" SECTION HEADER painted into the scroll-area crop at `crop_row`, across the
-// configured probe band. This is what makes the fine sensor reachable at this level: a frame painted only with
-// bar levels carries no header at all, so topOfContent's factor arm answers Unknown on it and every one of these
-// tests would be reading the coarse sensor no matter what the fine one did.
-//
-// The band stops at band_end (0.93 of the crop width) and the bar's scan line sits at 0.9693, so the coarse
-// reading is untouched and `exposed_rows` still decides it independently.
-Frame withFactorHeaderAt(const Frame &frame, int crop_row) {
-    const auto &config = shippedScraperConfig();
-    cv::Mat pixels = frame.data().clone();
-    const Rect<int> band = frame.anchor().mapToFrame(config.common.scroll_area_rect);
-    // Solidly inside the configured range ({70,150,0}..{190,255,85}), so the row's green FRACTION is 1.0 over
-    // the probe band and the threshold is not what is being tested here.
-    const Color green{130, 200, 40};
-    const int left = band.left() + static_cast<int>(std::lround(config.factor_header.band_start * band.width()));
-    const int right = band.left() + static_cast<int>(std::lround(config.factor_header.band_end * band.width()));
-    constexpr int kHeaderRows = 24;  // the header's measured height at these capture widths
-    fill(pixels(cv::Rect(left, band.top() + crop_row, right - left, kHeaderRows)), green);
-    return Frame(pixels, frame.timestamp());
+// A scroll-bar frame (thumb at `exposed_rows`) whose header is at `crop_row` instead of the head row. Painted on
+// the bare frame, so `crop_row` is the only header there is.
+Frame factorHeaderFrameAt(uint64 timestamp, int exposed_rows, int nonce, int crop_row) {
+    return withFactorHeaderAt(
+        bareScrollBarFrameIn(shippedScraperConfig().common, timestamp, exposed_rows, nonce), crop_row);
 }
 
 // Past the shipped stationary_time_threshold, so two frames this far apart latch. Read from the config rather
@@ -656,6 +707,103 @@ TEST_CASE("a tab whose capture would not start at the head of the list is refuse
     CHECK(h.discards.empty());
 }
 
+TEST_CASE("the factor tab's head-of-content word is checked by the header once the thumb reads the head") {
+    // THE DEFECT THIS EXISTS FOR, and it is a defect of SHAPE rather than of arithmetic. The fine sensor used
+    // to be a difference against a reference row captured at the factor probe. Nothing captures that reference
+    // until a tab has latched its fragment #0, so on every frame before then the fine sensor had nothing to say
+    // and the word on the wire came from the scroll thumb alone -- on the one tab that carries a finer landmark,
+    // during the one stretch where the user is most likely to have nudged the list. The second subcase is a
+    // frame the thumb reads as a genuine head and the header reads as displaced, which is exactly the case the
+    // old shape could not reach: it is the coarse sensor's own blind spot (kExposedTrackTopMargin puts it at
+    // tens of content pixels on a short thumb), and no reference exists yet to resolve it.
+    //
+    // The header is asked only behind a thumb at the head (scraper_impl::factorHeadReading), so the words below
+    // are the words of two frames: the first is judged before the tab is built and has no thumb reading, which
+    // is "unknown" on this tab as on every other; the second has a thumb, and a thumb at the head goes on to
+    // the header. Both frames come before any latch.
+    //
+    // Asserted on the WIRE rather than on the verdict function, because what changed is which frames the
+    // composition can answer at all -- a unit test of the verdict cannot see a call site that never made it.
+    const auto &config = shippedScraperConfig();
+
+    // The words of a session's first two frames, both showing the header at `row` under a thumb at the head.
+    const auto firstWords = [](int row) {
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        h.scraper.update(factorHeaderFrameAt(0, 0, /*nonce=*/0, row), SceneState{FactorPage, record::Standard});
+        h.scraper.update(factorHeaderFrameAt(1, 0, /*nonce=*/1, row), SceneState{FactorPage, record::Standard});
+        for (const auto &[index, word] : h.positions) {
+            CHECK(index == static_cast<int>(FactorPage));
+        }
+        return h.positionWords(FactorPage);
+    };
+    const int last = factorHeadLastRowOn(scrollBarFrameAt(0, 0, 0));
+    const std::vector<std::string> kHead{"unknown", "at_top"};
+
+    SUBCASE("a banner anywhere in the window reads at_top, before anything has latched") {
+        CHECK(firstWords(kFactorHeadRow) == kHead);
+        CHECK(firstWords(1) == kHead);
+        CHECK(firstWords(last) == kHead);
+        // A displacement a one-capture-pixel window would refuse: two rows above the head row.
+        CHECK(firstWords(kFactorHeadRow - 2) == kHead);
+    }
+
+    SUBCASE("a banner cut by the scroll area's top, or past the window, reads scrolled while the thumb says head") {
+        // exposed_rows = 0 is a genuine head to the thumb once it can read, so on the second frame the only
+        // thing that can produce "scrolled" here is the banner's own position.
+        for (const int row : {0, last + 1}) {
+            CAPTURE(row);
+            CHECK(firstWords(row) == std::vector<std::string>{"unknown", "scrolled"});
+        }
+    }
+
+    SUBCASE("a factor frame showing no banner reads scrolled under a thumb at the head") {
+        // UNDER A THUMB AT THE HEAD, THE HEADER DOES NOT DEFER. A frame on which the banner search finds nothing
+        // in its window is a frame whose record would not be read from its banner, so it is not at the head --
+        // whether the content moved or something covers the banner (that case is not special-cased; see
+        // factorHeadReading). Two frames: the first has no thumb reading and says "unknown", as every tab's
+        // first frame does; the second has a thumb that reads a genuine head, and the word says scrolled.
+        // Two looks: no header drawn (the banner search's first non-background row is row 0 under this harness's
+        // reader), and a scroll area the banner search finds nothing in at all.
+        using Look = std::function<Frame(uint64, int)>;
+        const Look no_header = [&config](uint64 timestamp, int nonce) {
+            return bareScrollBarFrameIn(config.common, timestamp, /*exposed_rows=*/0, nonce);
+        };
+        const Look nothing_found = [&config](uint64 timestamp, int nonce) {
+            const Frame bar = bareScrollBarFrameIn(config.common, timestamp, /*exposed_rows=*/0, nonce);
+            cv::Mat pixels = bar.data().clone();
+            const Rect<int> band = bar.anchor().mapToFrame(config.common.scroll_area_rect);
+            fill(pixels(cv::Rect(band.left(), band.top(), band.width() * 9 / 10, band.height())),
+                 readerScanConfig().bg_color.min());
+            return Frame(pixels, timestamp);
+        };
+        const auto wordsOn = [](const Look &look, bool banner_found) {
+            ScraperHarness h;
+            h.scraper.buildSession(record::Standard);
+            const auto banner =
+                h.factor_reader->findBanner(look(0, 0), shippedScraperConfig().common.scroll_area_rect);
+            REQUIRE(banner.has_value() == banner_found);
+            h.scraper.update(look(0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+            h.scraper.update(look(1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+            return h.positionWords(FactorPage);
+        };
+        CHECK(wordsOn(no_header, true) == std::vector<std::string>{"unknown", "scrolled"});
+        CHECK(wordsOn(nothing_found, false) == std::vector<std::string>{"unknown", "scrolled"});
+    }
+
+    SUBCASE("a thumb that reads scrolled refuses a banner at the head row") {
+        // The thumb, on the wire: the banner conditions hold (the head row), the thumb shows one tip pixel of
+        // track. The first frame has no thumb reading and is unknown; the header's head row does not change that.
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        h.scraper.update(
+            scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+        h.scraper.update(
+            scrollBarFrameAt(1, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+        CHECK(h.positionWords(FactorPage) == std::vector<std::string>{"unknown", "scrolled"});
+    }
+}
+
 TEST_CASE("a tab at the head of the list is not refused") {
     // The negative control. Without it, "refused" would be indistinguishable from "this synthetic bar refuses
     // everything", which is exactly how a threshold that is too tight would look.
@@ -667,6 +815,199 @@ TEST_CASE("a tab at the head of the list is not refused") {
         scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{FactorPage, record::Standard});
 
     CHECK(h.refusals.empty());
+}
+
+// --- fragment #0 is accepted by the same judgment every other consumer asks ---------------------------------
+//
+// ScrollableScrapingInterpreter::startScrolling used to judge the frame it latches by the scroll thumb alone, on
+// every tab. The factor tab's banner judgment reached Rule 3 and the position word but not the one decision that
+// decides what gets captured, so a factor list pre-scrolled by less than one thumb pixel's worth of content was
+// latched as fragment #0 and read, silently, from the wrong rows. makeTabScraper now hands every tab's interpreter
+// CharaDetailSceneScraper::topOfContent bound to the tab; these cases pin that on the wire (the refusal, the
+// probe), for the factor tab and for the two tabs that must keep judging by the thumb.
+
+// The thumb's reading of `frame` under the shipped common layout, as topOfContent's coarse arm takes it.
+scraper_impl::TopOfContent thumbReadingOf(const Frame &frame) {
+    const auto &layout = shippedScraperConfig().common;
+    const scraper_impl::ScrollBarOffsetEstimator thumb(
+        layout.scroll_bar_bg_color,
+        layout.scroll_bar_scan_line,
+        layout.scroll_bar_margin_color,
+        layout.scroll_bar_track_color,
+        layout.viewport,
+        layout.cap_offset,
+        layout.scroll_bar_thumb_probe);
+    return CharaDetailSceneScraper::thumbTopOfContent(thumb.topMargin(frame.copy(layout.scroll_bar_rect)));
+}
+
+// The row the harness's reader finds the banner's top at, on the common layout's scroll area.
+std::optional<int> bannerRowOf(const ScraperHarness &h, const Frame &frame) {
+    const auto hit = h.factor_reader->findBanner(frame, shippedScraperConfig().common.scroll_area_rect);
+    return hit.has_value() ? std::optional<int>(hit->row) : std::nullopt;
+}
+
+// A factor list at its head, then scrolled down by `scroll` content pixels: the content texture moves up by
+// `scroll`, and so does the header, which the scroll area's top edge cuts once it passes the head row (only the
+// rows still below the edge are drawn, from row 0). The thumb is drawn independently at `exposed_rows`: on a long
+// list a thumb is short, and one thumb pixel is worth up to ~27 content px (see kExposedTrackTopMargin), so a
+// scroll of that size still shows exposed_rows == 0. This harness does not model that ratio geometrically -- it
+// states its outcome, a thumb that reads the head while the content has moved, which is the case the thumb
+// cannot catch.
+Frame prescrolledFactorFrame(uint64 timestamp, int scroll, int exposed_rows, int nonce) {
+    const auto &layout = shippedScraperConfig().common;
+    const Frame textured =
+        withContentTexture(bareScrollBarFrameIn(layout, timestamp, exposed_rows, nonce), layout, scroll);
+    const int header_top = kFactorHeadRow - scroll;
+    if (header_top >= 0) {
+        return withFactorHeaderAt(textured, header_top, layout);
+    }
+    return withFactorHeaderAt(textured, 0, layout, std::max(kFactorHeaderRows + header_top, 1));
+}
+
+using RefusalLog = std::vector<std::tuple<int, bool, std::string>>;
+
+RefusalLog refusedAs(TabPage tab, const std::string &reason) {
+    return {{static_cast<int>(tab), true, reason}};
+}
+
+TEST_CASE("the factor tab refuses a fragment #0 whose banner is cut at the top, although the thumb reads the head") {
+    // N2. The thumb is at its head on every frame here (exposed_rows 0); only the banner row differs, so the
+    // banner is what decides. Row 0 is a banner cut by the scroll area's top edge; row 1 is the first row the
+    // window accepts, the control that keeps "refused" from meaning "this harness refuses everything".
+    const auto capture = [](ScraperHarness &h, int banner_row) {
+        h.scraper.buildSession(record::Standard);
+        const Frame first = factorHeaderFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0, banner_row);
+        REQUIRE(thumbReadingOf(first) == scraper_impl::TopOfContent::AtTop);
+        REQUIRE(bannerRowOf(h, first) == std::optional<int>(banner_row));
+        h.scraper.update(first, SceneState{FactorPage, record::Standard});
+        h.scraper.update(
+            factorHeaderFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1, banner_row),
+            SceneState{FactorPage, record::Standard});
+    };
+
+    SUBCASE("row 1 is latched") {
+        ScraperHarness h;
+        capture(h, 1);
+        CHECK(h.refusals.empty());
+        REQUIRE(h.probe_frames.size() == 1);
+        CHECK(h.probe_frames.front().timestamp() == kPastStationary);
+    }
+
+    SUBCASE("row 0 is refused as scrolled, and nothing is latched") {
+        ScraperHarness h;
+        capture(h, 0);
+        CHECK(h.refusals == refusedAs(FactorPage, "scrolled"));
+        CHECK(h.probe_frames.empty());
+        CHECK(h.discards.empty());
+    }
+}
+
+TEST_CASE("a long factor list pre-scrolled by 24 to 27 px, which its thumb cannot show, is refused on both exits") {
+    // The failure this wiring exists for: on the friend max-rental list a thumb pixel is worth ~27 content px, so
+    // a pre-scroll of 24..27 px reads as the head to the thumb, and fragment #0 used to be latched and read from
+    // the wrong rows with no warning. Each pre-scroll is checked against both halves of its premise first -- the
+    // thumb reads the head, the banner is cut -- so the refusal cannot come from anything else.
+    for (const int scroll : {24, 25, 26, 27}) {
+        CAPTURE(scroll);
+        {
+            // The stationary exit.
+            ScraperHarness h;
+            h.scraper.buildSession(record::Standard);
+            const Frame first = prescrolledFactorFrame(0, scroll, /*exposed_rows=*/0, /*nonce=*/0);
+            REQUIRE(thumbReadingOf(first) == scraper_impl::TopOfContent::AtTop);
+            REQUIRE(bannerRowOf(h, first) == std::optional<int>(0));
+            h.scraper.update(first, SceneState{FactorPage, record::Standard});
+            h.scraper.update(
+                prescrolledFactorFrame(kPastStationary, scroll, /*exposed_rows=*/0, /*nonce=*/1),
+                SceneState{FactorPage, record::Standard});
+            CHECK(h.refusals == refusedAs(FactorPage, "scrolled"));
+            CHECK(h.probe_frames.empty());
+        }
+        {
+            // The motion exit: the user keeps scrolling before anything settles, so the offset exit latches the
+            // first, pre-scrolled frame, several updates old.
+            ScraperHarness h;
+            h.scraper.buildSession(record::Standard);
+            h.scraper.update(
+                prescrolledFactorFrame(0, scroll, /*exposed_rows=*/0, /*nonce=*/0),
+                SceneState{FactorPage, record::Standard});
+            REQUIRE(h.refusals.empty());
+            h.scraper.update(
+                prescrolledFactorFrame(50, scroll + 10, /*exposed_rows=*/0, /*nonce=*/1),
+                SceneState{FactorPage, record::Standard});
+            CHECK(h.refusals == refusedAs(FactorPage, "scrolled"));
+            CHECK(h.probe_frames.empty());
+        }
+    }
+}
+
+TEST_CASE("the pre-scroll frames are latched when they are at the head, on both exits") {
+    // The controls for the case above, on the same frame builder. Stationary: no pre-scroll. Motion: no pre-scroll
+    // on the latched frame while the CURRENT frame is already scrolled past the head (its banner is cut) -- so this
+    // is also what fails if acceptance judged "now" rather than the frame it latches.
+    ScraperHarness still;
+    still.scraper.buildSession(record::Standard);
+    still.scraper.update(prescrolledFactorFrame(0, 0, 0, 0), SceneState{FactorPage, record::Standard});
+    still.scraper.update(prescrolledFactorFrame(kPastStationary, 0, 0, 1), SceneState{FactorPage, record::Standard});
+    CHECK(still.refusals.empty());
+    CHECK(still.probe_frames.size() == 1);
+
+    ScraperHarness moving;
+    moving.scraper.buildSession(record::Standard);
+    moving.scraper.update(prescrolledFactorFrame(0, 0, 0, 0), SceneState{FactorPage, record::Standard});
+    const Frame current = prescrolledFactorFrame(50, 10, 0, 1);
+    REQUIRE(bannerRowOf(moving, current) == std::optional<int>(0));
+    moving.scraper.update(current, SceneState{FactorPage, record::Standard});
+    CHECK(moving.refusals.empty());
+    REQUIRE(moving.probe_frames.size() == 1);
+    CHECK(moving.probe_frames.front().timestamp() == 0);
+}
+
+TEST_CASE("the skill and campaign tabs still accept fragment #0 by the thumb alone") {
+    // N5. These tabs have no banner, and their downstream tolerance is unmeasured, so the wiring must not change
+    // what they accept. The first two looks are the ones a banner-reading acceptance would decide differently: a
+    // frame with no factor header at all, and one whose "header" is cut at row 0.
+    struct Look {
+        const char *name;
+        std::function<Frame(uint64, int)> frame;
+        std::optional<std::string> refusal;  // nullopt: latched
+    };
+    const std::vector<Look> looks{
+        {"no header, thumb at the head",
+         [](uint64 t, int n) { return bareScrollBarFrameIn(shippedScraperConfig().common, t, 0, n); },
+         std::nullopt},
+        {"a header cut at row 0, thumb at the head",
+         [](uint64 t, int n) { return factorHeaderFrameAt(t, 0, n, 0); },
+         std::nullopt},
+        {"a header at the head row, thumb one tip pixel down",
+         [](uint64 t, int n) { return scrollBarFrameAt(t, 1, n); },
+         std::string("scrolled")},
+    };
+    for (const TabPage tab : {SkillPage, CampaignPage}) {
+        CAPTURE(static_cast<int>(tab));
+        for (const auto &look : looks) {
+            CAPTURE(look.name);
+            ScraperHarness h;
+            h.scraper.buildSession(record::Standard);
+            h.scraper.update(look.frame(0, 0), SceneState{tab, record::Standard});
+            h.scraper.update(look.frame(kPastStationary, 1), SceneState{tab, record::Standard});
+            if (look.refusal.has_value()) {
+                CHECK(h.refusals == refusedAs(tab, look.refusal.value()));
+            } else {
+                CHECK(h.refusals.empty());
+            }
+        }
+
+        // A thumb that vanishes before the latch: the reading reaches the refusal unresolved, so
+        // kMissingReadingIsScrolled refuses it and the reason still says the thumb could not be read. The first
+        // frame builds the tab with a scroll bar.
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        h.scraper.update(scrollBarFrameAt(0, 0, 0), SceneState{tab, record::Standard});
+        h.scraper.update(noScrollBarFrameAt(kPastStationary, 1), SceneState{tab, record::Standard});
+        h.scraper.update(noScrollBarFrameAt(2 * kPastStationary, 1), SceneState{tab, record::Standard});
+        CHECK(h.refusals == refusedAs(tab, "unknown"));
+    }
 }
 
 TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refusal") {
@@ -694,56 +1035,61 @@ TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refus
 }
 
 TEST_CASE("a tab not built yet says so on the wire, rather than being resolved here") {
+    // The first frame of a tab is judged BEFORE the tab is built from it (SceneScraper::build runs later in the
+    // same update), so there is no thumb to measure and no structure to ask. The thumb is every tab's head
+    // sensor, so that is "unknown" on every tab -- the factor tab included, even on a frame whose green header
+    // sits at the head row: the header is asked only behind a thumb at the head, and never answers for a
+    // thumb that has no reading. (A frame of a BUILT, scrollable tab whose thumb cannot be read says "unknown"
+    // too; see "a frame of a scrollable factor page that shows neither ..." below, which also pins what Rule 3
+    // does with it.)
+    TabPage tab = CampaignPage;
+    SUBCASE("a campaign frame") {
+        tab = CampaignPage;
+    }
+    SUBCASE("a factor frame whose header is at the head row") {
+        tab = FactorPage;
+    }
     ScraperHarness h;
     h.scraper.buildSession(record::Standard);
-
-    // The first frame of a tab is judged BEFORE the tab is built from it (SceneScraper::build runs later in the
-    // same update), so there is no thumb to measure and no structure to ask. On a campaign frame there is no
-    // header either, so nothing has anything to say. (A frame of a BUILT, scrollable tab that neither sensor can
-    // read says "unknown" too; see "a frame of a scrollable factor page that shows neither ..." below, which also
-    // pins what Rule 3 does with it.)
-    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{CampaignPage, record::Standard});
+    // scrollBarFrameAt draws the factor header at the head row (factorHeaderFrameAt with kFactorHeadRow).
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{tab, record::Standard});
 
     // The word, not a bool. "unknown" is the whole point: resolved to either answer here, this reads as one
     // of the other two and the consumer that needed the distinction never sees it.
-    CHECK(h.positionWords(CampaignPage) == std::vector<std::string>{"unknown"});
+    CHECK(h.positionWords(tab) == std::vector<std::string>{"unknown"});
 }
 
 TEST_CASE("a tab whose page cannot scroll is at the head of its content on the wire, whatever its frames show") {
     // A PAGE WITH NO SCROLL BAR CANNOT BE ANYWHERE BUT THE HEAD OF ITS CONTENT, and the core says so from the
-    // structure the tab was built with, not from a sensor. Before, a skill or campaign page with no scroll bar
-    // says "unknown" on every frame (no thumb), and a factor page says whatever its header says -- "unknown" when
-    // the header is covered, its green missed, or no reference row has been read yet, "scrolled" when it sits off
-    // the row its factor probe read. Rule 3 resolves both as "scrolled" and then never judges the page the user
-    // can switch on.
+    // structure the tab was built with, not from a sensor. Read from sensors, a skill or campaign page with no
+    // scroll bar would say "unknown" on every frame (no thumb), and a factor page would say whatever its header
+    // says -- "scrolled" when the banner is not found in its window or lands outside it, which a real
+    // no-scroll-bar clip measured. Rule 3 acts only on "at_top", so it would never judge the page the user can
+    // switch on.
     //
     // Four pages, and two of them are not the factor tab, so an answer keyed on the tab's name stays red.
+    // The first frame's word is "unknown" on all four: it is taken before the tab is built, when no thumb can be
+    // read (see the case above), and the factor tab's header is not asked without a thumb at the head.
     TabPage tab = SkillPage;
     std::function<Frame(uint64, int)> page;
-    std::string sensors_word;  // the first frame's word, taken before the tab is built (see the case above)
     SUBCASE("a skill page") {
         tab = SkillPage;
         page = noScrollBarFrameAt;
-        sensors_word = "unknown";
     }
     SUBCASE("a campaign page") {
         tab = CampaignPage;
         page = noScrollBarFrameAt;
-        sensors_word = "unknown";
     }
     SUBCASE("a factor page whose header is not drawn") {
         tab = FactorPage;
         page = noScrollBarFrameAt;
-        sensors_word = "unknown";
     }
-    SUBCASE("a factor page whose header is drawn") {
-        // Before the latch no reference row exists, so the header sensor has nothing to compare and the first
-        // word is the thumb's -- and there is no thumb.
+    SUBCASE("a factor page whose header is drawn just past the banner window") {
         tab = FactorPage;
         page = [](uint64 timestamp, int nonce) {
-            return withFactorHeaderAt(noScrollBarFrameAt(timestamp, nonce), kHeaderCropRow);
+            const Frame bare = noScrollBarFrameAt(timestamp, nonce);
+            return withFactorHeaderAt(bare, factorHeadLastRowOn(bare) + 1);
         };
-        sensors_word = "unknown";
     }
     ScraperHarness h;
     h.scraper.buildSession(record::Standard);
@@ -753,31 +1099,52 @@ TEST_CASE("a tab whose page cannot scroll is at the head of its content on the w
     h.scraper.update(page(kPastStationary, /*nonce=*/0), SceneState{tab, record::Standard});
     h.scraper.update(page(kPastStationary + kPastDwell, /*nonce=*/0), SceneState{tab, record::Standard});
 
-    CHECK(h.positionWords(tab) == std::vector<std::string>{sensors_word, "at_top"});
+    CHECK(h.positionWords(tab) == std::vector<std::string>{"unknown", "at_top"});
     CHECK(h.discards.empty());
 }
 
 TEST_CASE("a tab a sensor CAN read says which way it measured") {
     // The positive control for the "unknown" cases: without it, "unknown" would be indistinguishable from a wire
     // that says "unknown" no matter what the sensors found. Both measured words are reachable from the same
-    // frames the refusal cases use, so the two claims are pinned against the same synthetic bar.
+    // frames the refusal cases use, so the two claims are pinned against the same synthetic bar. The skill tab
+    // is the one read by the thumb alone; the factor tab is read by its banner as well.
     ScraperHarness h;
     h.scraper.buildSession(record::Standard);
 
     // Frame 1 builds the tab, so its scroll-bar estimator does not exist yet while the verdict for that frame
-    // is taken -- the tab is genuinely unreadable for exactly one frame, and the wire says so.
-    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    // is taken -- a thumb-only tab is genuinely unreadable for exactly one frame, and the wire says so.
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{SkillPage, record::Standard});
     h.scraper.update(
-        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{FactorPage, record::Standard});
-    CHECK(h.positionWords(FactorPage) == std::vector<std::string>{"unknown", "at_top"});
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{SkillPage, record::Standard});
+    CHECK(h.positionWords(SkillPage) == std::vector<std::string>{"unknown", "at_top"});
 
     ScraperHarness scrolled;
     scrolled.scraper.buildSession(record::Standard);
     scrolled.scraper.update(
-        scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+        scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{SkillPage, record::Standard});
     scrolled.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{SkillPage, record::Standard});
+    CHECK(scrolled.positionWords(SkillPage) == std::vector<std::string>{"unknown", "scrolled"});
+
+    // The factor tab on the same frames, and the same words. Its thumb is its head sensor too, so the first
+    // frame, where the thumb has no reading yet, is "unknown" although the header sits at the head row. At the
+    // head the second frame's thumb goes on to the header, which keeps at_top; at the one-tip-pixel frames the
+    // thumb's scrolled is the answer.
+    ScraperHarness factor;
+    factor.scraper.buildSession(record::Standard);
+    factor.scraper.update(
+        scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    factor.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+    CHECK(factor.positionWords(FactorPage) == std::vector<std::string>{"unknown", "at_top"});
+
+    ScraperHarness factor_scrolled;
+    factor_scrolled.scraper.buildSession(record::Standard);
+    factor_scrolled.scraper.update(
+        scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    factor_scrolled.scraper.update(
         scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
-    CHECK(scrolled.positionWords(FactorPage) == std::vector<std::string>{"unknown", "scrolled"});
+    CHECK(factor_scrolled.positionWords(FactorPage) == std::vector<std::string>{"unknown", "scrolled"});
 }
 
 // --- the reading Rule 3 takes once its pixel diff has said "a different character" -------------------------
@@ -934,6 +1301,44 @@ TEST_CASE("a candidate switch read as the same record keeps the session and asks
     CHECK(h.discards.empty());
 }
 
+TEST_CASE("a factor list displaced inside the head window is judged by Rule 3, and a Same takes it as the witness") {
+    // N6. Behind a thumb at the head, the flush gate is the header's window, so a list a few rows off the row it was latched at is still at
+    // its head: the gate opens, the diff against the witness nominates the frame, both frames are read, and the
+    // Same verdict keeps the session and makes the displaced frame the witness. Before the window was the
+    // recognizer's, a displacement like this closed the gate and Rule 3 was blind to the frame.
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    const std::string first_session = h.sessionIdAt(0);
+    const uint64 latched_at = latchFactorHead(h, 0, /*nonce=*/0, shippedScraperConfig().common, record::Standard);
+
+    static constexpr int kDisplacement = 4;
+    const FrameAt displaced = [](uint64 timestamp, int nonce) {
+        return prescrolledFactorFrame(timestamp, kDisplacement, /*exposed_rows=*/0, nonce);
+    };
+    // The premise: the displaced frame's banner is off the latched row, and still inside the window.
+    REQUIRE(bannerRowOf(h, h.probe_frames.at(0)) == std::optional<int>(kFactorHeadRow));
+    REQUIRE(bannerRowOf(h, displaced(0, 0)) == std::optional<int>(kFactorHeadRow - kDisplacement));
+
+    const uint64 judged_at = holdFactorDivergence(h, latched_at + 100, /*nonce=*/10, displaced, record::Standard);
+    // REQUIRE: every line below reads what this reading left behind (framesRead().back() among them).
+    REQUIRE(h.framesRead() == std::vector<uint64>{latched_at, judged_at});
+    CHECK(
+        h.verdictsStated()
+        == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Same});
+    CHECK(h.discards.empty());
+    CHECK(h.sessionIdAt(h.recorder.made.size() - 1) == first_session);
+
+    // THE DISPLACED FRAME IS NOW THE WITNESS: holding it again is no change at all, and the latched look is a
+    // divergence again.
+    const std::size_t calls_after_verdict = h.factor_model_calls.size();
+    holdFactorDivergence(h, judged_at + 100, /*nonce=*/20, displaced, record::Standard);
+    CHECK(h.factor_model_calls.size() == calls_after_verdict);
+    const uint64 back_at =
+        holdFactorDivergence(h, judged_at + 100 + 2 * kPastDwell, /*nonce=*/30, latchedLook, record::Standard);
+    CHECK(h.framesRead().back() == back_at);
+    CHECK(h.discards.empty());
+}
+
 TEST_CASE("a candidate switch on which the reader finds no rows discards the session") {
     ScraperHarness h;
     h.scraper.buildSession(record::Standard);
@@ -1004,8 +1409,9 @@ TEST_CASE("going back and forth between two looks of one record costs one readin
 // self factors, or none, and nothing downstream of the reader can tell. That is the failure stage 1 fixed for the
 // probe; these pin it for the switch reading.
 //
-// Under readerScanConfig the banner search stops at its first sample, so a reading's first cell starts exactly
-// vertical_banner_bottom_delta below the top of the rect the reader was handed. What is asserted is that window,
+// Under readerScanConfig the banner search stops at the first row that leaves its background, which on these
+// frames is the painted header at kFactorHeadRow, so a reading's first cell starts exactly
+// vertical_banner_bottom_delta below that row of the rect the reader was handed. What is asserted is that window,
 // measured from the top of THIS LAYOUT's scroll area on the frame -- one capture pixel of rounding on each side.
 void checkSwitchReadingArea(const scraper_config::SceneScraperConfig &layout, record::RecordType record_type) {
     ScraperHarness h;
@@ -1033,8 +1439,8 @@ void checkSwitchReadingArea(const scraper_config::SceneScraperConfig &layout, re
         }
         CAPTURE(frame_at);
         CAPTURE(area_top);
-        CHECK(first_cell_top >= area_top + first_row_offset - 1);
-        CHECK(first_cell_top <= area_top + first_row_offset + 1);
+        CHECK(first_cell_top >= area_top + kFactorHeadRow + first_row_offset - 1);
+        CHECK(first_cell_top <= area_top + kFactorHeadRow + first_row_offset + 1);
     }
 }
 
@@ -1170,18 +1576,19 @@ Frame withFactorEndBar(const Frame &frame) {
     return Frame(pixels, frame.timestamp());
 }
 
-// `page` as a factor page draws it at the head of its content: the green 因子 header on kHeaderCropRow, and the
-// title-bar banner. On a page with no scroll bar the header is NOT what opens Rule 3's flush gate -- the page's
-// structure is -- so the kinds below that draw no header, or draw it off its row, are judged all the same.
+// `page` as a factor page draws it at the head of its content: the green 因子 header on the head row
+// (kFactorHeadRow), and the title-bar banner. On a page with no scroll bar the header is NOT what opens Rule 3's
+// flush gate -- the page's structure is -- so the kinds below that draw no header, or draw it off its row, are
+// judged all the same.
 Frame asFactorPageAtHead(const Frame &page) {
-    return withBanner(withFactorHeaderAt(page, kHeaderCropRow));
+    return withBanner(withFactorHeaderAt(page, kFactorHeadRow));
 }
 
-// `page` with the header two rows BELOW kHeaderCropRow, and the banner: past factor_header.flush_tolerance_px from
-// the row a latch on asFactorPageAtHead reads, so the sensor reads it as scrolled on a page that cannot scroll --
-// what a header partly covered, or drawn off its row, reads as.
+// `page` with the header one row past the banner window, and the title-bar banner: a header the judgment reads
+// as scrolled on a page that cannot scroll -- what one drawn lower than any device draws it, or a cut banner,
+// reads as.
 Frame withFactorHeaderBelowHead(const Frame &page) {
-    return withBanner(withFactorHeaderAt(page, kHeaderCropRow + 2));
+    return withBanner(withFactorHeaderAt(page, factorHeadLastRowOn(page) + 1));
 }
 
 // A factor page whose list fits on one screen: no scroll bar, the header at the head of its content, the banner.
@@ -1564,7 +1971,8 @@ TEST_CASE("a frame of a scrollable factor page that shows neither its header nor
         return withContentTexture(noScrollBarFrameAt(timestamp, nonce), shippedScraperConfig().common, 0);
     };
     holdFactorDivergence(h, captured + 100, /*nonce=*/2, unplaceable, record::Standard);
-    // Unresolved on the wire, and resolved "scrolled" by Rule 3's gate.
+    // No thumb on the frame: the factor tab reads "unknown", as any tab does whose thumb cannot be read, without
+    // asking the header. Rule 3 resolves that fail-closed, so its gate stays shut.
     CHECK(h.positionWords(FactorPage).back() == "unknown");
     CHECK(h.framesRead().empty());
     CHECK(h.verdicts.empty());

@@ -155,24 +155,16 @@ void FactorTabRecognizer::recognize(
     record::CharaDetailRecord &record,
     CropInfo &crop_info,
     PredictionHistory &history) const {
-    const auto anchor = frame.anchor();
-
-    // Find the green banner at the top of the Factors tab to calibrate the initial Y position,
-    const auto top_banner_y = searchVertical(
-        frame,
-        config.bg_color,
-        {
-            anchor.absolute(config.left_rect).left(),
-            anchor.absolute(config.area).top(),
-        },
-        config.vertical_banner_upper_gap);
-    if (!top_banner_y) {
+    // Find the green banner at the top of the Factors tab to calibrate the initial Y position. The search is the
+    // shared reader's (findBanner), so this read and the single-frame read find the banner by one rule.
+    const auto banner = rows->findBanner(frame, config.area);
+    if (!banner) {
         log_warning("Failed to find top banner of factor tab.");
         return;
     }
 
     // Move to the space between the banner and the first factor.
-    const double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+    const double scan_top = banner->top + config.vertical_banner_bottom_delta;
 
     // The stitched image's scroll area is config.area, the same rect the banner search above starts from.
     double current_y = scan_top;
@@ -189,26 +181,42 @@ void FactorTabRecognizer::recognize(
 
 std::vector<record::Factor>
 FactorRowReader::visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const {
-    const auto anchor = frame.anchor();
-
     // Scan from the caller's scroll area, NOT from config.area: this frame is a live one, whose scroll
     // area moves with the record layout (see the header for the full reason).
-    const auto top_banner_y = searchVertical(
-        frame,
-        config.bg_color,
-        {
-            anchor.absolute(config.left_rect).left(),
-            anchor.absolute(window.scroll_area).top(),
-        },
-        config.vertical_banner_upper_gap);
-    if (!top_banner_y) {
+    const auto banner = findBanner(frame, window.scroll_area);
+    if (!banner) {
         log_warning("Failed to find top banner of factor tab.");
         return {};
     }
 
-    double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+    double scan_top = banner->top + config.vertical_banner_bottom_delta;
     PredictionHistory history;
     return recognizeOne(frame, window.scroll_area, scan_top, history, window.factor_limit);
+}
+
+std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const Rect<double> &scroll_area) const {
+    const auto anchor = frame.anchor();
+    const auto scan = scanVertical(
+        frame,
+        config.bg_color,
+        {
+            anchor.absolute(config.left_rect).left(),
+            anchor.absolute(scroll_area).top(),
+        },
+        config.vertical_banner_upper_gap);
+    if (!scan || !scan->hit_y) {
+        return std::nullopt;
+    }
+    const int hit_y = scan->hit_y.value();
+    const auto area = anchor.mapToFrame(scroll_area);
+    const int run_end_y = backgroundResumesAt(frame, config.bg_color, scan->x, hit_y, area.bottom());
+    return BannerHit{
+        anchor.mapFromFrame(Point<int>{scan->x, hit_y}).y(),
+        scan->x - area.left(),
+        hit_y - scan->start_y,
+        scan->length,
+        run_end_y - scan->start_y,
+    };
 }
 
 std::vector<record::Factor>

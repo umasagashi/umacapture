@@ -546,6 +546,6 @@
     "band_start": 0.12,
     "band_end": 0.93,
     "green_fraction_threshold": 0.5,
-    "flush_tolerance_px": 1.5
+    "banner_window_reserve": 0.1
   }
 }

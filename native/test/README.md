@@ -32,8 +32,13 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   `CharaDetailSceneStitcher::stitch` (a missing base image removes the partial
   output via the injected hook and sends `on_stitch_failed`, keeping the input for
   diagnosis). Fragment reads use real files under the temp directory; directory
-  ops are `DirectoryHooks` fakes. The full success path (needs a calibrated config
-  and a valid image set) is left to the CLI/integration harness.
+  ops are `DirectoryHooks` fakes. The success path is exercised for one property:
+  a synthetic record stitched with the shipped configs keeps the factor tab's
+  banner at the live frame's row, column, search length and run end
+  (`FactorRowReader::findBanner` on both sides; Standard and Friend layouts, units
+  540/720/736/1079, four anchor shapes including a re-anchored pane whose
+  `base.png` reads back with a smaller unit). What stitched records read as is
+  left to the CLI/integration harness.
 - `chara_detail/test_scraper_estimators.cpp` — the scroll-offset estimators and the
   stationary-frame catcher. `ScrollBarOffsetEstimator`: thumb margins / position from a
   rendered track (and the no-bar nullopt), and `scrollGuess` — the thumb-move-to-content-
@@ -67,7 +72,21 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   change, self-heal across a resolution change, cropping the latched frame to its target rect,
   the `minimum_color` gate reaching the pixel diff, and measuring a *fraction* of its region
   rather than an absolute amount of change — all keyed on frame timestamps. Driven by
-  hand-built `CV_8UC3` mats.
+  hand-built `CV_8UC3` mats. Also the **factor tab's head judgment**
+  (`scraper_impl::factorHeadReading` / `factorHeadVerdict`) on readings handed in. Behind a
+  thumb at the head: the banner row accepted from 1 to `factorHeadLastRow` (the recognizer's
+  search window less `banner_window_reserve`) and refused at 0 and one past it, the reserve
+  being what refuses that row, and the banner's run having to contain the green sensor's row.
+  The thumb's role, stated on the structure: an unreadable thumb is `unknown` and a thumb
+  reading `scrolled` is `scrolled` however clearly the header shows the head, with neither the
+  banner search nor the green scan taken; a thumb at the head is kept or refused by the header
+  (refused by the window without the green scan being taken). Also
+  `TopOfContentPolicy` (which way an `unknown` reading falls, both directions) and the one
+  shipped thumb threshold (`thumbTopOfContent` refusing the smallest positive top margin),
+  and `ScrollableScrapingInterpreter`'s fragment-#0 acceptance driven with a thumb judgment
+  handed in: the stationary and motion exits each latching a head and refusing a head start,
+  the motion exit asking the judgment about the descriptor it latches (the first frame) and
+  not the frame that triggered it.
 - `chara_detail/test_scene_scraper.cpp` — `BaseFrameCatcher`, the base-image gate
   layered on top of `StationaryFrameCatcher`: readiness needs both the base region
   stationary AND the green title-bar banner visible on the header scan line for a
@@ -90,8 +109,28 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   to the records a golden compares. A tab built for a page with **no scroll bar** says
   `at_top` from the structure it was built with, before any sensor and whatever its frames
   show (on the skill, campaign and factor tabs alike, with the factor header missing or
-  read as scrolled), while a frame of a *scrollable* page that shows neither its header nor
-  its scroll bar still says `unknown` and is not judged by Rule 3. And **which rule watches a captured tab for a
+  drawn past its window). A tab not built yet says `unknown` on its first frame — the
+  factor tab too, even with its header at the head row, because the thumb is every tab's
+  head sensor and the header is asked only behind a thumb at the head. From the second
+  frame the factor tab's word comes from its head judgment: a banner anywhere in the window
+  (including two rows above the head row) says `at_top`, a banner cut at row 0 or one row
+  past the window says `scrolled` although the thumb reads a head, a thumb showing one tip
+  pixel says `scrolled` over a banner at the head row, a factor frame with no banner in its
+  window under a thumb at the head — scrolled or covered — says `scrolled`, and a built
+  factor page whose frame shows neither its thumb nor its header says `unknown` and is not
+  judged by Rule 3. The harness's factor
+  frames paint that banner (`kFactorHeadRow`, with the rows above it in the harness
+  reader's background) because the judgment reads the harness's own `FactorRowReader`.
+  **Fragment-#0 acceptance asks the same judgment** (`topOfContent`, handed to every tab's
+  interpreter): on the factor tab a banner cut at row 0 is refused as `scrolled` while the
+  thumb reads a head, and row 1 is latched; a long list pre-scrolled by 24–27 px, which a
+  short thumb still reads as the head, is refused on the stationary and the motion exit
+  alike, while the same frames at the head are latched (the motion control's current frame
+  already being cut, so judging "now" would refuse it); the skill and campaign tabs still
+  accept by the thumb alone (a header-less frame and a cut "header" latched, one tip pixel
+  refused as `scrolled`, a vanished thumb refused as `unknown`). Rule 3 judges a factor list
+  displaced a few rows inside the window, and a `same` reading takes the displaced frame as
+  its witness without a reset. And **which rule watches a captured tab for a
   character switch**: Rule 3, and only Rule 3, whenever the factor tab holds its witness
   (after the tab is captured and after the session completes, keeping the session on a
   same-record reading). No rule watches any other tab, so a captured skill or campaign tab
@@ -118,10 +157,26 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   band's width also buys occlusion tolerance that no corpus statistic can observe.
   A third compares the header's crop row across the two layouts, which is what notices
   `friend_common.viewport` moving without the scroll-area rect that is now derived from it.
+  A fourth runs the factor tab's head judgment on the production readings (the
+  recognizer's `findBanner` on the shipped `recognizer.json`, the green scan
+  `firstHeaderGreenRow`, the thumb estimator) over three clips at two anchor units: every
+  frame the thumb and the green header place at the head is accepted, counted with its
+  denominator, and every banner row those frames show has room on both sides inside the
+  window. A fifth decodes `friend_standard_many_rental` and checks that the 46 frames
+  where the end-of-list 継承履歴 bar sits inside the banner window (decode order 354..399)
+  pass both banner conditions and are refused by the thumb alone, and that no other frame
+  of the clip is. A sixth, clip-free, paints the header at ten measured capture geometries
+  (units 540–810, re-anchored ones included) and checks that the measured head row, row 1
+  and the window's last row are accepted, that the row past it is refused although the
+  recognizer still finds the banner there, and that the window is
+  `lround(vertical_banner_upper_gap * unit)`. The footage cases report and continue when
+  their clips are absent.
 - `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
   out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and
-  the out-of-bounds start clamp, against hand-built mats.
+  the out-of-bounds start clamp, against hand-built mats; `scanVertical`, the pixel
+  form of the same scan (start, unclamped length, hit row), and
+  `backgroundResumesAt`, the end of a content run.
 - `chara_detail/test_record.cpp` — the `RecordType` axis predicates
   (`isInheritanceOnly` / `isFriend`; pure enum logic) plus the JSON serialization
   contract of the `CharaDetailRecord` tree: a fully populated record survives
@@ -199,7 +254,9 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   config JSON under `assets/config/chara_detail` via the `TEST_ASSET_CONFIG_DIR`
   compile definition CMake injects — a deliberate, narrow exception to the "no game
   assets" scope below (those files are small versioned config, not screenshots or
-  ONNX models, and are themselves the contract under test).
+  ONNX models, and are themselves the contract under test). It also checks that the
+  shipped files agree on the one scroll-area rect the scraper crops with, the
+  stitcher pastes at and the recognizer reads from.
 
 - `chara_detail/test_factor_change_discriminator.cpp` — the character-switch
   discriminator: a resample/requantisation perturbation of the same factor list is

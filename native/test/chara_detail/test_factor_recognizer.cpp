@@ -80,7 +80,7 @@ void band(cv::Mat &mat, int start_x, int width, int y) {
 }
 
 TEST_CASE("visibleSelfPrefix returns no factors when the top banner is not found") {
-    // On an all-background frame the banner search (searchVertical over bg_color) never leaves the
+    // On an all-background frame the banner search (findBanner, a vertical scan over bg_color) never leaves the
     // background, so visibleSelfPrefix bails and returns an empty list.
     const auto config = factorConfig();
     const auto recognizer = makeRecognizer(config, 0, 0);
@@ -149,8 +149,9 @@ TEST_CASE("visibleSelfPrefix stops before a row whose cell would fall off the fr
 constexpr int kFrameWidth = 736;
 constexpr int kFrameHeight = 1308;
 
-// Values pinned from native/tool/builder/chara_detail_recognizer_builder.h (factorTab) and
-// chara_detail_scene_scraper_builder.h (common / friendCommon). They are copies, not the source of truth:
+// Values pinned from native/tool/builder/chara_detail_recognizer_builder.h (factorTab),
+// chara_detail_scene_scraper_builder.h (common / friendCommon) and chara_detail_geometry.h (the Standard scroll
+// area's top). They are copies, not the source of truth:
 // what these cases assert is the RELATIONSHIP between the supplied content area and the scan, so the exact
 // numbers only have to be plausible production geometry. The golden suite covers the real values.
 constexpr double kScanTop = 0.9111;

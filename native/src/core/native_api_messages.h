@@ -49,7 +49,10 @@ inline std::string scrollUpdated(int index, double progress) {
 // a tab not built yet, or a scroll bar unmeasurable for a moment on a page that has one. A page with NO scroll
 // bar at all reads "at_top" from the frame after its tab is built, on every tab and whatever its frames show:
 // it cannot be anywhere but the head of its content, and the core takes that from the structure the tab was
-// built with, before any sensor (CharaDetailSceneScraper::topOfContent).
+// built with, before any sensor (CharaDetailSceneScraper::topOfContent). A scrollable factor page reads its
+// scroll thumb first, like every other tab, so it reads "unknown" exactly when the thumb cannot be read (the
+// first frame of a tab not built yet included). The green header is asked only behind a thumb at the head,
+// and it can only turn that "at_top" into "scrolled".
 //
 // NOT A BOOL, and that is the contract rather than a richer payload for its own sake. The core cannot answer
 // "unknown" for the front end because the front end has two consumers whose costs for a wrong answer are

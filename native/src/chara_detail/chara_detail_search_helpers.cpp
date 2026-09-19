@@ -10,6 +10,19 @@ std::optional<double> searchVertical(
     const Point<double> &scan_start_left,
     const double max_length,
     const bool reversed) {
+    const auto scan = scanVertical(frame, bg_color, scan_start_left, max_length, reversed);
+    if (!scan || !scan->hit_y) {
+        return std::nullopt;
+    }
+    return frame.anchor().mapFromFrame(Point<int>{scan->x, scan->hit_y.value()}).y();
+}
+
+std::optional<VerticalScan> scanVertical(
+    const Frame &frame,
+    const Range<Color> &bg_color,
+    const Point<double> &scan_start_left,
+    const double max_length,
+    const bool reversed) {
     // A zero-dimension frame (e.g. a momentary 0-width capture) would make the clamps below
     // std::clamp(x, 0, -1), which is undefined behavior when lo > hi. Bail before that.
     if (frame.width() <= 0 || frame.height() <= 0) {
@@ -28,13 +41,34 @@ std::optional<double> searchVertical(
     const int direction = reversed ? -1 : 1;
     const auto scan_end_pixels = std::clamp(scan_start_pixels + direction * scan_length_pixels, 0, frame.height());
 
+    VerticalScan scan{scan_x_pixels, scan_start_pixels, scan_length_pixels, std::nullopt};
     for (int y = scan_start_pixels; reversed ? (y >= scan_end_pixels) : (y < scan_end_pixels); y += direction) {
         const auto scan_point = frame_anchor.mapFromFrame(Point<int>{scan_x_pixels, y});
         if (!frame.isIn(bg_color, scan_point)) {
-            return scan_point.y();
+            scan.hit_y = y;
+            return scan;
         }
     }
-    return std::nullopt;
+    return scan;
+}
+
+int backgroundResumesAt(
+    const Frame &frame, const Range<Color> &bg_color, const int x, const int from_y, const int end_y) {
+    const int first = std::clamp(from_y, 0, frame.height());
+    // Same reason as scanVertical's early return: a zero-width frame would make the column clamp undefined.
+    // There is no pixel to read, so the run is empty.
+    if (frame.width() <= 0) {
+        return first;
+    }
+    const int column = std::clamp(x, 0, frame.width() - 1);
+    const int last = std::clamp(end_y, first, frame.height());
+    const auto &frame_anchor = frame.anchor();
+    for (int y = first; y < last; y++) {
+        if (frame.isIn(bg_color, frame_anchor.mapFromFrame(Point<int>{column, y}))) {
+            return y;
+        }
+    }
+    return last;
 }
 
 }  // namespace uma::chara_detail::recognizer_impl

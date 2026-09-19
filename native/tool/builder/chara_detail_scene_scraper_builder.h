@@ -1,6 +1,7 @@
 #pragma once
 
 #include "builder/builder_util.h"
+#include "builder/chara_detail_geometry.h"
 #include "chara_detail/chara_detail_config.h"
 
 namespace uma::tool {
@@ -43,9 +44,9 @@ private:
             Rect<double>{{0.1, 0.0556, IS}, {0.9, 0.8074, IS}},
             Rect<double>{{0.0, 0.0, IS}, {0.0, 0.0, ILE}},
             Rect<double>{{0.0222, 0.7259, IS}, {0.9759, 0.8037, IS}},
-            Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
-            // scroll_bar_rect: full-width band for scrollbar detection, initially identical to scroll_area_rect.
-            Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
+            standard_scroll_area_rect,
+            // scroll_bar_rect: full-width band for scrollbar detection, declared as the same region as scroll_area_rect.
+            standard_scroll_area_rect,
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
             Range<Color>{Color{123, 121, 140} + 30, {255, 255, 255}},
             // scroll_bar_scan_line.x sits on the thumb's true horizontal center (trackCenterX centroid across
@@ -459,9 +460,10 @@ private:
     // own measurement without dragging the other.
     [[nodiscard]] Range<Color> factorTabGreen() const { return {{70, 150, 0}, {190, 255, 85}}; }
 
-    // The green "因子" section header is a precise "flush at the very top" sensor for maybeResetOnFactorChange:
-    // it moves 1:1 with the factor list, so a tiny scroll shifts it ~10 px where the scroll thumb barely moves
-    // (its travel is compressed by viewport/content). Probe a band x[0.12,0.93] of the scroll-area crop -- solid
+    // The green "因子" section header sensor is the half of the factor tab's head-of-content judgment that says
+    // the banner the recognizer's search found IS the green header (the judgment is described below). The header
+    // moves 1:1 with the factor list, where the scroll thumb barely moves (its travel is compressed by
+    // viewport/content). Probe a band x[0.12,0.93] of the scroll-area crop -- solid
     // header green across it, so requiring green over half the band (fraction > 0.5) still rejects a stray green
     // factor pill. Same UI green as factorEndGreen -- literally the same factorTabGreen(), see its note for how
     // its bounds are sized.
@@ -481,14 +483,32 @@ private:
     // here but falls to 0.806 at [0.05,0.99], spending headroom above the threshold; and the highest NON-header
     // row rises to 0.4094 here but to 0.4347 at [0.12,0.88], too close under 0.5 to keep. That lower figure is
     // the one to watch when the game adds factors: it is driven by the green factor pill, which is content.
-    // flush_tolerance_px is in capture pixels (the header top-edge row). Live measurement (factor reset diag): a
-    // real switch snaps to EXACTLY flush (0 px), whereas a same-character scroll of only ~4 px still spikes the
-    // content diff to ~29 %. 1.5 px sits in that gap -- it rejects a >=2 px scroll while tolerating up to 1 px of
-    // header-edge detection jitter on a genuine flush frame, so a real switch is still detected. Pixels, not a
-    // width fraction, so it does not drift with capture resolution (a fraction would drop below 1 px on a smaller
-    // capture and start missing real switches).
+    //
+    // banner_window_reserve (0.10) IS THE ONLY OTHER NUMBER, AND IT IS NOT A POSITION. When the scroll thumb
+    // reads the factor tab at the head (the thumb decides first, as on every tab), the green header confirms it
+    // when the recognizer's own banner search (FactorRowReader::findBanner) finds the banner
+    // at a row r with 1 <= r <= L - 1 - ceil(0.10 * L) (scraper_impl::factorHeadLastRow), and this band's first
+    // green row lies inside the run the search found there. The bound comes from the part of the pipeline that
+    // has to tolerate the displacement:
+    //   * L is recognizer.json's factor-tab vertical_banner_upper_gap (0.0555 of the width, see factorTab() in
+    //     chara_detail_recognizer_builder.h) in capture pixels -- the window the stitched record's read searches
+    //     for the banner in. L - 1 is the last row that read can find it on; a fragment #0 accepted with its
+    //     banner below that is read without a banner, which is the silent misread this judgment exists to stop.
+    //     The judgment takes L from the search itself (BannerHit::search_rows), so it cannot drift from it.
+    //   * the upper bound is therefore a fraction of the width, independent of capture width and layout:
+    //     about (0.0555 - 0.1 * 0.0555) = 0.050 of the width. At the unit extremes: L = 30 -> r <= 26 (540),
+    //     L = 41 -> r <= 35 (736), L = 60 -> r <= 53 (1079). Real footage puts the head at r = 8 (540) and
+    //     r = 10..11 (736), so the window leaves room on both sides of where today's devices draw the banner.
+    //   * THE RESERVE CORRESPONDS TO NO MEASURED ERROR SOURCE, and says so on purpose. The live frame and the
+    //     stitched image find the banner at the same row by construction (one function, one scroll-area rect --
+    //     chara_detail_geometry.h -- and a pixel-exact paste; test_scene_stitcher.cpp and test_config.cpp assert
+    //     both), so the path-to-path error it could absorb is zero today. It is kept as a policy margin against a
+    //     future drift of the same kind that those tests would not see (a sub-pixel shift of the rect, a paste
+    //     change) -- ceil(0.10 * L) = 3 rows at 540, 5 at 736, 6 at 1079 -- and against the scroll-offset veto's budget when a list resting
+    //     below its head is scrolled back up. It is a fraction of L rather than of the width so that it follows
+    //     the window if vertical_banner_upper_gap moves.
     [[nodiscard]] chara_detail::scraper_config::FactorHeaderConfig factorHeader() const {
-        return {factorTabGreen(), 0.12, 0.93, 0.5, 1.5};
+        return {factorTabGreen(), 0.12, 0.93, 0.5, 0.10};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {

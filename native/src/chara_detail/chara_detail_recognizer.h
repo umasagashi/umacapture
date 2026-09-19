@@ -237,6 +237,23 @@ struct SelfFactorWindow {
     }
 };
 
+// Where the factor tab's green banner (the "因子" header) was found, as FactorRowReader::findBanner found it.
+// Every integer is in the pixels of the frame that was searched, relative to the scroll area handed in:
+// - `column` is the scanned column, counted from the scroll area's left edge;
+// - `row` is the banner's top row, counted from the first scanned row (the scroll area's top edge, clamped to
+//   the frame);
+// - `search_rows` is how many rows the search was asked to scan (L), before any clamp to the frame;
+// - `run_end_row` is the exclusive end of the non-background run that starts at `row` in the same column,
+//   bounded by the scroll area's bottom edge (and the frame's).
+// `top` is the same top edge as a normalized y, which is what the reading of the rows below the banner starts from.
+struct BannerHit {
+    double top;
+    int column;
+    int row;
+    int search_rows;
+    int run_end_row;
+};
+
 // Reads the factor tab's rows of (factor, star) off a frame, and owns the pipeline's only pair of factor models.
 //
 // ONE INSTANCE PER PIPELINE, SHARED BY TWO STAGES. NativeApi::startPipeline builds it once and hands the same
@@ -284,6 +301,23 @@ public:
     // friend_common), so the window is handed down from there rather than re-derived from the record type
     // against a second copy of the layout constants.
     [[nodiscard]] std::vector<record::Factor> visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const;
+
+    // THE BANNER SEARCH, the one every reading of the factor tab starts from: the stitched record's read
+    // (FactorTabRecognizer::recognize) and the single-frame read (visibleSelfPrefix) both call this and nothing
+    // else to find the green banner. It walks one column -- this reader's left_rect's left edge -- down from
+    // [scroll_area]'s top edge for vertical_banner_upper_gap, and returns the first row that leaves this reader's
+    // bg_color, or nullopt when every scanned row stays in the background.
+    //
+    // It takes the WHOLE frame and the scroll area's rect on it, never a crop of the scroll area. The column and
+    // the scan length are scaled by the frame's anchor unit, and a crop's unit is not the frame's: a crop of the
+    // scroll area is one pixel narrower than the intersection (its right edge is IntersectPixelEnd), so the same
+    // fractions land on a different column at some units (736 is one of them: 179 on the frame, 178 on the crop).
+    // Keeping the crop out of the signature is what keeps a live frame and the stitched image, which carries the
+    // live crop's pixels unscaled, on the same column and the same row (test_scene_stitcher.cpp asserts it).
+    //
+    // [scroll_area] is the scroll area on THIS frame: the layout's rect on a live frame, config.area on the
+    // stitched image (see visibleSelfPrefix for why the two differ).
+    [[nodiscard]] std::optional<BannerHit> findBanner(const Frame &frame, const Rect<double> &scroll_area) const;
 
     // Reads one factor list (self, parent1 or parent2) from [scan_top] down, advancing [scan_top] past it.
     //

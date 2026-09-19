@@ -1190,10 +1190,13 @@ using scraper_impl::TopOfContent;
 using scraper_impl::TopOfContentPolicy;
 
 TEST_CASE("TopOfContentPolicy names the unmeasurable case instead of folding it into a bool") {
-    // An unreadable thumb is a third state, not a bool: a caller that re-typed the comparison itself would pick
-    // a direction silently, and callers do not all want the same one. Only the fail-closed direction is shipped
-    // as a constant (kMissingReadingIsScrolled), so the fail-open arm is a policy built right here: what is
-    // pinned is the CLASS's contract in both directions.
+    // The state the three shipped call sites disagreed about, silently, because each re-typed the comparison.
+    //
+    // Only ONE direction is still shipped in this process: the fail-open answer belongs to the capture card,
+    // which now reads the verdict off the wire and resolves it in Dart, so the core holds no constant for it
+    // (see kMissingReadingIsScrolled's comment). What is pinned here is the CLASS's contract in both
+    // directions -- the policy is still a parameter every SceneScraper is constructed with -- so the fail-open
+    // arm is a policy built right here rather than a shipped constant kept alive by its own test.
     const auto fail_closed = CharaDetailSceneScraper::kMissingReadingIsScrolled;
     constexpr TopOfContentPolicy fail_open{TopOfContent::AtTop};
 
@@ -1221,29 +1224,178 @@ TEST_CASE("the one shipped threshold refuses the smallest head start the widget 
 
     // A genuine top reads exactly 0 (see the case above on scrollbarFrameCappedTop), and it is accepted.
     CHECK(Scraper::thumbTopOfContent(0.0) == TopOfContent::AtTop);
-    CHECK(accepted(0.0));
 
     // One tip pixel of travel -- the smallest movement the widget can show -- was measured across this
-    // project's clip corpus at 0.00196..0.00267, and it must read as Scrolled. Those readings sit an order of
-    // magnitude below kTopMarginThreshold (0.02), which is why fragment #0 is not judged against that one.
+    // project's clip corpus at 0.00196..0.00267, and it must read as Scrolled.
+    //
+    // THIS CASE USED TO SAY THE OPPOSITE HALF AS WELL. It required a SECOND policy, carrying
+    // kTopMarginThreshold = 0.02, to answer AtTop for these same two readings -- pinning that threshold from
+    // BELOW, on the claim that a genuine top could read ~0.002 and so needed tolerating. That requirement is
+    // retired, and not because the tolerance became inconvenient: the ~0.002 was a MEASUREMENT BIAS, not a
+    // reading. geometryAt took the track top off the near-white margin run, which the thumb's own
+    // anti-aliased cap terminated one sample early whenever the thumb was parked at the top. Folding the
+    // track-colour exposure test into upper_gap (2026-09-09) removed it -- over 31 clips / 24,258
+    // topMargin-path reads, every reading the fold moved lay in [0.00195, 0.00267] and moved to 0. So there
+    // is nothing left under 0.02 for a second threshold to tolerate, the second policy is gone, and these two
+    // readings now mean one thing only: a head start this detector must refuse.
     for (const double head_start : {0.00196, 0.00267}) {
         CHECK(Scraper::thumbTopOfContent(head_start) == TopOfContent::Scrolled);
     }
 
     // The bound the ruling actually made -- "not one missed row" -- is that this threshold is EXACTLY zero,
     // and no literal taken from the corpus can state that: every one of them leaves room underneath. The
-    // smallest positive double does state it. Together with thumbTopOfContent(0.0) == AtTop above (which forbids
-    // a threshold below 0) this brackets the constant to 0 from both sides, which is the whole of what
+    // smallest positive double does state it. Together with thumbTopOfContent(0.0) == AtTop above (which forbids a
+    // threshold below 0) this brackets the constant to 0 from both sides, which is the whole of what
     // kExposedTrackTopMargin is required to be. Any strictly positive threshold turns this red, including one
     // too small to matter on the corpus -- deliberately, because "too small to matter" is a claim about a
     // corpus of one device and the ruling is not.
     CHECK(Scraper::thumbTopOfContent(std::nextafter(0.0, 1.0)) == TopOfContent::Scrolled);
-    // ...and the same through the resolution the call site actually applies, so a resolve() that rounded or
+    // ...and the same through the resolution the call sites actually apply, so a resolve() that rounded or
     // clamped on its way to a verdict could not hide behind the derivation.
     CHECK_FALSE(accepted(std::nextafter(0.0, 1.0)));
 
     // Unmeasurable on a page that HAS a scroll bar: refuse rather than capture a possibly truncated list.
     CHECK_FALSE(accepted(std::nullopt));
+}
+
+TEST_CASE(
+    "the factor tab's green header, behind a thumb at the head: the banner row inside the recognizer's window, "
+    "and its run reaching the green row") {
+    // THE WINDOW IS THE RECOGNIZER'S, and this case states its shape on readings handed in directly. It is not
+    // a one-capture-pixel window around a calibrated position, which would refuse a 2 px displacement the
+    // recognizer reads correctly. The bound is where the stitched record's banner search stops finding the banner, less
+    // a reserve. Whether real screens land inside it is test_factor_header_band.cpp's claim, on real footage.
+    //
+    // Every line here hands in a thumb at the head, because the header is asked only behind one (the thumb's
+    // own answers are the next case's claim). The reserve is local, at the shipped value's magnitude, but
+    // written here: what is stated is the function.
+    using recognizer_impl::BannerHit;
+    constexpr double kReserve = 0.10;
+    constexpr int kSearchRows = 41;  // lround(0.0555 * 736): the banner search window at a 736 px anchor unit
+    const int last = scraper_impl::factorHeadLastRow(kSearchRows, kReserve);
+    const auto hit = [search_rows = kSearchRows](int row, int run_end) {
+        return std::optional<BannerHit>{BannerHit{0.0, 179, row, search_rows, run_end}};
+    };
+    const auto verdictWith =
+        [](const std::optional<BannerHit> &banner, const std::optional<int> &green_row, double reserve) {
+            return scraper_impl::factorHeadVerdict(TopOfContent::AtTop, banner, green_row, reserve);
+        };
+    const auto verdict = [&verdictWith, reserve = kReserve](
+                             const std::optional<BannerHit> &banner, const std::optional<int> &green_row) {
+        return verdictWith(banner, green_row, reserve);
+    };
+
+    // 1. THE UPPER BOUND is L - 1 - ceil(reserve * L), at every unit the band produces. L - 1 is the last row the
+    //    recognizer's search can find the banner on at all.
+    CHECK(last == 35);
+    CHECK(scraper_impl::factorHeadLastRow(30, kReserve) == 26);  // 540
+    CHECK(scraper_impl::factorHeadLastRow(40, kReserve) == 35);  // 720
+    CHECK(scraper_impl::factorHeadLastRow(60, kReserve) == 53);  // 1079
+    CHECK(scraper_impl::factorHeadLastRow(kSearchRows, 0.0) == kSearchRows - 1);
+
+    // 2. c1 -- the banner row. Row 0 is a banner cut by the scroll area's top edge: refused. Rows 1 and `last`
+    //    are the two ends of the window. `last + 1` is refused, and is accepted once the reserve is taken away,
+    //    which says the reserve (and not some other bound) is what refuses it.
+    CHECK(verdict(hit(0, 25), 1) == TopOfContent::Scrolled);
+    CHECK(verdict(hit(1, 26), 2) == TopOfContent::AtTop);
+    CHECK(verdict(hit(last, last + 25), last + 1) == TopOfContent::AtTop);
+    CHECK(verdict(hit(last + 1, last + 26), last + 2) == TopOfContent::Scrolled);
+    CHECK(verdictWith(hit(last + 1, last + 26), last + 2, 0.0) == TopOfContent::AtTop);
+    CHECK(verdictWith(hit(kSearchRows, kSearchRows + 25), kSearchRows + 1, 0.0) == TopOfContent::Scrolled);
+    CHECK(verdict(std::nullopt, 10) == TopOfContent::Scrolled);  // no banner in the window
+    CHECK(verdict(std::nullopt, std::nullopt) == TopOfContent::Scrolled);
+
+    // 3. c2 -- the run found at the banner row contains the green sensor's first row. [row, run_end): the banner
+    //    row itself (no fade row) and the run's last row are in. The run's end, a row above the banner, and no
+    //    green row at all (a run that is not green) are out. No threshold on the distance.
+    CHECK(verdict(hit(10, 35), 10) == TopOfContent::AtTop);
+    CHECK(verdict(hit(10, 35), 34) == TopOfContent::AtTop);
+    CHECK(verdict(hit(10, 35), 35) == TopOfContent::Scrolled);
+    CHECK(verdict(hit(10, 35), 9) == TopOfContent::Scrolled);
+    CHECK(verdict(hit(10, 35), std::nullopt) == TopOfContent::Scrolled);
+}
+
+TEST_CASE("the factor tab's thumb decides first, and the green header is asked only behind its at-the-head") {
+    // THE ROLES ARE NOT INTERCHANGEABLE, and this states them on the structure itself (factorHeadReading). The
+    // thumb is the head sensor, as on every tab: its Unknown and its Scrolled are the answer, whatever the header
+    // shows. The header is a precision sensor near the head: it is read only when the thumb says AtTop, and
+    // there it can only keep AtTop or turn it into Scrolled. So each line hands in a header that would be
+    // accepted (a banner at the head row, its run reaching green), and counts which readings were taken.
+    using recognizer_impl::BannerHit;
+    using scraper_impl::TopOfContentSensor;
+    constexpr double kReserve = 0.10;
+    struct Outcome {
+        scraper_impl::TopOfContentReading reading;
+        int banner_reads = 0;
+        int green_reads = 0;
+    };
+    const auto judge = [reserve = kReserve](
+                           TopOfContent thumb, const std::optional<BannerHit> &banner, std::optional<int> green) {
+        Outcome outcome{};
+        outcome.reading = scraper_impl::factorHeadReading(
+            thumb,
+            [&] {
+                ++outcome.banner_reads;
+                return banner;
+            },
+            [&](const BannerHit &) {
+                ++outcome.green_reads;
+                return green;
+            },
+            reserve);
+        return outcome;
+    };
+    const std::optional<BannerHit> head{BannerHit{0.0, 179, 10, 41, 35}};
+    const std::optional<BannerHit> cut{BannerHit{0.0, 179, 0, 41, 35}};
+    const std::optional<BannerHit> past{BannerHit{0.0, 179, 36, 41, 61}};
+
+    SUBCASE("an unreadable thumb is unknown, however clearly the header shows the head") {
+        const Outcome o = judge(TopOfContent::Unknown, head, 11);
+        CHECK(o.reading.verdict == TopOfContent::Unknown);
+        CHECK(o.reading.sensor == TopOfContentSensor::ScrollThumb);
+        CHECK(o.banner_reads == 0);
+        CHECK(o.green_reads == 0);
+        // The pure form says the same.
+        CHECK(scraper_impl::factorHeadVerdict(TopOfContent::Unknown, head, 11, kReserve) == TopOfContent::Unknown);
+        CHECK(
+            scraper_impl::factorHeadVerdict(TopOfContent::Unknown, std::nullopt, std::nullopt, kReserve)
+            == TopOfContent::Unknown);
+    }
+
+    SUBCASE("a thumb that reads scrolled is scrolled, however clearly the header shows the head") {
+        // The frames this exists for: the 継承履歴 bar at the end of a long list holds both header conditions,
+        // and the thumb's Scrolled is what refuses it (test_factor_header_band.cpp measures that on footage).
+        const Outcome o = judge(TopOfContent::Scrolled, head, 11);
+        CHECK(o.reading.verdict == TopOfContent::Scrolled);
+        CHECK(o.reading.sensor == TopOfContentSensor::ScrollThumb);
+        CHECK(o.banner_reads == 0);
+        CHECK(o.green_reads == 0);
+        CHECK(scraper_impl::factorHeadVerdict(TopOfContent::Scrolled, head, 11, kReserve) == TopOfContent::Scrolled);
+    }
+
+    SUBCASE("a thumb at the head is kept or refused by the header") {
+        // Kept: the header at the head row, its run reaching green.
+        const Outcome kept = judge(TopOfContent::AtTop, head, 11);
+        CHECK(kept.reading.verdict == TopOfContent::AtTop);
+        CHECK(kept.reading.sensor == TopOfContentSensor::FactorHeader);
+        CHECK(kept.banner_reads == 1);
+        CHECK(kept.green_reads == 1);
+        // Refused by c1 -- cut at the top edge, or past the window -- without reading green.
+        for (const auto &banner : {cut, past, std::optional<BannerHit>{}}) {
+            const Outcome refused = judge(TopOfContent::AtTop, banner, 11);
+            CHECK(refused.reading.verdict == TopOfContent::Scrolled);
+            CHECK(refused.reading.sensor == TopOfContentSensor::FactorHeader);
+            CHECK(refused.banner_reads == 1);
+            CHECK(refused.green_reads == 0);
+        }
+        // Refused by c2 -- a run in the window that is not the green header, or no green at all.
+        for (const auto green : {std::optional<int>(40), std::optional<int>()}) {
+            const Outcome refused = judge(TopOfContent::AtTop, head, green);
+            CHECK(refused.reading.verdict == TopOfContent::Scrolled);
+            CHECK(refused.reading.sensor == TopOfContentSensor::FactorHeader);
+            CHECK(refused.green_reads == 1);
+        }
+    }
 }
 
 // A 100x200 frame whose TOP 100 rows are scrollable content and whose BOTTOM 100 rows are the scroll-bar
@@ -1309,13 +1461,19 @@ struct InterpreterHarness {
     // because the two are different claims: ready_count says the cue reached the wire, this says the latch
     // event stated whether it was owed -- which is what a consumer that synthesizes the cue downstream reads.
     std::vector<bool> latched_cues;
+    // The timestamp of every frame the head judgment was put to, in order. What lets a case state that the
+    // judgment was asked about the frame that is about to become fragment #0, not whichever frame is current.
+    std::vector<uint64> judged;
     std::unique_ptr<ScrollableScrapingInterpreter> interpreter;
 
-    // THE JUDGMENT THIS HARNESS HANDS IN: the thumb's, as CharaDetailSceneScraper::topOfContent takes it -- the
-    // scroll-bar band of the frame it is given, against the shipped threshold. The interpreter owns no judgment
-    // of its own; what these cases pin is WHICH frame it asks about and how it acts on the answer.
-    [[nodiscard]] static scraper_impl::TopOfContentJudge thumbJudge() {
-        return [thumb = makeScrollBarEstimator()](const Frame &frame) {
+    // THE JUDGMENT THIS HARNESS HANDS IN: the thumb's, as CharaDetailSceneScraper::topOfContent takes it for a
+    // tab without a finer landmark -- the scroll-bar band of the frame it is given, against the shipped threshold.
+    // The interpreter owns no judgment of its own any more; what these cases pin is WHICH frame it asks about and
+    // how it acts on the answer. The factor tab's banner judgment is test_scene_scraper.cpp's subject, where the
+    // scraper that composes it is.
+    [[nodiscard]] scraper_impl::TopOfContentJudge thumbJudge() {
+        return [this, thumb = makeScrollBarEstimator()](const Frame &frame) {
+            judged.push_back(frame.timestamp());
             return scraper_impl::TopOfContentReading{
                 CharaDetailSceneScraper::thumbTopOfContent(thumb.topMargin(frame.copy(kBarRect))),
                 scraper_impl::TopOfContentSensor::ScrollThumb};
@@ -1403,6 +1561,8 @@ TEST_CASE("the motion path judges the descriptor it latches, not the frame that 
     CHECK(h.latched_frames.size() == 1);
     CHECK_FALSE(h.interpreter->refusal().has_value());
     CHECK(h.ready_count == 0);  // this path deliberately never sends the cue
+    // ...and the judgment was put to the latched descriptor's own full frame, once: the first one.
+    CHECK(h.judged == std::vector<uint64>{0});
 }
 
 TEST_CASE("the motion path refuses when the descriptor it latches was already scrolled") {

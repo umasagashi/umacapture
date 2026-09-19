@@ -17,8 +17,9 @@
 // it is what makes the first assertion non-trivial.
 //
 // The synthetic material is a blurred, text-like list rather than a hard-edged bitmap on purpose. Anti-aliasing
-// in a real capture spreads a glyph edge over ~1px whatever the capture resolution (the same argument the
-// scraper config makes for keeping flush_tolerance_px in pixels), and a half-pixel resample round trip is
+// in a real capture spreads a glyph edge over ~1px whatever the capture resolution (the same reason the factor
+// header's row quantization is derived per frame from the anchor unit instead of being stored as a width
+// fraction -- see FactorHeaderConfig), and a half-pixel resample round trip is
 // exactly a [1 2 1]/4 blur along the shifted axis, i.e. a quarter of the local second derivative. On a hard
 // step edge that second derivative is unbounded and the proxy would model no real capture chain; on an
 // anti-aliased one it is the small, edge-local residue that codec re-quantisation actually produces. The blur

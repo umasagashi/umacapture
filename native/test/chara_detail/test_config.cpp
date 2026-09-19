@@ -195,5 +195,44 @@ TEST_CASE("the two shipped layouts' scroll areas differ only by their viewports"
     }
 }
 
+TEST_CASE("the shipped scroll area is one rect across the scraper, the stitcher and the recognizer") {
+    // WHAT DEPENDS ON THIS. The scraper judges the factor tab's head by the banner's row below the Standard
+    // layout's scroll area on the live frame; the stitcher pastes the live crop at its own scroll_area_rect; the
+    // recognizer finds the banner on the stitched image by scanning down from its tabs' `area`. The banner the
+    // recognizer finds is the banner the scraper judged only while these are the same rect, and all of them are
+    // written from one builder constant (native/tool/builder/chara_detail_geometry.h). A shift in one file moves
+    // every stitched banner by the difference; the recognizer absorbs it silently until the banner leaves its
+    // search window, so neither the goldens nor any read would fail first. test_scene_stitcher.cpp checks that
+    // the row survives the stitch; this checks the files the three stages actually load.
+    const auto scraper =
+        json_util::read(configPath("scene_scraper.json")).get<scraper_config::CharaDetailSceneScraperConfig>();
+    const auto stitcher =
+        json_util::read(configPath("scene_stitcher.json")).get<stitcher_config::CharaDetailSceneStitcherConfig>();
+    const auto recognizer =
+        json_util::read(configPath("recognizer.json")).get<recognizer_config::CharaDetailRecognizerConfig>();
+
+    const auto &standard = scraper.common.scroll_area_rect;
+
+    SUBCASE("the stitcher pastes the strip where the Standard layout crops it") {
+        CHECK(stitcher.scroll_area_rect.top() == standard.top());
+        CHECK(stitcher.scroll_area_rect == standard);
+    }
+
+    SUBCASE("every recognizer tab reads the stitched image from the same rect") {
+        CHECK(recognizer.factor_tab.area.top() == stitcher.scroll_area_rect.top());
+        CHECK(recognizer.factor_tab.area == stitcher.scroll_area_rect);
+        CHECK(recognizer.skill_tab.area == stitcher.scroll_area_rect);
+        CHECK(recognizer.campaign_tab.common.area == stitcher.scroll_area_rect);
+    }
+
+    SUBCASE("the stain fill above the strip ends on the strip's top edge") {
+        // Half-open: the fill's bottom edge is the strip's first row, which it therefore never paints. That row is
+        // where the recognizer's banner search starts.
+        CHECK(stitcher.scroll_area_upper_fill_rect.bottom() == stitcher.scroll_area_rect.top());
+        const auto fill_bottom_anchor = stitcher.scroll_area_upper_fill_rect.bottomRight().anchor();
+        CHECK(fill_bottom_anchor == stitcher.scroll_area_rect.topLeft().anchor());
+    }
+}
+
 }  // namespace
 }  // namespace uma::chara_detail

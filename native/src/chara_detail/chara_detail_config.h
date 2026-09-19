@@ -195,10 +195,18 @@ struct ScanParameter {
     EXTENDED_JSON_TYPE_NDC(ScanParameter, x, length, color_range);
 };
 
-// Locates the green "因子" section header, whose top edge moves 1:1 with the factor list (unlike the scroll
-// thumb, whose travel is compressed by viewport/content). maybeResetOnFactorChange uses it as a precise "flush
-// at the very top" sensor: it runs the same-character content diff only when the header sits at its reference
-// (flush) y, so a tiny scroll of the same character no longer reads as a switch.
+// The factor tab's green header check, and the green "因子" section header sensor it uses. The factor tab's
+// head is the scroll thumb's to decide, as on every tab; when the thumb reads the head, the judgment
+// (scraper_impl::factorHeadReading) checks it closely with the header. It takes the header row from the
+// RECOGNIZER's banner search
+// (FactorRowReader::findBanner, configured by recognizer.json's factor tab) and checks it against that search's
+// own window less `banner_window_reserve`; this sensor only confirms that the run the search found is the green
+// header (its first green row lies inside that run). So no position here is calibrated against footage: the
+// window is the recognizer's, which is the bound a fragment #0 has to stay inside to be read correctly.
+//
+// Neither a calibrated absolute position nor a reference row read from an earlier frame is used: a
+// one-capture-pixel window around a fixed position refuses displacements the recognizer tolerates, and a
+// reference row cannot answer before it has been taken.
 struct FactorHeaderConfig {
     // Vivid header green (same UI green as factor_end_green / header_color_range).
     Range<Color> color_range;
@@ -210,12 +218,13 @@ struct FactorHeaderConfig {
     double band_end;
     // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).
     double green_fraction_threshold;
-    // Max |current - reference| header top-edge offset, in capture pixels, still treated as flush. In pixels (not
-    // a width fraction) on purpose: the two quantities this discriminates -- the ~1 px header-row detection jitter
-    // and the ~2 px scroll at which the content diff already spikes -- are pixel-scale, not screen-geometry-scale.
-    // A width fraction would drift with capture resolution and, at a smaller capture, shrink below the 1 px jitter
-    // floor and start dropping real switches.
-    double flush_tolerance_px;
+    // THE SHARE OF THE BANNER SEARCH WINDOW HELD BACK FROM THE HEAD JUDGMENT, as a fraction of that window
+    // (BannerHit::search_rows, L = the recognizer's vertical_banner_upper_gap in capture pixels). A banner row r
+    // is at the head when 1 <= r <= L - 1 - ceil(banner_window_reserve * L) (scraper_impl::factorHeadLastRow).
+    // A fraction of L, not of the width, so it follows the window if vertical_banner_upper_gap is ever changed.
+    // It is a POLICY RESERVE, not a measured error: see factorHeader() in the builder for what it does and does
+    // not correspond to.
+    double banner_window_reserve;
 
     EXTENDED_JSON_TYPE_NDC(
         FactorHeaderConfig,
@@ -223,7 +232,7 @@ struct FactorHeaderConfig {
         band_start,
         band_end,
         green_fraction_threshold,
-        flush_tolerance_px);
+        banner_window_reserve);
 };
 
 struct CharaDetailSceneScraperConfig {

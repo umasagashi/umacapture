@@ -176,6 +176,10 @@ serializes them to JSON (round-trip-verifying each).
   aliases (`IS`/`ILE`/`IPE` for `Intersect*`, `SS`/`SLE`/`SPE` for `Screen*`),
   color helpers, and condition combinators (`allOf`, `anyOf`, `lineCheck`, …).
   Coordinates read like `Rect<double>{{0.1, 0.0556, IS}, {0.9, 0.8074, IS}}`.
+- **Shared geometry:** `native/tool/builder/chara_detail_geometry.h` holds the
+  rect more than one builder must agree on — the Standard layout's scroll area,
+  which the scraper crops with, the stitcher pastes at and the recognizer reads
+  the stitched tabs from. `test_config.cpp` checks the shipped JSONs agree on it.
 - **Emit:** the CLI `build` subcommand (`native/src/core/cli.cpp`, `buildJson`)
   writes the four JSONs into the target assets dir and asserts
   `json == reconstructed_json` so serialization stays lossless:
