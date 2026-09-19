@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/const.dart';
 import '/src/chara_detail/archive_executor.dart' as archive_executor;
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/factor_enhancement.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -1125,7 +1126,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     // archive set) by matching factors and card. Each record whose parent ids
     // changed is split by its owning store: active-side changes persist here (the
     // new record among them), archive-side changes go to the archive store.
-    final resolution = InheritanceResolver.resolveForNewRecord(record, existing, g1RaceSids: _g1RaceSids());
+    final resolution = InheritanceResolver.resolveForNewRecord(
+      record,
+      existing,
+      g1RaceSids: _g1RaceSids(),
+      classifier: _factorClassifier(),
+    );
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
     final archiveIds = {for (final e in archiveRecords) e.id};
     final activePersists = <CharaDetailRecord>[];
@@ -1481,10 +1487,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
                 if (archiveRecords == null) {
                   throw StateError('Archive storage became unavailable during inheritance resolution.');
                 }
-                resolution = InheritanceResolver.resolveAll([
-                  ...activeRecords,
-                  ...archiveRecords,
-                ], g1RaceSids: _g1RaceSids());
+                resolution = InheritanceResolver.resolveAll(
+                  [...activeRecords, ...archiveRecords],
+                  g1RaceSids: _g1RaceSids(),
+                  classifier: _factorClassifier(),
+                );
                 final archiveIds = {for (final record in archiveRecords) record.id};
                 final archiveStore = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
                 final archiveUpdates = <CharaDetailRecord>[];
@@ -1529,6 +1536,15 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       return const {};
     }
     return ref.read(raceGradeSidProvider(_gradeG1));
+  }
+
+  /// The factor colour table for enhancement-aware parent matching, read through
+  /// `.asData` for the same reason as [_g1RaceSids] (`factorInfoProvider`
+  /// dereferences `.value!`). Null while the module has not resolved, which tells
+  /// the resolver to match parents exactly only.
+  FactorClassifier? _factorClassifier() {
+    final loaded = ref.read(factorInfoLoader).asData;
+    return loaded == null ? null : FactorClassifier.fromInfo(loaded.value);
   }
 
   /// Reports the outcome of an inheritance resolution via toasts.

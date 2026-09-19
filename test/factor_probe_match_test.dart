@@ -95,6 +95,17 @@ void main() {
       expect(record.matchesFactorProbe([...self], belowThreshold: false), isTrue);
     });
 
+    test('a white-add-only enhanced uma still hits the probe', () {
+      // Enhancement appends added whites after the existing ones, so a probe capped at the
+      // threshold reads the same prefix as the stored pre-enhancement record: the early check keeps
+      // treating the enhanced uma as that record's duplicate.
+      final pre = [for (var id = 1; id <= 12; id++) Factor(id, id % 3 + 1)];
+      final enhanced = [...pre, const Factor(50, 3)];
+      final record = makeRecord(self: pre);
+
+      expect(record.matchesFactorProbe(enhanced.sublist(0, 10), belowThreshold: false), isTrue);
+    });
+
     test('a diverging star fails the match', () {
       final record = makeRecord(self: [const Factor(1, 1), const Factor(2, 2), const Factor(3, 3)]);
 

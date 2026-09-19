@@ -12,6 +12,7 @@ import 'package:umacapture/src/chara_detail/inheritance.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/factor_classifier.dart';
 import 'support/records.dart';
 
 // Assembles a record-by-id lookup, as the resolver builds internally.
@@ -95,7 +96,7 @@ void main() {
       expect(result.ambiguities, isEmpty);
     });
 
-    test('factor mismatch (different order) does not link', () {
+    test('exact matching is order-sensitive', () {
       final parent = makeRecord(id: 'p', card: 10, self: [const Factor(1, 1), const Factor(2, 2)]);
       final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(2, 2), const Factor(1, 1)]);
 
@@ -384,6 +385,192 @@ void main() {
 
       expect(updated.metadata.recordId.parent1, 'p');
       expect(updated.metadata.relationBonus, isNull);
+    });
+  });
+
+  group('enhancement-aware parent matching', () {
+    // A parent before and after factor enhancement: star-up plus one appended 3-star white.
+    final pre = [...coloured(1, 1, 1), ...whites(10)];
+    final mid = [...coloured(2, 1, 1), ...whites(10)];
+    final post = [...coloured(3, 1, 1), ...whites(10), const Factor(1050, 3)];
+
+    CharaDetailRecord childOf(List<Factor> snapshot, {String id = 'c'}) =>
+        makeRecord(id: id, card: 20, parent1Card: 10, parent1: snapshot);
+
+    test('links a child whose snapshot is the pre to the stored enhanced parent', () {
+      final parent = makeRecord(id: 'p', card: 10, self: post);
+
+      final forNew = InheritanceResolver.resolveForNewRecord(childOf(pre), [parent], classifier: testClassifier);
+      expect(forNew.changed.single.metadata.recordId.parent1, 'p');
+
+      final all = InheritanceResolver.resolveAll([childOf(pre), parent], classifier: testClassifier);
+      expect(all.changed.single.metadata.recordId.parent1, 'p');
+    });
+
+    test('links a child whose snapshot is enhanced to the stored pre', () {
+      final parent = makeRecord(id: 'p', card: 10, self: pre);
+
+      final forNew = InheritanceResolver.resolveForNewRecord(childOf(post), [parent], classifier: testClassifier);
+      expect(forNew.changed.single.metadata.recordId.parent1, 'p');
+
+      final asParent = InheritanceResolver.resolveForNewRecord(parent, [childOf(post)], classifier: testClassifier);
+      expect(asParent.changed.single.metadata.recordId.parent1, 'p');
+    });
+
+    test('the enhancement lookup is card-independent: a stored parent of another card still links', () {
+      // The snapshot names card 10; the stored records carry card 99. Enhancement matching reads self
+      // factors only, because the green factor already differs per card.
+      final storedPost = makeRecord(id: 'p', card: 99, self: post);
+      final storedPre = makeRecord(id: 'p', card: 99, self: pre);
+
+      final forNew = InheritanceResolver.resolveForNewRecord(childOf(pre), [storedPost], classifier: testClassifier);
+      expect(forNew.changed.single.metadata.recordId.parent1, 'p');
+
+      final all = InheritanceResolver.resolveAll([childOf(pre), storedPost], classifier: testClassifier);
+      expect(all.changed.single.metadata.recordId.parent1, 'p');
+
+      final asParent = InheritanceResolver.resolveForNewRecord(storedPre, [childOf(post)], classifier: testClassifier);
+      expect(asParent.changed.single.metadata.recordId.parent1, 'p');
+    });
+
+    test('the exact path stays card-keyed: without a classifier a stored parent of another card does not link', () {
+      final result = InheritanceResolver.resolveAll([childOf(pre), makeRecord(id: 'p', card: 99, self: pre)]);
+
+      expect(result.isEmpty, isTrue);
+    });
+
+    test('exact match wins over an enhancement match', () {
+      final exact = makeRecord(id: 'p_exact', card: 10, self: pre);
+      final enhanced = makeRecord(id: 'p_enhanced', card: 10, self: post);
+
+      final result = InheritanceResolver.resolveForNewRecord(childOf(pre), [
+        enhanced,
+        exact,
+      ], classifier: testClassifier);
+      expect(result.ambiguities, isEmpty);
+      expect(result.changed.single.metadata.recordId.parent1, 'p_exact');
+
+      final all = InheritanceResolver.resolveAll([childOf(pre), enhanced, exact], classifier: testClassifier);
+      expect(all.ambiguities, isEmpty);
+      expect(all.changed.single.metadata.recordId.parent1, 'p_exact');
+    });
+
+    test('two enhancement matches and no exact are ambiguous and unlinked', () {
+      final records = [makeRecord(id: 'p_mid', card: 10, self: mid), makeRecord(id: 'p_post', card: 10, self: post)];
+
+      final result = InheritanceResolver.resolveForNewRecord(childOf(pre), records, classifier: testClassifier);
+      expect(result.changed, isEmpty);
+      expect(result.ambiguities.single.recordId, 'c');
+      expect(result.ambiguities.single.candidateCount, 2);
+
+      final all = InheritanceResolver.resolveAll([childOf(pre), ...records], classifier: testClassifier);
+      expect(all.changed, isEmpty);
+      expect(all.ambiguities.single.candidateCount, 2);
+    });
+
+    test('Direction B: new enhancement-only parent, existing exact record -> child links to the existing record', () {
+      final existingExact = makeRecord(id: 'p_existing', card: 10, self: pre);
+      final newEnhanced = makeRecord(id: 'p_new', card: 10, self: post);
+
+      final result = InheritanceResolver.resolveForNewRecord(newEnhanced, [
+        childOf(pre),
+        existingExact,
+      ], classifier: testClassifier);
+
+      expect(result.ambiguities, isEmpty);
+      final child = result.changed.single;
+      expect(child.id, 'c');
+      expect(child.metadata.recordId.parent1, 'p_existing');
+    });
+
+    test('Direction B: new enhancement-only parent links an unlinked child', () {
+      final newEnhanced = makeRecord(id: 'p_new', card: 10, self: post);
+
+      final result = InheritanceResolver.resolveForNewRecord(newEnhanced, [childOf(pre)], classifier: testClassifier);
+
+      expect(result.changed.single.metadata.recordId.parent1, 'p_new');
+    });
+
+    test('a record is never its own parent, exact or by enhancement, in resolveAll and both directions', () {
+      // Its own self relates to its recorded parent1 exactly (r_exact) or by enhancement (r_enh).
+      final selfExact = makeRecord(id: 'r_exact', card: 10, self: pre, parent1Card: 10, parent1: pre);
+      final selfEnhanced = makeRecord(id: 'r_enh', card: 10, self: post, parent1Card: 10, parent1: pre);
+
+      for (final record in [selfExact, selfEnhanced]) {
+        expect(InheritanceResolver.resolveAll([record], classifier: testClassifier).isEmpty, isTrue);
+        expect(InheritanceResolver.resolveForNewRecord(record, const [], classifier: testClassifier).isEmpty, isTrue);
+      }
+      // Direction B: a new record matching the child's slot is its only candidate, not ambiguous
+      // with the child itself.
+      final newParent = makeRecord(id: 'n', card: 10, self: mid);
+      final result = InheritanceResolver.resolveForNewRecord(newParent, [selfEnhanced], classifier: testClassifier);
+      expect(result.ambiguities, isEmpty);
+      expect(result.changed.single.metadata.recordId.parent1, 'n');
+    });
+
+    test("excluded child's own exact match does not hide an enhancement match", () {
+      final child = makeRecord(id: 'c', card: 10, self: pre, parent1Card: 10, parent1: pre);
+      final enhanced = makeRecord(id: 'p', card: 10, self: post);
+
+      final all = InheritanceResolver.resolveAll([child, enhanced], classifier: testClassifier);
+
+      expect(all.changed.single.metadata.recordId.parent1, 'p');
+    });
+
+    test('without a classifier an enhancement pair does not link', () {
+      final parent = makeRecord(id: 'p', card: 10, self: post);
+
+      expect(InheritanceResolver.resolveForNewRecord(childOf(pre), [parent]).isEmpty, isTrue);
+      expect(InheritanceResolver.resolveAll([childOf(pre), parent]).isEmpty, isTrue);
+    });
+
+    test('with a classifier and >=5 whites a reordered list links', () {
+      final parent = makeRecord(id: 'p', card: 10, self: pre);
+
+      final result = InheritanceResolver.resolveForNewRecord(childOf([...pre.reversed]), [
+        parent,
+      ], classifier: testClassifier);
+
+      expect(result.changed.single.metadata.recordId.parent1, 'p');
+    });
+
+    test('additive preservation and the grandchild bonus refresh hold with a classifier', () {
+      final linkedElsewhere = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: pre, parent1Id: 'gone');
+      final enhanced = makeRecord(id: 'p', card: 10, self: post);
+      expect(InheritanceResolver.resolveAll([linkedElsewhere, enhanced], classifier: testClassifier).changed, isEmpty);
+
+      final parent2 = makeRecord(id: 'p2', card: 30, self: post);
+      final kept = makeRecord(
+        id: 'c',
+        card: 20,
+        parent1Card: 10,
+        parent1: pre,
+        parent1Id: 'kept',
+        parent2Card: 30,
+        parent2: pre,
+      );
+      final updated = InheritanceResolver.resolveAll([kept, parent2], classifier: testClassifier).changed.single;
+      expect(updated.metadata.recordId.parent1, 'kept');
+      expect(updated.metadata.recordId.parent2, 'p2');
+
+      final newGrandparent = makeRecord(id: 'n', card: 10, self: post, races: [race(5)]);
+      final child = makeRecord(id: 'c', card: 20, self: mid, parent1Card: 10, parent1: pre, races: [race(5)]);
+      final grandchild = makeRecord(
+        id: 'gc',
+        card: 30,
+        parent1Card: 20,
+        parent1: mid,
+        parent1Id: 'c',
+        relationBonus: 0,
+      );
+      final result = InheritanceResolver.resolveForNewRecord(
+        newGrandparent,
+        [child, grandchild],
+        g1RaceSids: {5},
+        classifier: testClassifier,
+      );
+      expect(result.changed.firstWhere((e) => e.id == 'c').metadata.recordId.parent1, 'n');
+      expect(result.changed.firstWhere((e) => e.id == 'gc').metadata.relationBonus, 3);
     });
   });
 }

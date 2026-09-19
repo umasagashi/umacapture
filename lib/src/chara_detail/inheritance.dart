@@ -1,4 +1,5 @@
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/factor_enhancement.dart';
 
 /// Resolves parent/child inheritance links between captured records, and (when
 /// race-grade data is supplied) recomputes each record's graded-race relation
@@ -9,15 +10,24 @@ import '/src/chara_detail/chara_detail_record.dart';
 /// leaves them null; this resolver fills them by matching a record against the
 /// parent slots that other records recorded.
 ///
-/// A stored record `parent` occupies child `child`'s slot `N` (1 or 2) when both
-/// hold:
+/// A stored record `parent` is a candidate for child `child`'s slot `N` (1 or 2)
+/// in one of two ways:
 ///
-/// * `parent.trainee.card == child.family.parentN.self.card` (the card matches), and
-/// * `parent.factors.self == child.factors.parentN` (the parent's own factors match
-///   the factor list the child recorded for that parent).
+/// * **Exact:** `parent.trainee.card == child.family.parentN.self.card` and
+///   `parent.factors.self == child.factors.parentN`, compared in list order.
+///   Matching is keyed on a `card|factors` string.
+/// * **By enhancement:** given a [FactorClassifier], `parent.factors.self` and
+///   `child.factors.parentN` relate under [compareEnhancement] in either
+///   direction. The child's snapshot is taken at training time and never
+///   changes, while the stored parent may have been captured before or after a
+///   factor enhancement, so either side may be the enhanced one. The card is not
+///   a term here, because the green factor already differs per card.
 ///
-/// The factor list order is guaranteed by the recognizer, so the lists are
-/// compared as-is (no sorting). Matching is keyed on a `card|factors` string.
+/// The child itself is removed from the candidates first. Then exact candidates,
+/// when there are any, are the candidates and enhancement matches are not
+/// considered. One candidate links the slot; more than one is reported as an
+/// [AmbiguousMatch] and leaves it empty. Without a classifier only exact
+/// candidates exist.
 ///
 /// Resolution is additive: it only fills empty parent slots and never clears or
 /// re-points a link that is already set. A once-resolved lineage therefore stays
@@ -59,8 +69,12 @@ class InheritanceResolver {
   /// also recomputed from the resolved lineage, and a record whose bonus changed
   /// is returned even if its links did not. An empty set (the default) leaves the
   /// bonus untouched, preserving the link-only behaviour.
-  static InheritanceResolution resolveAll(List<CharaDetailRecord> records, {Set<int> g1RaceSids = const {}}) {
-    final index = _selfKeyIndex(records);
+  static InheritanceResolution resolveAll(
+    List<CharaDetailRecord> records, {
+    Set<int> g1RaceSids = const {},
+    FactorClassifier? classifier,
+  }) {
+    final matcher = _ParentMatcher(records, classifier);
     final ambiguities = <AmbiguousMatch>[];
 
     // Phase 1: fill each record's empty parent slots, preserving existing links.
@@ -73,16 +87,7 @@ class InheritanceResolver {
         if (current != null) {
           return current;
         }
-        final candidates = (index[_childKey(child, slot)] ?? const <CharaDetailRecord>[])
-            .where((p) => p.id != child.id)
-            .toList();
-        if (candidates.length == 1) {
-          return candidates.first.id;
-        }
-        if (candidates.length > 1) {
-          ambiguities.add(AmbiguousMatch(child.id, slot, candidates.length));
-        }
-        return null;
+        return _linkSlot(matcher.candidatesForSlot(child, slot), child.id, slot, ambiguities);
       }
 
       resolvedLinks[child.id] = (
@@ -113,9 +118,10 @@ class InheritanceResolver {
   ///
   /// This is additive and narrow for links: it only fills [newRecord]'s own empty
   /// parent slots and the empty slots of [existing] children that [newRecord]
-  /// uniquely satisfies. An already-set link is left untouched (never cleared or
-  /// re-pointed), and unrelated links are never re-evaluated. [existing] must not
-  /// contain [newRecord].
+  /// matches; such a slot links whichever record the matching rule picks over
+  /// [existing] plus [newRecord], which is not always [newRecord]. An already-set
+  /// link is left untouched (never cleared or re-pointed), and unrelated links are
+  /// never re-evaluated. [existing] must not contain [newRecord].
   ///
   /// When [g1RaceSids] is non-empty, [Metadata.relationBonus] is also recomputed
   /// for [newRecord] and for every stored record whose lineage now reaches
@@ -131,63 +137,43 @@ class InheritanceResolver {
     CharaDetailRecord newRecord,
     List<CharaDetailRecord> existing, {
     Set<int> g1RaceSids = const {},
+    FactorClassifier? classifier,
   }) {
     final ambiguities = <AmbiguousMatch>[];
 
-    // Index [existing] by self key once so both directions resolve candidates in
-    // O(1) lookups instead of a full scan per slot/child. [existing] excludes
-    // newRecord, so no self-exclusion is needed here.
-    final index = _selfKeyIndex(existing);
-
-    // Direction A: treat newRecord as a child and fill its empty parent slots.
+    // Direction A: treat newRecord as a child and fill its empty parent slots
+    // from [existing].
+    final existingMatcher = _ParentMatcher(existing, classifier);
     var parent1 = newRecord.metadata.recordId.parent1;
     var parent2 = newRecord.metadata.recordId.parent2;
-    for (final slot in const [1, 2]) {
-      // Additive: leave an already-linked slot untouched (never re-point it).
-      if ((slot == 1 ? parent1 : parent2) != null) {
-        continue;
-      }
-      final key = _childKey(newRecord, slot);
-      final candidates = index[key] ?? const <CharaDetailRecord>[];
-      if (candidates.length == 1) {
-        if (slot == 1) {
-          parent1 = candidates.first.id;
-        } else {
-          parent2 = candidates.first.id;
-        }
-      } else if (candidates.length > 1) {
-        ambiguities.add(AmbiguousMatch(newRecord.id, slot, candidates.length));
-      }
-    }
+    // Additive: leave an already-linked slot untouched (never re-point it).
+    parent1 ??= _linkSlot(existingMatcher.candidatesForSlot(newRecord, 1), newRecord.id, 1, ambiguities);
+    parent2 ??= _linkSlot(existingMatcher.candidatesForSlot(newRecord, 2), newRecord.id, 2, ambiguities);
 
-    // Direction B: treat newRecord as a parent and find existing children,
-    // collecting their new parent links (applied to byId below).
-    final newSelfKey = _selfKey(newRecord);
-    final sameSelf = index[newSelfKey] ?? const <CharaDetailRecord>[];
+    // Direction B: treat newRecord as a parent. A child's empty slot is touched
+    // when newRecord matches it (exactly or by enhancement); a touched slot is
+    // resolved by the same rule as [resolveAll] over existing + newRecord, so it
+    // may link an existing record that beats newRecord (an exact one over an
+    // enhancement-only newRecord). The new links are applied to byId below.
+    final fullMatcher = _ParentMatcher([...existing, newRecord], classifier);
     final childLinks = <String, _Links>{};
     for (final child in existing) {
       for (final slot in const [1, 2]) {
-        if (_childKey(child, slot) != newSelfKey) {
-          continue;
-        }
-        // Additive: leave an already-linked slot untouched (whether it points at
-        // newRecord from an earlier iteration or at another record).
+        // Additive: leave an already-linked slot untouched.
         final current =
             childLinks[child.id] ??
             (parent1: child.metadata.recordId.parent1, parent2: child.metadata.recordId.parent2);
-        if ((slot == 1 ? current.parent1 : current.parent2) != null) {
+        if ((slot == 1 ? current.parent1 : current.parent2) != null ||
+            !fullMatcher.matchesSlot(newRecord, child, slot)) {
           continue;
         }
-        // Any other stored record that also satisfies this empty slot makes the
-        // match ambiguous, so skip linking and report it.
-        final others = sameSelf.where((p) => p.id != child.id);
-        if (others.isNotEmpty) {
-          ambiguities.add(AmbiguousMatch(child.id, slot, others.length + 1));
+        final linked = _linkSlot(fullMatcher.candidatesForSlot(child, slot), child.id, slot, ambiguities);
+        if (linked == null) {
           continue;
         }
         childLinks[child.id] = (
-          parent1: slot == 1 ? newRecord.id : current.parent1,
-          parent2: slot == 2 ? newRecord.id : current.parent2,
+          parent1: slot == 1 ? linked : current.parent1,
+          parent2: slot == 2 ? linked : current.parent2,
         );
       }
     }
@@ -303,29 +289,21 @@ class InheritanceResolver {
     );
   }
 
-  static Map<String, List<CharaDetailRecord>> _selfKeyIndex(List<CharaDetailRecord> records) {
-    final index = <String, List<CharaDetailRecord>>{};
-    for (final record in records) {
-      index.putIfAbsent(_selfKey(record), () => []).add(record);
+  /// The slot rule: one candidate is the link, more than one is recorded in
+  /// [ambiguities] and leaves the slot empty, none leaves it empty.
+  static String? _linkSlot(
+    List<CharaDetailRecord> candidates,
+    String childId,
+    int slot,
+    List<AmbiguousMatch> ambiguities,
+  ) {
+    if (candidates.length == 1) {
+      return candidates.single.id;
     }
-    return index;
-  }
-
-  /// Matching key for a record viewed as a parent: its card and own factors.
-  static String _selfKey(CharaDetailRecord record) {
-    return '${record.trainee.card}|${_factorsKey(record.factors.self)}';
-  }
-
-  /// Matching key for [child]'s parent [slot]: the recorded parent card and factors.
-  static String _childKey(CharaDetailRecord child, int slot) {
-    final parent = slot == 1 ? child.family.parent1 : child.family.parent2;
-    final factors = slot == 1 ? child.factors.parent1 : child.factors.parent2;
-    return '${parent.self.card}|${_factorsKey(factors)}';
-  }
-
-  /// Order-preserving serialization of a factor list (order is recognizer-guaranteed).
-  static String _factorsKey(List<Factor> factors) {
-    return factors.map((f) => '${f.id}:${f.star}').join(',');
+    if (candidates.length > 1) {
+      ambiguities.add(AmbiguousMatch(childId, slot, candidates.length));
+    }
+    return null;
   }
 
   /// Returns a copy of [record] with its parent record-id slots replaced, and
@@ -374,6 +352,84 @@ class InheritanceResolver {
 
 /// Resolved parent record-id slots for a single record.
 typedef _Links = ({String? parent1, String? parent2});
+
+/// The one candidate lookup behind every parent slot [InheritanceResolver]
+/// resolves; the matching rule is stated on that class.
+final class _ParentMatcher {
+  final FactorClassifier? _classifier;
+  final Map<String, List<CharaDetailRecord>> _exact = {};
+  final Map<String, List<(CharaDetailRecord, SplitFactors)>> _byColouredKinds = {};
+
+  _ParentMatcher(Iterable<CharaDetailRecord> pool, this._classifier) {
+    final classifier = _classifier;
+    for (final record in pool) {
+      _exact.putIfAbsent(_selfKey(record), () => []).add(record);
+      final split = classifier == null ? null : SplitFactors.of(record.factors.self, classifier);
+      if (split != null) {
+        _byColouredKinds.putIfAbsent(split.colouredKey, () => []).add((record, split));
+      }
+    }
+  }
+
+  /// Candidates for [child]'s parent [slot], [child] itself removed first.
+  List<CharaDetailRecord> candidatesForSlot(CharaDetailRecord child, int slot) {
+    final exact = (_exact[_childKey(child, slot)] ?? const <CharaDetailRecord>[])
+        .where((p) => p.id != child.id)
+        .toList();
+    if (exact.isNotEmpty) {
+      return exact;
+    }
+    final snapshot = _snapshotSplit(child, slot);
+    if (snapshot == null) {
+      return const [];
+    }
+    return [
+      for (final (record, split)
+          in _byColouredKinds[snapshot.colouredKey] ?? const <(CharaDetailRecord, SplitFactors)>[])
+        if (record.id != child.id && split.relateTo(snapshot) != EnhancementRelation.unrelated) record,
+    ];
+  }
+
+  /// Whether [parent] matches [child]'s [slot] exactly or by enhancement,
+  /// regardless of what else in the pool matches it.
+  bool matchesSlot(CharaDetailRecord parent, CharaDetailRecord child, int slot) {
+    if (parent.id == child.id) {
+      return false;
+    }
+    if (_selfKey(parent) == _childKey(child, slot)) {
+      return true;
+    }
+    final classifier = _classifier;
+    final snapshot = _snapshotSplit(child, slot);
+    final split = classifier == null ? null : SplitFactors.of(parent.factors.self, classifier);
+    return snapshot != null && split != null && split.relateTo(snapshot) != EnhancementRelation.unrelated;
+  }
+
+  SplitFactors? _snapshotSplit(CharaDetailRecord child, int slot) {
+    final classifier = _classifier;
+    if (classifier == null) {
+      return null;
+    }
+    return SplitFactors.of(slot == 1 ? child.factors.parent1 : child.factors.parent2, classifier);
+  }
+
+  /// Exact matching key for a record viewed as a parent: its card and own factors.
+  static String _selfKey(CharaDetailRecord record) {
+    return '${record.trainee.card}|${_factorsKey(record.factors.self)}';
+  }
+
+  /// Exact matching key for [child]'s parent [slot]: the recorded parent card and factors.
+  static String _childKey(CharaDetailRecord child, int slot) {
+    final parent = slot == 1 ? child.family.parent1 : child.family.parent2;
+    final factors = slot == 1 ? child.factors.parent1 : child.factors.parent2;
+    return '${parent.self.card}|${_factorsKey(factors)}';
+  }
+
+  /// Order-preserving serialization of a factor list.
+  static String _factorsKey(List<Factor> factors) {
+    return factors.map((f) => '${f.id}:${f.star}').join(',');
+  }
+}
 
 /// A child slot that matched more than one candidate parent and was left unlinked.
 class AmbiguousMatch {
