@@ -6,8 +6,7 @@
 // listener around the single event (SingleThreadMultiEventRunnerImpl in util/event_util.h) and a backstop in
 // EventRunnerThread::run, but that containment can only log one generic line: it names neither the unit of
 // work that was lost nor whether the throw was a failure at all.
-// Those handlers used to log every containment at error level, which is right for a
-// genuine failure and wrong for a cancellation the app itself asked for. The concrete case is the Wasm build:
+// Logging every containment at error level is right for a genuine failure and wrong for a cancellation the app itself asked for. The concrete case is the Wasm build:
 // stop() raises an inference abort by design (native/wasm/wasm_inference_bridge.h), the parked bridge wait
 // throws, and the in-flight record is dropped. That is the successful stop path -- yet it read exactly like a
 // broken frame, in the console and in the error telemetry fed from it.

@@ -39,12 +39,11 @@ constexpr double kFactorEndGraySearchSpan = 0.16;
 
 // Thumb-bottom "pinned" tolerance in pixels for the scroll-bar guess: at/below this lower_gap the thumb
 // bottom is treated as at the track bottom (bottom rest / overscroll), where the frame's own measured thumb
-// length is unreliable, so the guess divides by the reference (from) length instead. Mirrors the historical
-// kThumbBottomFlushPx, which was 1.5 px back when the factor header's head-of-content test was a pixel
-// tolerance too, rounded to 2 px. That tolerance no longer exists in any form: the factor tab's head is now
+// length is unreliable, so the guess divides by the reference (from) length instead. The value is a 1.5 px
+// flush tolerance rounded up to 2 px. It shares no origin with the factor tab's head-of-content test, which is
 // checked, behind the thumb's AtTop, by the header row against the recognizer's own search window (see
-// scraper_impl::factorHeadReading),
-// so the two numbers have no common origin left. This one stays in pixels because a scroll-bar tip IS pixel-scale.
+// scraper_impl::factorHeadReading) and carries no pixel tolerance. This one stays in pixels because a scroll-bar
+// tip IS pixel-scale.
 constexpr double kThumbBottomFlushPx = 2.0;
 
 // Minimum thumb-length CHANGE, in pixels, between two frames that counts as a genuine mid-scroll re-scale (the
@@ -165,7 +164,7 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // move with the thumb -- it is the top edge of the scroll-bar crop -- which is the whole property being
     // bought here.
     //
-    // What that costs: the page margin is no longer excluded by the index window, only by colour. There are
+    // What that costs: the page margin is not excluded by the index window, only by colour. There are
     // two colour headrooms here, they are NOT the same size, and -- measured, not argued -- they fail in
     // OPPOSITE directions. Neither is bounded by this corpus, which is one device.
     //
@@ -202,17 +201,16 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // same 16 clips: 3 and 4 samples on the player/factor layouts, 4 and 5 on landscape 2-pane, 7 on friend,
     // and the page margin (241-248) fills it on all 4,063 corpus frames carrying a scroll bar.
     //
-    // THE FRIEND FIGURE ABOVE IS HISTORICAL, and its size was an artefact. friend_common's scroll-bar band
-    // used to be placed by the TAB BAR's drop, which left it about four rows above the scroll area's own top;
-    // the extra near-white margin those four rows swept up is the whole reason friend was the roomiest layout
-    // here. The band is now derived from the viewport difference and starts at the true top, so friend reads
-    // 3 to 4 samples at a genuine head of content -- measured on friend_standard_many_rental's 74
-    // head-of-content frames, against 4 to 5 on player_standard_factor_tiny_scroll_switch. It is the same
-    // depth as the other layouts because it is now the same geometry, and the number to compare against a
-    // future change is 3, not 7.
+    // THE FRIEND FIGURE OF 7 ABOVE DOES NOT DESCRIBE THIS GEOMETRY: it is what a scroll-bar band placed by
+    // the TAB BAR's drop reads, about four rows above the scroll area's own top, where those rows sweep up
+    // extra near-white margin. friend_common's band is derived from the viewport difference and starts at the
+    // true top, so friend reads 3 to 4 samples at a genuine head of content -- measured on
+    // friend_standard_many_rental's 74 head-of-content frames, against 4 to 5 on
+    // player_standard_factor_tiny_scroll_switch. It is the same depth as the other layouts because it is the
+    // same geometry, and the number to compare against a future change is 3, not 7.
     //
     // So the slack is three samples at its thinnest, not merely "sample 0 happens to be white" -- and friend
-    // no longer sits above that floor, it sits on it.
+    // does not sit above that floor, it sits on it.
     //
     // IF A FUTURE CROP OR WIDGET SHIFT SPENDS THOSE THREE, THE FAILURE IS ONE OF TWO, AND THEY ARE OPPOSITES.
     // Which one you get depends on where the crop's top edge stops relative to the placeholder track's own top:
@@ -1452,7 +1450,7 @@ void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
     FrameDescriptor current_descriptor = describe(frame);
     if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1) > initial_scroll) {
         // Didn't get a stationary image, so no ready is owed -- the user is already scrolling and the cue would
-        // arrive after the event it announces. That is now stated as an argument rather than by the absence of a
+        // arrive after the event it announces. That is stated as an argument rather than by the absence of a
         // send here, so every consumer of the latch learns it instead of only the two senders in this function.
         startScrolling(initial_descriptor, kCueWithheld);
         return;
@@ -1488,9 +1486,9 @@ void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_
     on_head_latched->send(valid_descriptor.source_frame, cue_owed);
     on_scroll_updated->send(offset_estimator.position(previous_descriptor).value_or(0.0));
     // The cue itself, last, and only when the exit that got here owes one. It lives here rather than at the
-    // caller so that "the cue is owed" has a single writer: the caller used to say it twice -- once by being
-    // the branch that sends, once by being the branch that is reachable only after a settled latch -- and a
-    // third exit added later would have had to remember both. A refused descriptor returns above, so this is
+    // caller so that "the cue is owed" has a single writer: a caller that sends says it twice -- once by being
+    // the branch that sends, once by being the branch that is reachable only after a settled latch -- and every
+    // further exit would have to remember both. A refused descriptor returns above, so this is
     // still reached only when a head was actually latched.
     if (cue_owed) {
         on_scroll_ready->send();
@@ -1854,8 +1852,7 @@ void CharaDetailSceneScraper::constructSession() {
         // (makeTabScraper), because that tab's announcement is not the core's to make: the front end withholds the
         // chime until the duplicate probe below reports "not a duplicate", and synthesizes it there. Putting the
         // tab on the wire sender instead would sound the chime at the latch, ahead of the check it exists to gate.
-        // It carries no listener any more -- what used to hang off it (the probe) hangs off the latch itself now,
-        // because "the cue fired" and "these are fragment #0's pixels" are different facts and only one exit states
+        // It carries no listener -- the probe hangs off the latch itself, because "the cue fired" and "these are fragment #0's pixels" are different facts and only one exit states
         // both. A direct connection with no listener dispatches to nothing, which is exactly the withholding.
         // The fact this sink drops on the floor is not lost: startScrolling also puts it on on_head_latched as
         // `cue_owed`, and the probe forwards it to the front end, which is where this tab's chime is decided.
@@ -1896,7 +1893,7 @@ void CharaDetailSceneScraper::constructSession() {
             // is the displacement Rule 3's flush gate and the duplicate check cannot tolerate at all.
             //
             // Retained across many later frames and diffed in maybeResetOnFactorChange. THE CLONE IS NOT WHAT MAKES
-            // THAT SAFE, and the old justification here ("a capture source may reuse its buffer") no longer holds:
+            // THAT SAFE, and "a capture source may reuse its buffer" does not justify it:
             // frame_shaper::shapeCapturedFrame refuses at the seam any producer frame that is not solely owned, and
             // for a refcounted allocation cv::Mat::create reallocates rather than overwriting once a downstream copy
             // exists -- so a retained shallow copy cannot be written out from under this. That is exactly why
@@ -2075,9 +2072,9 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
         // ready(), and finds a null scraper once the session is released), and Rule 1's own return is taken only
         // when the rebuild failed and the session was discarded, which leaves no level to report at all -- as
         // does the fragment-write failure of the catch below, which discards the session for the same reason. A
-        // second call at the top of the function (tried and removed) could therefore never observe a transition
-        // this one had not already reported one frame earlier: it fired zero times over 583 doctest cases and 27
-        // clip runs, and deleting it left every case green.
+        // second call at the top of the function could therefore never observe a transition this one had not
+        // already reported one frame earlier: measured, such a call fires zero times over 583 doctest cases and 27
+        // clip runs.
         notifyTabRefusalIfChanged();
         // Rule 3's witness, BEFORE the awaiting level: in the frame a factor tab stops awaiting, the front end then
         // already holds the witness that frame installed, so it never pairs a phase of the shown factor tab with "no
@@ -2288,8 +2285,7 @@ bool CharaDetailSceneScraper::handleTabSwitchInProgress(TabPage tab_page) {
     auto *scraper = scraperOf(previous);
     // An interpreter belongs to ONE visit: leaving a tab that has not completed discards it, whatever it did
     // or did not do while it was displayed. There is deliberately no predicate here naming the states worth
-    // discarding, because every such predicate has been wrong. A `started()` predicate -- since deleted, this
-    // guard having been its last reader -- left a REFUSED tab in place (the refusal happens instead of
+    // discarding, because every such predicate has been wrong. A `started()` predicate leaves a REFUSED tab in place (the refusal happens instead of
     // setting is_scrolling), so coming back found the same terminal interpreter and the tab could never
     // complete. Widening it to `started() || refusal()` was wrong the other way: a tab that was merely glanced
     // at is neither, yet its interpreter is already holding the frames it was fed --
@@ -2469,7 +2465,7 @@ bool CharaDetailSceneScraper::maybeResetOnFactorChange(
     }
     if (verdict == scraper_impl::FactorSwitchVerdict::Same) {
         // KEEP THE SESSION AND COMPARE AGAINST THIS FRAME FROM NOW ON. Both halves are required, and neither is a
-        // tolerance: the rectangle, the threshold and the dwell are exactly what they were.
+        // tolerance: the rectangle, the threshold and the dwell stay as they are.
         //   * Replacing the reference is what makes the check cost ONE read per displacement. Left on the old
         //     frame, the diff would stay above the threshold, the next frame would reopen the dwell and the one
         //     after it would read again -- a read every dwell for as long as the displacement lasts. What it

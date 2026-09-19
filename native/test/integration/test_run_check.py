@@ -243,7 +243,7 @@ def main() -> int:
 
     # 7. check_probe_factors -- the STRICT onFactorProbe check. Nothing here is read out of the product and
     # nothing pins a shipped value (the native config tests do that). There is no numeric threshold on the
-    # wire at all any more: `factors` arrives already capped to the factor-tab layout's self-factor-count
+    # wire at all: `factors` arrives already capped to the factor-tab layout's self-factor-count
     # threshold (the core trims before sending), and `below_threshold` is the core's own statement of whether
     # that cap or the list's own end produced the length sent. `small_count` / `large_count` below are two
     # arbitrary sizes fixtures use to build lists of different lengths; neither is a shipped value.
@@ -263,8 +263,8 @@ def main() -> int:
         )
         check("a probe that agrees on every element, below_threshold false, passes", result is None, result)
 
-        # 7a2. WITHIN-CAP DISAGREEMENT IS STILL CAUGHT. This change dropped coverage for a disagreement
-        # PAST the layout's self-factor-count threshold (7b, removed below), but a disagreement AT AN
+        # 7a2. WITHIN-CAP DISAGREEMENT IS CAUGHT. A disagreement PAST the layout's self-factor-count
+        # threshold is outside what the probe reads, but a disagreement AT AN
         # INDEX INSIDE the threshold is exactly the defect class this file's own module docstring names
         # as the reason check_probe_factors exists at all, and every other fixture in this section uses
         # the same list verbatim as both the probe and the golden source, so none of them can ever
@@ -284,19 +284,17 @@ def main() -> int:
             result,
         )
 
-        # 7b [removed, no replacement]. The old fixture modeled a probe LONGER than the layout's
-        # self-factor-count threshold whose trailing element (past the threshold) disagreed with the
-        # golden record. Under the new contract `factors` on the wire never carries more than the
-        # threshold to begin with -- the core trims before sending -- so there is no real onFactorProbe
-        # this scenario could model any more, and the coverage it gave (catching a defect at an index
-        # past the threshold) has no substitute in this file. This is an accepted, deliberate loss of
-        # coverage, not an oversight.
+        # 7b [none]. There is no case for a probe LONGER than the layout's self-factor-count threshold
+        # whose trailing element (past the threshold) disagrees with the golden record: `factors` on the
+        # wire never carries more than the threshold -- the core trims before sending -- so there is no
+        # real onFactorProbe such a case could model, and a defect at an index past the threshold is not
+        # caught in this file. This is an accepted, deliberate gap in coverage, not an oversight.
 
         # 7c. below_threshold TRUE, agrees on everything sent, and the golden record's own self-factor
-        # count equals the probe's length: passes. The old matching rule (leading-run agreement against
-        # the threshold, with no count check) could never reach this case at all: it required the leading
-        # run to reach the threshold, so a record with fewer self-factors than the threshold never
-        # matched under it. The count check added here is what lets such a record match.
+        # count equals the probe's length: passes. A leading-run rule against the threshold, with no count
+        # check, could never reach this case at all: it requires the leading run to reach the threshold,
+        # so a record with fewer self-factors than the threshold never matches under it. The count check
+        # is what lets such a record match.
         own_c = [factor(i, 1) for i in range(small_count - 1)]
         result = run.check_probe_factors(
             probe_case(golden_file(tmp_path / "c", own_c)),
@@ -348,7 +346,7 @@ def main() -> int:
         )
 
         # 7e. NO FLAG ON THE LINE, NO VERDICT. The probe agrees on every element it sent, which passes
-        # under either boolean value of below_threshold (there is no length to compare against any more) --
+        # under either boolean value of below_threshold (there is no length to compare against) --
         # so only refusing on a missing or malformed field can fail this.
         own_e = [factor(i, 1) for i in range(large_count + 2)]
         golden_e = golden_file(tmp_path / "e", own_e)

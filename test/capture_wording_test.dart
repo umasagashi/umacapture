@@ -1,38 +1,7 @@
-// THE CODE → LOCALE DIRECTION for the capture card: every state the card can display has the
-// translation nodes it names.
+// Pins that the capture card, driven into each `CharaDetailCaptureStatus` and into the listed
+// variants and session-level banners, shows translated sentences rather than raw translation keys.
+// If it breaks, the user sees a key such as `pages.capture.capture_control.message.…` on the card.
 // Run: .fvm/flutter_sdk/bin/flutter test test/capture_wording_test.dart
-//
-// WHY A SECOND WORDING FILE. `capture_optional_line_test.dart` walks `pages.capture.*` OUT OF
-// `ja.json` and checks the shape of what it finds. That direction cannot see a state the code can
-// reach and the locale has no node for — there is nothing in the file to walk. This branch spent a
-// whole stage in exactly that condition: `_resolvePerCharacterMessage` gained a `tabRefused` arm
-// naming `…message.tab_refused`, `ja.json` had no such node, and the card put two raw keys on
-// screen. `optionalMessageLine` returns `key.tr()` for an absent key, `.tr()` renders an
-// unresolvable key AS the key, and every easy_localization "not found" becomes a Sentry breadcrumb
-// on every rebuild of the status widget (`.claude/CLAUDE.md`, `app_logger.dart`). **The whole suite
-// was green for all of it.** `storage_wording_test.dart` has this direction for `pages.storage.*`;
-// the capture card had nothing.
-//
-// HOW IT IS CHECKED, and why not by scanning the source for key literals. The keys that broke are
-// not written anywhere as literals: `_StatusMessage` appends `.status` and `.action` to a base that
-// `_resolvePerCharacterMessage` builds from a `const` prefix and an arm-specific leaf. A text scan
-// sees `"$tr_capture.capture_control.message"` and stops. So the card is RENDERED, once per status,
-// and read for two things at once — a raw key on screen, and the warning easy_localization logs
-// before producing one.
-//
-// The states are enumerated from `CharaDetailCaptureStatus.values`, so the next status added has no
-// recipe here and fails this file rather than slipping through it.
-//
-// WHAT THIS FILE DOES NOT COVER, stated rather than left to be discovered:
-//
-//   * `pages.capture.*` keys outside the card's banner — the preview tile
-//     (`tr_preview`), the import surface (`tr_video_import`), the storage-persistence banner
-//     (`tr_storage_persistence`), the requirement tooltips and the blocked-toggle reasons. Each of
-//     those namespaces is reached through its own prefix constant and several are built from an
-//     enum member at runtime, so covering them properly is the `storage_wording_test.dart`
-//     treatment — a literal scan plus a pinned set of dynamic sites — and not this file.
-//   * The locale → code direction (a node nothing names). That is a different defect and a
-//     different file.
 import 'dart:convert';
 import 'dart:io';
 
@@ -261,7 +230,7 @@ void main() {
 
   group('every state the capture card can display has the sentences it names', () {
     testWidgets('the detector fires when a node the card names is missing', (tester) async {
-      // THE NEGATIVE CONTROL, and it is this branch's own defect reproduced: with
+      // THE NEGATIVE CONTROL, the missing-node condition described at the top of this file: with
       // `message.tab_refused` gone, `_StatusMessage` resolves `…tab_refused.status` and
       // `optionalMessageLine` resolves `…tab_refused.action`, both of which come back AS the key —
       // and easy_localization says so first, which is the line that becomes a Sentry breadcrumb.

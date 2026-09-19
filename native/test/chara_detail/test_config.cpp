@@ -102,15 +102,16 @@ TEST_CASE("missing required keys are rejected") {
     CHECK_THROWS(incomplete.get<stitcher_config::CharaDetailSceneStitcherConfig>());
 }
 
-// An empty scan sequence is the one malformed shape that used to pass deserialization: a missing key, a wrong
-// type or broken JSON is already refused above, but `"skill_scans": []` parsed cleanly and only surfaced much
-// later, inside the scraper runner thread, where nothing reports it to the user.
+// An empty scan sequence is the one malformed shape the JSON shape alone does not refuse: a missing key, a wrong
+// type or broken JSON is already refused above, but `"skill_scans": []` parses cleanly, and unchecked it would
+// only surface once a session builds its first page box, on the scraper runner thread.
 //
-// This asserts the refusal AT THE DESERIALIZATION BOUNDARY, which is what makes it reportable: `.get<>()` is
-// what startPipeline calls (core/native_api.cpp), so a throw here is caught by startEventLoopReportingError
-// and handed to notifyError -- Dart's onError on Windows and web, a non-zero exit on the CLI. PageScrapingBox's
-// own constructor rejects the same thing, but it runs too late and on the wrong thread to be seen; asserting
-// that one instead would assert a throw nobody catches usefully.
+// This asserts the refusal AT THE DESERIALIZATION BOUNDARY, which is where it names the configuration:
+// `.get<>()` is what startPipeline calls (core/native_api.cpp), so a throw here is caught by
+// startEventLoopReportingError and handed to notifyError -- Dart's onError on Windows and web, a non-zero exit
+// on the CLI -- before any session exists. PageScrapingBox's own constructor rejects the same thing too, and
+// that throw is caught as well (CharaDetailSceneScraper::failSession reports `scrape_failed`), but it ends one
+// attempt at a time and says only that the attempt failed, not that the config is unusable.
 TEST_CASE("an empty scan sequence is rejected while the scraper config is deserialized") {
     const Json shipped = json_util::read(configPath("scene_scraper.json"));
 

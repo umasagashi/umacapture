@@ -22,9 +22,9 @@ remove. Unlike `.notes/`, its contents are addressed **by name** from committed 
 - `testdata/clips/calibration/` — clips a shipped constant was calibrated against. **It is empty
   today, and that is the expected state, not missing material.** Its one clip,
   `friend_standard_many_rental.mp4`, was moved into `testdata/clips/golden/` on the user's
-  instruction and registered in `native/test/integration/cases.json`, so the two constants it
-  derived — the scroll-guess veto half-width and `friend_common.viewport`, both in
-  `native/tool/builder/chara_detail_scene_scraper_builder.h` — now cite material the golden suite
+  instruction and registered in `native/test/integration/cases.json`, so the two constants derived
+  from it — the scroll-guess veto half-width and `friend_common.viewport`, both in
+  `native/tool/builder/chara_detail_scene_scraper_builder.h` — rest on material the golden suite
   re-runs. A clip being a derivation source and a golden input is not a conflict: the second only
   adds the requirement that its records stay reproducible. Keep this entry: the next clip a
   constant is calibrated on lands here, and a clip only graduates to `golden/` once a case asserts
@@ -41,11 +41,12 @@ remove. Unlike `.notes/`, its contents are addressed **by name** from committed 
   `app_drive_run.py` run becomes the baseline rather than being checked against one, and that is
   worth saying in its report. The rule above is a prohibition on emptying `runs/` in future, not
   a claim that it currently holds anything.
-- `testdata/evidence/` — primary material that a shipped constant or a source comment cites as
-  its derivation. Named by dropping any `analysis/` level: `.notes/analysis/<X>/` →
-  `testdata/evidence/<X>/`, and `.notes/<X>/` → `testdata/evidence/<X>/` for the entries that
-  never had one (`testdata/evidence/video-import/` came from `.notes/video-import/`). Reversing
-  the mapping therefore has two candidate pre-images, not one.
+- `testdata/evidence/` — primary material a shipped constant was derived from. A code comment
+  does not cite it; it states what was derived inline (`.claude/CLAUDE.md`, `## Comments`).
+  Named by dropping any `analysis/` level: `.notes/analysis/<X>/` → `testdata/evidence/<X>/`, and
+  `.notes/<X>/` → `testdata/evidence/<X>/` for the entries that never had one
+  (`testdata/evidence/video-import/` came from `.notes/video-import/`). Reversing the mapping
+  therefore has two candidate pre-images, not one.
 
 ## `.notes/` is scratch, and must stay that way
 

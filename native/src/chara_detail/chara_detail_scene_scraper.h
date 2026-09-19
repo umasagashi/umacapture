@@ -105,11 +105,11 @@ struct FrameDescriptor {
 
 // WHETHER A SCROLL AREA IS AT THE HEAD OF ITS CONTENT, as one named fact with the unmeasurable case named.
 //
-// This used to be an expression re-typed at each call site, and the sites did not agree: two of them read a
-// missing top-margin as "not at the top" (`has_value() && value <= T`) while a third read it as "at the top"
-// (`!has_value() || value <= T`). Both are defensible -- that direction IS the false-alarm / miss trade -- but
-// it was decided by which `||` someone typed rather than stated anywhere, so the third state has a name here
-// and each call site supplies its answer for it as an argument (see TopOfContentPolicy).
+// Re-typed as an expression at each call site, it lets the sites disagree: one reads a missing top-margin as
+// "not at the top" (`has_value() && value <= T`), another as "at the top" (`!has_value() || value <= T`). Both
+// are defensible -- that direction IS the false-alarm / miss trade -- but it must be stated rather than decided
+// by which `||` someone types, so the third state has a name here and each call site supplies its answer for
+// it as an argument (see TopOfContentPolicy).
 enum class TopOfContent {
     AtTop,
     Scrolled,
@@ -214,11 +214,15 @@ using TopOfContentJudge = std::function<TopOfContentReading(const Frame &frame)>
 //     reads from the same place. Whatever this refuses for want of a header, the record could not have read
 //     either.
 //   * The green sensor (c2) reads a BAND, [band_start, band_end] = [0.12, 0.93] of the crop width. The band
-//     contains that column, and a row needs more than green_fraction_threshold of the band green. An overlay
-//     that leaves the column clear loses the header only once it covers enough of the band. (A tap effect up to
-//     ~368 px wide at a 736 px unit is survived; see factorHeader() in the builder.) The header then reads
-//     absent and c2 refuses. That refusal is one the user sees -- the tab is refused, or Rule 3 does not judge
-//     the frame -- and never a silent acceptance.
+//     contains that column, and a row needs more than green_fraction_threshold (0.5) of the band green. An
+//     overlay that leaves the column clear loses the header only once it covers enough of the band: the row
+//     stays over the threshold while less than half of its samples are off-green, 0.5 * (0.93 - 0.12) = 0.405
+//     of the crop width. The crop spans the full intersection width in both layouts, so at a 736 px unit that
+//     is 0.405 * 736 = 298 px of a 0.81 * 736 = 596 px band. Every off-green sample counts, the header's own
+//     included, so an overlay on a real header row is allowed less than that; factorHeader() in
+//     chara_detail_scene_scraper_builder.h gives the measured green occupancy of a header row. Past it the
+//     header reads absent and c2 refuses. That refusal is one the user sees -- the tab is refused, or Rule 3
+//     does not judge the frame -- and never a silent acceptance.
 
 // The last header row (c1) still read as the head of the list, for a banner search of `search_rows` rows
 // (BannerHit::search_rows, i.e. the recognizer's own window L) with `reserve` (FactorHeaderConfig::
@@ -921,9 +925,8 @@ public:
     // the user hears -- and there are exits from this wait that have nothing to announce: the scrollable
     // interpreter's offset exit begins capture without ever latching a stationary frame (so there is no
     // settled instant to announce), and the non-scrollable interpreter is handed no cue sender at all. A
-    // consumer reading "no cue yet" as "still waiting" waits forever on both. Three facts were riding on one
-    // signal -- the chime sounded, scrolling is now permitted, capture has begun -- and only the first is what
-    // the cue states.
+    // consumer reading "no cue yet" as "still waiting" waits forever on both. Of three facts -- the chime
+    // sounded, scrolling is now permitted, capture has begun -- the cue states only the first.
     //
     // Derived straight from the members that record the latch and the refusal, in one expression per
     // implementation, so there is no second place that could go out of step when a new exit is added.
@@ -1331,8 +1334,8 @@ private:
     // from a scrollable page and from a page with no scroll bar alike, and a captured tab is only ever un-captured
     // together with it (rebuildTab, resetMonitors), so a captured factor tab always holds one.
     //
-    // NO OTHER TAB IS WATCHED, IN ANY STATE OF THE SESSION. There used to be a second rule for them ("a captured
-    // tab back at the head of its list is a switch"), and it was removed rather than narrowed, for three reasons:
+    // NO OTHER TAB IS WATCHED, IN ANY STATE OF THE SESSION. There is no rule of the form "a captured tab back at
+    // the head of its list is a switch", nor a narrowed one, for three reasons:
     //   (a) A position is not a switch. The game returns the displayed tab to the head when the record changes,
     //       but a user who scrolls back up puts it there too, and a rule that cannot tell the two apart throws
     //       captured tabs away on a guess. A rule's job is to detect the switch; losing work when there was none
@@ -1600,23 +1603,19 @@ private:
     // below which the content counts as flush with the head of its list. Zero: any exposed track above the
     // thumb at all means the user had already scrolled.
     //
-    // THERE USED TO BE A SECOND ONE, kTopMarginThreshold = 0.02, which the switch-detection rules and the UI
-    // position report compared against so they would tolerate a thin idle band. It is retired, and both edges
-    // of the band it sat in turned out to be artefacts:
-    //  * its LOWER edge was a measurement bias. geometryAt read the track top off the near-white margin run,
-    //    which the thumb's own anti-aliased cap terminated one sample early whenever the thumb was parked on
-    //    it, so a genuine top read ~0.002 instead of 0. Folding the track-colour exposure test into upper_gap
-    //    removed that: measured over 31 clips / 24,258 topMargin-path reads, every reading the fold moved was
-    //    in [0.00195, 0.00267] and moved to 0. There is nothing left under 0.02 for it to tolerate.
-    //  * its UPPER edge was a misdiagnosis. The commit that introduced 0.02 recorded the failure it fixed as
-    //    "the inheritance history lazily loading re-scales the thumb to ~0.027 while the content changes";
-    //    the excursion was in fact about 75 content px of REAL scroll, which a threshold has no business
-    //    absorbing. What actually separates that case from a character switch is the factor tab's green
-    //    header, which this scraper now composes in behind the thumb (topOfContent) rather than a band on the
-    //    coarse one.
-    // The retirement is what leaves a policy with nothing left to decide but unknown_verdict -- and, once the
-    // two directions stopped differing in anything else, what let the fail-open one move out of this process
-    // to the consumer that wanted it (see kMissingReadingIsScrolled).
+    // THERE IS NO SECOND, NON-ZERO TOLERANCE BAND (such as 0.02) for the switch-detection rules or the UI
+    // position report. Neither edge of such a band has anything to absorb:
+    //  * a LOWER edge would absorb a measurement bias that does not occur. The track-colour exposure test is
+    //    folded into upper_gap, so the thumb's own anti-aliased cap cannot terminate the near-white margin run
+    //    one sample early: measured over 31 clips / 24,258 topMargin-path reads, the readings this fold
+    //    affects lie in [0.00195, 0.00267] without it and are 0 with it.
+    //  * an UPPER edge would absorb real scroll. The inheritance history's lazy load re-scales the thumb to
+    //    ~0.027 while the content changes, but that excursion is about 75 content px of REAL scroll. What
+    //    separates that case from a character switch is the factor tab's green header, which this scraper
+    //    composes in behind the thumb (topOfContent), not a band on the coarse one.
+    // That is what leaves a policy with nothing to decide but unknown_verdict -- and, since the two directions
+    // differ in nothing else, what lets the fail-open one live in the consumer that wants it (see
+    // kMissingReadingIsScrolled).
     //
     // Zero is available as a threshold only because a genuine top reads EXACTLY 0: upper_gap is clamped to 0
     // whenever no placeholder track is exposed above the thumb, and the exposure test is anchored at the scan
@@ -1674,15 +1673,15 @@ public:
     // topOfContent answers such a page AtTop from its structure -- a certain answer, not absent evidence -- so
     // there is no Unknown left for this policy to resolve on it.
     //
-    // THE FAIL-OPEN DIRECTION IS NOT MISSING, IT MOVED. Its one consumer was the capture card ("a frame nobody
+    // THE FAIL-OPEN DIRECTION LIVES IN DART, NOT HERE. Its one consumer is the capture card ("a frame nobody
     // could read has not been shown to be scrolled away"), which lives behind on_scroll_position, and that
-    // wire now carries the verdict UNRESOLVED because the front end has a second consumer (the
+    // wire carries the verdict UNRESOLVED because the front end has a second consumer (the
     // duplicate-probe hint gate) whose direction is the opposite one -- unlike the green character-switch
     // arrows, which are not a consumer of this word at all and read whether the factor tab is shown and whether
     // Rule 3 is armed, never the scroll position. The card states fail-open for itself, in
     // Dart (TopOfContent in lib/src/core/platform_controller.dart). A constant here for a direction nothing
-    // here takes would be a constant kept alive by its own test, which is why there is no kMissingReadingIsAtTop
-    // any more; TopOfContentPolicy itself still carries unknown_verdict as a parameter, and both of its
+    // here takes would be a constant kept alive by its own test, which is why there is no kMissingReadingIsAtTop;
+    // TopOfContentPolicy itself still carries unknown_verdict as a parameter, and both of its
     // directions are pinned on locally built policies in test_scraper_estimators.cpp.
     static constexpr scraper_impl::TopOfContentPolicy kMissingReadingIsScrolled{
         scraper_impl::TopOfContent::Scrolled};

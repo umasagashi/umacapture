@@ -13,8 +13,7 @@ namespace uma::chara_detail::record {
 // The integer VALUE of each entry is a cross-layer contract — do not reorder or renumber it:
 //   - Dart declares its own RecordType enum in this same order and looks entries up positionally
 //     (RecordType.values.indexOf(...) in spec/parser.dart and spec/script.dart) for column/script lookups;
-//   - no wire message carries the value as an int any more (onFactorProbe used to, as a diagnostic nobody
-//     decoded, and dropped it);
+//   - no wire message carries the value as an int;
 //   - record.json stores the NAME (see EXTENDED_JSON_TYPE_ENUM below), which is order-independent.
 // The scene context resolves which type is active by branch NAME, not position (see recordTypeTag and
 // CharaDetailSceneContext), so reordering the condition branches cannot silently change the mapping;

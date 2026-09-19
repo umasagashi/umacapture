@@ -122,8 +122,8 @@ inline std::string tabRefused(int index, bool refused, const std::string &reason
 // ANNOUNCEMENT -- the chime the user listens for -- and there are exits from this wait that have nothing to
 // announce: the offset exit in ScrollableScrapingInterpreter::updateBefore begins capture without ever
 // latching a stationary frame, and a page with no scroll bar is handed no cue sender at all. A front end that
-// read "no onScrollReady yet" as "still waiting" therefore told the user to hold off, in a caution colour,
-// for the rest of a capture that was running normally. The chime and the permission are two facts; this is
+// reads "no onScrollReady yet" as "still waiting" would tell the user to hold off, in a caution colour, for
+// the rest of a capture that is running normally. The chime and the permission are two facts; this is
 // the second one.
 //
 // `scroll_bar` is the page's structure (scraper_impl::SceneScraper::scrollable), fixed from the tab's first frame

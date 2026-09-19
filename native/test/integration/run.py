@@ -683,12 +683,12 @@ PROBE_MARKER = '{"type":"onFactorProbe"'
 #   a probe passes when every element of probe.factors equals golden self at the same index, AND
 #   (not probe.below_threshold OR len(golden self) == len(probe.factors))
 #
-# An earlier version asserted a floor of 5 and a prefix match. Both were slack: measured, weakening it to "the
-# probe is non-empty" left all three cases passing, so neither was ever the thing that bit. Asserting full
+# A floor of 5 and a prefix match would both be slack: measured, weakening such a check to "the probe is
+# non-empty" leaves all three cases passing, so neither would be the thing that bites. Asserting full
 # agreement (and, when the core says the read ended, the count too) is what makes this a statement about the
 # FEATURE working rather than about the probe merely having said something.
 #
-# WHERE THE FLAG COMES FROM AND WHY THERE IS NO THRESHOLD HERE ANY MORE. `factors` on the wire is already
+# WHERE THE FLAG COMES FROM AND WHY THERE IS NO THRESHOLD HERE. `factors` on the wire is already
 # capped to the self-factor-count threshold of the factor-tab layout the scraper chose for the session
 # (`common` or `friend_common` in assets/config/chara_detail/scene_scraper.json) -- the core trims before
 # sending, not the front end, and this file follows that: every element the probe DID send must agree, with
@@ -697,8 +697,8 @@ PROBE_MARKER = '{"type":"onFactorProbe"'
 # early because the character has fewer self-factors than the layout's threshold must ALSO match the golden
 # record's count, or a record that legitimately has more self-factors than the probe read would pass on a
 # prefix that says
-# nothing about the character actually having only that many. `record_type` and the numeric threshold are no
-# longer on the wire at all (the front end never held a copy of the threshold to begin with); re-deriving
+# nothing about the character actually having only that many. `record_type` and the numeric threshold are not
+# on the wire at all (the front end holds no copy of the threshold); re-deriving
 # either from lib/ would state the layout choice a second time, next to the scraper's own.
 #
 # NO DEFAULT. A probe line without a boolean `below_threshold` fails the case with a reason, and is never

@@ -77,9 +77,9 @@ void main() {
     });
 
     test('during capture, is safe on the factor tab scrolled off its top, and unsafe on the other tabs', () {
-      // INTENT CHANGED (R8). This used to be "unsafe once the factor tab is scrolled off its top", which
-      // asked the user to scroll back up before switching. A record switch returns the list to its head,
-      // which is where Rule 3 judges, so the position before the switch is not a condition any more.
+      // The switch does not depend on the factor tab's scroll position: the user need not scroll back
+      // up before switching. A record switch returns the list to its head, which is where Rule 3
+      // judges, so the position before the switch is not a condition.
       CharaDetailCaptureState scrolledOn(int tab) => CharaDetailCaptureState(
         detailOpened: true,
         currentTab: tab,
@@ -158,9 +158,9 @@ void main() {
     });
 
     test('after success, is safe on the factor tab at any position, and unsafe on the other tabs', () {
-      // INTENT CHANGED (R6, R8). This used to be "is safe when every tab is captured (success)", on any
-      // tab: Rule 2 watched the other tabs once the session was complete. No rule watches them now, so a
-      // completed session is safe to switch from the 継承タブ only -- the same answer as during capture.
+      // Completion does not make every tab safe, and the position does not decide the switch. No rule
+      // watches the other tabs of a completed session, so it is safe to switch from the 継承タブ only,
+      // at any position -- the same answer as during capture.
       for (final position in TopOfContent.values) {
         final onFactor = CharaDetailCaptureState(currentTab: 1, topOfContent: position, factorSwitchArmed: true)
           ..link = CharaDetailLink(id: 'x');
@@ -229,10 +229,10 @@ void main() {
       expect(state.switchSafety, isFalse);
     });
 
-    test('still answers while a tab is refused, but the answer is now false, not factorAtTop', () {
+    test('while a tab is refused, still answers, and the answer is false wherever the user is', () {
       // THE POINT OF NOT ROUTING A REFUSAL TO `fail`. A refused tab is a live in-detail phase, so
       // `failed`'s null is still the wrong answer -- it would blank the indicator during exactly the
-      // moment the user is being told to move around the tabs. But the answer is no longer
+      // moment the user is being told to move around the tabs. But the answer is not
       // `factorAtTop` either: a refused factor tab never fired the probe Rule 3 needs (the refusal
       // happens INSTEAD of `startScrolling` accepting the head), so being AT the factor top proves
       // nothing here, same as during the settle wait. See the `switchSafety` doc comment.
@@ -254,7 +254,7 @@ void main() {
       expect(
         elsewhere.switchSafety,
         isFalse,
-        reason: 'false either way now, so moving off the factor top changes nothing',
+        reason: 'false wherever the user is, so moving off the factor top changes nothing',
       );
     });
 
@@ -320,7 +320,7 @@ void main() {
           .scrollPosition(1, TopOfContent.scrolled);
       expect(state.factorAtTop, isFalse);
       expect(state.status, CharaDetailCaptureStatus.capturing);
-      // INTENT CHANGED (R8): leaving the head no longer withdraws the switch; the tab shown decides it.
+      // Leaving the head does not withdraw the switch; the tab shown decides it.
       expect(state.switchSafety, isTrue);
     });
 
@@ -372,8 +372,8 @@ void main() {
       expect(state.skillTabProgress, 1);
       expect(state.factorTabProgress, 1);
       expect(state.campaignTabProgress, 1);
-      // INTENT CHANGED (R6): completion no longer makes every tab safe. Nothing stated a tab here, so the
-      // default (skill) is on screen, and that tab is not watched.
+      // Completion does not make every tab safe. Nothing stated a tab here, so the default (skill) is
+      // on screen, and that tab is not watched.
       expect(state.switchSafety, isFalse);
     });
 
@@ -416,7 +416,7 @@ void main() {
     });
 
     test('is alreadyCaptured for a confirmed duplicate, safe to switch on the factor tab only', () {
-      // INTENT CHANGED (R6): used to be safe on any tab once every tab was captured.
+      // Every tab being captured does not make every tab safe: only the factor tab is watched.
       final onFactor = CharaDetailCaptureState(
         detailOpened: true,
         currentTab: 1,
@@ -468,8 +468,8 @@ void main() {
     });
 
     test('a refusal outranks the duplicate hint, whose instruction would contradict it', () {
-      // LOAD-BEARING ORDER, and a RULING WITH A COST — the order was the other way round until the
-      // cost of each direction had been measured against the other.
+      // LOAD-BEARING ORDER, and a RULING WITH A COST — chosen by weighing the cost of each direction
+      // against the other.
       //
       // The hint's line is 「詳細画面を検出しました／スクロールしてキャプチャを開始してください」 with the
       // green "safe to switch" arrows beside it. Shown while a tab stands refused, that is a wrong
@@ -511,10 +511,9 @@ void main() {
   // ready to scroll, the picture is still moving and the recognizer cannot accept the head of the
   // list. Scrolling inside that window loses the rows above the first fragment for good.
   //
-  // The card used to be byte-identical on both sides of that boundary: `detailReady`, blue, and the
-  // action line 「スクロールしてキャプチャを開始してください」 -- i.e. it told the user to do the one
-  // thing that breaks the capture, at the one moment doing it breaks the capture. `onScrollReady`
-  // reached Dart with a tab index and was discarded on the line that received it.
+  // A card that is the same on both sides of that boundary -- `detailReady`, blue, and the action
+  // line 「スクロールしてキャプチャを開始してください」 -- would tell the user to do the one thing
+  // that breaks the capture, at the one moment doing it breaks the capture.
   group('CharaDetailCaptureState -- the settle wait', () {
     test('a freshly opened detail screen is waiting, not ready', () {
       // What `onCharaDetailStarted` leaves behind, verbatim. No readiness has been stated yet.
@@ -578,11 +577,11 @@ void main() {
     });
 
     test('coming BACK to an unfinished tab waits again, on the core statement that says so', () {
-      // THE CASE THE FORWARD DIRECTION DOES NOT COVER, and the one the user asked for by name:
-      // leaving a tab whose capture is in progress rebuilds it in the core, so returning to it finds
-      // a fresh interpreter that has to latch all over again.
+      // THE CASE THE FORWARD DIRECTION DOES NOT COVER: leaving a tab whose capture is in progress
+      // rebuilds it in the core, so returning to it finds a fresh interpreter that has to latch all
+      // over again, and the user must be made to wait again rather than told the tab is ready.
       //
-      // WHERE THAT NOW COMES FROM. The rebuild is the core's, and the core restates `awaiting: true`
+      // WHERE THAT COMES FROM. The rebuild is the core's, and the core restates `awaiting: true`
       // for that index on the very frame it rebuilds -- while another tab is displayed. This side
       // does not re-derive it from the change of index: an inference here would be a second copy of
       // a fact the wire already carries, and the two would disagree for whichever frame arrived
@@ -626,10 +625,9 @@ void main() {
     });
 
     test('a tab index the core has not levelled asserts a wait', () {
-      // FAIL-CLOSED, and the reverse of what this side used to do. The old shape answered "ready" for
-      // an unknown index so that an instruction could not become unwithdrawable; the withdrawal now
-      // exists by construction, because the core walks the same `kAllTabPages` for the level as for
-      // the position event -- an index that can appear in one can appear in the other. With that
+      // FAIL-CLOSED. Answering "ready" for an unknown index would only be needed if an instruction could otherwise
+      // become unwithdrawable; the withdrawal exists by construction, because the core walks the same `kAllTabPages`
+      // for the level as for the position event -- an index that can appear in one can appear in the other. With that
       // guaranteed, the safe default is the one that costs a moment rather than the head of a list.
       final state = CharaDetailCaptureState().started('rec-1').scrollPosition(7, TopOfContent.atTop);
       expect(state.currentTabAwaitingHead, isTrue);
@@ -658,7 +656,7 @@ void main() {
     //     gate does: the hint stands only at a MEASURED factor top, where the probe fired.
     //
     // The switch arrows are not a consumer: they read the tab shown and the armed level, not the
-    // position (R8), which the second case below pins so that the position cannot creep back into them
+    // position, which the second case below pins so that the position cannot creep back into them
     // unnoticed.
     //
     // Nothing else in this file pins either direction: every other case states a MEASURED verdict, and
@@ -685,9 +683,9 @@ void main() {
     });
 
     test('does not decide the switch arrows, which read the tab shown and the armed level', () {
-      // INTENT CHANGED (R8). This used to be "withholds the switch arrows, where a measured top shows
-      // them". Rule 3 still resolves an unreadable frame as scrolled, but it judges the first frame of the
-      // new record, which the game puts at the head; the frame before the switch is not what it reads.
+      // An unreadable factor top does not withhold the switch arrows. Rule 3 resolves an unreadable frame as scrolled,
+      // but it judges the first frame of the new record, which the game puts at the head; the frame before the switch
+      // is not what it reads.
       for (final verdict in TopOfContent.values) {
         expect(unreadableFactorTop(verdict).switchSafety, isTrue, reason: '$verdict');
       }

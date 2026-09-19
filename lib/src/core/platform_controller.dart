@@ -448,8 +448,8 @@ class CharaDetailCaptureState {
   /// chime the user listens for (`onScrollReady`, and `onFactorProbe` when it says `cue_owed`) is a
   /// separate fact: it announces a stationary latch, and the core has two ways out of this wait that
   /// sound nothing — capture begun from the offset comparison, and the end of the wait on a tab with
-  /// no scroll bar. Reading "no chime yet" as "still waiting" is what made the caution message stick
-  /// for whole captures.
+  /// no scroll bar. Reading "no chime yet" as "still waiting" would leave the caution message standing
+  /// for whole captures that took either of those routes.
   ///
   /// **What the level waits for is the core's to say, per page kind**: the head latch on a page that
   /// scrolls, the tab's completion on a page with no scroll bar (see
@@ -459,7 +459,7 @@ class CharaDetailCaptureState {
   /// tab whose capture is in progress — or refused — rebuilds it
   /// (`CharaDetailSceneScraper::handleTabSwitchInProgress`), and the fresh interpreter's `awaiting:
   /// true` arrives here for that index while the user is already elsewhere. A *completed* tab keeps
-  /// `false`, which is why no progress-based escape hatch is needed on this side any more.
+  /// `false`, which is why this side needs no progress-based escape hatch.
   ///
   /// Session-scoped: [reset] drops it, and the core clears its own emitted levels at the same
   /// boundaries and restates all three on the session's first frame.
@@ -618,7 +618,7 @@ class CharaDetailCaptureState {
   /// scroll-position event. The verdict is stored as stated; the consumers resolve it.
   CharaDetailCaptureState scrollPosition(int index, TopOfContent topOfContent) {
     final state = clone();
-    // Nothing about the wait is decided here any more. The rebuild that a tab switch performs is the
+    // Nothing about the wait is decided here. The rebuild that a tab switch performs is the
     // core's own, and it restates that tab's `awaiting` level on the wire; this side inferring it
     // from a change of index would be a second, independently-derived copy of the same fact, and the
     // two orderings (position first, or level first) would then disagree for one frame.
@@ -649,8 +649,10 @@ class CharaDetailCaptureState {
 
   /// Records the core's statement that [index]'s tab is complete (`onPageReady`), and fills its ring.
   ///
-  /// The one writer of [tabsCompleted]. The ring and the set are written by this one call, so the
-  /// ring cannot report a completion the set does not hold.
+  /// The one writer of [tabsCompleted], and the only call that turns a tab's completion into a fact.
+  /// It fills the ring as well, but it is not the ring's only writer: [progress] fills it from thumb
+  /// positions too, and the card labels a full ring complete (`lib/src/gui/capture.dart`), so a ring
+  /// can read complete before this call has run. The set, not the ring, carries the core's statement.
   CharaDetailCaptureState pageReady(int index) {
     final state = progress(index, 1);
     state.tabsCompleted.add(index);
@@ -858,7 +860,7 @@ class CharaDetailCaptureState {
   ///
   /// So this tracks Rule 3's own gate rather than approximating it. Near the head, the tolerance is
   /// the recognizer's own safe range rather than one thumb pixel: a displaced fragment #0 that the
-  /// header accepts is still read from its header, in exchange for no longer being tight to a single
+  /// header accepts is still read from its header, at the cost of not being tight to a single
   /// pixel. The header cannot tell itself from the 継承履歴 bar at the end of the list. The thumb's
   /// `scrolled` is what separates the two, and that holds only while the thumb is long enough; the
   /// core states the limit at `factorHeadReading` in `chara_detail_scene_scraper.h`.
@@ -1901,7 +1903,7 @@ class PlatformController {
           // may begin" by paths that have nothing to announce (see [CharaDetailCaptureStatus.
           // waitingForReady]), so a card driven from here waits for a sound that never comes.
           //
-          // Carries an `index` this side no longer reads. Left on the wire because the sound is
+          // Carries an `index` this side does not read. Left on the wire because the sound is
           // per tab and a front end that wanted a per-tab chime would need it; nothing here has to
           // parse it to sound the cue, which is why a message that lost the field still chimes.
           _scrollReadyEvent.add(_soundEventSequence++);
@@ -1939,23 +1941,22 @@ class PlatformController {
           break;
         case 'onFactorProbe':
           {
-            // NOT the end of the factor tab's settle wait, any more. That is `onTabAwaitingHead`
+            // NOT the end of the factor tab's settle wait. That is `onTabAwaitingHead`
             // for this index, which the core states: from the same `startScrolling` the probe hangs off
             // on a page that scrolls, from the tab's completion on a page with no scroll bar (after the
-            // latch that sends this probe), and on the paths that produce no probe at all. This message used to
-            // double as the factor tab's readiness statement because the tab emits no
-            // `onScrollReady` (`makeTabScraper` wires it to the internal `factor_scroll_ready`
-            // instead); with the level on the wire the special case is gone.
+            // latch that sends this probe), and on the paths that produce no probe at all. That the factor tab
+            // emits no `onScrollReady` (`makeTabScraper` wires it to the internal `factor_scroll_ready`
+            // instead) does not make this message its readiness statement: the level is.
             //
             // NOR DOES IT STATE WHERE THE TAB IS. The displayed tab and whether it is flush with its head
             // are `onScrollPosition`'s alone, stated by the core from the frame on screen. This handler
-            // used to assert the factor top on every probe, because the probe fires from the head latch.
-            // That describes the frame the latch took, not the frame displayed when this message lands:
-            // the exit that latches because the user was already scrolling is taken off a moving list,
-            // and the core states the position on edges only (a change of tab or of verdict), so an
-            // asserted top overwrote a newer `scrolled` and stood until the next edge, with the arrows
-            // and the duplicate-hint gate open on a list Rule 3 does not judge. It overwrote the core's
-            // `unknown` the same way. Nothing needs it: the core's edge memory is cleared on every
+            // does not assert the factor top, although the probe fires from the head latch: the latch
+            // describes the frame it took, not the frame displayed when this message lands. The exit that
+            // latches because the user was already scrolling is taken off a moving list, and the core states
+            // the position on edges only (a change of tab or of verdict), so an asserted top would overwrite
+            // a newer `scrolled` and stand until the next edge, with the arrows and the duplicate-hint gate
+            // open on a list Rule 3 does not judge. It would overwrite the core's `unknown` the same way.
+            // Nothing needs it: the core's edge memory is cleared on every
             // session reset, so the position is restated on the next frame, and a return to the tab is
             // itself an edge.
             // WHETHER THE CHIME IS OWED AT ALL, stated by the core on this message and not inferred here.
@@ -1975,9 +1976,12 @@ class PlatformController {
             // WHICH ATTEMPT IT IS ABOUT, first of all. The probe is read off the scraper thread, so it can
             // arrive after the next attempt was announced; a probe of an earlier attempt says nothing
             // about the character on screen, and its chime (either one) would be about a tab the user is
-            // no longer looking at. It is skipped whole. A probe that names no attempt is skipped too:
-            // the same fail-open direction a missing `below_threshold` takes below, since the check is a
-            // convenience and the authoritative duplicate check still runs on the finished record.
+            // no longer looking at. It is skipped whole. A probe that names no attempt is skipped the same
+            // way, chime included: the core puts `record_id` on every probe (`native_api_messages.h`'s
+            // `factorProbe`), so a probe without one did not come from this build's core, and nothing it
+            // says -- whether a cue is owed included -- can be attributed to the character on screen.
+            // That is not the direction a missing `below_threshold` takes below: there the message is this
+            // build's and only the duplicate check is unanswerable, so the chime still follows `cue_owed`.
             final probeRecordId = data['record_id'];
             if (probeRecordId is! String || !captureState.isCurrentAttempt(probeRecordId)) {
               logger.i("Factor probe for ${jsonEncode(probeRecordId)} is not about the current attempt; skipped");
@@ -1997,26 +2001,23 @@ class PlatformController {
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
             // EVERY PROBE IS ANSWERED, including one whose factors are identical to the last. This side
-            // used to hold the previous probe's factors and drop a match, to spend the duplicate check
-            // and its error cue at most once per character — and because the comparison sat ahead of
-            // the chime, it spent the chime once per character too.
+            // keeps no copy of the previous probe's factors to drop a match against: that would spend the
+            // duplicate check and its error cue at most once per character, and, with the comparison ahead
+            // of the chime, the chime once per character too.
             //
-            // Spending the chime that way was wrong from the day it was written, not something a later
-            // change broke. The suppression landed hours after the chime moved onto this message, and
-            // `handleTabSwitchInProgress` already rebuilt a tab the user had started but not finished —
-            // so a return visit already began at the top of a rebuilt tab with its fragments discarded,
-            // genuinely owing a cue, and already lost it to the unchanged key. The set of rebuilt tabs
-            // has only grown since (the exit once also spared a tab that had not started scrolling; it
-            // is now `scraper == nullptr || scraper->ready()`), which widened the defect rather than
-            // introducing it. The duplicate check itself keeps no memo and accumulates nothing — its
+            // Spending the chime that way is wrong. Leaving a tab that is not complete makes
+            // `handleTabSwitchInProgress` rebuild it (it spares only `scraper == nullptr ||
+            // scraper->ready()`), so a return visit begins at the top of a rebuilt tab with its fragments
+            // discarded, genuinely owes a cue, and would lose it to an unchanged key.
+            // The duplicate check itself keeps no memo and accumulates nothing — its
             // verdict is recomputed from storage on every probe — but it is not silent when re-run: a
             // character already on file re-sounds `duplicated_character_probe`'s error cue and restates
             // the failure (`reportDuplicateFromFactorProbe`) each time the user returns to the tab. That
             // repetition is accepted here rather than papered over, on the same grounds as the chime:
             // the visit really is a fresh attempt on a rebuilt tab, and the alternative — staying silent
-            // about a duplicate the user is about to capture again — is the failure being removed.
+            // about a duplicate the user is about to capture again — is the failure this avoids.
             //
-            // Nor could the comparison have told the two apart: `onFactorProbe` carries three fields
+            // Nor can such a comparison tell the two apart: `onFactorProbe` carries four fields
             // (`native_api_messages.h`'s `factorProbe`) and none of them is a visit count or a
             // re-emission flag, so a settling frame and a genuine revisit are the same message. Of the
             // two ways to be wrong, a repeated cue is a noise the user can ignore, while a withheld one
@@ -2088,8 +2089,9 @@ class PlatformController {
             // before the ready cue, so the rows above the first captured fragment were never seen.
             //
             // Deliberately NOT routed to `captureState.fail`. That marks the whole session failed,
-            // which is terminal and would blank `switchSafety` at the one moment the remedy is to
-            // move between tabs; only this tab is unusable and the session goes on waiting for it.
+            // which is terminal and would blank `switchSafety` at the one moment a remedy is to
+            // scroll back to the head and then move between tabs (see [tabRefusals]); only this tab
+            // is unusable and the session goes on waiting for it.
             //
             // `refused` is a LEVEL the core re-states when it changes, and the withdrawal arrives on
             // this same type with `refused: false` (a tab switch rebuilds the tab in the core). So
@@ -2132,7 +2134,7 @@ class PlatformController {
         case 'onCharaDetailRestarted':
           // A restart is a mid-scene reset (native inferred a character switch and rebuilt the session
           // without the detail screen closing). The UI resets its capture progress exactly as on a fresh
-          // open — which is why this shared the `onCharaDetailStarted` case until the message gained a
+          // open; it is a separate case from `onCharaDetailStarted` only because the message carries a
           // payload.
           //
           // WHAT IT DOES *NOT* DO IS REPORT A FAILURE, and that is a decision rather than an omission: both

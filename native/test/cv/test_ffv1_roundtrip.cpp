@@ -27,8 +27,8 @@ namespace {
 
 // A token unique to this PROCESS, appended to every scratch filename below. More than one
 // umacapture_ffv1_tests process can run at a time (Debug and Release side by side, or an independent
-// verification run alongside a regression run), and these filenames were previously fixed literals under
-// the shared system temp directory: two such processes race the same .mkv file. There is no pid helper
+// verification run alongside a regression run), and with fixed literal filenames under the shared system
+// temp directory two such processes would race the same .mkv file. There is no pid helper
 // in this tree, so a random token stands in for one --
 // native/test/chara_detail/test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the
 // same reason.

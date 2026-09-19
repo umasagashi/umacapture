@@ -14,8 +14,9 @@
 //   * IT IS A LEVEL, PER TAB. The core re-states it when it changes and withdraws it on the same
 //     type with `refused: false`; there is deliberately no paired "cleared" message. So this side
 //     holds the last value per index, and the chime fires on the transition in — not per message.
-//   * IT REACHES THE USER. The banner says so, and the progress rings stay: the remedy is to leave
-//     the tab and come back, which is a thing the user does on the display the rings are part of.
+//   * IT REACHES THE USER. The banner says so, and the progress rings stay: one remedy is to scroll
+//     the refused tab back to its head and then leave it and come back (the game keeps a tab's scroll
+//     position across a switch), which is a thing the user does on the display the rings are part of.
 //
 // Status ranking and `switchSafety` are asserted in `switch_safety_test.dart`, with the rest of the
 // status derivation.
@@ -341,12 +342,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       await tester.pump();
 
-      // THE WORDING HAS LANDED. `ja.json` now carries both `tab_refused.status` and
+      // THE WORDING IS SHIPPED. `ja.json` carries both `tab_refused.status` and
       // `tab_refused.action`, so the banner is asserted the same way every other state's is: read
       // literally out of the shipped translations via `appSentenceAt`, not compared against the raw
-      // key. `find.text(someKey)` would pass whether or not the key resolved (key equals key), which
-      // is exactly the gap the earlier, key-only assertion existed to flag while the sentence was
-      // still missing.
+      // key. `find.text(someKey)` would pass whether or not the key resolved (key equals key), so a
+      // missing sentence would go unnoticed.
       expect(
         find.text(appSentenceAt('pages.capture.capture_control.message.tab_refused.status')),
         findsOneWidget,
@@ -360,7 +360,9 @@ void main() {
       expect(
         find.byType(CircularPercentIndicator),
         findsNWidgets(3),
-        reason: 'the remedy is to move between the tabs these rings describe; hiding them hides it',
+        reason:
+            'the remedy is to scroll the refused tab back to its head and then leave it and return, moving between '
+            'the tabs these rings describe; hiding them hides it',
       );
     });
   });

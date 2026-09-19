@@ -91,7 +91,7 @@ const Color kThumb{60, 60, 60};  // the scroll thumb
 //    friendCommon's darkest is 242). It guards the track box's CEILING (234) from above, with 7 levels to
 //    spare: raise that ceiling to 241 and the at-top cases here read non-zero. On the corpus the same
 //    8-level move is likewise the first that changes any verdict, and it changes them the same way -- a
-//    FALSE ALARM at a genuine top. Painting 245, as this file used to, hid the four levels in between.
+//    FALSE ALARM at a genuine top. Painting 245 instead would hide the four levels in between.
 //  * kThumbCap 226 is the BRIGHTEST at-top thumb cap in the corpus (friendCommon; the common layout's
 //    brightest is 201, i.e. 27 levels of slack, so pooling the two layouts would have hidden this). It
 //    guards the margin box's FLOOR (228) from below, with 2 levels to spare: lower that floor to 226 and the
@@ -119,11 +119,10 @@ const Color kThumbCap{226, 226, 226};  // thumb fading into whatever is above it
 // offset and thumb probe stay synthetic, because the frames are hand-built 100 px mats and those four are
 // geometry, not colour.
 //
-// Restating them here is what this file used to do, and it hid a real break. The background box was written
-// as [200,255]^3, whose floor sits 47 levels above the shipped one, and kThumbCap then had to be pushed up to
-// 205 just to stay inside that invented floor -- a level picked to satisfy the synthetic's own box rather
-// than measured anywhere, and above the whole at-top cap range of the layout it was supposed to stand for
-// (196-201 on common). A synthetic running its own floor of 200 against its own cap of 205 stays green
+// Restating them here can hide a real break. A background box written as [200,255]^3 has a floor 47 levels
+// above the shipped one, and kThumbCap would then have to be pushed up to 205 just to stay inside that invented
+// floor -- a level picked to satisfy the synthetic's own box rather than measured anywhere, and above the whole
+// at-top cap range of the layout it is supposed to stand for (196-201 on common). A synthetic running its own floor of 200 against its own cap of 205 stays green
 // through every edit to the SHIPPED background floor, including one that lifts it past a real cap and makes
 // `upper` stop a sample early. Reading the boxes from the config is what puts such an edit in front of these
 // assertions. It does not by itself make the painted levels representative -- that is what the extremes
@@ -1190,12 +1189,13 @@ using scraper_impl::TopOfContent;
 using scraper_impl::TopOfContentPolicy;
 
 TEST_CASE("TopOfContentPolicy names the unmeasurable case instead of folding it into a bool") {
-    // The state the three shipped call sites disagreed about, silently, because each re-typed the comparison.
+    // An unreadable thumb is a third state, not a bool: a caller that re-typed the comparison itself would pick
+    // a direction silently, and the callers do not all want the same one.
     //
-    // Only ONE direction is still shipped in this process: the fail-open answer belongs to the capture card,
-    // which now reads the verdict off the wire and resolves it in Dart, so the core holds no constant for it
+    // Only ONE direction is shipped in this process: the fail-open answer belongs to the capture card,
+    // which reads the verdict off the wire and resolves it in Dart, so the core holds no constant for it
     // (see kMissingReadingIsScrolled's comment). What is pinned here is the CLASS's contract in both
-    // directions -- the policy is still a parameter every SceneScraper is constructed with -- so the fail-open
+    // directions -- the policy is a parameter every SceneScraper is constructed with -- so the fail-open
     // arm is a policy built right here rather than a shipped constant kept alive by its own test.
     const auto fail_closed = CharaDetailSceneScraper::kMissingReadingIsScrolled;
     constexpr TopOfContentPolicy fail_open{TopOfContent::AtTop};
@@ -1228,16 +1228,13 @@ TEST_CASE("the one shipped threshold refuses the smallest head start the widget 
     // One tip pixel of travel -- the smallest movement the widget can show -- was measured across this
     // project's clip corpus at 0.00196..0.00267, and it must read as Scrolled.
     //
-    // THIS CASE USED TO SAY THE OPPOSITE HALF AS WELL. It required a SECOND policy, carrying
-    // kTopMarginThreshold = 0.02, to answer AtTop for these same two readings -- pinning that threshold from
-    // BELOW, on the claim that a genuine top could read ~0.002 and so needed tolerating. That requirement is
-    // retired, and not because the tolerance became inconvenient: the ~0.002 was a MEASUREMENT BIAS, not a
-    // reading. geometryAt took the track top off the near-white margin run, which the thumb's own
-    // anti-aliased cap terminated one sample early whenever the thumb was parked at the top. Folding the
-    // track-colour exposure test into upper_gap (2026-09-09) removed it -- over 31 clips / 24,258
-    // topMargin-path reads, every reading the fold moved lay in [0.00195, 0.00267] and moved to 0. So there
-    // is nothing left under 0.02 for a second threshold to tolerate, the second policy is gone, and these two
-    // readings now mean one thing only: a head start this detector must refuse.
+    // NO SECOND POLICY answers AtTop for these same two readings. A genuine top does not read ~0.002: that value
+    // is a MEASUREMENT BIAS that appears only if the track top is taken off the near-white margin run, which the
+    // thumb's own anti-aliased cap terminates one sample early whenever the thumb is parked at the top. The
+    // track-colour exposure test is folded into upper_gap, which removes it -- over 31 clips / 24,258
+    // topMargin-path reads, the readings this fold affects lie in [0.00195, 0.00267] without it and are 0 with
+    // it. So there is nothing under a threshold such as 0.02 for a second policy to tolerate, and these two
+    // readings mean one thing only: a head start this detector must refuse.
     for (const double head_start : {0.00196, 0.00267}) {
         CHECK(Scraper::thumbTopOfContent(head_start) == TopOfContent::Scrolled);
     }
@@ -1468,7 +1465,7 @@ struct InterpreterHarness {
 
     // THE JUDGMENT THIS HARNESS HANDS IN: the thumb's, as CharaDetailSceneScraper::topOfContent takes it for a
     // tab without a finer landmark -- the scroll-bar band of the frame it is given, against the shipped threshold.
-    // The interpreter owns no judgment of its own any more; what these cases pin is WHICH frame it asks about and
+    // The interpreter owns no judgment of its own; what these cases pin is WHICH frame it asks about and
     // how it acts on the answer. The factor tab's banner judgment is test_scene_scraper.cpp's subject, where the
     // scraper that composes it is.
     [[nodiscard]] scraper_impl::TopOfContentJudge thumbJudge() {
@@ -1485,8 +1482,8 @@ struct InterpreterHarness {
     // reaches keeps the catcher open so the motion path runs instead.
     explicit InterpreterHarness(uint64 stationary_time)
         // Built on the same precondition product guarantees: a non-empty scan sequence (PageScrapingBox refuses
-        // an empty one) and a directory that exists. The previous empty sequence relied on addScrollArea
-        // returning early, which is only true in Release -- in Debug the assert fired and aborted the process.
+        // an empty one) and a directory that exists. An empty sequence would reach addScrollArea's assert, which
+        // aborts the process in Debug and compiles away in Release.
         : tab_dir(uniqueHarnessDir())
         , box(std::make_shared<PageScrapingBox>(
               std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, tab_dir, recorder.hooks())) {
@@ -1586,11 +1583,11 @@ int firstContentRow(const Frame &frame) {
 
 TEST_CASE("startScrolling publishes fragment #0's own full frame from both of its exits") {
     // The fact this pins: "the frame that became fragment #0" is available to a consumer on EVERY exit, and it
-    // is fragment #0's own frame rather than whichever frame was current when something else fired. Before this
-    // publication existed the only signal carrying those pixels was the ready cue, which the motion exit
+    // is fragment #0's own frame rather than whichever frame was current when something else fired. Without this
+    // publication the only signal carrying those pixels would be the ready cue, which the motion exit
     // deliberately never sends (see "the motion path judges the descriptor it latches" above) -- so a consumer
-    // hanging off the cue got nothing at all on that exit, and the frame it took on the other exit was fragment
-    // #0's only by coincidence of the two being the same frame there.
+    // hanging off the cue would get nothing at all on that exit, and the frame it took on the other exit would be
+    // fragment #0's only by coincidence of the two being the same frame there.
     //
     // Both exits are driven in one case so the pair cannot drift apart, and each published frame is checked for
     // (a) full resolution -- 200 rows, i.e. content AND bar, not the 100-row content crop the interpreter keeps

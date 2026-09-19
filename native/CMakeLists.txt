@@ -630,9 +630,8 @@ add_custom_command(
 
 # The tests that decode video (the footage cases in test/chara_detail/test_factor_header_band.cpp, and the
 # generated-clip cases in test/cv/test_video_loader.cpp and test_video_frame_grabber.cpp) need OpenCV's FFmpeg
-# plugin next to THIS exe. It used to arrive only as a side effect of building umacapture_cli into the same
-# directory; a tests-only build then fell back to MSMF without a word -- an FFV1 clip decoded to nothing, and an
-# .mp4 decoded to different pixels that still passed. Copied under its shipped name in every configuration: a
+# plugin next to THIS exe, and nothing else puts it there in a tests-only build. Without it OpenCV falls back to
+# MSMF without a word -- an FFV1 clip decodes to nothing, and an .mp4 decodes to different pixels that still pass. Copied under its shipped name in every configuration: a
 # Debug opencv_world4130d.dll asks for `..._64d.dll` first and then loads `..._64.dll` from beside the exe
 # (measured on this target, OpenCV 4.13). This target links no onnxruntime and no libav, so nothing else is needed.
 add_custom_command(

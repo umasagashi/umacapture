@@ -48,10 +48,9 @@ TEST_CASE("a mid-scene reset reports whether the session it discarded had comple
 }
 
 TEST_CASE("a discard is distinguishable from a start by more than its tag") {
-    // THE DEFECT THIS EXISTS TO REMOVE. The two tags always differed, but the restart message was empty, so the
-    // only thing a receiver could do with the difference was ignore it -- and both front ends did, dispatching
-    // the pair into one branch. Both now begin an attempt and name it; only the discard carries the one bit that
-    // says whether anything was lost with it.
+    // A tag difference alone is not enough: with an empty restart message, the only thing a receiver can do
+    // with the difference is ignore it and dispatch the pair into one branch. Both begin an attempt and name
+    // it; only the discard carries the one bit that says whether anything was lost with it.
     const Json started = Json::parse(charaDetailStarted("rec-1"));
     const Json restarted = Json::parse(charaDetailRestarted(false, "rec-1"));
     CHECK(started.at("type") != restarted.at("type"));

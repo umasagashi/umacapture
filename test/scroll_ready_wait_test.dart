@@ -7,28 +7,26 @@
 // captured fragment for good, and the core answers that with `onTabRefused` — the report of a loss
 // that has already happened.
 //
-// The card had no way to say "not yet". `onScrollReady` arrived with a tab index and was discarded
-// on the line that received it (`_scrollReadyEvent.add(...)` and nothing else), and its only
-// consumer was the sound. So before the cue and after it the banner was byte-identical: 「詳細画面を
-// 検出しました」 with the action line 「スクロールしてキャプチャを開始してください」, in the ordinary
-// informational blue. The app told the user to do the one thing that breaks the capture, at the one
+// So the card has to say "not yet". A card that showed 「詳細画面を検出しました」 with the action
+// line 「スクロールしてキャプチャを開始してください」 in the ordinary informational blue both before
+// and after the cue would tell the user to do the one thing that breaks the capture, at the one
 // moment doing it breaks the capture.
 //
-// The first answer to that keyed the wait off `onScrollReady`, and that was wrong in the other
-// direction: the chime is an ANNOUNCEMENT, and the core ends the wait by paths that announce
-// nothing — capture begun from the offset comparison rather than a stationary latch, and the end of
-// the wait on a tab with no scroll bar, which is handed no cue sender at all. A card waiting for a
-// sound that never comes told the user to stop, in a caution colour, for the whole of a capture that
-// was running normally. The wait now ends on `onTabAwaitingHead`, the per-tab level the core states.
+// The wait cannot be keyed off `onScrollReady` either: the chime is an ANNOUNCEMENT, and the core
+// ends the wait by paths that announce nothing — capture begun from the offset comparison rather
+// than a stationary latch, and the end of the wait on a tab with no scroll bar, which is handed no
+// cue sender at all. A card waiting for a sound that never comes would tell the user to stop, in a
+// caution colour, for the whole of a capture that is running normally. The wait ends on
+// `onTabAwaitingHead`, the per-tab level the core states.
 // On a tab with no scroll bar that level stands until the tab is read, and the same message says the
 // page has no scroll bar, which selects a wait text that mentions neither scrolling nor a cue.
 //
 // Three things have to hold, which is why there are three groups:
 //
 //   * THE END OF THE WAIT IS A LEVEL THE CORE STATES, per tab, withdrawn on the same message.
-//   * THE CHIME DOES NOT END IT. `onScrollReady` and `onFactorProbe` are announcements this side no
-//     longer reads as permission — the negative half is the regression guard, because it is exactly
-//     what the old shape got right-looking and wrong.
+//   * THE CHIME DOES NOT END IT. `onScrollReady` and `onFactorProbe` are announcements this side does
+//     not read as permission — the negative half is the regression guard, because reading the chime
+//     as permission looks right on the ordinary path and is wrong on the silent ones.
 //   * THE FACTOR CHIME IS OWED BY ONE EXIT ONLY. This tab's chime is the one this side sounds
 //     itself, off `onFactorProbe`, because it has to wait for the duplicate check. The core arms
 //     that probe from every latch -- both exits of a page that scrolls, and the settled frame of a
@@ -231,11 +229,11 @@ void main() {
 
   group('the chime does not end the wait', () {
     test('onScrollReady sounds the cue and settles nothing', () async {
-      // THE REGRESSION GUARD, and the inversion of what this file used to assert. The core sends the
-      // cue only from the stationary-latch exit; the offset exit begins capture with no cue at all,
-      // and a page with no scroll bar is handed no cue sender, so its wait ends without one. A card
-      // that read this message as permission stayed on 「まだスクロールしないでください」 for the rest
-      // of those captures.
+      // THE REGRESSION GUARD: the chime is not permission. The core sends the cue only from the
+      // stationary-latch exit; the offset exit begins capture with no cue at all, and a page with no
+      // scroll bar is handed no cue sender, so its wait ends without one. A card that read this
+      // message as permission would stay on 「まだスクロールしないでください」 for the rest of those
+      // captures.
       final (container, controller) = build();
       final cues = <int>[];
       final subscription = container.listen<AsyncValue<int>>(
@@ -259,7 +257,7 @@ void main() {
 
     test('a chime with no index still chimes', () async {
       // Fail-open in the direction the sound matters: the chime is the part the user is waiting for,
-      // so a message that lost its index must not lose it. Nothing here reads the index any more.
+      // so a message that lost its index must not lose it. Nothing here reads the index.
       final (container, controller) = build();
       final cues = <int>[];
       final subscription = container.listen<AsyncValue<int>>(
@@ -278,10 +276,9 @@ void main() {
 
     test('onFactorProbe settles nothing either, and moves no position', () {
       // The factor tab never emits `onScrollReady` (`makeTabScraper` wires it to the internal
-      // `factor_scroll_ready`), and this message used to double as its readiness statement. It no
-      // longer does: the level covers the factor tab like the other two, including on the paths that
-      // produce no probe at all. Nor does it state WHERE the tab is — it used to assert the factor top,
-      // and that is gone too: the position is `onScrollPosition`'s alone.
+      // `factor_scroll_ready`), and this message is not its readiness statement: the level covers the
+      // factor tab like the other two, including on the paths that produce no probe at all. Nor does
+      // it state WHERE the tab is: the position is `onScrollPosition`'s alone.
       final (container, controller) = build();
       controller.handleNativeMessage(_startedMessage);
       controller.handleNativeMessage(_scrollPositionMessage(_skillTab, 'scrolled'));
@@ -297,10 +294,10 @@ void main() {
     });
 
     test('a probe that lands after the factor list moved leaves it scrolled', () {
-      // THE CASE THE OLD ASSERTION GOT WRONG. The probe hangs off the head latch, which describes the
+      // THE CASE AN ASSERTED TOP GETS WRONG. The probe hangs off the head latch, which describes the
       // frame the latch took, not the one on screen when the message lands: the exit that latches
       // because the user was already scrolling is taken off a moving list, and the core states the
-      // position on edges only. An asserted top here overwrote the newer `scrolled` and put the
+      // position on edges only. An asserted top here would overwrite the newer `scrolled` and put the
       // duplicate-hint gate up on a list Rule 3 does not judge, until the next edge.
       final (container, controller) = build();
       controller.handleNativeMessage(_startedMessage);
@@ -357,7 +354,7 @@ void main() {
     test('a probe from the exit that waited chimes', () async {
       // THE POSITIVE CONTROL, and it comes first: without it, the silence asserted below could just
       // as well be a probe this side never chimes for, which would leave the user waiting for a
-      // sound that never comes — a worse failure than the noise being removed.
+      // sound that never comes — a worse failure than the noise this silence avoids.
       final (container, controller) = build();
       final cues = listenForCues(container);
       controller.handleNativeMessage(_startedMessage);
@@ -383,8 +380,8 @@ void main() {
 
       expect(cues, isEmpty);
       // The message was processed rather than dropped, observed at the one thing the probe still does
-      // here besides the chime: it hands its rows to the duplicate check. (The probe used to be seen
-      // through the factor top it asserted; it asserts no position any more.) What the check then
+      // here besides the chime: it hands its rows to the duplicate check. (It asserts no position, so
+      // it cannot be observed through the factor top.) What the check then
       // decides from those rows is the storage layer's, and its matching primitive is asserted in
       // `factor_probe_match_test.dart`.
       expect(storage.belowThresholds, [
@@ -412,9 +409,9 @@ void main() {
       // handleTabSwitchInProgress`), and the rebuilt tab latches its fragment #0 again and owes the
       // cue again. The character has not changed, so the second probe is byte-identical to the first.
       //
-      // This side used to compare each probe against the previous one and drop an unchanged key, and
-      // the comparison sat ahead of the chime, so it took the sound with it: the user stood at the top
-      // of the factor tab waiting for a cue that had been spent on the visit they abandoned. Nothing
+      // So this side does not compare a probe against the previous one: dropping an unchanged key
+      // ahead of the chime would take the sound with it, and the user would stand at the top of the
+      // factor tab waiting for a cue that had been spent on the visit they abandoned. Nothing
       // on the wire can tell the two apart — `onFactorProbe` carries three fields and none of them is
       // a visit count or a re-emission flag (`native_api_messages.h`'s `factorProbe`) — so a repeat is
       // sounded as the news it usually is.

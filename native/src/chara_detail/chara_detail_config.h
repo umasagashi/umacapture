@@ -265,8 +265,9 @@ struct CharaDetailSceneScraperConfig {
     // summary on the CLI. That is exactly where Range's inverted-box check (types/range.h) and Model's
     // output-head check (cv/model.h) already land.
     //
-    // PageScrapingBox's own constructor keeps an equivalent throw, but it runs on the scraper runner thread,
-    // where event_util's per-event catch only logs it; it is a class invariant, not a diagnostic.
+    // PageScrapingBox's own constructor keeps an equivalent throw as a class invariant. It runs on the scraper
+    // runner thread, where both construction sites catch it and end the attempt as `scrape_failed`; it is not
+    // where a bad config is diagnosed.
     CharaDetailSceneScraperConfig(
         const SceneScraperConfig &common,
         const SceneScraperConfig &friend_common,

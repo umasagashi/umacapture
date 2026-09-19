@@ -148,8 +148,8 @@ void main() {
 
     test('pattern 2: below_threshold true, every sent factor agrees, and the counts are equal -> matches', () {
       // The core's own read ended before the layout's cap: the character really does have exactly as
-      // many self-factors as were sent. The old matching rule (leading-run agreement only) could never
-      // reach this case at all: a record with as few self-factors as the threshold never had enough of
+      // many self-factors as were sent. A rule of leading-run agreement only could never reach this
+      // case at all: a record with as few self-factors as the threshold never had enough of
       // a leading run to fire the check.
       final self = [for (var i = 1; i <= 9; i++) Factor(i, 1)];
       final record = makeRecord(self: self);
@@ -341,8 +341,8 @@ void main() {
 
   group('RecordType ordinal contract', () {
     // chara_detail_record.dart states that this order stays aligned with the native RecordType enum, because
-    // record_type columns (the saved record's own metadata field, unrelated to onFactorProbe, whose own
-    // record_type field was dropped from the wire) map the value to a label by index.
+    // record_type columns (the saved record's own metadata field, unrelated to onFactorProbe, which carries
+    // no record_type field) map the value to a label by index.
     test('values are in the exact wire order', () {
       expect(RecordType.values, [
         RecordType.standard,

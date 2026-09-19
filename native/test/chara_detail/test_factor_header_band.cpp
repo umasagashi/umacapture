@@ -88,8 +88,9 @@ scraper_config::CharaDetailSceneScraperConfig shippedScraperConfig() {
     return json_util::read(path).get<scraper_config::CharaDetailSceneScraperConfig>();
 }
 
-// Green fraction of every row of the scroll-area crop, measured exactly as factorHeaderTopY measures it (same
-// crop, same band, same row line), so this cannot drift from the sensor it is a statement about.
+// Green fraction of every row of the scroll-area crop, measured the way scraper_impl::firstHeaderGreenRow
+// measures it (same crop, same band, same row line). This is a COPY of that row loop, not a call into it, so it
+// can drift: a change to how firstHeaderGreenRow measures a row has to be repeated here.
 std::vector<double> rowFractions(
     const Frame &frame, const Rect<double> &scroll_area_rect, const scraper_config::FactorHeaderConfig &header) {
     const Frame area = frame.view(scroll_area_rect);
@@ -167,7 +168,7 @@ BandStats measureClip(
 
 const std::filesystem::path kClipDir = std::filesystem::path(TEST_GOLDEN_CLIP_DIR);
 
-// The clips are gitignored test material (testdata/clips/golden/), so a machine without them skips -- the
+// The clips are gitignored test material in the golden clip directory, so a machine without them skips -- the
 // same conditional shape every golden case here has.
 bool clipAvailable(const std::string &name) {
     return std::filesystem::exists(kClipDir / name);

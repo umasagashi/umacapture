@@ -629,9 +629,11 @@ class CharaDetailStateWidget extends ConsumerWidget {
             status == CharaDetailCaptureStatus.tabCompleted ||
             status == CharaDetailCaptureStatus.duplicateHint ||
             // A refused tab is still an open detail screen with a session in progress: the other
-            // tabs keep whatever they captured, and the remedy is to move between the tabs the rings
-            // describe. Dropping the rings (and with them the switch indicators) here would hide the
-            // very display the user is being told to act on.
+            // tabs keep whatever they captured, and one remedy is to scroll the refused tab back to its
+            // head and then leave it and return, moving between the tabs the rings describe (the game
+            // keeps a tab's scroll position across a switch, so switching alone is refused again).
+            // Dropping the rings (and with them the switch indicators) here would hide the very
+            // display the user is being told to act on.
             status == CharaDetailCaptureStatus.tabRefused ||
             status == CharaDetailCaptureStatus.succeeded ||
             status == CharaDetailCaptureStatus.alreadyCaptured);

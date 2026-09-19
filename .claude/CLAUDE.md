@@ -98,6 +98,20 @@ passages pruned out. These are the project's own answers where it now stays sile
   lines are touched. The debug theme gallery (Settings → Debug → Theme gallery,
   `kDebugMode` only) visualizes the full palette and remaining literal debt.
 
+## Comments
+
+- **A comment says what the code does now, not what it used to do.** No "used to",
+  "previously", "was changed to", no "now X, but before Y". The history is in `git log` and
+  `git blame`; a comment that carries it makes the current behaviour something the reader has
+  to work out by subtraction, and it goes stale the next time the code moves.
+- **A comment does not point outside the repository.** No `.notes/` path, no gitignored path —
+  `testdata/` included — and no external URL, with or without a reason beside it. Whoever clones
+  this repository has to be able to reach everything a comment sends them to, so state the fact in
+  the comment itself.
+- Both rules govern **the comments you write**. Existing violations are grandfathered until their
+  lines are touched, the same way pre-existing colour literals are above. Neither rule is enforced
+  by a hook.
+
 ## "Visualise it" means show the real pixels
 
 When asked to visualise something — 「可視化して」/「図で見せて」/「見せて」 — the ask

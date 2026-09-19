@@ -142,7 +142,7 @@ TEST_CASE("visibleSelfPrefix stops before a row whose cell would fall off the fr
 // The cases below paint that geometry at the pixel rows measured off a real clip, so a scan that starts
 // from the wrong place is visible as wrong factors rather than as no factors.
 //
-// Measured from testdata/clips/golden/friend_standard.mp4 frame 165 (736x1308, anchor unit 735), at the
+// Measured from the golden clip friend_standard.mp4, frame 165 (736x1308, anchor unit 735), at the
 // scan column x = left_rect.left(): the tab-bar pill's top edge at row 676, the pill body at 706-719, the
 // scroll area top at 727, the green factor header at 742-769, and the first two factor rows at 788 and
 // 848. The offsets below are those rows expressed relative to the scroll area top, so the fixture stays
@@ -429,8 +429,9 @@ TEST_CASE("a limited read hands the models no cell past the limit") {
 }
 
 // THE FLAG THE FRONT END RECEIVES IS THE READ'S, END TO END. The reader's list goes into messages::factorProbe with
-// the limit it was read under, which is what CharaDetailRecognizer::probe does (that class has no injection ctor,
-// so this composes the two halves it joins). below_threshold is asserted in the message text, on both sides of the
+// the limit it was read under, which is what CharaDetailRecognizer::probe does. This case composes the two halves
+// it joins directly; the probe itself, built through its production ctor, is driven in
+// test_recognizer_wiring.cpp. below_threshold is asserted in the message text, on both sides of the
 // boundary.
 TEST_CASE("the probe message states below_threshold for exactly the reads that are shorter than their limit") {
     const auto config = factorConfig();

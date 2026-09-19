@@ -120,7 +120,8 @@ void main() {
     });
 
     test('a full ring without the statement is not a completion', () {
-      // T2. The thumb can reach the bottom before the tab completes.
+      // The source is the statement, not the ring. The thumb can reach the bottom before the tab
+      // completes.
       final (container, controller) = skillShown('scrolled');
 
       controller.handleNativeMessage(_scrollUpdated(_skillTab, 1.0));
@@ -132,7 +133,8 @@ void main() {
     });
 
     test('a ring written back to zero does not withdraw a completion', () {
-      // T3. Nothing is inferred from the ring in either direction.
+      // The source is the statement, not the ring: nothing is inferred from the ring in either
+      // direction.
       final (container, controller) = skillShown('scrolled');
       controller.handleNativeMessage(_pageReady(_skillTab));
 
@@ -172,7 +174,7 @@ void main() {
       'onCharaDetailClosed': jsonEncode({'type': 'onCharaDetailClosed'}),
     }.entries) {
       test('${boundary.key} drops it', () {
-        // T4.
+        // The set lives for one session.
         final (container, controller) = skillShown('scrolled');
         controller.handleNativeMessage(_pageReady(_skillTab));
         expect(stateOf(container).tabsCompleted, {_skillTab});
@@ -185,7 +187,8 @@ void main() {
     }
 
     test('a completion of an earlier attempt drops nothing', () {
-      // T4, the other half: a late `onCharaDetailFinished` of the previous attempt is not a boundary.
+      // The set lives for one session, the other half: a late `onCharaDetailFinished` of the previous
+      // attempt is not a boundary.
       final (container, controller) = skillShown('scrolled');
       controller.handleNativeMessage(_started('rec-2'));
       controller.handleNativeMessage(_awaiting(_skillTab, false));
@@ -219,24 +222,24 @@ void main() {
     );
 
     test('a refusal of another tab outranks it', () {
-      // T5. The refusal is session-wide and needs an action the "show an unfinished tab" line does not
-      // name (scroll the refused tab back up first).
+      // The ranking: the refusal is session-wide and needs an action the "show an unfinished tab" line
+      // does not name (scroll the refused tab back up first).
       final state = completedFactor().tabRefused(_skillTab, true, 'scrolled');
       expect(state.status, CharaDetailCaptureStatus.tabRefused);
       expect(state.tabRefused(_skillTab, false, '').status, CharaDetailCaptureStatus.tabCompleted);
     });
 
     test('a standing wait on the displayed tab outranks it', () {
-      // T5. Within one frame the core sends the completion before it withdraws the wait; the wait is
-      // shown for those two adjacent messages.
+      // The ranking: within one frame the core sends the completion before it withdraws the wait; the
+      // wait is shown for those two adjacent messages.
       final state = completedFactor().tabAwaitingHead(_factorTab, true);
       expect(state.status, CharaDetailCaptureStatus.waitingForReady);
       expect(state.tabAwaitingHead(_factorTab, false).status, CharaDetailCaptureStatus.tabCompleted);
     });
 
     test('the duplicate hint outranks it, and the phase beneath the hint is tabCompleted', () {
-      // T5. The hint is recorded as an event only on the transition into it, so it must not be hidden by
-      // a completion that arrives in the same moment.
+      // The ranking: the hint is recorded as an event only on the transition into it, so it must not be
+      // hidden by a completion that arrives in the same moment.
       final state = completedFactor().fail(message: 'duplicated_character_probe');
       expect(state.status, CharaDetailCaptureStatus.duplicateHint);
       expect(state.phase, CharaDetailCaptureStatus.tabCompleted);
@@ -254,7 +257,7 @@ void main() {
     });
 
     test('it outranks the scroll phases, and phase equals status away from the hint', () {
-      // T1/T5. A completed tab reads as completed scrolled or not.
+      // The ranking, at any scroll position: a completed tab reads as completed scrolled or not.
       for (final position in TopOfContent.values) {
         final state = completedFactor(position: position);
         expect(state.status, CharaDetailCaptureStatus.tabCompleted, reason: '$position');
@@ -269,7 +272,7 @@ void main() {
     });
 
     test('it is not an event', () {
-      // T10: a position inside a character, like the scroll phases.
+      // Not an event: a position inside a character, like the scroll phases.
       expect(eventfulCaptureStatuses, isNot(contains(CharaDetailCaptureStatus.tabCompleted)));
     });
   });

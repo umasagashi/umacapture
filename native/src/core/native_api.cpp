@@ -435,8 +435,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     restarted_connection->listen(
         [this](const auto &discarded, const auto &begun) { notifyCharaDetailRestarted(discarded, begun); });
 
-    // The attempt could not be built: creating its scraping directory failed, so it has nowhere to scrape into.
-    // Terminal for the attempt, and reported exactly as a stitch failure is -- the record will never exist, so
+    // The attempt cannot continue: creating its scraping directory failed, so it has nowhere to scrape into, or
+    // one of its fragments could not be written, so the record would be short. Terminal for the attempt, and reported exactly as a stitch failure is -- the record will never exist, so
     // the UI is told the attempt finished unsuccessfully instead of being left waiting for a capture that can
     // never progress.
     const auto session_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();

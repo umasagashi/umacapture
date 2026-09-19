@@ -223,11 +223,10 @@ struct HookRecorder {
     }
 };
 
-// A scratch directory unique to this PROCESS. Previously a literal relative to the test binary's working
-// directory (the build directory), which two umacapture_tests processes running in the same directory
-// share: ScraperHarness below writes real fragment files under it through injected mkdir hooks, so two
-// concurrent processes race the same relative path and one fails with "failed to open image for write"
-// (see .notes/debug-scan-assert/T-test-tempdirs.md). The random token separates processes the same way
+// A scratch directory unique to this PROCESS. ScraperHarness below writes real fragment files under it
+// through injected mkdir hooks, so a path shared by two umacapture_tests processes running in the same
+// directory would have them race the same location, and one would fail with "failed to open image for
+// write". The random token separates processes the same way
 // test_scraper_estimators.cpp's uniqueHarnessDir() does -- there is no pid helper in this tree, and this
 // needs no platform header. A single token is enough here (no per-call counter): every case in this file
 // shares the one root, and doctest runs them one at a time within a process.
@@ -366,7 +365,7 @@ struct ScraperHarness {
     std::vector<std::pair<int, std::string>> positions;
     // Every frame the factor duplicate probe was armed with, in order. Kept as FRAMES rather than as a count
     // because "the probe fired" and "the probe was handed fragment #0's own pixels" are different claims, and
-    // the exit this file could not previously reach is exactly where they come apart.
+    // the offset exit is exactly where they come apart.
     std::vector<Frame> probe_frames;
     // The `cue_owed` carried by each of those probes, in the same order. A third claim again: the probe fired,
     // it carried fragment #0's pixels, and it said whether the exit that latched them owed the user a chime.
@@ -965,8 +964,8 @@ TEST_CASE("the factor tab's head-of-content word is checked by the header once t
     // until a tab has latched its fragment #0, so on every frame before then the fine sensor had nothing to say
     // and the word on the wire came from the scroll thumb alone -- on the one tab that carries a finer landmark,
     // during the one stretch where the user is most likely to have nudged the list. The second subcase is a
-    // frame the thumb reads as a genuine head and the header reads as displaced, which is exactly the case the
-    // old shape could not reach: it is the coarse sensor's own blind spot (kExposedTrackTopMargin puts it at
+    // frame the thumb reads as a genuine head and the header reads as displaced, which is exactly the case a
+    // reference-row comparison cannot reach: it is the coarse sensor's own blind spot (kExposedTrackTopMargin puts it at
     // tens of content pixels on a short thumb), and no reference exists yet to resolve it.
     //
     // The header is asked only behind a thumb at the head (scraper_impl::factorHeadReading), so the words below
@@ -1071,10 +1070,10 @@ TEST_CASE("a tab at the head of the list is not refused") {
 
 // --- fragment #0 is accepted by the same judgment every other consumer asks ---------------------------------
 //
-// ScrollableScrapingInterpreter::startScrolling used to judge the frame it latches by the scroll thumb alone, on
-// every tab. The factor tab's banner judgment reached Rule 3 and the position word but not the one decision that
-// decides what gets captured, so a factor list pre-scrolled by less than one thumb pixel's worth of content was
-// latched as fragment #0 and read, silently, from the wrong rows. makeTabScraper now hands every tab's interpreter
+// ScrollableScrapingInterpreter::startScrolling judging the frame it latches by the scroll thumb alone would leave
+// the factor tab's banner judgment out of the one decision that decides what gets captured, so a factor list
+// pre-scrolled by less than one thumb pixel's worth of content would be latched as fragment #0 and read, silently,
+// from the wrong rows. makeTabScraper therefore hands every tab's interpreter
 // CharaDetailSceneScraper::topOfContent bound to the tab; these cases pin that on the wire (the refusal, the
 // probe), for the factor tab and for the two tabs that must keep judging by the thumb.
 
@@ -1123,8 +1122,9 @@ RefusalLog refusedAs(TabPage tab, const std::string &reason) {
 }
 
 TEST_CASE("the factor tab refuses a fragment #0 whose banner is cut at the top, although the thumb reads the head") {
-    // N2. The thumb is at its head on every frame here (exposed_rows 0); only the banner row differs, so the
-    // banner is what decides. Row 0 is a banner cut by the scroll area's top edge; row 1 is the first row the
+    // The factor tab's fragment #0 is decided by the thumb when the thumb is not at its head, and by the banner
+    // when it is. The thumb is at its head on every frame here (exposed_rows 0); only the banner row differs, so
+    // the banner is what decides. Row 0 is a banner cut by the scroll area's top edge; row 1 is the first row the
     // window accepts, the control that keeps "refused" from meaning "this harness refuses everything".
     const auto capture = [](ScraperHarness &h, int banner_row) {
         h.scraper.build(SceneInfo{record::Standard});
@@ -1158,8 +1158,8 @@ TEST_CASE("the factor tab refuses a fragment #0 whose banner is cut at the top, 
 
 TEST_CASE("a long factor list pre-scrolled by 24 to 27 px, which its thumb cannot show, is refused on both exits") {
     // The failure this wiring exists for: on the friend max-rental list a thumb pixel is worth ~27 content px, so
-    // a pre-scroll of 24..27 px reads as the head to the thumb, and fragment #0 used to be latched and read from
-    // the wrong rows with no warning. Each pre-scroll is checked against both halves of its premise first -- the
+    // a pre-scroll of 24..27 px reads as the head to the thumb, and, judged by the thumb alone, fragment #0 would be
+    // latched and read from the wrong rows with no warning. Each pre-scroll is checked against both halves of its premise first -- the
     // thumb reads the head, the banner is cut -- so the refusal cannot come from anything else.
     for (const int scroll : {24, 25, 26, 27}) {
         CAPTURE(scroll);
@@ -1221,7 +1221,7 @@ TEST_CASE("the pre-scroll frames are latched when they are at the head, on both 
 }
 
 TEST_CASE("the skill and campaign tabs still accept fragment #0 by the thumb alone") {
-    // N5. These tabs have no banner, and their downstream tolerance is unmeasured, so the wiring must not change
+    // Fragment #0 acceptance by the thumb alone on the bannerless tabs. These tabs have no banner, and their downstream tolerance is unmeasured, so the wiring must not change
     // what they accept. The first two looks are the ones a banner-reading acceptance would decide differently: a
     // frame with no factor header at all, and one whose "header" is cut at row 0.
     struct Look {
@@ -1296,8 +1296,8 @@ TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refus
 
 // --- "do not scroll yet" is a level this core states, not the absence of the cue --------------------------
 //
-// THE DEFECT THESE EXIST FOR. The front end used to derive "the user must not scroll yet" from the fact that
-// no scroll-ready had arrived for the displayed tab. The cue is an ANNOUNCEMENT, and this core reaches "the
+// THE FAILURE THESE GUARD AGAINST: a front end deriving "the user must not scroll yet" from the fact that no
+// scroll-ready has arrived for the displayed tab. The cue is an ANNOUNCEMENT, and this core reaches "the
 // head is latched, scrolling may begin" by paths that announce nothing:
 //
 //   * ScrollableScrapingInterpreter::updateBefore's OFFSET exit, which begins capture without a stationary
@@ -1306,8 +1306,8 @@ TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refus
 //   * a REFUSED tab, where startScrolling returns false and the cue is deliberately withheld;
 //   * NonScrollableScrapingInterpreter, which is not given a cue sender at all.
 //
-// On every one of those the card said 「まだスクロールしないでください」, in a caution colour, for as long as
-// the tab was displayed -- over a capture that was proceeding normally. A page with no scroll bar does still have
+// On every one of those such a card says 「まだスクロールしないでください」, in a caution colour, for as long as
+// the tab is displayed -- over a capture that is proceeding normally. A page with no scroll bar does still have
 // a wait -- it holds until the tab is complete -- but it is not a wait for a cue, and the level says which kind of
 // page it is (`scroll_bar`) so the front end can word it without mentioning scrolling.
 //
@@ -1556,17 +1556,17 @@ TEST_CASE("leaving a tab whose capture is in progress puts it back to awaiting i
 
 // --- an unfinished visit leaves nothing behind ------------------------------------------------------------
 //
-// THE DEFECT THIS EXISTS FOR. The switch handler used to rebuild only a tab that had `started()` or been
-// refused, on the stated reasoning that "a brief glance that never settles into a stationary frame never sets
+// THE FAILURE THIS GUARDS AGAINST: a switch handler that rebuilds only a tab that has `started()` or been
+// refused, on the reasoning that "a brief glance that never settles into a stationary frame never sets
 // is_scrolling, so it is not started and switching away from it discards nothing". A glance discards nothing
-// only if the interpreter is holding nothing, and it is: StationaryFrameCatcher::previous_frame is written on
+// only if the interpreter is holding nothing, and it is not: StationaryFrameCatcher::previous_frame is written on
 // every update, and ScrollableScrapingInterpreter::initial_descriptor is written on the first one and never
-// cleared. So the tab kept the pixels of the visit the user walked away from, and the FIRST frame of the next
-// visit could latch -- or refuse -- against evidence gathered before the switch, i.e. against a stationarity
+// cleared. So such a tab keeps the pixels of the visit the user walked away from, and the FIRST frame of the next
+// visit can latch -- or refuse -- against evidence gathered before the switch, i.e. against a stationarity
 // claim spanning the time the user spent on another tab entirely.
 //
 // The tab is the same tab, so a "same pixels" test cannot tell the two visits apart; only the interpreter's
-// lifetime can. That is why the handler now rebuilds every tab you leave that is not ready(), and why this
+// lifetime can. That is why the handler rebuilds every tab you leave that is not ready(), and why this
 // case reads the wire rather than any internal flag.
 TEST_CASE("a tab left before it latched keeps nothing from the visit that was abandoned") {
     // All three tabs share ScrollableScrapingInterpreter and the same switch handler, so the retention was
@@ -1589,7 +1589,7 @@ TEST_CASE("a tab left before it latched keeps nothing from the visit that was ab
 
         // Visit 1: ONE frame, on a screen that is already scrolled by a tip pixel. A single frame can latch
         // nothing -- the catcher needs a second, identical one -- so the tab is neither started nor refused,
-        // which is exactly the state the old guard declined to rebuild.
+        // which is exactly the state a started-or-refused guard would decline to rebuild.
         h.update(
             scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{route.glanced, record::Standard});
         REQUIRE(h.refusals.empty());
@@ -1625,12 +1625,12 @@ TEST_CASE("a tab left before it latched keeps nothing from the visit that was ab
 
 // --- the factor duplicate probe is armed by the latch, not by the announcement ----------------------------
 //
-// THE DEFECT THIS EXISTS FOR. The probe (Rule 3's reference, on_factor_probe) used to
-// hang off the factor tab's scroll-ready cue and take "whichever frame was current when the cue fired". On the
-// stationary exit those are the same frame, so it worked -- by an accident of identity. The offset exit sends
-// no cue at all, so on a premature scroll the probe never fired: the early duplicate check never ran and
-// Rule 3 (maybeResetOnFactorChange) returned immediately for the rest of the session, because its reference
-// was empty. Both failures were SILENT and both were fail-open.
+// THE FAILURE THIS GUARDS AGAINST: a probe (Rule 3's reference, on_factor_probe) hung off the factor tab's
+// scroll-ready cue, taking "whichever frame was current when the cue fired". On the stationary exit those are
+// the same frame, so it would work -- by an accident of identity. The offset exit sends no cue at all, so on a
+// premature scroll such a probe never fires: the early duplicate check never runs and Rule 3
+// (maybeResetOnFactorChange) returns immediately for the rest of the session, because its reference is empty.
+// Both failures are SILENT and both are fail-open.
 //
 // The two facts asserted here are (a) that the probe fires on both exits, and (b) that it is armed with
 // fragment #0's OWN frame rather than the current one. (b) is not decoration: taking the current frame at the
@@ -1760,16 +1760,16 @@ TEST_CASE("the factor tab's duplicate probe is armed by the latch, from both of 
 
 // --- the probe carries the cue its exit owed ---------------------------------------------------------------
 //
-// THE DEFECT THIS EXISTS FOR, and it is the one the case above created. Arming the probe from both exits gave
-// the factor tab back its duplicate check and Rule 3 -- and, because this tab's chime is not sounded by the
-// core but synthesized by the front end off this very message, it also gave the factor tab a chime on the exit
+// THE DEFECT THIS GUARDS AGAINST. The probe is armed from both exits, which gives the factor tab its duplicate
+// check and Rule 3 on either -- and, because this tab's chime is not sounded by the core but synthesized by the
+// front end off this very message, a probe that did not say which exit it came from would chime on the exit
 // that must not chime. A user who scrolled before the cue would hear the cue after they started.
 //
-// The fix is not a state test anywhere: `cue_owed` is stated by the exit that latched, travels on the latch
+// No state test decides this: `cue_owed` is stated by the exit that latched, travels on the latch
 // event and out on on_factor_probe, and the front end reads it. So what is asserted here is that the probe
 // still fires on both exits (the duplicate check and Rule 3 stay alive) while the flag it carries differs.
 // A test of the probe's presence alone cannot see this, and a test of the chime alone cannot tell "no chime"
-// from "no probe" -- which is exactly the pair the previous stage traded one for the other.
+// from "no probe" -- and each of the two can be fixed by breaking the other.
 //
 // Controls first again, for the reason the case above states: a fatal REQUIRE aborts the whole case.
 TEST_CASE("the factor probe carries the cue its exit owed, so a premature scroll stays silent") {
@@ -1794,9 +1794,9 @@ TEST_CASE("the factor probe carries the cue its exit owed, so a premature scroll
     }
 
     SUBCASE("a tab whose cue does reach the wire still chimes on one exit and not the other") {
-        // CONTROL for the move that made the flag possible: on_scroll_ready is now sent from inside
-        // startScrolling under `cue_owed`, rather than by the caller of the stationary exit. If that move had
-        // changed which exits chime, every tab on the wire would be wrong and no factor-tab assertion would
+        // CONTROL for what makes the flag possible: on_scroll_ready is sent from inside startScrolling under
+        // `cue_owed`, rather than by the caller of the stationary exit. If that placement changed which exits
+        // chime, every tab on the wire would be wrong and no factor-tab assertion would
         // say so, because the factor tab puts nothing on on_scroll_ready either way.
         {
             ScraperHarness settled;
@@ -1826,9 +1826,8 @@ TEST_CASE("the factor probe carries the cue its exit owed, so a premature scroll
 
     SUBCASE("the motion exit's probe says no cue is owed, and still arms the probe") {
         // THE DISCRIMINATOR. Both halves matter and they pull in opposite directions: the probe must still
-        // fire (that is what the previous stage bought -- the early duplicate check and Rule 3's reference on
-        // an exit that used to arm nothing) and the chime must still be withheld (that is what this stage
-        // keeps). Asserting only one of them would let the other regress unnoticed.
+        // fire (that is what gives the early duplicate check and Rule 3 a reference on an exit that sends no
+        // cue) and the chime must still be withheld (the front end decides this tab's chime). Asserting only one of them would let the other regress unnoticed.
         ScraperHarness h;
         h.scraper.build(SceneInfo{record::Standard});
 
@@ -1852,20 +1851,20 @@ TEST_CASE("the factor probe carries the cue its exit owed, so a premature scroll
 
 // --- revisiting an unfinished factor tab probes again, and the second probe owes a cue too -----------------
 //
-// THE DEFECT THIS EXISTS FOR. A user who leaves the factor tab before its capture finishes and comes back to it
-// hears no "you may scroll now" chime on the second visit. That tab's chime is not sounded by this core at all
+// THE DEFECT THIS GUARDS AGAINST. A user who leaves the factor tab before its capture finishes and comes back to
+// it is owed a "you may scroll now" chime on the second visit too. That tab's chime is not sounded by this core at all
 // (makeTabScraper hands it the internal factor_scroll_ready sink); the front end synthesizes it off
 // on_factor_probe's `cue_owed`. So "the core did not send a second probe" and "the core sent one and the front
-// end swallowed it" produce the identical symptom, and only one of them is a defect in this file's subject.
+// end swallowed it" would produce the identical symptom -- a silent second visit --, and only one of them is a defect in this file's subject.
 //
-// This case pins the CORE's half as a single measurement. It was previously only a composition of two other
-// cases -- "a tab left before it latched keeps nothing from the visit that was abandoned" (which drives the
+// This case pins the CORE's half as a single measurement rather than as a composition of two other
+// cases --"a tab left before it latched keeps nothing from the visit that was abandoned" (which drives the
 // {FactorPage, SkillPage} route but returns to a screen ALREADY SCROLLED, so it ends in a refusal and never
 // reaches a probe) and "the stationary exit's probe says a cue is owed" (which drives a first visit only). Two
-// cases that each cover half of a claim do not cover the claim: nothing here observed a SECOND probe, and a
+// cases that each cover half of a claim do not cover the claim: neither observes a SECOND probe, and a
 // core that emitted one probe per session would leave both of them green.
 //
-// The route is the one the user reported: factor -> skill -> factor. The return is at the HEAD of the list,
+// The route is factor -> skill -> factor, the ordinary way a tab is left unfinished and revisited. The return is at the HEAD of the list,
 // which is what the abandoned-visit case above deliberately is not, and is what a user who did not scroll
 // before switching away actually sees.
 TEST_CASE("coming back to an unfinished factor tab probes again, still owing the cue") {
@@ -1915,12 +1914,11 @@ TEST_CASE("coming back to an unfinished factor tab probes again, still owing the
 //
 // The composite verdict is three-valued and leaves this process UNRESOLVED, because the two front-end
 // consumers answer "no sensor could read this frame" in opposite directions (see
-// CharaDetailSceneScraper::on_scroll_position). Two thirds of that contract were already watched -- the
+// CharaDetailSceneScraper::on_scroll_position). Two thirds of that contract are watched elsewhere -- the
 // message's SHAPE by test_native_api_messages.cpp, the front end's resolution by the Dart suite -- and the
-// third was watched by nothing: no test observed the WORD this class chooses.
+// third is watched here: the WORD this class chooses.
 //
-// That gap is not hypothetical. Resolving here with a fail-open policy, exactly as this code did before the
-// unification, leaves the whole suite green: the wire simply never carries "unknown" again and the
+// Without these cases, resolving here with a fail-open policy would leave the whole suite green: the wire simply never carries "unknown" again and the
 // fail-closed consumer is fail-open in practice, behind a message whose shape never changed. A golden cannot
 // see it either -- the golden suite compares records, and this channel produces none.
 
@@ -2192,10 +2190,10 @@ TEST_CASE("a candidate switch read as the same record keeps the session and asks
 }
 
 TEST_CASE("a factor list displaced inside the head window is judged by Rule 3, and a Same takes it as the witness") {
-    // N6. Behind a thumb at the head, the flush gate is the header's window, so a list a few rows off the row it was latched at is still at
+    // Rule 3 sees a list displaced within the header's window. Behind a thumb at the head, the flush gate is the header's window, so a list a few rows off the row it was latched at is still at
     // its head: the gate opens, the diff against the witness nominates the frame, both frames are read, and the
-    // Same verdict keeps the session and makes the displaced frame the witness. Before the window was the
-    // recognizer's, a displacement like this closed the gate and Rule 3 was blind to the frame.
+    // Same verdict keeps the session and makes the displaced frame the witness. A gate narrower than the
+    // recognizer's window would stay closed on such a frame and leave Rule 3 blind to it.
     ScraperHarness h;
     h.scraper.build(SceneInfo{record::Standard});
     const std::string first_session = h.sessionIdAt(0);
@@ -2648,7 +2646,7 @@ TEST_CASE("the capture helpers really capture: a tab, the witness, and a whole s
         CHECK(h.completions == 0);
     }
     SUBCASE("a factor page with no scroll bar, which latches the witness on its one frame owing no cue") {
-        // THE LATCH THAT USED TO INSTALL NOTHING. The page is captured and its head latched on the same frame, so
+        // A LATCH WITH NO SCROLL BAR STILL INSTALLS THE WITNESS. The page is captured and its head latched on the same frame, so
         // the probe is armed exactly as on a scrolled capture -- with the whole frame, this session's scroll area,
         // and no cue: there is nothing to scroll, so "you may scroll now" would be false, and it would arrive after
         // the tab's own completion.
@@ -2690,9 +2688,9 @@ TEST_CASE("the capture helpers really capture: a tab, the witness, and a whole s
 }
 
 TEST_CASE("an opened session announces the id its record finishes under, before anything else of it") {
-    // THE DEFECT THIS EXISTS FOR. The start used to be announced by a listener on the open event that ran before
-    // the scraper built the session, so it could not name the session at all; a front end then had no way to tell
-    // the record of the previous attempt, finishing late on another thread, from this attempt's.
+    // THE FAILURE THIS GUARDS AGAINST: a start announced by a listener on the open event that runs before the
+    // scraper builds the session cannot name the session at all, and a front end then has no way to tell the
+    // record of the previous attempt, finishing late on another thread, from this attempt's.
     ScraperHarness h;
     h.opened->send(SceneInfo{record::Standard});
 
@@ -3252,10 +3250,10 @@ TEST_CASE("a captured factor tab whose frames show a different record is discard
 }
 
 TEST_CASE("a captured factor page with no scroll bar that stays at its head is not discarded, however long it stays") {
-    // THE RESET THIS CLOSES. Such a page is captured on the frame it settles on, and the user has nowhere to scroll
-    // it, so it stays at the head of its content for as long as it is displayed. While its latch installed no
-    // witness, a rule that took "a captured tab at the head for the dwell" for a switch discarded it with nobody
-    // having switched. Rule 3 watches it now, and an unchanged page nominates nothing, however many dwells pass.
+    // THE RESET THIS GUARDS AGAINST. Such a page is captured on the frame it settles on, and the user has nowhere
+    // to scroll it, so it stays at the head of its content for as long as it is displayed. A rule that took "a
+    // captured tab at the head for the dwell" for a switch would discard it with nobody having switched. Its latch
+    // installs a witness, so Rule 3 watches it, and an unchanged page nominates nothing, however many dwells pass.
     bool complete = false;
     SUBCASE("while the other tabs are still to be captured") {
         complete = false;
@@ -3384,8 +3382,8 @@ TEST_CASE("after completion, a switch made on another tab is judged by Rule 3 on
 }
 
 TEST_CASE("Rule 3's dwell does not resume across a frame of another tab") {
-    // The same property from Rule 3's side, which a captured factor tab now needs: before, its dwell could be
-    // left standing only on a tab still being captured, where leaving the tab rebuilt it and dropped the dwell.
+    // The same property from Rule 3's side, which a captured factor tab needs: leaving a tab still being captured
+    // rebuilds it and drops the dwell, but a captured tab is not rebuilt, so nothing else drops its dwell.
     ScraperHarness h;
     h.scraper.build(SceneInfo{record::Standard});
     const uint64 completed_at = completeSession(h, captureFactorByScrolling);

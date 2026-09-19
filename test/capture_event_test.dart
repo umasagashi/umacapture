@@ -233,7 +233,7 @@ void main() {
       // tab keeps the status at `tabRefused`. So the probe firing produces no transition and no
       // event, at the moment it fires.
       //
-      // It was ranked the other way for exactly this reason and was changed anyway: the hint's
+      // The refusal still ranks above the hint despite that: the hint's
       // wording tells the user the screen is fine and that switching away is safe, which is a wrong
       // instruction at the moment they are deciding whether to move on. A duplicate is caught again
       // at the end of the capture (`duplicated_character`, terminal); the rows above a refused tab's
@@ -334,10 +334,10 @@ void main() {
     });
 
     test('every outcome the card records goes when the next character is opened', () {
-      // THE REPORTED DEFECT, for all four outcomes at once: 「キャプチャ完了前に詳細画面を見失いま
-      // した」 stayed on screen after the user opened the detail screen again, because the only
-      // "next" this side could name was the next SESSION. What the user is looking at had moved on
-      // and the past tense had not.
+      // The property, for all four outcomes at once: once the user opens the detail screen again, no
+      // outcome of the previous attempt may stay on the card. A 「キャプチャ完了前に詳細画面を見失いま
+      // した」 left standing reads as a statement about the character now on screen, when it is about
+      // the one before; the "next" that clears it is the next character, not the next SESSION.
       //
       // All four rather than the failures alone: a success left standing points at a record from
       // the previous character while the rings underneath fill for this one, which is the same
@@ -633,10 +633,10 @@ void main() {
     }
 
     test('onCharaDetailStarted -- the screen was opened again -- clears the last outcome', () {
-      // THE REPORTED SEQUENCE, in the order the core produces it: the detail screen was lost
+      // THE LOST-SCREEN SEQUENCE, in the order the core produces it: the detail screen is lost
       // mid-capture, `onCharaDetailClosed` arrives, the error naming the loss arrives right after
       // it and takes the card's slot, and the user opens the character again. 「キャプチャ完了前に
-      // 詳細画面を見失いました」 has to be gone by then; it was not.
+      // 詳細画面を見失いました」 has to be gone by then.
       final (container, controller) = build();
       final notifier = container.read(charaDetailCaptureStateProvider.notifier)..started('rec-1');
       // The close FIRST, then the error -- which is the order the core guarantees, not an
@@ -644,7 +644,7 @@ void main() {
       // listener that emits `onCharaDetailClosed` "before the scraper's own on_closed listener, so
       // for an incomplete close this fires ahead of the closed_before_completed error, letting that
       // error win the final UI state". Writing it the other way round makes the close reset a state
-      // that already carries the outcome, which is a different sequence from the reported one and
+      // that already carries the outcome, which is a different sequence from the lost-screen one and
       // silently turns this case into a second test of "`reset()` carries the attempt id".
       controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailClosed'}));
       notifier.fail('closed_before_completed');
@@ -695,19 +695,11 @@ void main() {
     });
   });
 
-  group('the reported symptom, on screen', () {
-    // THE BUG AS THE USER SEES IT, which is a SENTENCE THAT WILL NOT GO AWAY -- not a provider
-    // value. Everything above stops at `container.read(captureEventProvider)`; every case below
-    // reaches the widget through `_pumpEvent`, which overrides the notifier with
-    // `_FixedCaptureEventNotifier` -- a holder that listens to nothing. So the recording rules and
-    // the rendering are pinned separately and the two halves meet only at the provider, never on
-    // screen. A change that keeps the notifier correct and breaks the view -- `CaptureEventView`
-    // gaining any caching, the tile hoisted into a parent that does not rebuild, `_failureText`
-    // swallowing the code -- reproduces the complaint exactly with this file green.
-    //
-    // This case therefore uses NO override: the real `CaptureEventNotifier` is mounted under the
-    // real view, the sentence is put on screen through the sequence the core emits, and the reopen
-    // arrives from the wire. What is asserted is the RENDERED text going away.
+  group('the failure sentence, rendered on screen', () {
+    // Pins that the failure sentence shown on screen leaves the screen when the character is opened
+    // again. If it breaks, the user sees the previous attempt's failure under the new character.
+    // The case mounts the real notifier under the real view with no provider override, and asserts
+    // on the rendered text.
     useHiveForTest(['settings']);
 
     setUp(() {
@@ -757,14 +749,14 @@ void main() {
       expect(
         find.text(sentence),
         findsOneWidget,
-        reason: 'the reported sentence never reached the screen, so its leaving would prove nothing',
+        reason: 'the failure sentence never reached the screen, so its leaving would prove nothing',
       );
 
       // The user opens the character again.
       controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-2'}));
       await tester.pump();
 
-      expect(find.text(sentence), findsNothing, reason: 'THE REPORTED BUG: the line survived the reopen');
+      expect(find.text(sentence), findsNothing, reason: 'the failure sentence survived the reopen');
       expect(find.byType(CaptureMessageTile), findsNothing, reason: 'the card kept a row with something else in it');
     });
   });
