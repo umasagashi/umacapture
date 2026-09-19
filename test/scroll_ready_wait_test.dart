@@ -94,7 +94,7 @@ String _factorProbeMessage({bool? cueOwed, bool belowThreshold = _probeBelowThre
   'factors': <Object>[],
   'below_threshold': belowThreshold,
   'record_id': _recordId,
-  if (cueOwed != null) 'cue_owed': cueOwed,
+  'cue_owed': ?cueOwed,
 });
 
 const _probeBelowThreshold = true;

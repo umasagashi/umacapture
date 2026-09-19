@@ -959,14 +959,14 @@ TEST_CASE("a tab whose capture would not start at the head of the list is refuse
 }
 
 TEST_CASE("the factor tab's head-of-content word is checked by the header once the thumb reads the head") {
-    // THE DEFECT THIS EXISTS FOR, and it is a defect of SHAPE rather than of arithmetic. The fine sensor used
-    // to be a difference against a reference row captured at the factor probe. Nothing captures that reference
-    // until a tab has latched its fragment #0, so on every frame before then the fine sensor had nothing to say
-    // and the word on the wire came from the scroll thumb alone -- on the one tab that carries a finer landmark,
-    // during the one stretch where the user is most likely to have nudged the list. The second subcase is a
-    // frame the thumb reads as a genuine head and the header reads as displaced, which is exactly the case a
-    // reference-row comparison cannot reach: it is the coarse sensor's own blind spot (kExposedTrackTopMargin puts it at
-    // tens of content pixels on a short thumb), and no reference exists yet to resolve it.
+    // THE HAZARD THIS PINS is one of SHAPE rather than of arithmetic: which frames the header is asked about at
+    // all. The stretch before a tab latches its fragment #0 is the one where the user is most likely to have
+    // nudged the list, and on the factor tab the scroll thumb is the coarse sensor there: it reads the head
+    // across a blind spot of tens of content pixels on a short thumb (kExposedTrackTopMargin). If the word on the
+    // wire came from the thumb alone before a latch, such a nudge would read at_top. The header needs no
+    // reference captured by a latch -- it is a fact of the frame -- so it answers from the first thumb reading
+    // on. The second subcase is exactly that frame: the thumb reads a genuine head and the header reads it as
+    // displaced.
     //
     // The header is asked only behind a thumb at the head (scraper_impl::factorHeadReading), so the words below
     // are the words of two frames: the first is judged before the tab is built and has no thumb reading, which

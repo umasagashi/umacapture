@@ -320,7 +320,8 @@ TEST_CASE("detail crop report before anything is measured repeats the default as
 }
 
 TEST_CASE("factor probe serializes each factor as id/star, beside exactly three more data fields") {
-    // The whole message, so a field that came back -- record_type, match_threshold -- or went missing fails here.
+    // The whole message, so any extra field (record_type and match_threshold are not part of it) or a missing
+    // one fails here.
     // `record_id` names the attempt the probe frame was latched in, so a result arriving after the next attempt
     // began can be told apart from that attempt's own.
     const std::vector<chara_detail::record::Factor> factors{{101, 3}, {202, 1}};
@@ -362,9 +363,9 @@ TEST_CASE("factor probe states whether the latch owed a cue, in both directions"
     // The factor tab's chime is synthesized by the front end off this message, so this field is the whole of
     // what tells it whether the latch that took fragment #0 owed the user a cue: of a scrollable page's two exits
     // only the one that waited does, and a page with no scroll bar (which also arms the probe) owes none. Both
-    // directions are pinned: a field
-    // that were hard-wired to either value would leave the front end either always silent (the capture never
-    // starts, because the user is never told to scroll) or always chiming (the defect this replaces).
+    // directions are pinned: a field hard-wired to either value would leave the front end either always silent
+    // (the capture never starts, because the user is never told to scroll) or always chiming (a cue over a
+    // capture that owed none).
     CHECK(Json::parse(factorProbe({}, 14, true, "rec-1")).at("cue_owed") == true);
     CHECK(Json::parse(factorProbe({}, 14, false, "rec-1")).at("cue_owed") == false);
 }
