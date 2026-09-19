@@ -369,8 +369,11 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto scroll_updated_connection = event_util::makeDirectConnection<int, double>();
     scroll_updated_connection->listen([this](int index, double progress) { notifyScrollUpdated(index, progress); });
 
-    const auto scroll_position_connection = event_util::makeDirectConnection<int, bool>();
-    scroll_position_connection->listen([this](int index, bool at_top) { notifyScrollPosition(index, at_top); });
+    // Carries the three-valued top-of-content word, not a yes/no: the resolution of "no sensor could read this
+    // frame" belongs to each front-end consumer, whose costs for it are opposite (see messages::scrollPosition).
+    const auto scroll_position_connection = event_util::makeDirectConnection<int, std::string>();
+    scroll_position_connection->listen(
+        [this](int index, const std::string &top_of_content) { notifyScrollPosition(index, top_of_content); });
 
     // A tab's capture was refused (its first fragment was not the head of the list), or that refusal was
     // withdrawn by a rebuild. Level-driven and per tab -- see messages::tabRefused for why this is not routed
@@ -381,6 +384,16 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         log_info("tab {} refused={} ({})", index, refused, reason);
         notifyTabRefused(index, refused, reason);
     });
+
+    // Whether the character-switch rule holds a reference to compare the factor tab against -- the level the
+    // front ends' switch arrows are made of (see messages::factorSwitchArmed). Debug-level: it changes on every
+    // ordinary capture.
+    const auto factor_switch_armed_connection = event_util::makeDirectConnection<bool>();
+    factor_switch_armed_connection->listen([this](bool armed) {
+        log_debug("factor_switch_armed={}", armed);
+        notifyFactorSwitchArmed(armed);
+    });
+
 
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
@@ -459,6 +472,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         scroll_updated_connection,
         scroll_position_connection,
         tab_refused_connection,
+        factor_switch_armed_connection,
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,

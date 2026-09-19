@@ -906,11 +906,15 @@ public:
 
     void notifyScrollUpdated(int index, double progress) { notify(messages::scrollUpdated(index, progress)); }
 
-    void notifyScrollPosition(int index, bool at_top) { notify(messages::scrollPosition(index, at_top)); }
+    void notifyScrollPosition(int index, const std::string &top_of_content) {
+        notify(messages::scrollPosition(index, top_of_content));
+    }
 
     void notifyTabRefused(int index, bool refused, const std::string &reason) {
         notify(messages::tabRefused(index, refused, reason));
     }
+
+    void notifyFactorSwitchArmed(bool armed) { notify(messages::factorSwitchArmed(armed)); }
 
     void notifyPageReady(int index) { notify(messages::pageReady(index)); }
 

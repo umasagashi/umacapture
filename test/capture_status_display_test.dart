@@ -511,7 +511,7 @@ void main() {
         capturing: true,
         drive: (n) => n
           ..started()
-          ..scrollPosition(1, true)
+          ..scrollPosition(1, TopOfContent.atTop)
           ..fail('duplicated_character_probe'),
       );
 

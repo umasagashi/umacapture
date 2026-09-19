@@ -193,8 +193,10 @@ struct ScanParameter {
 struct FactorHeaderConfig {
     // Vivid header green (same UI green as factor_end_green / header_color_range).
     Range<Color> color_range;
-    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Right of centre, clear of the
-    // left icon column and the diagonal stripes, where only the solid header spans the whole band.
+    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Its width is an OCCLUSION
+    // BUDGET: a tap effect wider than the band hides the probe entirely, so the band is as wide as the row
+    // contents allow rather than as narrow as certainty allows. See factorHeader() in
+    // chara_detail_scene_scraper_builder.h for the measured edges and what each one costs.
     double band_start;
     double band_end;
     // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).

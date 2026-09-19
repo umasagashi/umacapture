@@ -42,8 +42,33 @@ inline std::string scrollUpdated(int index, double progress) {
     return json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump();
 }
 
-inline std::string scrollPosition(int index, bool at_top) {
-    return json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump();
+// WHETHER A TAB IS FLUSH WITH THE HEAD OF ITS CONTENT, stated THREE-VALUED and deliberately UNRESOLVED.
+//
+// `top_of_content` is the same stable machine word `onTabRefused`'s `reason` carries
+// (scraper_impl::topOfContentTag): "at_top", "scrolled", or "unknown" when no sensor could read this frame --
+// the factor tab's scroll bar unmeasurable for a moment, or a factor page that has no scroll bar at all.
+//
+// NOT A BOOL, and that is the contract rather than a richer payload for its own sake. The core cannot answer
+// "unknown" for the front end because the front end has two consumers whose costs for a wrong answer are
+// OPPOSITE: the capture card's phase wants fail-open (a tab nobody could read is not "capturing"), while the
+// duplicate-probe hint gate wants fail-closed (standing the hint on an unreadable frame would claim a
+// certainty that the core's own reset rule -- which resolves fail-closed -- refuses to claim for a switch).
+// One bool picks one of them for both. Each consumer resolves this word for itself, which is the same rule
+// the core already applies internally (TopOfContentPolicy::unknown_verdict), applied one layer further out.
+// The green character-switch arrows are not a consumer of this word at all: they read whether the factor tab
+// is shown (this message's `index`) and whether the switch rule holds its witness (onFactorSwitchArmed below),
+// never the scroll position (see switchSafety in lib/src/core/platform_controller.dart).
+//
+// A READER MUST TREAT AN ABSENT OR UNRECOGNISED WORD AS "unknown", not as "at_top": that keeps a payload this
+// build does not understand on the side each consumer already chose for missing evidence, instead of handing
+// every consumer the optimistic answer. Fail-open consumers lose nothing by it -- "unknown" is what they
+// resolve to at_top anyway -- and fail-closed ones stay closed.
+//
+// Edge-triggered on the VERDICT, so a tab going from readable-at-top to unreadable is a message: the two
+// resolve the same way for one consumer and differently for the other, so they cannot be collapsed here.
+inline std::string scrollPosition(int index, const std::string &top_of_content) {
+    return json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"top_of_content", top_of_content}}
+        .dump();
 }
 
 // A TAB'S CAPTURE WAS REFUSED, or that refusal was withdrawn. `refused` is the level, not an occurrence: the
@@ -63,6 +88,20 @@ inline std::string scrollPosition(int index, bool at_top) {
 inline std::string tabRefused(int index, bool refused, const std::string &reason) {
     return json_util::Json{{"type", "onTabRefused"}, {"index", index}, {"refused", refused}, {"reason", reason}}
         .dump();
+}
+
+// WHETHER THE FACTOR TAB'S CHARACTER-SWITCH RULE (Rule 3) HOLDS ITS REFERENCE: the core has a frame to compare
+// the factor tab against (CharaDetailSceneScraper::factorSwitchArmed). Not per tab, because the reference is not:
+// it is installed by the factor tab's head latch, kept through that tab's capture and the session's completion,
+// and dropped only when the factor tab is rebuilt or the session is discarded. A front end offers a switch exactly
+// when the factor tab is shown (onScrollPosition's `index`) AND this level is true: a record switch opens the new
+// record's factor tab at its head, where Rule 3 compares it with the reference while the tab is being captured,
+// and where the completed-tab rule sees a captured tab back at its head once it is.
+//
+// A level, edge-triggered, restated on the first frame of every session. A reader must treat an absent or
+// malformed `armed` as false.
+inline std::string factorSwitchArmed(bool armed) {
+    return json_util::Json{{"type", "onFactorSwitchArmed"}, {"armed", armed}}.dump();
 }
 
 inline std::string pageReady(int index) {

@@ -235,10 +235,12 @@ enum CharaDetailCaptureStatus {
   /// Capturing, but no detail screen has been detected yet.
   waitingForDetail,
 
-  /// Detail screen detected, nothing captured yet (safe to start or to switch characters).
+  /// Detail screen detected, nothing captured yet. Whether a character switch is safe is
+  /// [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
   detailReady,
 
-  /// Scroll capture in progress on at least one tab (not safe to switch until complete).
+  /// The displayed tab is scrolled while its session is still incomplete. Whether a character switch is
+  /// safe is [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
   capturing,
 
   /// Every tab captured; the record was saved.
@@ -266,6 +268,49 @@ enum CharaDetailCaptureStatus {
   failed,
 }
 
+/// Whether a tab is flush with the head of its content, as the core states it — with the
+/// unmeasurable case named rather than folded into one of the other two.
+///
+/// The core's own `TopOfContent`, carried verbatim on `onScrollPosition`. It arrives unresolved
+/// **because this side has two consumers whose costs for a wrong answer are opposite**: the capture
+/// card's phase resolves [unknown] to "at top" (a tab nobody could read is not *capturing*), while
+/// the duplicate-probe hint gate ([CharaDetailCaptureState.factorAtTop]) resolves it to "scrolled",
+/// the direction the core's own switch-detection gate resolves it in. A bool on the wire had to pick
+/// one of them for both; see `messages::scrollPosition` in `native_api_messages.h`. The
+/// character-switch arrows are not a consumer: they read the displayed tab and whether the core's
+/// switch detector is armed, never the position ([CharaDetailCaptureState.switchSafety] states why).
+///
+/// Neither direction is "the" answer here, which is why this type resolves nothing itself: every
+/// consumer says which way it falls, at the point where the cost of being wrong is known.
+enum TopOfContent {
+  atTop('at_top'),
+  scrolled('scrolled'),
+
+  /// No sensor could read this frame — the tab's scroll bar was unmeasurable for a moment, the tab
+  /// has not been built yet, or the page has no scroll bar at all.
+  unknown('unknown');
+
+  const TopOfContent(this.wireWord);
+
+  /// The core's stable machine word for this fact, as it appears on `onScrollPosition`.
+  ///
+  /// Carried per value rather than derived from the Dart name: the words are the core's
+  /// (`scraper_impl::topOfContentTag`), so a rename on either side has to be a deliberate edit here
+  /// instead of silently ceasing to match.
+  final String wireWord;
+
+  /// Built from [values], not written out: a verdict added later cannot be left out of the lookup
+  /// and silently degrade to [unknown] — the constructor makes it state its word.
+  static final Map<String, TopOfContent> _byWireWord = {for (final verdict in values) verdict.wireWord: verdict};
+
+  /// Reads the wire word. **An absent or unrecognised word is [unknown], never [atTop]** — that
+  /// leaves a payload this build does not understand on the side each consumer already chose for
+  /// missing evidence, instead of handing every consumer the optimistic answer. The fail-open
+  /// consumer loses nothing (it resolves [unknown] to "at top" anyway) and the fail-closed one
+  /// stays closed.
+  static TopOfContent fromWire(Object? word) => _byWireWord[word] ?? TopOfContent.unknown;
+}
+
 class CharaDetailCaptureState {
   /// Native tab index for the factor tab (skill=0, factor=1, campaign=2).
   static const int factorTabIndex = 1;
@@ -289,12 +334,34 @@ class CharaDetailCaptureState {
   /// The tab currently displayed (skill=0, factor=1, campaign=2), from the native scroll-position event.
   int currentTab;
 
-  /// Whether the current tab is at its scroll-top, from the native scroll-position event.
+  /// Whether the current tab is flush with the head of its content, from the native scroll-position
+  /// event — three-valued, and deliberately not resolved on arrival.
   ///
   /// This is the single authoritative scroll-position fact. Native reports it directly rather than the
-  /// UI inferring it from capture-progress deltas, so "capturing" (scrolled) and "safe to switch" (factor
-  /// tab at top) are both derived from it and can never disagree. A non-scrollable tab counts as at top.
-  bool atTop;
+  /// UI inferring it from capture-progress deltas, so "capturing" (scrolled) and the duplicate-probe hint
+  /// gate (factor tab at top) are both derived from it and can never disagree about what was *measured*.
+  ///
+  /// **A fact about the screen, not about the character**, like [currentTab]: [success] keeps both,
+  /// because the core states them on edges only and does not restate them when a session completes.
+  ///
+  /// **They do disagree, on purpose, about what a frame nobody could measure means**, and that is the
+  /// whole reason this is not a bool: [status] resolves [TopOfContent.unknown] optimistically and
+  /// [factorAtTop] resolves it pessimistically, because a wrong "at top" costs those two different
+  /// things. Each states its own direction below; nothing resolves it here.
+  TopOfContent topOfContent;
+
+  /// Whether the core's character-switch detector on the factor tab (Rule 3) holds the reference it
+  /// diffs against, as the core states it on `onFactorSwitchArmed`.
+  ///
+  /// **A level the core states on edges**, restated on the first frame of every session. The
+  /// reference is installed by the factor tab's head latch and cleared when an unfinished factor tab
+  /// is rebuilt or the session is reset.
+  /// Until then a switch cannot be detected, however the screen looks; [switchSafety] reads this for
+  /// exactly that reason.
+  ///
+  /// Session-scoped: [reset] drops it. [success] **keeps** it, as it keeps [currentTab]: the core
+  /// states it on edges only and does not restate it when a session completes.
+  bool factorSwitchArmed;
 
   /// The tabs whose capture the core refused, by native tab index, to the machine reason it gave.
   ///
@@ -323,8 +390,12 @@ class CharaDetailCaptureState {
     this.error,
     this.duplicateRecordId,
     this.currentTab = 0,
-    this.atTop = true,
+    // The core has not spoken yet, which is exactly [TopOfContent.unknown] and not a claim that the
+    // tab is at its top. Both consumers then apply their own direction to it, so the pre-first-frame
+    // state costs the same as any other unreadable frame instead of being optimistic for everyone.
+    this.topOfContent = TopOfContent.unknown,
     Map<int, String>? tabRefusals,
+    this.factorSwitchArmed = false,
   }) : tabRefusals = Map<int, String>.from(tabRefusals ?? const <int, String>{});
 
   CharaDetailCaptureState clone() {
@@ -337,10 +408,11 @@ class CharaDetailCaptureState {
       error: error,
       duplicateRecordId: duplicateRecordId,
       currentTab: currentTab,
-      atTop: atTop,
+      topOfContent: topOfContent,
       // Copied, not shared: every mutator here returns a new state built from a clone, and a shared
       // map would let a later refusal edit the state a listener already captured.
       tabRefusals: tabRefusals,
+      factorSwitchArmed: factorSwitchArmed,
     );
   }
 
@@ -373,11 +445,19 @@ class CharaDetailCaptureState {
     return state;
   }
 
-  /// Records the current tab and whether it is at its scroll-top, from the native scroll-position event.
-  CharaDetailCaptureState scrollPosition(int index, bool atTop) {
+  /// Records the current tab and the core's top-of-content verdict for it, from the native
+  /// scroll-position event. The verdict is stored as stated; the consumers resolve it.
+  CharaDetailCaptureState scrollPosition(int index, TopOfContent topOfContent) {
     final state = clone();
     state.currentTab = index;
-    state.atTop = atTop;
+    state.topOfContent = topOfContent;
+    return state;
+  }
+
+  /// Records the core's statement of whether Rule 3 holds its reference ([factorSwitchArmed]).
+  CharaDetailCaptureState factorSwitchArmedChanged(bool armed) {
+    final state = clone();
+    state.factorSwitchArmed = armed;
     return state;
   }
 
@@ -399,11 +479,24 @@ class CharaDetailCaptureState {
   CharaDetailCaptureState success({required String id}) {
     final state = reset();
     // Keep every tab pinned at 100% instead of clearing it, so the completed progress rings (and the
-    // "safe to switch" indicator alongside them) stay visible until the next character is opened.
+    // switch indicator alongside them) stay visible until the next character is opened.
     state.skillTabProgress = 1;
     state.factorTabProgress = 1;
     state.campaignTabProgress = 1;
     state.link = CharaDetailLink(id: id);
+    // THE SCREEN'S POSITION IS KEPT, because completing a session changes nothing on screen and the core
+    // does not restate it. The core sends `onScrollPosition` on edges only (a change of tab or verdict),
+    // and its edge memory is cleared in `CharaDetailSceneScraper::resetMonitors` -- on a session reset,
+    // which reaches this side as [started] or [reset] -- and not on completion. Dropping the pair here
+    // would leave this side on tab 0 / unknown while the core, having already stated the real pair, says
+    // nothing more until the user moves: [switchSafety] would call the 継承タブ unsafe right after a
+    // capture completes on it. [fail] keeps them for the same reason (it builds on [clone]), so
+    // `alreadyCaptured` and `succeeded` hold the same screen facts.
+    state.currentTab = currentTab;
+    state.topOfContent = topOfContent;
+    // Kept for the same reason: the core states the witness on edges only, and a completed session
+    // holds it. Dropping it here would call the 継承タブ unsafe after every completion.
+    state.factorSwitchArmed = factorSwitchArmed;
     return state;
   }
 
@@ -463,32 +556,96 @@ class CharaDetailCaptureState {
     if (currentError == "duplicated_character_probe" && factorAtTop) {
       return CharaDetailCaptureStatus.duplicateHint;
     }
-    // Two states only: the current tab is either at its top (detailReady, and switchable when it is the
-    // factor tab) or scrolled (capturing). There is no intermediate, because both derive from the same
-    // atTop fact rather than from two independent heuristics.
-    if (!atTop) {
+    // Two states only: the current tab is either at its top (detailReady) or scrolled (capturing).
+    // There is no intermediate, because both derive from the same top-of-content fact rather than
+    // from two independent heuristics.
+    //
+    // **FAIL-OPEN, and this is the one place the phase resolves it**: only a MEASURED "scrolled"
+    // moves the card into its capturing phase. A tab nobody could read — a page with no scroll bar
+    // at all, or a frame whose bar was unmeasurable — has nothing to have scrolled away from, and
+    // announcing "capturing" there would tell the user a capture is under way on a tab that cannot
+    // start one. The opposite direction belongs to [factorAtTop], and the two differ deliberately:
+    // a wrong phase costs a wrong sentence, a wrong switch arrow costs the capture.
+    if (topOfContent == TopOfContent.scrolled) {
       return CharaDetailCaptureStatus.capturing;
     }
     return CharaDetailCaptureStatus.detailReady;
   }
 
-  /// Whether the factor tab is currently displayed at its scroll-top -- the one point mid-capture where a
-  /// character switch is detectable (Rule 3). Derived from the single (currentTab, atTop) fact.
-  bool get factorAtTop => atTop && currentTab == factorTabIndex;
+  /// Whether the factor tab is currently displayed at the head of its list -- the condition Rule 3's
+  /// character-switch gate is made of. Derived from the single (currentTab, [topOfContent]) fact.
+  ///
+  /// **FAIL-CLOSED, the opposite of [status], and that is what this answer is for.** Only a MEASURED
+  /// "at top" counts; [TopOfContent.unknown] answers false. It is the same direction Rule 3 itself resolves
+  /// an unreadable frame in (`kMissingReadingIsScrolled`), so this answer and the rule it promises agree on
+  /// every frame, including the ones no sensor could read.
+  ///
+  /// **Used by the duplicate-probe hint gate in [status] only.** The hint stands where the probe fired,
+  /// at the factor top, and degrades to the ordinary phase once the user scrolls or leaves the tab.
+  ///
+  /// **Used by the duplicate-probe hint gate in [status] only.** The hint stands where the probe fired,
+  /// at the factor top, and degrades to the ordinary phase once the user scrolls or leaves the tab.
+  ///
+  /// **Not part of the switch arrows' condition.** A record switch puts the list at its head, so the
+  /// frame Rule 3 judges is at this gate whether or not the frame before the switch was; the arrows
+  /// read [factorTabShown] and [factorSwitchArmed] instead, and [switchSafety] states the premise that
+  /// rests on.
+  bool get factorAtTop => topOfContent == TopOfContent.atTop && currentTab == factorTabIndex;
+
+  /// Whether the 継承タブ (the factor tab) is the tab on screen, at any scroll position.
+  ///
+  /// The one tab whose content the core compares for a character switch (Rule 3). Half of the switch
+  /// arrows' condition; the other half is whether Rule 3 is armed ([factorSwitchArmed]). See
+  /// [switchSafety].
+  bool get factorTabShown => currentTab == factorTabIndex;
 
   /// Whether it is safe to navigate to an adjacent character without closing the detail screen.
   ///
-  /// Native can only detect and re-capture a switch when the factor tab is at its top (Rule 3) or
-  /// every tab is complete (Rule 2); switching anywhere else loses the new character's first frame.
-  /// So a switch is safe only at [factorAtTop] (during capture) or after success. Returns null when
-  /// there is no meaningful guidance (no detail session, or a hard error surfaced separately).
+  /// A switch is offered where the 継承タブ (the factor tab) will judge it: that tab is shown
+  /// ([factorTabShown]) **and** Rule 3 holds its reference ([factorSwitchArmed]), before and after the
+  /// session completes alike. A record switch opens the new record's 継承タブ at its head; while the tab is
+  /// being captured Rule 3 compares it with the reference, and once it is captured the completed-tab rule
+  /// sees a captured tab back at its head. The skill and 育成情報 tabs are not offered: an inherited
+  /// character's skill list can be empty and it carries no status block, so nothing there is compared.
+  /// Returns null when there is no meaningful guidance (no detail session, or a hard error surfaced
+  /// separately).
+  ///
+  /// **The scroll position is deliberately not part of the answer, and that rests on a game fact, not on
+  /// data.** Rule 3 judges only frames at the head of the factor list ([factorAtTop]'s gate). Switching
+  /// to another record returns the game to the head of the list, so the first frame of the new record is
+  /// at that gate even when the user switched from a scrolled 継承タブ. Asking the user to scroll back up
+  /// first would instruct an operation the detector does not need. Nothing on this side can observe that
+  /// fact, and no golden clip switches from a scrolled 継承タブ; if the game ever kept the scroll across a
+  /// record switch, a switch from there would go unseen with the arrows shown.
+  ///
+  /// **Whether Rule 3 is armed is data, stated by the core.** The diff it nominates a switch by is taken
+  /// against a reference the factor tab's head latch installs, and until that latch there is no
+  /// reference at all: at the factor top, before the
+  /// latch, the screen looks exactly like the safe moment and is not one. The core states the reference's
+  /// presence as its own level ([factorSwitchArmed]), and this reads that level.
+  ///
+  /// **A refused tab is answered, not skipped, and the answer is false.**
+  /// [CharaDetailCaptureStatus.tabRefused] is a live in-detail phase, so it is not routed to the
+  /// terminal `null` branch below -- the user is being told to move around the tabs, and blanking the
+  /// indicator there would be wrong. But the answer is a policy, not the witness: whichever tab was
+  /// refused, letting the user switch abandons that tab's refusal without the path that withdraws it
+  /// (leaving the tab and coming back), so a refused session is a "finish this first" state.
+  ///
+  /// The statuses are listed rather than defaulted so that a status added later has to state its
+  /// own answer here: the wildcard means "no guidance", which is the wrong answer for every phase
+  /// status and is silent about being wrong.
   bool? get switchSafety => switch (status) {
-    // succeeded and alreadyCaptured both mean every tab was captured, so a switch is detectable (Rule 2).
+    // One answer for the phases and the completed states alike: the 継承タブ shown and Rule 3 holding its
+    // reference. `duplicateHint` is gated on [factorAtTop], so it is always on the factor tab; it reads the
+    // same facts rather than a second `true` that would agree only by that gate.
+    CharaDetailCaptureStatus.detailReady ||
+    CharaDetailCaptureStatus.capturing ||
+    CharaDetailCaptureStatus.duplicateHint ||
     CharaDetailCaptureStatus.succeeded ||
-    CharaDetailCaptureStatus.alreadyCaptured ||
-    CharaDetailCaptureStatus.duplicateHint => true,
-    CharaDetailCaptureStatus.detailReady || CharaDetailCaptureStatus.capturing => factorAtTop,
-    _ => null,
+    CharaDetailCaptureStatus.alreadyCaptured => factorTabShown && factorSwitchArmed,
+    // A policy, not the witness; see the doc comment above.
+    CharaDetailCaptureStatus.tabRefused => false,
+    CharaDetailCaptureStatus.waitingForDetail || CharaDetailCaptureStatus.failed => null,
   };
 }
 
@@ -502,7 +659,9 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
-  void scrollPosition(int index, bool atTop) => state = state.scrollPosition(index, atTop);
+  void scrollPosition(int index, TopOfContent topOfContent) => state = state.scrollPosition(index, topOfContent);
+
+  void factorSwitchArmedChanged(bool armed) => state = state.factorSwitchArmedChanged(armed);
 
   void tabRefused(int index, bool refused, String reason) => state = state.tabRefused(index, refused, reason);
 
@@ -1360,6 +1519,15 @@ class PlatformController {
         case 'onScrollReady':
           _scrollReadyEvent.add(_soundEventSequence++);
           break;
+        case 'onFactorSwitchArmed':
+          // WHETHER RULE 3 CAN SEE A CHARACTER SWITCH NOW: the core's statement that the factor tab's
+          // switch detector holds the reference it diffs against. Read by the switch arrows only.
+          //
+          // Absent or not a boolean -> false. The two directions are not symmetric: arrows withheld by
+          // mistake cost the user a moment, while arrows shown over a detector with nothing to diff
+          // against let a switch go unseen and mix two characters into one record.
+          captureState.factorSwitchArmedChanged(data['armed'] == true);
+          break;
         case 'onFactorProbe':
           {
             // Native deferred the factor-tab scroll-ready cue and instead sent the self-factors
@@ -1373,11 +1541,6 @@ class PlatformController {
                 .whereType<Map>()
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
-            // The probe only fires at the factor tab's top, so it marks the one safe point to switch
-            // characters mid-capture. Reassert the factor-at-top position before the dedup break, so even
-            // a re-emitted probe (e.g. a settling frame after briefly leaving and returning) -- and any
-            // ordering ahead of the scroll-position event -- restores the "safe" state.
-            captureState.scrollPosition(CharaDetailCaptureState.factorTabIndex, true);
             // Native may re-emit the probe for the same character (e.g. a settling frame after a switch).
             // Skip an unchanged key so the duplicate check and its error cue fire at most once per character.
             if (_sameFactorKey(probeSelf, _lastProbeKey)) {
@@ -1410,9 +1573,12 @@ class PlatformController {
         case 'onScrollPosition':
           {
             final index = data['index'] as int?;
-            final atTop = data['at_top'] as bool?;
-            if (index != null && atTop != null) {
-              captureState.scrollPosition(index, atTop);
+            if (index != null) {
+              // The verdict is stated three-valued and stored unresolved; `fromWire` maps an absent or
+              // unrecognised word to [TopOfContent.unknown] rather than dropping the message, so a tab
+              // whose word this build does not understand still moves the consumers off whatever the
+              // previous frame said. Dropping it would leave a stale "at top" standing.
+              captureState.scrollPosition(index, TopOfContent.fromWire(data['top_of_content']));
             }
           }
           break;

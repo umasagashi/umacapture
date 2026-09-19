@@ -209,9 +209,10 @@ struct ScraperHarness {
     event_util::Connection<RecordInfo> closed_before_completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<int> scroll_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<int, double> scroll_updated = event_util::makeDirectConnection<int, double>();
-    event_util::Connection<int, bool> scroll_position = event_util::makeDirectConnection<int, bool>();
+    event_util::Connection<int, std::string> scroll_position = event_util::makeDirectConnection<int, std::string>();
     event_util::Connection<int, bool, std::string> tab_refused =
         event_util::makeDirectConnection<int, bool, std::string>();
+    event_util::Connection<bool> factor_switch_armed = event_util::makeDirectConnection<bool>();
     event_util::Connection<int> page_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<RecordInfo> completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<Frame, RecordInfo> factor_probe = event_util::makeDirectConnection<Frame, RecordInfo>();
@@ -220,6 +221,13 @@ struct ScraperHarness {
     std::vector<DiscardedSession> discards;
     // Every on_tab_refused message, in order, as {index, refused, reason}.
     std::vector<std::tuple<int, bool, std::string>> refusals;
+    // Every on_scroll_position message, in order, as {index, word}. A SEQUENCE, and of the WORD the core put
+    // on the wire rather than of a bool derived from it: this channel is the one place the composite verdict
+    // leaves the core, it is edge-triggered, and its whole contract is that the third state survives the trip
+    // (see CharaDetailSceneScraper::on_scroll_position). "The core said unknown", "the core said at_top" and
+    // "the core has said nothing about this tab" are three different claims, and a front end that resolves
+    // fail-closed acts differently on each.
+    std::vector<std::pair<int, std::string>> positions;
     CharaDetailSceneScraper scraper;
 
     ScraperHarness()
@@ -232,6 +240,7 @@ struct ScraperHarness {
               scroll_updated,
               scroll_position,
               tab_refused,
+              factor_switch_armed,
               page_ready,
               completed,
               factor_probe,
@@ -243,6 +252,19 @@ struct ScraperHarness {
         tab_refused->listen([this](int index, bool refused, const std::string &reason) {
             refusals.emplace_back(index, refused, reason);
         });
+        scroll_position->listen([this](int index, const std::string &word) { positions.emplace_back(index, word); });
+    }
+
+    // Every word stated for `tab`, in order. Not the last one: what the wire promises is that a tab which
+    // becomes unreadable SAYS SO, and a final-state check cannot tell "said unknown" from "never spoke".
+    [[nodiscard]] std::vector<std::string> positionWords(TabPage tab) const {
+        std::vector<std::string> words;
+        for (const auto &[index, word] : positions) {
+            if (index == static_cast<int>(tab)) {
+                words.push_back(word);
+            }
+        }
+        return words;
     }
 
     [[nodiscard]] std::string sessionIdAt(std::size_t made_index) const {
@@ -373,6 +395,20 @@ Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
     return Frame(pixels, timestamp);
 }
 
+// The same frame with NO SCROLL BAR AT ALL: the band is uniformly the near-white page margin, so the
+// background run down the scan line never reaches a thumb and hasScrollbar answers false. That is the real
+// shape of an inheritance-only record's skill tab, and it is what makes SceneScraper::build install the
+// non-scrollable interpreter -- the one that is handed no scroll-ready sender.
+Frame noScrollBarFrameAt(uint64 timestamp, int nonce) {
+    cv::Mat pixels(960, 540, CV_8UC3, cv::Scalar(kNoBanner.b(), kNoBanner.g(), kNoBanner.r()));
+    const Rect<int> band_rect =
+        Frame(pixels, timestamp).anchor().mapToFrame(shippedScraperConfig().common.scroll_bar_rect);
+    fill(pixels(cv::Rect(0, 0, pixels.cols, band_rect.top())),
+         Color(static_cast<int>(nonce % 2) * 120 + 10, 0, 0));
+    fill(pixels(cv::Rect(band_rect.left(), band_rect.top(), band_rect.width(), band_rect.height())), kBarMargin);
+    return Frame(pixels, timestamp);
+}
+
 // Past the shipped stationary_time_threshold, so two frames this far apart latch. Read from the config rather
 // than restated, for the same reason the rect above is.
 const uint64 kPastStationary = shippedScraperConfig().common.stationary_time_threshold + 100;
@@ -432,6 +468,44 @@ TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refus
     // The withdrawal travels on the same message, so a front end holding one value per tab needs no second
     // type; an empty reason is what "not refused" carries.
     CHECK(std::get<2>(h.refusals.back()).empty());
+}
+
+TEST_CASE("a tab no sensor can read says so on the wire, rather than being resolved here") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    // The factor tab of a record whose list does not scroll: the coarse sensor has no thumb to measure and
+    // the fine one has no reference row (the header reference is taken at the factor probe, which only a
+    // latch arms -- and a non-scrollable page never latches one). Both silent, on every frame.
+    h.scraper.update(noScrollBarFrameAt(0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    h.scraper.update(noScrollBarFrameAt(kPastStationary, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+
+    // The word, not a bool. "unknown" is the whole point: resolved to either answer here, this reads as one
+    // of the other two and the consumer that needed the distinction never sees it.
+    CHECK(h.positionWords(FactorPage) == std::vector<std::string>{"unknown"});
+}
+
+TEST_CASE("a tab a sensor CAN read says which way it measured") {
+    // The positive control for the case above: without it, "unknown" would be indistinguishable from a wire
+    // that says "unknown" no matter what the sensors found. Both measured words are reachable from the same
+    // frames the refusal cases use, so the two claims are pinned against the same synthetic bar.
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    // Frame 1 builds the tab, so its scroll-bar estimator does not exist yet while the verdict for that frame
+    // is taken -- the tab is genuinely unreadable for exactly one frame, and the wire says so.
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    h.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+    CHECK(h.positionWords(FactorPage) == std::vector<std::string>{"unknown", "at_top"});
+
+    ScraperHarness scrolled;
+    scrolled.scraper.buildSession(record::Standard);
+    scrolled.scraper.update(
+        scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    scrolled.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+    CHECK(scrolled.positionWords(FactorPage) == std::vector<std::string>{"unknown", "scrolled"});
 }
 
 }  // namespace

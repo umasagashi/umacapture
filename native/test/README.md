@@ -83,7 +83,26 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   that one of the three reset rules is reachable without game pixels — the other two
   read the image — and a discard reporting `completed == true` is not reachable at all
   from this target (it needs a fully captured session); the integration manifest's
-  `expect_discarded_incomplete` is what covers that direction.
+  `expect_discarded_incomplete` is what covers that direction. Also the **top-of-content
+  wire**: that `on_scroll_position` carries the composite verdict's own word
+  (`at_top` / `scrolled` / `unknown`) *unresolved*, because the two front-end consumers
+  answer an unreadable frame in opposite directions — a resolve on this side is invisible
+  to the records a golden compares. And **Rule 2** (a completed tab back at the head of
+  its list): it commits only after the dwell, one frame away from the top restarts the
+  dwell, and a frame no sensor can read supplies no switch at all.
+- `chara_detail/test_factor_header_band.cpp` — the invariant the fine (green "因子"
+  header) sensor rests on, measured against real footage: inside the configured probe
+  band, the header row is the *only* row of the scroll-area crop that clears
+  `green_fraction_threshold`. `factorHeaderTopY` returns the first row that clears it and
+  stops, so any other row that could clear it would be returned silently instead. Decodes
+  two golden clips (one Player-layout, one Friend-layout with the longest rental-factor
+  list) through the shared `VideoLoader` and checks that the cleared rows form a single
+  run of header height, with the threshold strictly between the worst non-header row and
+  the weakest header row. It is an invariant about game CONTENT, so it is re-measured on
+  every run rather than argued once. The clips are gitignored test material, so the case
+  reports and continues when they are absent. A second case states `band_start` /
+  `band_end` / `green_fraction_threshold` as data with their derivation, because the
+  band's width also buys occlusion tolerance that no corpus statistic can observe.
 - `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
   out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and

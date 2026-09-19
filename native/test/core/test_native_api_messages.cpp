@@ -78,6 +78,11 @@ TEST_CASE("string-payload messages") {
     checkMessage(error("boom"), R"({"type":"onError","message":"boom"})");
 }
 
+TEST_CASE("the switch witness is a level with one key, in both directions") {
+    checkMessage(factorSwitchArmed(true), R"({"type":"onFactorSwitchArmed","armed":true})");
+    checkMessage(factorSwitchArmed(false), R"({"type":"onFactorSwitchArmed","armed":false})");
+}
+
 TEST_CASE("error survives a non-UTF-8 message instead of throwing") {
     // The message often embeds an exception's what(), which can carry non-UTF-8 bytes (e.g. a
     // CP932-localized system message). A strict dump() would throw here and the onError notification
@@ -95,8 +100,14 @@ TEST_CASE("scroll messages") {
     checkMessage(scrollReady(3), R"({"type":"onScrollReady","index":3})");
     checkMessage(pageReady(2), R"({"type":"onPageReady","index":2})");
     checkMessage(scrollUpdated(1, 0.25), R"({"type":"onScrollUpdated","index":1,"progress":0.25})");
-    checkMessage(scrollPosition(0, true), R"({"type":"onScrollPosition","index":0,"at_top":true})");
-    checkMessage(scrollPosition(4, false), R"({"type":"onScrollPosition","index":4,"at_top":false})");
+    // Three-valued, not a bool: "unknown" is on the wire because the front end's two consumers of this fact
+    // resolve a missing reading in opposite directions (see messages::scrollPosition). Pinning all three words
+    // here is what keeps a later "simplification" back to a yes/no from being silent.
+    checkMessage(scrollPosition(0, "at_top"), R"({"type":"onScrollPosition","index":0,"top_of_content":"at_top"})");
+    checkMessage(
+        scrollPosition(4, "scrolled"), R"({"type":"onScrollPosition","index":4,"top_of_content":"scrolled"})");
+    checkMessage(
+        scrollPosition(1, "unknown"), R"({"type":"onScrollPosition","index":1,"top_of_content":"unknown"})");
 }
 
 TEST_CASE("a tab refusal states the tab, the level and the machine reason") {

@@ -169,7 +169,7 @@ void main() {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
         ..started()
-        ..scrollPosition(1, true)
+        ..scrollPosition(1, TopOfContent.atTop)
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
 
       expect(
@@ -177,7 +177,7 @@ void main() {
         CharaDetailCaptureStatus.duplicateHint,
       );
 
-      container.read(charaDetailCaptureStateProvider.notifier).scrollPosition(1, false);
+      container.read(charaDetailCaptureStateProvider.notifier).scrollPosition(1, TopOfContent.scrolled);
 
       expect(
         container.read(charaDetailCaptureStateProvider).status,
@@ -205,7 +205,7 @@ void main() {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
         ..started()
-        ..scrollPosition(1, true)
+        ..scrollPosition(1, TopOfContent.atTop)
         ..tabRefused(0, true, 'scrolled')
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
 
@@ -225,7 +225,7 @@ void main() {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
         ..started()
-        ..scrollPosition(1, true)
+        ..scrollPosition(1, TopOfContent.atTop)
         ..tabRefused(0, true, 'scrolled')
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
       expect(container.read(captureEventProvider), isNull);
@@ -260,7 +260,7 @@ void main() {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
         ..started()
-        ..scrollPosition(0, false)
+        ..scrollPosition(0, TopOfContent.scrolled)
         ..progress(0, 0.5);
 
       expect(container.read(captureEventProvider), isNull);

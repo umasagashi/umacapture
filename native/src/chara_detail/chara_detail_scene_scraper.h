@@ -101,7 +101,9 @@ using TopOfContentJudge = std::function<TopOfContentReading(const Frame &frame)>
 
 // The single derivation of TopOfContent from a top-margin reading (ScrollBarOffsetEstimator::topMargin),
 // against a threshold. Free, and not a member of TopOfContentPolicy, because the READING and the answer for an
-// absent reading are two separable things. The shipped threshold is applied in exactly one place,
+// absent reading are two separable things: the composite sensor (CharaDetailSceneScraper::topOfContent) takes
+// one reading per frame and hands it UNRESOLVED to several consumers whose answers for "absent" differ, so it
+// cannot go through any one consumer's policy object. The shipped threshold is applied in exactly one place,
 // CharaDetailSceneScraper::thumbTopOfContent.
 [[nodiscard]] constexpr TopOfContent
 topOfContentFromTopMargin(const std::optional<double> &top_margin, double threshold) {
@@ -894,8 +896,9 @@ public:
         const event_util::Sender<RecordInfo> &on_closed_before_completed,
         const event_util::Sender<int> &on_scroll_ready,
         const event_util::Sender<int, double> &on_scroll_updated,
-        const event_util::Sender<int, bool> &on_scroll_position,
+        const event_util::Sender<int, std::string> &on_scroll_position,
         const event_util::Sender<int, bool, std::string> &on_tab_refused,
+        const event_util::Sender<bool> &on_factor_switch_armed,
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
@@ -954,16 +957,20 @@ private:
     // reset and returns true so the caller stops processing the current (mid-switch) frame.
     [[nodiscard]] bool handleRecordTypeChange(record::RecordType record_type, uint64 timestamp);
 
-    // True when the current tab's scroll bar has sat at the very top for the debounce window. A completed
-    // tab normally rests at the bottom, so this only becomes true after a switch (or a deliberate scroll
-    // back up), both of which the spec discards.
+    // True when the current tab has sat at the head of its content for the debounce window. A completed tab
+    // normally rests at the bottom, so this only becomes true after a switch (or a deliberate scroll back up),
+    // both of which the spec discards. Takes the frame's ALREADY-TAKEN reading (see topOfContent) rather than
+    // the frame, so the several consumers of one frame's verdict share one scan and cannot disagree; the
+    // timestamp is passed beside it because the dwell is this rule's own and not part of the reading.
     [[nodiscard]] bool detectCompletedTabAtTop(TabPage tab_page, const Frame &frame);
 
-    // Emit the current tab's at-top position to the UI, edge-triggered so a stationary tab does not spam the
-    // channel every frame. "At top" reuses the same top-margin threshold as the switch-detection rules; a tab
-    // with no scrollbar (a short, non-scrollable page) or one not yet built counts as at the top, since there
-    // is nothing to scroll away from.
-    void notifyScrollPositionIfChanged(TabPage tab_page, const Frame &frame);
+    // Emit the current tab's top-of-content verdict to the UI, edge-triggered so a stationary tab does not spam
+    // the channel every frame. Same reading as every other consumer this frame, and UNRESOLVED: this is the one
+    // consumer that does not act on the fact itself but forwards it, and the front end's own consumers answer
+    // Unknown in opposite directions (see on_scroll_position). The edge is taken on the three-valued verdict,
+    // so a tab going from readable to unreadable is an edge even though one front-end consumer resolves both
+    // the same way.
+    void notifyScrollPositionIfChanged(TabPage tab_page, scraper_impl::TopOfContent reading);
 
     // Emit each tab's refusal level to the UI, edge-triggered, in the same idiom as
     // notifyScrollPositionIfChanged. Walks EVERY tab (kAllTabPages), not just the current one, for two
@@ -977,6 +984,13 @@ private:
     // two reports.
     void notifyTabRefusalIfChanged();
 
+    // Whether Rule 3 holds a reference to compare the factor tab against (factor_probe_reference), the level the
+    // front ends' switch arrows are made of.
+    [[nodiscard]] bool factorSwitchArmed() const;
+
+    // Emit factorSwitchArmed to the UI, edge-triggered, restated on each session's first frame.
+    void notifyFactorSwitchArmedIfChanged();
+
     void handleTabSwitchInProgress(TabPage tab_page);
 
     void rebuildTab(TabPage tab_page);
@@ -984,7 +998,8 @@ private:
     // On the factor tab, diff the current stable top-of-page against the last probed reference. A large,
     // sustained change while at the top means the displayed character switched, so reset (the fresh session
     // re-probes). Reuses the stationary rect and its calibrated color thresholds as the change metric.
-    void maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type);
+    void maybeResetOnFactorChange(
+        const Frame &frame, record::RecordType record_type, const scraper_impl::TopOfContentReading &reading);
 
     // Top-edge pixel row of the green "因子" section header, relative to the scroll-area crop (so it tracks the
     // content, not the scroll thumb). Scans the config band top-down for the first row that is mostly header
@@ -995,8 +1010,9 @@ private:
 
     // WHETHER THIS TAB'S CONTENT IS FLUSH WITH THE TOP OF ITS SCROLL AREA on `frame`: the scroll thumb's top
     // margin, read by thumbTopOfContent. Unresolved -- a tab with no scraper, or a frame with no measurable
-    // scroll bar, reads Unknown, and the consumer's policy answers it. Handed to every tab's interpreter as its
-    // TopOfContentJudge (makeTabScraper), so fragment-#0 acceptance asks the scraper and holds no threshold.
+    // scroll bar, reads Unknown, and each consumer's policy answers it. Handed to every tab's interpreter as its
+    // TopOfContentJudge (makeTabScraper), so fragment-#0 acceptance asks the scraper and holds no threshold;
+    // taken once per frame in update() and shared by the UI position report and Rule 3's thumb fallback.
     [[nodiscard]] scraper_impl::TopOfContentReading topOfContent(TabPage tab_page, const Frame &frame) const;
 
     void resetMonitors();
@@ -1012,13 +1028,28 @@ private:
     const event_util::Sender<RecordInfo> on_closed_before_completed;
     const event_util::Sender<int> on_scroll_ready;  // When user can start scrolling.
     const event_util::Sender<int, double> on_scroll_updated;  // When user scrolling.
-    const event_util::Sender<int, bool> on_scroll_position;  // Current tab's at-top position (edge-triggered).
+    // The current tab's top-of-content fact (edge-triggered), as the composite verdict (see topOfContent)
+    // spelled with topOfContentTag and deliberately NOT resolved here.
+    //
+    // The resolution is the consumer's, and the front end has two whose answers for "no sensor could read this
+    // frame" are opposite: the capture card's phase wants fail-open (a frame nobody could read is not shown to be
+    // "capturing"), while the duplicate-probe hint gate wants fail-closed, because standing the hint on a frame
+    // nobody could read would claim a certainty that Rule 3 -- which resolves fail-closed -- refuses to claim for
+    // a switch, and an undetected switch corrupts the capture silently. A bool here would have picked one
+    // direction for both; the word lets each front-end consumer apply TopOfContentPolicy's rule for itself,
+    // exactly as the core's own consumers do. The green character-switch arrows are not a consumer of this word:
+    // they read whether the factor tab is shown (CharaDetailCaptureState.factorTabShown) and whether Rule 3 holds
+    // its witness (on_factor_switch_armed), never the scroll position (CharaDetailCaptureState.switchSafety
+    // states why). See messages::scrollPosition for the wire contract this feeds.
+    const event_util::Sender<int, std::string> on_scroll_position;
     // A tab's capture was refused because its first captured fragment was not the head of the list -- the user
     // began scrolling before the ready cue, so the rows above it were never seen. Per tab, edge-triggered off
     // the level, and WITHDRAWABLE: the same message carries refused=false once a tab switch rebuilds the tab.
     // Deliberately not routed through the error channel, which is session-scoped and terminal: only this tab
     // is unusable, the session keeps waiting for it, and a tab switch retries it.
     const event_util::Sender<int, bool, std::string> on_tab_refused;
+    // Whether Rule 3 holds its reference (factorSwitchArmed). Edge-triggered, restated per session.
+    const event_util::Sender<bool> on_factor_switch_armed;
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
     // The factor tab's fragment #0 and the session it belongs to, for the early duplicate check. Sent once per
@@ -1117,11 +1148,23 @@ public:
     // PUBLIC for the same reason factorChangeRatio / isFactorChanged are: the decision this encodes -- which way
     // an unmeasurable reading falls -- is the entire content of premature-scroll detection, and a whole-clip
     // golden cannot state it (a golden sees a missing record, not a verdict).
+    // THE ONE ANSWER THIS PROCESS SHIPS to "which way does a reading that could not be taken fall". A policy is
+    // named for that and not after a call site -- the question has exactly two answers, and a new consumer
+    // picks one of them rather than inventing a third combination.
     //
-    // FAIL-CLOSED: an unmeasurable scroll bar on a page that HAS one means the evidence that the capture starts
-    // at the head is missing, and the ruling is to refuse rather than to capture a list whose head may be
-    // absent. A page with no scroll bar at all never reaches this policy (NonScrollableScrapingInterpreter is
-    // not given one).
+    // FAIL-CLOSED, for every consumer whose "at top" claim COSTS something when it is wrong: fragment-#0
+    // acceptance (accepting a list whose head may be missing) and Rule 3's content gate when its header
+    // comparison cannot answer (discarding a captured session). A page with no scroll bar at all never reaches
+    // this policy through fragment-#0 acceptance (NonScrollableScrapingInterpreter is not given one).
+    //
+    // THE FAIL-OPEN DIRECTION LIVES IN DART, NOT HERE. Its one consumer is the capture card ("a tab that cannot
+    // scroll has nothing to have scrolled away from"), which lives behind on_scroll_position, and that wire
+    // carries the verdict UNRESOLVED because the front end has a second consumer (the character-switch arrows)
+    // whose direction is the opposite one. The card states fail-open for itself, in Dart (TopOfContent in
+    // lib/src/core/platform_controller.dart). A constant here for a direction nothing here takes would be a
+    // constant kept alive by its own test, which is why there is no kMissingReadingIsAtTop;
+    // TopOfContentPolicy itself still carries unknown_verdict as a parameter, and both of its directions are
+    // pinned on locally built policies in test_scraper_estimators.cpp.
     static constexpr scraper_impl::TopOfContentPolicy kMissingReadingIsScrolled{
         scraper_impl::TopOfContent::Scrolled};
 
@@ -1228,11 +1271,17 @@ private:
     // Header top-edge pixel row (see factorHeaderTopY) captured with factor_probe_reference; the flush gate
     // compares the current header row against it in pixels.
     std::optional<int> reference_header_y;
-    std::optional<std::pair<TabPage, bool>> last_scroll_position_emitted;
+    // Last top-of-content verdict put on the wire, with the tab it described. Held as the three-valued verdict
+    // rather than as the emitted word, because the word is a rendering of it and comparing renderings would
+    // make the edge depend on the tag table.
+    std::optional<std::pair<TabPage, scraper_impl::TopOfContent>> last_scroll_position_emitted;
     // Last refusal level put on the wire, per tab. Indexed by TabPage and sized from kAllTabPages, so a new
     // tab page is covered by construction instead of by someone remembering to extend a list. The initial
     // all-nullopt state is the true initial level (no tab is refused), so a fresh session emits nothing.
     std::array<std::optional<scraper_impl::TopOfContent>, kAllTabPages.size()> last_refusal_emitted{};
+    // Last factorSwitchArmed level put on the wire. nullopt is "never stated": every session restates the level
+    // on its first frame.
+    std::optional<bool> last_factor_switch_armed_emitted;
 };
 
 }  // namespace uma::chara_detail

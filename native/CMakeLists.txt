@@ -168,6 +168,7 @@ set(
         test/chara_detail/test_scene_context.cpp
         test/chara_detail/test_scene_stitcher.cpp
         test/chara_detail/test_scene_scraper.cpp
+        test/chara_detail/test_factor_header_band.cpp
         test/chara_detail/test_factor_change_discriminator.cpp
         test/chara_detail/test_scraper_estimators.cpp
         test/chara_detail/test_search_helpers.cpp
@@ -268,6 +269,11 @@ target_compile_definitions(
         # Absolute path to the repo-committed config assets, so test/chara_detail/test_config.cpp can
         # characterization-test the real shipped config without depending on the working directory.
         TEST_ASSET_CONFIG_DIR="${CMAKE_CURRENT_LIST_DIR}/../assets/config"
+        # Absolute path to the gitignored golden clip directory, so a case that states an invariant about real
+        # footage (test/chara_detail/test_factor_header_band.cpp) can find its input. The directory is test
+        # MATERIAL and not part of the repository, so the case that reads it must -- like every golden case --
+        # report and continue when a clip is absent rather than fail.
+        TEST_GOLDEN_CLIP_DIR="${CMAKE_CURRENT_LIST_DIR}/../testdata/clips/golden"
 )
 
 target_include_directories(

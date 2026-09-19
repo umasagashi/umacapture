@@ -401,10 +401,26 @@ private:
 
     // The green "因子" section header is a precise "flush at the very top" sensor for maybeResetOnFactorChange:
     // it moves 1:1 with the factor list, so a tiny scroll shifts it ~10 px where the scroll thumb barely moves
-    // (its travel is compressed by viewport/content). Probe a right-of-centre band x[0.65,0.88] of the scroll-area
-    // crop -- solid header green there, clear of the left icon column and the diagonal stripes, so requiring green
-    // across the whole band (fraction > 0.5) rejects a stray green factor pill. Same UI green as
-    // factorEndGreen -- literally the same factorTabGreen(), see its note for how its bounds are sized.
+    // (its travel is compressed by viewport/content). Probe a band x[0.12,0.93] of the scroll-area crop -- solid
+    // header green across it, so requiring green over half the band (fraction > 0.5) still rejects a stray green
+    // factor pill. Same UI green as factorEndGreen -- literally the same factorTabGreen(), see its note for how
+    // its bounds are sized.
+    //
+    // THE BAND IS AN OCCLUSION BUDGET, NOT A LOCATION. It was x[0.65,0.88] -- picked as the narrowest strip that
+    // is certainly header green -- and that is 0.15 W = 110 px of the crop's width, so a touch/tap effect wider
+    // than that hides the whole probe and the header reads as absent. Widening to [0.12,0.93] does not move the
+    // bar's edges: measured over 9 golden clips / 8,261 frames, the returned row, the bar's height and therefore
+    // the scroll at which the sensor goes silent are identical under both bands (2 disagreeing frames, neither
+    // at top). What it buys is the occlusion a scan survives, 110 px -> 368 px of tap diameter. The cost is the
+    // scan, and it is two different numbers: the scan STOPS at the first over-threshold row, so a frame showing
+    // the header costs 18 us -> 63 us, while a frame with no header anywhere pays the full crop, 886 us ->
+    // 2890 us (8.8% of a 33 ms frame). The worst case is the common one on a scrolled tab, which is why
+    // topOfContent is called once per frame and not once per consumer.
+    //
+    // The edges are the measured limits, not round numbers. Green occupancy on a real header row stays 0.916
+    // here but falls to 0.806 at [0.05,0.99], spending headroom above the threshold; and the highest NON-header
+    // row rises to 0.4094 here but to 0.4347 at [0.12,0.88], too close under 0.5 to keep. That lower figure is
+    // the one to watch when the game adds factors: it is driven by the green factor pill, which is content.
     // flush_tolerance_px is in capture pixels (the header top-edge row). Live measurement (factor reset diag): a
     // real switch snaps to EXACTLY flush (0 px), whereas a same-character scroll of only ~4 px still spikes the
     // content diff to ~29 %. 1.5 px sits in that gap -- it rejects a >=2 px scroll while tolerating up to 1 px of
@@ -412,7 +428,7 @@ private:
     // width fraction, so it does not drift with capture resolution (a fraction would drop below 1 px on a smaller
     // capture and start missing real switches).
     [[nodiscard]] chara_detail::scraper_config::FactorHeaderConfig factorHeader() const {
-        return {factorTabGreen(), 0.65, 0.88, 0.5, 1.5};
+        return {factorTabGreen(), 0.12, 0.93, 0.5, 1.5};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {
