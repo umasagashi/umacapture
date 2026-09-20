@@ -772,9 +772,21 @@ bool _holdsRecordId(Iterable<CharaDetailRecord> existing, String id) => existing
 String? duplicateCharaIdIn(Iterable<CharaDetailRecord> existing, CharaDetailRecord record) =>
     existing.firstWhereOrNull((e) => e.id != record.id && record.isSameChara(e))?.id;
 
+/// The id whose `<root>/<id>/` directory a duplicate rejection may discard, or
+/// null when the rejection has no directory of its own to drop.
+///
+/// A rejected capture's directory is named by the arriving record's id, so the
+/// rejection branch drops it on the premise that the directory belongs to the
+/// record now arriving. When [existing] already holds that id, the directory is
+/// the stored record's own and erasing it destroys a record the user captured
+/// earlier. The premise is therefore settled here, by asking the record set, and
+/// handed to the branch as the decision itself rather than as a fact the branch
 /// has to re-read. A replacement whose new contents are another stored record's
 /// is refused with exactly this answer: the directory it would have written into
 /// is the stored record's, and it is kept.
+String? discardableArrivalIdIn(Iterable<CharaDetailRecord> existing, CharaDetailRecord record) =>
+    _holdsRecordId(existing, record.id) ? null : record.id;
+
 final class RecordDeleteResult {
   const RecordDeleteResult({required this.succeeded, required this.failed});
 
@@ -998,17 +1010,12 @@ class _AdditionPlan {
   /// The full resolution, for the inheritance toasts.
   final InheritanceResolution? resolution;
 
-  /// Whether the store already holds a record under the incoming record's id.
-  ///
-  /// The rejection branch drops `<root>/<incoming id>/` on the premise that the
-  /// directory belongs to the record now arriving. When the id is one the store
-  /// already holds, that directory is the stored record's own and deleting it
-  /// destroys data the user captured earlier. So the premise is resolved here, by
-  /// asking the record set, and carried to the branch as a fact -- rather than
-  /// left for the branch to assume from the shape of the verdict it was handed.
-  final bool incomingIdIsStored;
+  /// The id whose directory the rejection branch may discard, or null when it
+  /// has none to discard. See [discardableArrivalIdIn]. Always null on a resolved
+  /// plan: nothing was rejected, so nothing is dropped.
+  final String? discardableArrivalId;
 
-  const _AdditionPlan.duplicate(this.duplicatedId, {required this.incomingIdIsStored})
+  const _AdditionPlan.duplicate(this.duplicatedId, {required this.discardableArrivalId})
     : resolvedRecord = null,
       activePersists = const [],
       archiveUpdates = const [],
@@ -1021,8 +1028,8 @@ class _AdditionPlan {
     required this.archiveUpdates,
     required this.newState,
     required this.resolution,
-    required this.incomingIdIsStored,
-  }) : duplicatedId = null;
+  }) : duplicatedId = null,
+       discardableArrivalId = null;
 }
 
 class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
@@ -1286,10 +1293,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     final existing = existingRecords();
     final archiveRecords =
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
-    final incomingIdIsStored = _holdsRecordId(existing, record.id);
     final duplicatedId = duplicateCharaIdIn(existing, record);
     if (duplicatedId != null) {
-      return _AdditionPlan.duplicate(duplicatedId, incomingIdIsStored: incomingIdIsStored);
+      return _AdditionPlan.duplicate(duplicatedId, discardableArrivalId: discardableArrivalIdIn(existing, record));
     }
 
     // Link this record to existing parents/children (in either the active or the
@@ -1334,7 +1340,6 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       archiveUpdates: archiveUpdates,
       newState: newState,
       resolution: resolution,
-      incomingIdIsStored: incomingIdIsStored,
     );
   }
 
@@ -1371,8 +1376,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     if (plan.duplicatedId != null) {
       // A directory named by an id the store already holds is that stored
       // record's, not this arrival's, so there is nothing here to discard.
-      if (!plan.incomingIdIsStored) {
-        _discardRejectedDuplicateSync(rootDirectory / record.id);
+      final discardableId = plan.discardableArrivalId;
+      if (discardableId != null) {
+        _discardRejectedDuplicateSync(rootDirectory / discardableId);
       }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
@@ -1501,8 +1507,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
       // See [add]: a stored id's directory is never this arrival's to discard.
-      if (!plan.incomingIdIsStored) {
-        await _discardRejectedDuplicateAsync(rootDirectory / record.id);
+      final discardableId = plan.discardableArrivalId;
+      if (discardableId != null) {
+        await _discardRejectedDuplicateAsync(rootDirectory / discardableId);
       }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;

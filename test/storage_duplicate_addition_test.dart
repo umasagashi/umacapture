@@ -204,7 +204,31 @@ void main() {
       expect(duplicateCharaIdIn([self], twinContent('self')), isNull);
     });
   });
+
+  // The other half of that rejection: which directory it is allowed to erase.
+  //
   // Asked on its own as well as through a rejection: a replacement whose contents
   // are another record's is refused with an id the set holds, and what that
   // rejection may erase is this decision, which costs a stored record if wrong.
+  group('discardableArrivalIdIn', () {
+    final self = makeRecord(id: 'self', card: 77, self: const [Factor(9, 3)]);
+    final other = makeRecord(id: 'other', card: 77, self: const [Factor(9, 3)]);
+
+    test('has nothing to discard for an id the set already holds', () {
+      for (final id in ['self', 'other']) {
+        expect(
+          discardableArrivalIdIn([self, other], twinContent(id)),
+          isNull,
+          reason: 'root/$id belongs to the stored record, not to the arrival',
+        );
+      }
+    });
+
+    // Negative control: a rejected capture whose id is new *does* own the
+    // directory it arrived in, and leaving it behind is a second row next launch.
+    test('names the arrival when the set does not hold its id', () {
+      expect(discardableArrivalIdIn([self, other], twinContent('fresh')), 'fresh');
+      expect(discardableArrivalIdIn(const [], twinContent('fresh')), 'fresh');
+    });
+  });
 }

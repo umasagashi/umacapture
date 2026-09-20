@@ -1653,6 +1653,10 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
         // dedup and inheritance decision. Above the table, not instead of it:
         // the active records are loaded and usable.
         ArchiveStoreOutageBanner(),
+        // A third condition that is invisible without a statement: the rating or
+        // memo the user entered is in memory only, and the enhancement merge
+        // refuses while it stays that way.
+        MetadataWriteFailureBanner(),
         TopControlsLayer(),
         SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),

@@ -51,7 +51,13 @@ import 'support/records.dart';
 
 /// A bare carrier of the metadata write chain, so the chain's own contract can
 /// be read without a controller, a `Ref` or a file.
-class _Chain with MetadataWriteChain {}
+class _Chain with MetadataWriteChain {
+  @override
+  MetadataWriteTarget get writeTarget => (kind: MetadataStorageKind.rating, key: 'chain');
+
+  @override
+  void retryWrite() {}
+}
 
 /// A live metadata controller that writes nothing of its own.
 ///
@@ -64,6 +70,12 @@ class _Chain with MetadataWriteChain {}
 /// itself also fails the raw read the merge makes of the same path - which
 /// refuses for a different reason.
 class _ProbeChain extends Notifier<int> with MetadataWriteChain {
+  @override
+  MetadataWriteTarget get writeTarget => (kind: MetadataStorageKind.rating, key: 'probe');
+
+  @override
+  void retryWrite() {}
+
   @override
   int build() {
     keepWriteChainVisible(ref);

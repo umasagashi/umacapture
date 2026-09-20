@@ -25,6 +25,14 @@ part 'loader.mapper.dart';
 // ignore: constant_identifier_names
 const tr_columns = "pages.chara_detail.columns";
 
+/// Said when a rating/memo change could not be written to its file.
+///
+/// Sibling of `tr_storage_load_failure`, and a harder one: a load failure leaves
+/// the stored contents untouched, while a write failure means what the user just
+/// entered is held nowhere but in memory.
+// ignore: constant_identifier_names
+const tr_storage_write_failure = "pages.chara_detail.storage_write_failure";
+
 final moduleInfoLoaders = FutureProvider((ref) async {
   return Future.wait([ref.watch(moduleVersionLoader.future)]).then((_) {
     return Future.wait([
@@ -321,22 +329,6 @@ T? _dataForMutation<T>(AsyncValue<T> state, {required String storage, required S
   return value;
 }
 
-class _RatingDataWriter {
-  final FilePath path;
-  final RatingData data;
-
-  _RatingDataWriter(this.path, this.data);
-
-  static Future<void> _run(_RatingDataWriter arg) {
-    initializeMappers();
-    return arg.path.writeAsString(arg.data.toJson());
-  }
-
-  Future<void> run() {
-    return compute(_RatingDataWriter._run, this);
-  }
-}
-
 @MappableClass()
 class RatingData with RatingDataMappable {
   final String title;
@@ -352,6 +344,75 @@ class RatingData with RatingDataMappable {
     return RatingData(title: "pages.chara_detail.columns.rating.title".tr(), data: {});
   }
 }
+
+/// Writes one `metadata/{rating,memo}/<key>.json`.
+///
+/// A seam rather than a direct call so the same write can be substituted the way
+/// the enhancement merge substitutes its own writes of these very files
+/// (`enhancementMergeSeamsProvider`'s `writeMetadata`, whose signature this
+/// matches), so both writers of these files are replaceable alike.
+typedef MetadataFileWriter = Future<void> Function(FilePath path, String contents);
+
+Future<void> _writeMetadataFileInIsolate((FilePath, String) arg) => arg.$1.writeAsString(arg.$2);
+
+Future<void> _writeMetadataFile(FilePath path, String contents) {
+  // Off the UI isolate on native platforms, as the read side is. The JSON itself
+  // is already encoded by the caller, which is also the snapshot that keeps an
+  // in-place map edit from racing the write.
+  return compute(_writeMetadataFileInIsolate, (path, contents));
+}
+
+final metadataFileWriterProvider = Provider<MetadataFileWriter>((ref) => _writeMetadataFile);
+
+/// Which of the two metadata storages a write belongs to.
+enum MetadataStorageKind { rating, memo }
+
+/// One metadata storage file, named the way its controller is keyed.
+typedef MetadataWriteTarget = ({MetadataStorageKind kind, String key});
+
+/// The metadata storages whose file is currently behind its controller.
+///
+/// The failure is data ([MetadataWriteChain._writeLanded]); held here it is
+/// watchable by anyone, not only by the enhancement merge at the moment it asks,
+/// so the condition - the user's edits live in memory alone, and the merge goes
+/// on refusing - can be stated for as long as it lasts instead of only in the
+/// toast that announced it.
+///
+/// The chain is the value, not just its name: retrying means re-issuing the write
+/// of what *that* controller holds, and a controller that is disposed takes its
+/// entry with it rather than leaving a statement nobody can act on.
+class MetadataWriteFailureNotifier extends Notifier<Map<MetadataWriteTarget, MetadataWriteChain>> {
+  @override
+  Map<MetadataWriteTarget, MetadataWriteChain> build() => const {};
+
+  void failed(MetadataWriteChain chain) {
+    if (identical(state[chain.writeTarget], chain)) {
+      return;
+    }
+    state = {...state, chain.writeTarget: chain};
+  }
+
+  /// Drops [chain]'s entry, whether its write landed or the controller went away.
+  ///
+  /// Keyed by identity so a controller disposed after its replacement has already
+  /// failed cannot clear the replacement's statement on its way out.
+  ///
+  /// The withdrawal a disposal asks for arrives a microtask late (see
+  /// [MetadataWriteChain.keepWriteChainVisible]), and by then the whole container
+  /// may be gone - a shutdown disposes both - so this answers for its own
+  /// lifetime rather than asking every caller to.
+  void resolved(MetadataWriteChain chain) {
+    if (!ref.mounted || !identical(state[chain.writeTarget], chain)) {
+      return;
+    }
+    state = {...state}..remove(chain.writeTarget);
+  }
+}
+
+final metadataWriteFailureProvider =
+    NotifierProvider<MetadataWriteFailureNotifier, Map<MetadataWriteTarget, MetadataWriteChain>>(
+      MetadataWriteFailureNotifier.new,
+    );
 
 /// Every metadata controller that is alive in this isolate.
 ///
@@ -391,6 +452,22 @@ Future<bool> flushMetadataWrites() async {
 mixin MetadataWriteChain {
   Future<void> _writeChain = Future<void>.value();
 
+  /// Which storage file this chain writes, for [metadataWriteFailureProvider].
+  MetadataWriteTarget get writeTarget;
+
+  /// Re-issues the write of whatever this controller holds right now.
+  ///
+  /// The controller is the copy of record while a write is failing, so the retry
+  /// offered next to the statement is this and nothing more.
+  void retryWrite();
+
+  /// Where this chain reports, or null while it has not joined the live set.
+  ///
+  /// The two go together on purpose: an entry exists exactly for a controller
+  /// [flushMetadataWrites] can reach, so the statement on screen and the verdict
+  /// the merge asks for are about the same set of controllers.
+  MetadataWriteFailureNotifier? _failures;
+
   /// Whether the file holds what this controller holds.
   ///
   /// Each write persists the controller's whole map, so a later success
@@ -402,7 +479,17 @@ mixin MetadataWriteChain {
   /// as [ref] keeps it alive.
   void keepWriteChainVisible(Ref ref) {
     _liveMetadataWriters.add(this);
-    ref.onDispose(() => _liveMetadataWriters.remove(this));
+    _failures = ref.read(metadataWriteFailureProvider.notifier);
+    ref.onDispose(() {
+      _liveMetadataWriters.remove(this);
+      // A controller that is gone cannot be retried, so its entry must not
+      // outlive it as a statement with a dead button under it. Riverpod refuses
+      // a write to another provider from inside a dispose callback, so the
+      // withdrawal is made on the next microtask instead.
+      final failures = _failures;
+      _failures = null;
+      scheduleMicrotask(() => failures?.resolved(this));
+    });
   }
 
   /// Runs [write] after every write this controller already issued.
@@ -416,9 +503,15 @@ mixin MetadataWriteChain {
       try {
         await write();
         _writeLanded = true;
+        _failures?.resolved(this);
       } catch (error, stackTrace) {
         _writeLanded = false;
         logger.e("A metadata write failed.", error, stackTrace);
+        _failures?.failed(this);
+        // Said where the gesture was made, because the user is still there: the
+        // rating they dragged or the memo they typed is in memory and nowhere
+        // else. The banner the entry above raises is what remains afterwards.
+        Toaster.show(ToastData.error(description: tr_storage_write_failure.tr()));
       }
     });
   }
@@ -438,12 +531,21 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
 
   late FilePath path;
 
+  late MetadataFileWriter _writeFile;
+
+  @override
+  MetadataWriteTarget get writeTarget => (kind: MetadataStorageKind.rating, key: key);
+
+  @override
+  void retryWrite() => save();
+
   @override
   Future<RatingData> build() async {
     // `path` is assigned synchronously (before the first await) so [save] is safe
     // the moment the controller starts building. The read is async so web can load
     // the ratings file from OPFS; on desktop it is a fast local-disk read.
     keepWriteChainVisible(ref);
+    _writeFile = ref.read(metadataFileWriterProvider);
     path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
     return (await path.exists())
         ? await _readStorageFile(
@@ -501,7 +603,8 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
     if (data == null) {
       return;
     }
-    enqueueWrite(_RatingDataWriter(path, data.copyWith(data: {...data.data})).run);
+    final contents = data.copyWith(data: {...data.data}).toJson();
+    enqueueWrite(() => _writeFile(path, contents));
   }
 }
 
@@ -560,22 +663,6 @@ final charaDetailRecordRatingProvider =
       CharaDetailRecordRatingController.new,
     );
 
-class _MemoDataWriter {
-  final FilePath path;
-  final MemoData data;
-
-  _MemoDataWriter(this.path, this.data);
-
-  static Future<void> _run(_MemoDataWriter arg) {
-    initializeMappers();
-    return arg.path.writeAsString(arg.data.toJson());
-  }
-
-  Future<void> run() {
-    return compute(_MemoDataWriter._run, this);
-  }
-}
-
 @MappableClass()
 class MemoData with MemoDataMappable {
   final String title;
@@ -599,12 +686,21 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
 
   late FilePath path;
 
+  late MetadataFileWriter _writeFile;
+
+  @override
+  MetadataWriteTarget get writeTarget => (kind: MetadataStorageKind.memo, key: key);
+
+  @override
+  void retryWrite() => _save();
+
   @override
   Future<MemoData> build() async {
     // `path` is assigned synchronously (before the first await) so [_save] is safe
     // the moment the controller starts building. The read is async so web can load
     // the memo file from OPFS; on desktop it is a fast local-disk read.
     keepWriteChainVisible(ref);
+    _writeFile = ref.read(metadataFileWriterProvider);
     path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
     return (await path.exists())
         ? await _readStorageFile(path, "memo storage $key", MemoDataMapper.fromJson, whenAbsent: () => MemoData.empty)
@@ -652,7 +748,8 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
     if (data == null) {
       return;
     }
-    enqueueWrite(_MemoDataWriter(path, data.copyWith(data: {...data.data})).run);
+    final contents = data.copyWith(data: {...data.data}).toJson();
+    enqueueWrite(() => _writeFile(path, contents));
   }
 
   // Named `updateMemo` (not `update`) to avoid colliding with the inherited
