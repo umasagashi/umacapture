@@ -1007,6 +1007,47 @@ CaptureToggleBlocker? resolveCaptureToggleBlocker({
   return null;
 }
 
+/// Re-asks, at the moment the source picker resolves, whether a live session may still start.
+///
+/// **This is the only gate in the live-capture path that is asked twice, and the picker is why.**
+/// The toggle resolves [resolveCaptureToggleBlocker] in `build` and withholds itself while another
+/// job holds the record store, but a web press opens `getDisplayMedia` and the session does not
+/// announce itself as [LongReadKind.liveCapture] until the core reports it capturing — minutes
+/// later, if that is how long the user takes over the picker. Everything the toggle refused can
+/// therefore begin *inside* that window: an enhancement merge is exactly such a job, and it owns
+/// the record root for its snapshot, rewrite and delete. See `startCapture` on the web leg, which
+/// is where this is called.
+///
+/// Read through the container and not a widget's `ref`, for the reason `VideoImportButton.preflight`
+/// states about its own: the page can be gone by the time the picker closes, while the container is
+/// the app's.
+///
+/// The blocker is returned rather than a bool so a case can say *which* reason held; the channel
+/// only needs whether, and words its refusal with one sentence that names no holder — the same
+/// thing `longReadBusyMessage` deliberately does.
+@visibleForTesting
+CaptureToggleBlocker? liveCaptureStartPreflight(ProviderContainer container) {
+  final layout = container.read(pathLayoutProvider);
+  return resolveCaptureToggleBlocker(
+    controllerUnavailable: container.read(platformControllerProvider) == null,
+    // Not re-asked from the capability probe: a browser that could not capture never opened a
+    // picker, so reaching here already answers it. Passed as a constant rather than omitted
+    // because the resolver has no optional terms.
+    captureUnsupported: false,
+    // **THIS SESSION'S OWN ACTIVITY IS WHAT IS BEING ASKED ABOUT**, the same rule
+    // `VideoImportButton.preflight` states: the start that is asking is not yet `capturing`, and an
+    // import or a clip picker that began while the picker was open is a genuine refusal.
+    activity: resolveCaptureActivity(
+      capturing: container.read(capturingStateProvider),
+      importState: videoImportState.value,
+    ),
+    // The gate this function exists for. A null layout answers "nothing can be holding a path under
+    // a root the app has not resolved", which is `listenLiveCaptureLongRead`'s own reading of it.
+    heldByLongRead:
+        layout != null && liveCaptureBlockedBy(layout, container.read(longReadRegistryProvider).values) != null,
+  );
+}
+
 /// The **full** translation key for [blocker]'s sentence.
 ///
 /// Full keys rather than a leaf under one `blocked` map — the shape [captureActivityBlockedKey] uses —
@@ -1930,7 +1971,15 @@ class CaptureControlGroup extends ConsumerWidget {
             // The picker (web `getDisplayMedia`) must be opened inside the tap's transient activation.
             // The banner is only an overlay, so it must invoke capture synchronously without waiting
             // for user acknowledgement.
-            WebCaptureTutorialDialog.show(ref.base, controller.startCapture);
+            //
+            // The container is resolved here, at the press, and not inside the preflight: the page can
+            // be disposed while the picker is open, and `ProviderScope.containerOf` needs a live
+            // element. The container outlives it.
+            final container = ProviderScope.containerOf(context, listen: false);
+            WebCaptureTutorialDialog.show(
+              ref.base,
+              () => controller.startCapture(mayStillStart: () => liveCaptureStartPreflight(container) == null),
+            );
             return;
           }
           controller.startCapture();

@@ -470,7 +470,8 @@ class PlatformChannel {
   /// If the user cancels the picker or denies permission (`getDisplayMedia` rejects),
   /// or the session cannot start, it relays an `onError` with a reason instead of
   /// hanging: that clears the button's pending spinner and returns it to idle.
-  Future<void> startCapture() async {
+  /// [mayStillStart] is re-asked after the picker resolves; see the call site below.
+  Future<void> startCapture({bool Function()? mayStillStart}) async {
     if (_disposed) {
       logger.d('startCapture ignored: the platform channel is disposed');
       return;
@@ -517,6 +518,26 @@ class PlatformChannel {
     }
     if (_disposed) {
       _stopStreamTracks(stream);
+      return;
+    }
+    // **The picker is an unbounded gap between the gate and the claim, and this closes it.** The
+    // control that was pressed was gated on nothing else holding the record store, but a live
+    // session does not announce itself as `LongReadKind.liveCapture` until the core reports it
+    // capturing -- which is after this await. A merge, a zip or a module install started while the
+    // picker was open would therefore own the store while this session began writing records into
+    // it. Video import has the same gap and answers it the same way, with a preflight immediately
+    // before the claim is taken (`VideoImportButton.preflight`); this is that mechanism, at the one
+    // start path that opens a picker.
+    //
+    // Asked after `getDisplayMedia` and not before: the pre-picker answer is the one the control
+    // already gave, and re-asking it here would refuse nothing that was not refused at the press.
+    //
+    // And below the disposal check, not above it: a disposed channel's preflight would read providers
+    // out of a container that may already be gone.
+    if (mayStillStart != null && !mayStillStart()) {
+      logger.i('The live capture was refused after the picker closed: the record store is held by another job');
+      _stopStreamTracks(stream);
+      _relayNotify(jsonEncode({'type': 'onError', 'message': 'live_capture_blocked'}));
       return;
     }
     final tracks = stream.getVideoTracks().toDart;

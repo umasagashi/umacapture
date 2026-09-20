@@ -114,6 +114,10 @@ const _webToastedErrorCodes = <String>{
   'screen_share_denied',
   'screen_share_no_video',
   'live_capture_start_failed',
+  // Refused after the source picker closed because something else had taken the record store in
+  // the meantime; see `liveCaptureStartPreflight`. A start failure like the three above it, and
+  // reported before any session exists, so the capture state would be wiped before it was read.
+  'live_capture_blocked',
   // See `liveRecordsNotStoredErrorCode` in platform_channel_web_ops.dart. Kept as a literal
   // with the others rather than imported: this switch is shared code, and the codes it
   // routes are web-only strings that never resolve to anything on desktop.
@@ -2366,7 +2370,14 @@ class PlatformController {
     }
   }
 
-  Future<void> startCapture() => _command('startCapture', _platformChannel.startCapture());
+  /// Starts a live capture session.
+  ///
+  /// [mayStillStart] is re-asked by the web leg once its source picker resolves, and is the answer
+  /// to a window no control can gate from its build: a press is gated, the picker then stays open
+  /// for as long as the user takes to choose, and only the session that follows announces itself as
+  /// [LongReadKind.liveCapture]. See `liveCaptureStartPreflight`, which builds it.
+  Future<void> startCapture({bool Function()? mayStillStart}) =>
+      _command('startCapture', _platformChannel.startCapture(mayStillStart: mayStillStart));
 
   /// Stops the live capture session.
   ///
