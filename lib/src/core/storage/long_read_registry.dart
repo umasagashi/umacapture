@@ -825,8 +825,10 @@ final longReadRegistryProvider = NotifierProvider<LongReadRegistry, Map<LongRead
 /// in any projection of it, and the only trace it left was two log lines. That
 /// is enough to reconstruct a wait afterwards and no use at all to a surface
 /// that has to say, while the wait is happening, why it is showing nothing: the
-/// settings page's module row reads `moduleVersionLoader`, and a deferred
-/// install and an unfinished version check are the same `loading` to it. They
+/// pages waiting on the module update (`moduleUpdateActivityDisplay` — the
+/// capture, chara-detail and dashboard pages, the settings module row and the
+/// manual-update dialog) read `moduleVersionLoader`, and a deferred install and
+/// an unfinished version check are the same `loading` to it. They
 /// are not the same thing to the user — one is seconds and one can be a
 /// whole-store re-recognition — so the difference has to exist as data before a
 /// sentence can be chosen by it.

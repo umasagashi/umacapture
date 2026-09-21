@@ -23,6 +23,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/statistics.dart';
 import '/src/gui/theme_extensions.dart';
@@ -689,8 +690,13 @@ class DashboardPage extends ConsumerWidget {
     // hasError is a fallback for an unexpected exception inside the loader.
     final moduleAsync = ref.watch(moduleVersionLoader);
     final moduleUpdateFailed = ref.watch(moduleUpdateFailedProvider) || moduleAsync.hasError;
+    final moduleUpdating = moduleAsync.isLoading && moduleUpdateActivityDisplay(ref) != null;
     return ListTilePageRootWidget(
       children: [
+        // The statistics below wait on the same module update and show only a bare
+        // spinner per tile; the reason is stated once, here. Gated at the mount
+        // site rather than left to render nothing, so the list keeps no empty gap.
+        if (moduleUpdating) const ListCard(children: [ModuleUpdateActivityView()]),
         // Shown on every platform: the manual update dialog it opens installs
         // from the archive's bytes, so it works in a browser too, and web is the
         // build that most needs it -- its module lives in OPFS, which the

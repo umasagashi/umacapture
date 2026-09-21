@@ -625,6 +625,157 @@ const _versionFileName = "version_info.json";
 /// banner). Distinct from the transient failure toast.
 final moduleUpdateFailedProvider = settableNotifierProvider<bool>(false);
 
+/// What the automatic module update is doing right now, while [moduleVersionLoader]
+/// is loading. `null` means no update is in a phase worth naming: every one has
+/// finished, or is still at the quick version-JSON request. Derived from
+/// [moduleUpdateActivitiesProvider], which is written only through
+/// [withModuleUpdateActivity], by the desktop loader and by the web download, so
+/// every page waiting on the loader reads the same fact on both platforms.
+///
+/// A parked install is not a phase here: [longReadDeferralsProvider] already
+/// carries it, and the display gives it precedence (a park happens after
+/// [ModuleInstalling] has been published).
+sealed class ModuleUpdateActivity {
+  const ModuleUpdateActivity();
+}
+
+/// The module archive is being fetched. [progress] is determinate when the server
+/// sent a length; otherwise it is indeterminate and carries the byte count only.
+final class ModuleDownloading extends ModuleUpdateActivity {
+  final Progress progress;
+
+  const ModuleDownloading(this.progress);
+}
+
+/// The archive has arrived and is being validated and written into the modules
+/// directory.
+final class ModuleInstalling extends ModuleUpdateActivity {
+  const ModuleInstalling();
+}
+
+final moduleUpdateActivityProvider = Provider<ModuleUpdateActivity?>(
+  (ref) => ref.watch(moduleUpdateActivitiesProvider).values.lastOrNull,
+);
+
+/// The phase of every automatic module update that has published one and not yet
+/// ended, keyed by an owner token unique to that update.
+///
+/// **Keyed by owner and not a single value**, because two updates can run at
+/// once (the web bootstrap and the web refresh both download over `modules/`),
+/// and the phases they publish can be equal — every update reports the same
+/// `const ModuleInstalling()` — so a single value cannot say whose it is, and
+/// whichever ended first would clear the phase the other is still in.
+///
+/// Ordered by publication: a publish moves its owner last, so the phase shown
+/// ([moduleUpdateActivityProvider]) is the most recently reported one.
+class ModuleUpdateActivities extends Notifier<Map<Object, ModuleUpdateActivity>> {
+  @override
+  Map<Object, ModuleUpdateActivity> build() => const {};
+
+  void publish(Object owner, ModuleUpdateActivity activity) {
+    state = {...Map.of(state)..remove(owner), owner: activity};
+  }
+
+  void retire(Object owner) {
+    if (state.containsKey(owner)) {
+      state = Map.of(state)..remove(owner);
+    }
+  }
+}
+
+final moduleUpdateActivitiesProvider = NotifierProvider<ModuleUpdateActivities, Map<Object, ModuleUpdateActivity>>(
+  ModuleUpdateActivities.new,
+);
+
+/// How many received bytes an indeterminate download advances by before the next
+/// update is published. Measured in bytes, not time, so what is published does
+/// not depend on how fast the chunks arrive.
+const moduleDownloadIndeterminateStep = 64 * 1024;
+
+/// The download phase to publish for one progress callback, or `null` when it
+/// would show the same thing as [previous] (the same whole percent, or the same
+/// [moduleDownloadIndeterminateStep] bucket), so a 10 MB transfer rebuilds the
+/// waiting pages about a hundred times rather than once per chunk.
+///
+/// `total <= 0` means the length is unknown: dio's native adapter reports -1 when
+/// there is no `Content-Length` or the body is compressed, and the browser's XHR
+/// reports 0.
+@visibleForTesting
+ModuleDownloading? nextModuleDownloadActivity(ModuleDownloading? previous, int received, int total) {
+  final next = ModuleDownloading(
+    total <= 0 ? Progress(count: received, total: 0, indeterminate: true) : Progress(count: received, total: total),
+  );
+  if (previous == null) {
+    return next;
+  }
+  final before = previous.progress;
+  final after = next.progress;
+  if (before.indeterminate != after.indeterminate) {
+    return next;
+  }
+  final unchanged = after.indeterminate
+      ? before.count ~/ moduleDownloadIndeterminateStep == after.count ~/ moduleDownloadIndeterminateStep
+      : before.total == after.total && before.percent == after.percent;
+  return unchanged ? null : next;
+}
+
+/// Publishes the start of a module download through [report] and returns the
+/// callback that publishes its progress. Shared by the desktop file download and
+/// the web byte download, so both report the same phases.
+ProgressCallback _moduleDownloadProgress(void Function(ModuleUpdateActivity) report) {
+  var current = ModuleDownloading(Progress(total: 0, indeterminate: true));
+  var lengthLogged = false;
+  report(current);
+  return (received, total) {
+    if (!lengthLogged) {
+      lengthLogged = true;
+      logger.i("Module download started (length=$total)");
+    }
+    final next = nextModuleDownloadActivity(current, received, total);
+    if (next != null) {
+      current = next;
+      report(next);
+    }
+  };
+}
+
+/// Runs [body] as one automatic module update: [body] publishes its phases into
+/// [moduleUpdateActivitiesProvider], under an owner token of this call's own,
+/// through the `report` it is handed, and that entry is removed when [body] ends,
+/// by returning or by throwing.
+///
+/// Writes through the container's ref ([containerRefProvider]) rather than
+/// through [ref], because [ref] is the loader's and the loader can be disposed
+/// while its download is still running: a write through a disposed `Ref` throws,
+/// and one thrown from the `finally` below would replace the exception [body] is
+/// propagating — including the [LongReadNotStartedException] the loader relies
+/// on catching. When the container itself is gone there is nobody left to show
+/// the phase to, so writes are skipped ([RefBase.mounted]).
+///
+/// Removes only its own entry: an update running alongside keeps its phase until
+/// it ends too.
+Future<T> withModuleUpdateActivity<T>(
+  RefBase ref,
+  Future<T> Function(void Function(ModuleUpdateActivity) report) body,
+) async {
+  final container = ref.read(containerRefProvider);
+  final owner = Object();
+  void report(ModuleUpdateActivity activity) {
+    if (!container.mounted) {
+      return;
+    }
+    container.read(moduleUpdateActivitiesProvider.notifier).publish(owner, activity);
+  }
+
+  try {
+    return await body(report);
+  } finally {
+    if (container.mounted) {
+      container.read(moduleUpdateActivitiesProvider.notifier).retire(owner);
+    }
+  }
+}
+
 /// File name of the ONNX-extraction sentinel written into the OPFS `modulesDir`.
 ///
 /// This marker is independent of `version_info.json` (the display-layer JSON
@@ -833,24 +984,33 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
 /// and a third caller written later inherits the claim instead of being owed
 /// one. Only the extraction is inside it; the download above is not, for the
 /// reason [runModuleInstall] gives.
+///
+/// The update phases ([moduleUpdateActivityProvider]) are published here for the
+/// same reason: both callers inherit them.
 Future<void> _downloadAndExtractModuleToOpfs(RefBase ref, DirectoryPath modulesDir) async {
   logger.i("Bootstrapping web module data from ${Const.moduleZipUrl}");
-  final response = await createDiagnosticDio(
-    operation: "bootstrap_web_module",
-  ).get<List<int>>(Const.moduleZipUrl, options: Options(responseType: ResponseType.bytes));
-  // Validated like a manual install: a body that is not a module (an error page
-  // served with a 200, a truncated transfer) must not reach the extraction, or
-  // the markers would be committed over an empty archive and the fetch would
-  // never be attempted again. See [installModuleArchiveBytes].
-  await runModuleInstall(
-    ref,
-    modulesDir,
-    () => installModuleArchiveBytes(response.data ?? const <int>[], modulesDir, extractJson: true, extractOnnx: true),
-    // Nobody pressed anything to get here — both callers are a boot-time version
-    // check — so there is no surface to refuse on and nothing that could be told
-    // to come back later. See [runModuleInstall].
-    contention: LongReadContention.defer,
-  );
+  await withModuleUpdateActivity(ref, (report) async {
+    final response = await createDiagnosticDio(operation: "bootstrap_web_module").get<List<int>>(
+      Const.moduleZipUrl,
+      options: Options(responseType: ResponseType.bytes),
+      onReceiveProgress: _moduleDownloadProgress(report),
+    );
+    logger.i("Module download finished, installing");
+    report(const ModuleInstalling());
+    // Validated like a manual install: a body that is not a module (an error page
+    // served with a 200, a truncated transfer) must not reach the extraction, or
+    // the markers would be committed over an empty archive and the fetch would
+    // never be attempted again. See [installModuleArchiveBytes].
+    await runModuleInstall(
+      ref,
+      modulesDir,
+      () => installModuleArchiveBytes(response.data ?? const <int>[], modulesDir, extractJson: true, extractOnnx: true),
+      // Nobody pressed anything to get here — both callers are a boot-time version
+      // check — so there is no surface to refuse on and nothing that could be told
+      // to come back later. See [runModuleInstall].
+      contention: LongReadContention.defer,
+    );
+  });
 }
 
 /// Writes the requested payloads of an already-decoded module [archive] into
@@ -1000,17 +1160,23 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
-    await createDiagnosticDio(operation: "download_modules").download(Const.moduleZipUrl, downloadPath.path);
-    // Refuses a body that is not a module before writing anything, and so
-    // reaches the catch below instead of the success toast underneath it.
-    await runModuleInstall(
-      ref.base,
-      pathInfo.modulesDir,
-      () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
-      // Started by this version check and not by a press, so it waits rather
-      // than refusing. See [runModuleInstall].
-      contention: LongReadContention.defer,
-    );
+    await withModuleUpdateActivity(ref.base, (report) async {
+      await createDiagnosticDio(
+        operation: "download_modules",
+      ).download(Const.moduleZipUrl, downloadPath.path, onReceiveProgress: _moduleDownloadProgress(report));
+      logger.i("Module download finished, installing");
+      report(const ModuleInstalling());
+      // Refuses a body that is not a module before writing anything, and so
+      // reaches the catch below instead of the success toast underneath it.
+      await runModuleInstall(
+        ref.base,
+        pathInfo.modulesDir,
+        () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
+        // Started by this version check and not by a press, so it waits rather
+        // than refusing. See [runModuleInstall].
+        contention: LongReadContention.defer,
+      );
+    });
   } on LongReadNotStartedException {
     // Only the abandoned form can arrive here (this route never refuses): the
     // container went away while the install was parked. Nothing was written and

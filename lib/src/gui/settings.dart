@@ -30,6 +30,7 @@ import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/raw_frame_probe_view.dart';
 import '/src/gui/toast.dart';
@@ -720,22 +721,20 @@ class AboutGroup extends ConsumerWidget {
 
   /// What the module row shows while the version check has not answered.
   ///
-  /// Two sentences and not one, because `loading` covers two states that differ
-  /// by minutes. An automatic install that reaches a held `modules/` parks until
-  /// the reader lets go ([LongReadRegistry.holdWhenFree]), and the loader this
-  /// row reads stays `loading` for the whole park — so the row said 「確認中...」
-  /// about a check that had already finished, for as long as a whole-store
-  /// re-recognition takes. The park is a state the registry carries
-  /// ([longReadDeferralsProvider]), so the row is told which of the two it is
-  /// rather than inferring it from how long it has been waiting.
+  /// Not one sentence, because `loading` covers states that differ by minutes:
+  /// the quick version check, the archive download, its extraction, and an
+  /// install parked until a held `modules/` is let go
+  /// ([LongReadRegistry.holdWhenFree]). The loader this row reads stays
+  /// `loading` through all of them. Each of the longer ones is a state carried as
+  /// data, and [moduleUpdateActivityLabel] is where they are told apart for every
+  /// page waiting on the loader; this row falls back to
+  /// `$tr_settings.about.version.checking` only when none of them holds.
   String moduleVersionLoadingLabel(WidgetRef ref) {
-    return ref.watch(longReadDeferralsProvider).containsKey(LongReadKind.moduleInstall)
-        ? "$tr_settings.about.version.waiting".tr()
-        : "$tr_settings.about.version.checking".tr();
+    return moduleUpdateActivityLabel(ref) ?? "$tr_settings.about.version.checking".tr();
   }
 
   String moduleVersion(WidgetRef ref) {
-    // Read before the `when`, so the row rebuilds when the park begins or ends:
+    // Read before the `when`, so the row rebuilds when the phase changes:
     // a watch inside the `loading` branch is only established while that branch
     // is the one being built, which is true here but rests on it.
     final loadingLabel = moduleVersionLoadingLabel(ref);

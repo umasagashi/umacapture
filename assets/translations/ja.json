@@ -305,6 +305,7 @@
         },
         "chara_detail": {
             "title": "殿堂入り管理",
+            "loading": "ロード中",
             "no_record_message": "ウマ娘が登録されていません。先にキャプチャしてください。",
             "no_column_message": "表示する列がありません。上のボタンから列を追加してください。",
             "no_row_message": "該当するウマ娘は見つかりませんでした。",
@@ -1925,7 +1926,6 @@
                     "title": "バージョン",
                     "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
                     "checking": "確認中...",
-                    "waiting": "他の処理の完了を待っています...",
                     "unknown_version": "不明"
                 },
                 "regenerate": {
@@ -1944,6 +1944,12 @@
                 }
             },
             "module_update": {
+                "activity": {
+                    "downloading": "認識モジュールをダウンロード中… {percent}%（{received} / {total} MB）",
+                    "downloading_unknown_length": "認識モジュールをダウンロード中…（{received} MB）",
+                    "installing": "認識モジュールを展開中…",
+                    "waiting": "他の処理の完了を待っています..."
+                },
                 "entry": {
                     "title": "認識モジュールの手動更新",
                     "description": "認識モジュールを手動で更新します。更新後、対象バージョンのウマ娘の自動再認識も実行されます。"

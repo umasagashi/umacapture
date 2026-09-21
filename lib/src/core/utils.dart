@@ -416,6 +416,11 @@ class RefBase {
   /// A view of this ref whose [watch] behaves like [read], so code that watches
   /// providers through it registers no dependencies and will not be rebuilt.
   RefBase get readOnly => RefBase._(_ref, true);
+
+  /// Whether this ref can still be used: a `Ref` whose provider has not been
+  /// disposed, or a `WidgetRef` whose widget is still mounted. Both throw when
+  /// used past that point, so work that outlives its own ref checks this first.
+  bool get mounted => _ref is WidgetRef ? _ref.context.mounted : (_ref as Ref).mounted;
 }
 
 // Base class for the tag-selector providers (skill/factor tag filters in the

@@ -31,6 +31,7 @@ import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/record_store_banner.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
@@ -1621,7 +1622,14 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: const [CircularProgressIndicator(), SizedBox(height: 8), Text("Loading")],
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 8),
+          Text("$tr_chara_detail.loading".tr()),
+          // The initial data waits on the module update (through the module info
+          // loaders), which can be a multi-megabyte download.
+          const ModuleUpdateActivityView(),
+        ],
       ),
     );
   }

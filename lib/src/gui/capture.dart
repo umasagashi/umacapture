@@ -27,6 +27,7 @@ import '/src/gui/capture_preview_view.dart';
 import '/src/gui/chara_detail/report_import_dialog.dart';
 import '/src/gui/chara_detail/report_screen_dialog.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/settings.dart';
 import '/src/gui/storage_persistence_banner.dart';
 import '/src/gui/storage_tree.dart';
@@ -1955,6 +1956,10 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
             // screen for as long as the wasm module and the ONNX models take to arrive,
             // so it is the one loading state a user reliably reads.
             Text("$tr_capture.loading".tr()),
+            // The loader behind this layer waits on the module update, which can be
+            // a multi-megabyte download; this names it instead of leaving the
+            // spinner to look stuck.
+            const ModuleUpdateActivityView(),
           ],
         ),
       ),

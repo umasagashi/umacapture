@@ -11,10 +11,12 @@
 // takes. Nothing on screen accounted for the wait, and the one place it existed
 // was two lines in the log.
 //
-// WHAT THE FIX IS. The park is now a state and not only an event:
+// HOW IT IS CARRIED. The park is a state and not only an event:
 // `holdWhenFree` enters and leaves `longReadDeferralsProvider` on the transitions,
-// and the row asks which of the two waits it is in. The sentences, and the decision that the row tells
-// the two waits apart, are the author's (`docs/wording-decisions.md` records both, and that an approved
+// and the row takes its sentence from `moduleUpdateActivityDisplay`, where a park wins over any
+// published update phase (checking, downloading, installing). This file covers the park against the
+// check; the download and install phases are `module_update_activity_test.dart`'s. The sentences, and
+// the decision that the row tells the waits apart, are the author's (`docs/wording-decisions.md` records both, and that an approved
 // sentence changes only after confirming with the author); what this file asserts is that the right one
 // reaches the row, and that it goes away again.
 //
