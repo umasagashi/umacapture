@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
+import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
@@ -73,12 +74,19 @@ Map<String, dynamic> keyFileData(DirectoryPath directory, String key) =>
 
 /// A container over [info], with [overrides] layered on top of the three loaders
 /// every on-disk merge case needs.
-ProviderContainer makeMergeContainer({required PathInfo info, List<Override> overrides = const []}) {
+///
+/// [factorInfo] is what the factor table loader resolves to; by default the
+/// [testFactorInfo] table, at once.
+ProviderContainer makeMergeContainer({
+  required PathInfo info,
+  List<Override> overrides = const [],
+  Future<List<FactorInfo>> Function()? factorInfo,
+}) {
   final container = ProviderContainer(
     overrides: [
       pathInfoLoader.overrideWith((ref) async => info),
       moduleVersionLoader.overrideWith((ref) async => null),
-      factorInfoLoader.overrideWith((ref) async => testFactorInfo),
+      factorInfoLoader.overrideWith((ref) => factorInfo?.call() ?? Future.value(testFactorInfo)),
       ...overrides,
     ],
   );

@@ -515,15 +515,12 @@ final enhancementDismissalStoreProvider = Provider<EnhancementDismissalStore>((r
 /// since the colour of a factor is what decides it.
 final pendingEnhancementCandidatesProvider = Provider<List<EnhancementCandidate>>((ref) {
   final info = ref.watch(factorInfoLoader).asData;
-  if (info == null) {
-    return const [];
-  }
   final active = ref.watch(charaDetailRecordStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
   final archive = ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
   final dismissed = ref.watch(enhancementDismissedPairsProvider).asData?.value ?? const <RecordIdPair>{};
   return findEnhancementCandidates(
     [...active, ...archive],
-    FactorClassifier.fromInfo(info.value),
+    info == null ? null : FactorClassifier.fromInfo(info.value),
     dismissed: dismissed,
   );
 });
@@ -1343,14 +1340,7 @@ final class EnhancementMerge {
   /// (a refusal, not a pass) while the table has not loaded.
   bool _stillTheSameCandidate(EnhancementCandidate candidate, CharaDetailRecord older, CharaDetailRecord retired) {
     final info = _ref.read(factorInfoLoader).asData;
-    if (info == null) {
-      return false;
-    }
-    final relation = compareEnhancement(
-      older.factors.self,
-      retired.factors.self,
-      FactorClassifier.fromInfo(info.value),
-    );
+    final relation = relateRecords(older, retired, info == null ? null : FactorClassifier.fromInfo(info.value));
     final enhanced = switch (relation) {
       EnhancementRelation.unrelated => null,
       EnhancementRelation.identical => null,

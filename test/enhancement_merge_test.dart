@@ -648,8 +648,13 @@ void main() {
         (store: info.charaDetailActiveDir, id: 'child1'),
         (store: info.charaDetailArchiveDir, id: 'child2'),
       ];
-      for (final child in children) {
-        writeRecord(child.store, makeRecord(id: child.id, card: 3, self: whites(2), parent1Id: 'retired'));
+      // Distinct evaluation values: three children that read the same would be exact duplicates,
+      // and therefore merge candidates of their own.
+      for (final (index, child) in children.indexed) {
+        writeRecord(
+          child.store,
+          makeRecord(id: child.id, card: 3, self: whites(2), parent1Id: 'retired', evaluationValue: index),
+        );
       }
 
       final namesRetired = <String>[];

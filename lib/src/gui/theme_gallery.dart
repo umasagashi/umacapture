@@ -645,7 +645,8 @@ const Map<String, String> _roleUsages = {
       'button label, gauge and keyboard-focus ring).',
   'primaryContainer':
       'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
-      'column-builder group borders; character avatar; table/stat accents.',
+      'column-builder group borders; character avatar; table/stat accents; settings pending-count badge.',
+  'onPrimaryContainer': 'Count text on the settings "resolve inheritance" pending-count badge.',
   'secondaryContainer':
       'Subtle highlight backgrounds: dashboard and data-table avatars; tag chip drag highlight. Also the '
       'source the pale surfaceContainerLowest/Low/Bright tints are lerped from.',

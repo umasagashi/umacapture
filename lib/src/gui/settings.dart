@@ -927,13 +927,28 @@ class ResolveInheritanceTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final blocker = resolveInheritanceBlockerFor(ref, listen: true);
+    // The count of pending merge candidates, so a duplicate that appeared without a capture (a
+    // re-recognition, or one already on disk at launch) is visible without running the flow.
+    final pending = ref.watch(pendingEnhancementCandidatesProvider).length;
+    final colorScheme = Theme.of(context).colorScheme;
     return Disabled(
       disabled: blocker != null,
       tooltip: blocker == null ? null : resolveInheritanceBlockerKey(blocker).tr(),
       child: ListTile(
         title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
         subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
-        trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
+        trailing: Padding(
+          padding: const EdgeInsets.only(right: 16),
+          // Pending work, not a failure: the neutral container role the column chips' count badge
+          // also reads, rather than the error role Badge falls back to.
+          child: Badge.count(
+            count: pending,
+            isLabelVisible: pending > 0,
+            backgroundColor: colorScheme.primaryContainer,
+            textColor: colorScheme.onPrimaryContainer,
+            child: const Icon(Symbols.refresh_rounded),
+          ),
+        ),
         onTap: () => _run(ref),
       ),
     );

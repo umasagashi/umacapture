@@ -187,30 +187,62 @@ int compareRecordAge(CharaDetailRecord a, CharaDetailRecord b) {
 
 /// How two stored records relate as merge candidates.
 ///
-/// Records are compared only within the same set of coloured factor kinds; the card is not a term,
-/// because the green factor already differs per card.
+/// An exact duplicate ([CharaDetailRecord.isSameChara]) is [EnhancementRelation.identical] whatever
+/// its self factors hold: [kEnhancementMinPreWhites] and the known-id rule guard against a sparse or
+/// misread self list matching an unrelated uma, and a pair that also agrees on the parents, status,
+/// aptitudes, skills, rank and evaluation is not such a match. Every other pair is decided by
+/// [compareEnhancement] on the self factors alone, which needs the colour of each factor; with no
+/// [classifier] (the factor table has not loaded, or failed to) such a pair is unrelated.
+EnhancementRelation relateRecords(CharaDetailRecord a, CharaDetailRecord b, FactorClassifier? classifier) {
+  if (a.isSameChara(b)) {
+    return EnhancementRelation.identical;
+  }
+  if (classifier == null) {
+    return EnhancementRelation.unrelated;
+  }
+  return compareEnhancement(a.factors.self, b.factors.self, classifier);
+}
+
+/// Every pair of [records] that [relateRecords] relates, except the pairs in [dismissed].
+///
+/// With no [classifier] only the exact duplicates are found, as [relateRecords] relates nothing else.
+///
+/// Records are compared only within the same set of coloured factor kinds, or, for an exact
+/// duplicate, within the same factors; the card is not a term, because the green factor already
+/// differs per card.
 List<EnhancementCandidate> findEnhancementCandidates(
   Iterable<CharaDetailRecord> records,
-  FactorClassifier classifier, {
+  FactorClassifier? classifier, {
   Set<RecordIdPair> dismissed = const {},
 }) {
-  final buckets = <String, List<(CharaDetailRecord, SplitFactors)>>{};
+  // Two partitions, because each relation is only possible within one: an enhancement pair shares
+  // its coloured kinds, and an exact duplicate shares its whole factor set — including a record
+  // whose self list [SplitFactors.of] cannot split. A pair can sit in both; [seen] offers it once.
+  final byColouredKinds = <String, List<CharaDetailRecord>>{};
+  final byFactors = <String, List<CharaDetailRecord>>{};
   for (final record in records) {
-    final split = SplitFactors.of(record.factors.self, classifier);
+    final split = classifier == null ? null : SplitFactors.of(record.factors.self, classifier);
     if (split != null) {
-      buckets.putIfAbsent(split.colouredKey, () => []).add((record, split));
+      byColouredKinds.putIfAbsent(split.colouredKey, () => []).add(record);
     }
+    byFactors.putIfAbsent(_factorsKey(record.factors), () => []).add(record);
   }
+  final seen = <RecordIdPair>{...dismissed};
   final candidates = <EnhancementCandidate>[];
-  for (final bucket in buckets.values) {
+  for (final bucket in [...byColouredKinds.values, ...byFactors.values]) {
     for (var i = 0; i < bucket.length; i++) {
       for (var j = i + 1; j < bucket.length; j++) {
-        final (a, splitA) = bucket[i];
-        final (b, splitB) = bucket[j];
-        final relation = splitA.relateTo(splitB);
-        if (relation == EnhancementRelation.unrelated || dismissed.contains(RecordIdPair(a.id, b.id))) {
+        final a = bucket[i];
+        final b = bucket[j];
+        final pair = RecordIdPair(a.id, b.id);
+        if (seen.contains(pair)) {
           continue;
         }
+        final relation = relateRecords(a, b, classifier);
+        if (relation == EnhancementRelation.unrelated) {
+          continue;
+        }
+        seen.add(pair);
         final aOlder = compareRecordAge(a, b) <= 0;
         candidates.add(
           EnhancementCandidate(
@@ -228,3 +260,7 @@ List<EnhancementCandidate> findEnhancementCandidates(
   }
   return candidates;
 }
+
+/// [factors] as a string equal exactly when the sets are equal ([FactorSet]'s hash is by identity).
+String _factorsKey(FactorSet factors) =>
+    factors.toList().map((list) => list.map((f) => '${f.id}:${f.star}').join(',')).join('|');

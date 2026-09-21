@@ -37,13 +37,16 @@ import 'support/factor_classifier.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
 
-ThemeData _theme() {
-  final base = FlexThemeData.light(scheme: FlexScheme.blue, useMaterial3: true);
+ThemeData _theme({Brightness brightness = Brightness.light}) {
+  final dark = brightness == Brightness.dark;
+  final base = dark
+      ? FlexThemeData.dark(scheme: FlexScheme.blue, useMaterial3: true)
+      : FlexThemeData.light(scheme: FlexScheme.blue, useMaterial3: true);
   return base.copyWith(
     extensions: <ThemeExtension<dynamic>>[
-      AppSemanticColors.light(base.colorScheme),
+      dark ? AppSemanticColors.dark(base.colorScheme) : AppSemanticColors.light(base.colorScheme),
       AppChartColors.standard(),
-      CodeHighlightColors.light(),
+      dark ? CodeHighlightColors.dark() : CodeHighlightColors.light(),
     ],
   );
 }
@@ -306,12 +309,12 @@ EnhancementMergePick? _pickShown(WidgetTester tester, String kind) {
       .groupValue;
 }
 
-Future<void> _pump(WidgetTester tester, ProviderContainer container, Widget child) async {
+Future<void> _pump(WidgetTester tester, ProviderContainer container, Widget child, {ThemeData? theme}) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
       child: MaterialApp(
-        theme: _theme(),
+        theme: theme ?? _theme(),
         home: Scaffold(body: DialogLayer(child: child)),
       ),
     ),
@@ -336,6 +339,49 @@ void main() {
       expect(find.byType(EnhancementReviewList), findsNothing);
       expect(calls.log, ['resolve']);
     });
+
+    testWidgets('the tile shows the number of pending candidates, and no count when there are none', (tester) async {
+      Badge badge() => tester.widget<Badge>(find.byType(Badge));
+
+      await _pump(tester, _container(calls: _Calls()), const ResolveInheritanceTile());
+      expect(badge().isLabelVisible, isFalse);
+
+      await _pump(
+        tester,
+        _container(
+          calls: _Calls(),
+          candidates: const [
+            EnhancementCandidate(olderId: 'a', newerId: 'b', enhancedId: null),
+            EnhancementCandidate(olderId: 'c', newerId: 'd', enhancedId: 'd'),
+          ],
+        ),
+        const ResolveInheritanceTile(),
+      );
+      expect(badge().isLabelVisible, isTrue);
+      expect(find.descendant(of: find.byType(Badge), matching: find.text('2')), findsOneWidget);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('the pending count reads the primary container roles, not the error roles ($brightness)', (
+        tester,
+      ) async {
+        final theme = _theme(brightness: brightness);
+        await _pump(
+          tester,
+          _container(
+            calls: _Calls(),
+            candidates: const [EnhancementCandidate(olderId: 'a', newerId: 'b', enhancedId: null)],
+          ),
+          const ResolveInheritanceTile(),
+          theme: theme,
+        );
+        final badge = tester.widget<Badge>(find.byType(Badge));
+        final scheme = theme.colorScheme;
+        expect(scheme.primaryContainer, isNot(scheme.error), reason: 'the roles are distinguishable in this theme');
+        expect(badge.backgroundColor, scheme.primaryContainer);
+        expect(badge.textColor, scheme.onPrimaryContainer);
+      });
+    }
 
     testWidgets('cancelling after one merge keeps it; closing with no blocker runs the resolution after the merges', (
       tester,
