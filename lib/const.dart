@@ -44,7 +44,12 @@ class Const {
 
   static String get moduleZipName => "modules.zip";
 
-  static String get moduleZipUrl => "$moduleUrlRoot/$moduleZipName";
+  /// The fixed-name alias of the published archive, for a person to open in a browser.
+  ///
+  /// Only the manual update dialog shows it. The automatic update never fetches it: it learns
+  /// the archive's location from the pointer ([moduleVersionInfoUrl]'s `module_archive`) and
+  /// checks the bytes against that reference, which a fixed name cannot carry.
+  static String get moduleZipAliasUrl => "$moduleUrlRoot/$moduleZipName";
 
   static String get appVersionInfoUrl => "$appUrlRoot/version_info.json";
 

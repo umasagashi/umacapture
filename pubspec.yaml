@@ -22,6 +22,9 @@ dependencies:
   badges: ^3.2.0
   charset: ^2.0.1
   collection: ^1.16.0
+  # Checks a downloaded module archive against the digest its pointer states. Also hashes the
+  # pinned web assets in the build-time lib/web_deps_verify.dart.
+  crypto: ^3.0.7
   csv: ^8.0.0
   dart_eval: ^0.8.5
   dart_mappable: 4.6.1
@@ -78,10 +81,8 @@ dev_dependencies:
 
   auto_route_generator: 10.2.5
   build_runner: ^2.2.0
-  # Build-time only: lib/web_deps_verify.dart hashes the pinned web assets (crypto) and
-  # lib/distribution_info.dart walks the asset graph with a glob. Both used to resolve
-  # transitively through build_runner; declared here so a dependency bump cannot drop them.
-  crypto: ^3.0.7
+  # Build-time only: lib/distribution_info.dart walks the asset graph with a glob. It used to
+  # resolve transitively through build_runner; declared here so a dependency bump cannot drop it.
   dart_mappable_builder: 4.6.1
   # Test-only: puts the timer-driven bounds (the video import's inactivity watchdog)
   # on a controlled clock, so a suite never pays their wall time and "at the bound"

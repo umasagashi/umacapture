@@ -22,8 +22,8 @@
 //
 // WHAT IT CANNOT REACH. The loaders themselves: `moduleVersionLoader` skips the update in debug mode, and
 // the web route needs a browser. Both reach the helper only through `fetchVerifiedModuleArchive`, which
-// module_archive_fetch_test.dart runs over a fake dio adapter and pins as the helper's one caller. The real
-// dio adapters' progress events are not exercised.
+// module_archive_fetch_test.dart runs over a fake dio adapter and pins as the call both the desktop loader
+// and the web download make. The real dio adapters' progress events are not exercised.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -251,6 +251,20 @@ void main() {
       secondMayEnd.complete();
       await secondBody;
       expect(container.read(moduleUpdateActivityProvider), isNull);
+    });
+
+    test('an update that reports again is the one shown, although it published first', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(moduleUpdateActivitiesProvider.notifier);
+      final first = Object();
+      final second = Object();
+      final firstAgain = ModuleDownloading(Progress(count: 2, total: 10));
+      notifier.publish(first, ModuleDownloading(Progress(count: 1, total: 10)));
+      notifier.publish(second, const ModuleInstalling());
+      notifier.publish(first, firstAgain);
+
+      expect(container.read(moduleUpdateActivityProvider), same(firstAgain));
     });
 
     test("when the update shown ends first, the other update's phase is shown again", () async {

@@ -32,18 +32,60 @@ Uint8List _moduleZip() => _zip({
   "modules/skill/prediction.onnx": _bytes("onnx-payload"),
 });
 
+Uint8List _moduleZipWith(String extraEntry) {
+  final archive = ZipDecoder().decodeBytes(_moduleZip());
+  archive.addFile(ArchiveFile(extraEntry, 7, _bytes("escaped")));
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+/// [zip] with its central directory entry [name] restated as a Unix symbolic
+/// link: `ZipEncoder` only writes MS-DOS entries, and the decoder reads a link
+/// from the "made by Unix" byte and the file type in the external attributes.
+Uint8List _asUnixSymlink(Uint8List zip, String name) {
+  final data = ByteData.sublistView(zip);
+  for (var offset = 0; offset + 46 <= zip.length; offset++) {
+    if (data.getUint32(offset, Endian.little) != 0x02014b50) continue;
+    final nameLength = data.getUint16(offset + 28, Endian.little);
+    if (utf8.decode(zip.sublist(offset + 46, offset + 46 + nameLength)) != name) continue;
+    zip[offset + 5] = 3;
+    data.setUint32(offset + 38, 0xA1FF << 16, Endian.little);
+    return zip;
+  }
+  throw ArgumentError(name);
+}
+
 /// The archives the two install routes have to agree about.
 ///
 /// `holdsModule` is the *expected* verdict, not a reading of the implementation:
 /// a route that accepts anything, or refuses everything, fails on one half of
 /// this table or the other.
-const _corpus = <String, bool>{
+final _corpus = <String, bool>{
   "a module zip": true,
   "an HTML error page served with a 200": false,
   "a zip with only the version marker": false,
   "a zip with only the recognizer payload": false,
   "an empty zip": false,
+  ..._unsafeNameCorpus,
 };
+
+/// Entry names that would extract outside the module directory, or that the
+/// publish script refuses. Each is added to an otherwise valid module zip, so
+/// the name is the only reason to refuse it.
+const _unsafeNames = <String>[
+  "modules/../escaped.txt",
+  "modules/skill/../../escaped.txt",
+  "modules/./skill/prediction2.onnx",
+  "modules//skill/prediction2.onnx",
+  "modules/skill\\..\\..\\escaped.txt",
+  "modules/C:/escaped.txt",
+  "modules/skill/esc\u0001aped.onnx",
+  "../escaped.txt",
+  "/escaped.txt",
+  "C:/escaped.txt",
+  "escaped.txt",
+];
+
+final _unsafeNameCorpus = <String, bool>{for (final name in _unsafeNames) "a module zip with entry '$name'": false};
 
 Uint8List _archiveNamed(String name) => switch (name) {
   "a module zip" => _moduleZip(),
@@ -51,8 +93,38 @@ Uint8List _archiveNamed(String name) => switch (name) {
   "a zip with only the version marker" => _zip({"modules/version_info.json": _bytes("{}")}),
   "a zip with only the recognizer payload" => _zip({"modules/skill/prediction.onnx": _bytes("onnx")}),
   "an empty zip" => _zip(const {}),
-  _ => throw ArgumentError(name),
+  _ => _moduleZipWith(_unsafeNames.singleWhere((unsafe) => name == "a module zip with entry '$unsafe'")),
 };
+
+/// Awaits [route] and returns what it threw, or null when it completed.
+///
+/// Captured rather than asserted inline so a refusal test can check that nothing
+/// was written *before* it checks the exception: a route that writes and then
+/// fails on an I/O error has already broken the rule, whatever it threw.
+Future<Object?> _thrownBy(Future<void> route) async {
+  try {
+    await route;
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+/// Every path under [dir], empty when [dir] does not exist.
+List<String> _writtenUnder(DirectoryPath dir) {
+  final directory = Directory(dir.path);
+  if (!directory.existsSync()) return const [];
+  return [for (final entity in directory.listSync(recursive: true)) entity.path];
+}
+
+/// The refusal the entry-name rule raises for [name], and nothing else.
+///
+/// Pinned to the message and the offending name, not only to the exception type,
+/// so a refusal that comes from somewhere else -- the payload check, or the
+/// platform refusing a path during extraction -- does not satisfy it.
+Matcher _refusedForEntry(String name) => isA<FormatException>()
+    .having((e) => e.message, 'message', 'The archive has an unsafe entry name.')
+    .having((e) => e.source, 'source', name);
 
 /// A backend whose async delete always refuses, the way a file still held by the
 /// just-finished `compute` isolate does on Windows.
@@ -100,29 +172,36 @@ void main() {
 
   group('the file route (desktop) and the byte route (web) apply one rule', () {
     for (final entry in _corpus.entries) {
+      final unsafeEntry = _unsafeNames.where((name) => entry.key == "a module zip with entry '$name'").firstOrNull;
       test('${entry.key}: ${entry.value ? "accepted" : "refused"} by both routes', () async {
         final bytes = _archiveNamed(entry.key);
 
         // The byte route, as the web bootstrap and the manual byte install use it.
         final byteTarget = outDir / 'bytes';
-        final byteRoute = installModuleArchiveBytes(bytes, byteTarget, extractJson: true, extractOnnx: true);
+        final byteError = await _thrownBy(
+          installModuleArchiveBytes(bytes, byteTarget, extractJson: true, extractOnnx: true),
+        );
         // The file route, as `moduleVersionLoader` and `installModuleFromZip` use it.
         final fileTarget = outDir / 'file';
-        final fileRoute = installModuleArchiveFile((writeZip('${entry.key.hashCode}.zip', bytes), fileTarget));
+        final fileError = await _thrownBy(
+          installModuleArchiveFile((writeZip('${entry.key.hashCode}.zip', bytes), fileTarget)),
+        );
 
         if (entry.value) {
-          await byteRoute;
-          await fileRoute;
+          expect(byteError, isNull);
+          expect(fileError, isNull);
           // Negative control: a real module still installs by both routes.
           expect(await byteTarget.filePath('version_info.json').exists(), isTrue);
           expect(File('${fileTarget.path}/modules/version_info.json').existsSync(), isTrue);
         } else {
-          await expectLater(byteRoute, throwsFormatException);
-          await expectLater(fileRoute, throwsFormatException);
           // The refusal has to happen before the first write, or the commit
-          // markers would be laid over nothing.
-          expect(Directory(byteTarget.path).existsSync(), isFalse);
-          expect(Directory(fileTarget.path).existsSync(), isFalse);
+          // markers would be laid over nothing (and an unsafe name would already
+          // have been written wherever it points).
+          expect(_writtenUnder(byteTarget), isEmpty, reason: 'byte route wrote before refusing');
+          expect(_writtenUnder(fileTarget), isEmpty, reason: 'file route wrote before refusing');
+          final refusal = unsafeEntry == null ? isA<FormatException>() : _refusedForEntry(unsafeEntry);
+          expect(byteError, refusal);
+          expect(fileError, refusal);
         }
       });
     }
@@ -141,6 +220,40 @@ void main() {
     );
 
     expect(await target.filePath('version_info.json').readAsString(), contains("old"));
+  });
+
+  test('a name escaping modules/ is not written beside it in the data root', () async {
+    // The file route extracts into the data root (`modulesDir.parent`), and the
+    // archive package only keeps a name within that directory, so without the
+    // name check `modules/../escaped.txt` lands at `<data root>/escaped.txt`.
+    final dataRoot = outDir / 'data_root';
+    await dataRoot.create(recursive: true);
+
+    final error = await _thrownBy(
+      installModuleArchiveFile((writeZip('slip.zip', _moduleZipWith("modules/../escaped.txt")), dataRoot)),
+    );
+
+    expect(File('${dataRoot.path}/escaped.txt').existsSync(), isFalse);
+    expect(_writtenUnder(dataRoot), isEmpty);
+    expect(error, _refusedForEntry("modules/../escaped.txt"));
+  });
+
+  test('a symbolic link entry is refused by both routes', () async {
+    final bytes = _asUnixSymlink(_moduleZipWith("modules/skill/link.onnx"), "modules/skill/link.onnx");
+    // Guards the fixture: the round trip has to keep the entry a link.
+    expect(ZipDecoder().decodeBytes(bytes).any((file) => file.isSymbolicLink), isTrue);
+
+    final byteError = await _thrownBy(
+      installModuleArchiveBytes(bytes, outDir / 'bytes', extractJson: true, extractOnnx: true),
+    );
+    final fileError = await _thrownBy(installModuleArchiveFile((writeZip('link.zip', bytes), outDir / 'file')));
+
+    // Refused before extraction, not after: the link is the last entry, so an
+    // install that checks late has already written the module beside it.
+    expect(_writtenUnder(outDir / 'bytes'), isEmpty);
+    expect(_writtenUnder(outDir / 'file'), isEmpty);
+    expect(byteError, _refusedForEntry("modules/skill/link.onnx"));
+    expect(fileError, _refusedForEntry("modules/skill/link.onnx"));
   });
 
   group('the downloaded temp archive is cleaned up', () {

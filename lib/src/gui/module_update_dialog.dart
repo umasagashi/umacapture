@@ -358,7 +358,7 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
             const SizedBox(height: 12),
             _LabeledField(
               label: "$tr_module_update.dialog.module_label".tr(),
-              child: _UrlBox(url: Const.moduleZipUrl),
+              child: _UrlBox(url: Const.moduleZipAliasUrl),
             ),
             const SizedBox(height: 24),
             _Step(number: 3, text: "$tr_module_update.dialog.step_3".tr()),

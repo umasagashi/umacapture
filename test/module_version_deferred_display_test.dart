@@ -2,14 +2,13 @@
 //
 //   .fvm/flutter_sdk/bin/flutter test test/module_version_deferred_display_test.dart
 //
-// WHAT THE HARM WAS. An automatic module install that reaches a held `modules/`
+// WHAT IS AT STAKE. An automatic module install that reaches a held `modules/`
 // parks (`LongReadRegistry.holdWhenFree` with `LongReadContention.defer`) until the
 // reader — a re-recognition, a video import — lets go. That install runs inside
-// `moduleVersionLoader`'s body, so the loader stays `loading` for the whole park,
-// and the settings row read the loader alone: it said 「確認中...」 about a version
-// check that had already finished, for as long as a whole-store re-recognition
-// takes. Nothing on screen accounted for the wait, and the one place it existed
-// was two lines in the log.
+// `moduleVersionLoader`'s body, so the loader stays `loading` for the whole park.
+// A row that read the loader alone would say 「確認中...」 about a version check
+// that has already finished, for as long as a whole-store re-recognition takes,
+// with nothing on screen accounting for the wait.
 //
 // HOW IT IS CARRIED. The park is a state and not only an event:
 // `holdWhenFree` enters and leaves `longReadDeferralsProvider` on the transitions,

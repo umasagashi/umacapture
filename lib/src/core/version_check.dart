@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -54,6 +55,12 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
 
   final bool pinVersion;
 
+  /// Where the archive this version describes is published, stated only by the
+  /// published copy of this file (the pointer). The copy inside the zip never
+  /// carries it: an installed module does not record where it came from, so a
+  /// local version info always reads `null` here.
+  final ModuleArchiveRef? moduleArchive;
+
   ModuleVersionRawData(
     this.formatVersion,
     this.region,
@@ -61,6 +68,7 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
     this.minimumVersion = "2021-02-24T00:00:00+0900",
     this.applicationVersion = "0.0.0",
     this.pinVersion = false,
+    this.moduleArchive,
   ]);
 
   /// The two dates this module states, or `null` when either cannot be read.
@@ -105,6 +113,164 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
       operation: "check_latest_module_version",
     ).get(url.toString()).then((response) => ModuleVersionRawDataMapper.fromJson(response.toString()));
   }
+}
+
+/// The published module archive a pointer names: its location and the bytes it
+/// has to be.
+///
+/// [path] is relative to the pointer's own URL (see [resolveArchiveUrl]), so the
+/// pointer names no host and survives a move of the distribution origin.
+/// [sha256] and [size] are what a download is checked against before anything
+/// is installed (see [verifyModuleArchiveBytes] / [verifyModuleArchiveFile]).
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class ModuleArchiveRef with ModuleArchiveRefMappable {
+  final String path;
+
+  /// Lower-case hexadecimal SHA-256 of the archive bytes.
+  @MappableField(key: "sha256")
+  final String sha256;
+
+  /// Length of the archive in bytes.
+  final int size;
+
+  ModuleArchiveRef(this.path, this.sha256, this.size);
+
+  static final _sha256Pattern = RegExp(r"^[0-9a-f]{64}$");
+
+  /// Whether the digest and size have the shape a check can be made against. A
+  /// reference that fails this names no bytes, so it is treated like no
+  /// reference at all.
+  bool get isWellFormed => _sha256Pattern.hasMatch(sha256) && size > 0;
+}
+
+/// Thrown when a downloaded module archive is not the one the pointer named.
+class ModuleArchiveMismatchException implements Exception {
+  final String message;
+
+  const ModuleArchiveMismatchException(this.message);
+
+  @override
+  String toString() => "ModuleArchiveMismatchException: $message";
+}
+
+/// Resolves [archive]'s path against the URL of the pointer that named it.
+///
+/// Only a plain relative path below the pointer's own directory is accepted. A
+/// path carrying a scheme or a host, an absolute path, a `.` or `..` segment, a
+/// backslash, a percent-escape (which could spell a dot segment), a query or a
+/// fragment would let a pointer send the client somewhere other than beside
+/// itself, so each is refused with a [FormatException]. Segments are read from
+/// the path as written, because parsing already normalises dot segments away.
+Uri resolveArchiveUrl(String pointerUrl, ModuleArchiveRef archive) {
+  final pointer = Uri.parse(pointerUrl);
+  final relative = Uri.parse(archive.path);
+  if (archive.path.isEmpty ||
+      archive.path.contains("\\") ||
+      archive.path.contains("%") ||
+      relative.hasScheme ||
+      relative.hasAuthority ||
+      relative.hasAbsolutePath ||
+      relative.hasQuery ||
+      relative.hasFragment ||
+      archive.path.split("/").any((segment) => segment.isEmpty || segment == "." || segment == "..")) {
+    throw FormatException("Not a relative module archive path", archive.path);
+  }
+  final resolved = pointer.resolveUri(relative);
+  final directory = pointer.resolve(".");
+  if (resolved.origin != pointer.origin || !resolved.path.startsWith(directory.path)) {
+    throw FormatException("Module archive path leaves the pointer's directory", archive.path);
+  }
+  return resolved;
+}
+
+/// Checks downloaded archive [bytes] against the pointer that named them.
+///
+/// The in-memory entry (web receives the body as bytes). [verifyModuleArchiveFile]
+/// is the file entry; both apply the one comparison in [_requireArchiveMatches].
+///
+/// Throws a [ModuleArchiveMismatchException] on any difference.
+void verifyModuleArchiveBytes(List<int> bytes, ModuleArchiveRef expected, String expectedRecognizerVersion) {
+  _requireArchiveMatches(
+    size: bytes.length,
+    digest: () => crypto.sha256.convert(bytes).toString(),
+    innerRecognizerVersion: () => _innerRecognizerVersion(ZipDecoder().decodeBytes(bytes)),
+    expected: expected,
+    expectedRecognizerVersion: expectedRecognizerVersion,
+  );
+}
+
+/// File counterpart of [verifyModuleArchiveBytes] for the desktop download,
+/// which lands on disk. Hashes the file as a stream rather than loading it.
+///
+/// Takes one record argument so it can run inside a `compute` isolate.
+///
+/// Throws a [ModuleArchiveMismatchException] on any difference.
+Future<void> verifyModuleArchiveFile((FilePath, ModuleArchiveRef, String) args) async {
+  final (file, expected, expectedRecognizerVersion) = args;
+  final size = await File(file.path).length();
+  var digest = "";
+  if (size == expected.size) {
+    digest = (await crypto.sha256.bind(File(file.path).openRead()).first).toString();
+  }
+  final stream = InputFileStream(file.path);
+  try {
+    _requireArchiveMatches(
+      size: size,
+      digest: () => digest,
+      innerRecognizerVersion: () => _innerRecognizerVersion(ZipDecoder().decodeStream(stream)),
+      expected: expected,
+      expectedRecognizerVersion: expectedRecognizerVersion,
+    );
+  } finally {
+    await stream.close();
+  }
+}
+
+/// The one rule both verification entries apply: size, then digest, then the
+/// `recognizer_version` inside the archive. The later checks are thunks so a
+/// size mismatch (a truncated transfer) is refused without decoding.
+///
+/// The inner version check is not implied by the digest: it catches a pointer
+/// that was built from a different zip than the one it names.
+void _requireArchiveMatches({
+  required int size,
+  required String Function() digest,
+  required String? Function() innerRecognizerVersion,
+  required ModuleArchiveRef expected,
+  required String expectedRecognizerVersion,
+}) {
+  if (size != expected.size) {
+    throw ModuleArchiveMismatchException("size $size, expected ${expected.size}");
+  }
+  final actualDigest = digest();
+  if (actualDigest != expected.sha256) {
+    throw ModuleArchiveMismatchException("sha256 $actualDigest, expected ${expected.sha256}");
+  }
+  final inner = innerRecognizerVersion();
+  if (inner != expectedRecognizerVersion) {
+    throw ModuleArchiveMismatchException("recognizer_version $inner, expected $expectedRecognizerVersion");
+  }
+}
+
+/// The `recognizer_version` stated by the archive's own `version_info.json`, or
+/// `null` when the archive carries none that can be read.
+String? _innerRecognizerVersion(Archive archive) {
+  for (final file in archive) {
+    if (!file.isFile) {
+      continue;
+    }
+    final relative = _moduleRelativePath(file.name);
+    if (relative.length == 1 && relative.single == _versionFileName) {
+      try {
+        final json = jsonDecode(utf8.decode(file.content));
+        final version = json is Map ? json["recognizer_version"] : null;
+        return version is String ? version : null;
+      } on FormatException {
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 enum ModuleVersionCheckResultCode {
@@ -464,7 +630,7 @@ bool _reportManualInstallNotStarted(LongReadNotStartedException exception) {
 /// Installs a manually provided modules zip into the modules directory.
 ///
 /// The zip is extracted into the parent of [PathInfo.modulesDir] exactly like
-/// the auto-updater does, so a server-distributed `modules.zip` (whose top-level
+/// the auto-updater does, so a published module archive (whose top-level
 /// directory is `modules/`) lands at `modulesDir` as-is. The target follows the
 /// configurable data root: `modulesDir.parent` is `dataRoot ?? supportDir`, so a
 /// relocated install writes to the same place the app reads from. The archive
@@ -586,7 +752,17 @@ Future<void> installModuleArchiveBytes(
 /// in-memory one ([installModuleArchiveBytes]) and the file one
 /// ([installModuleArchiveFile]) -- so the predicate, the exception type and the
 /// message are one thing rather than two implementations that agree today.
+///
+/// Entry names are checked first, over every entry, before anything is written:
+/// the desktop route extracts into `modulesDir.parent` and the archive package
+/// only contains a name within *that* directory, so `modules/../x` would land
+/// beside `modules/` in the data root.
 void _requireModulePayload(Archive archive) {
+  for (final file in archive) {
+    if (!_isSafeModuleEntry(file)) {
+      throw FormatException("The archive has an unsafe entry name.", file.name);
+    }
+  }
   if (!_holdsModulePayload(archive)) {
     throw const FormatException("The archive holds no recognition module.");
   }
@@ -614,6 +790,24 @@ List<String> _moduleRelativePath(String name) {
   final segments = name.split("/").where((s) => s.isNotEmpty).toList();
   return (segments.isNotEmpty && segments.first == "modules") ? segments.sublist(1) : segments;
 }
+
+/// Whether [file] extracts inside the module directory by name alone.
+///
+/// The same rule the module publish script refuses a zip by, so a published
+/// archive always passes: the name starts with `modules/`, and no segment is
+/// empty (a trailing `/` marks a directory), `.` or `..`; no backslash, drive
+/// colon or control character. Stricter than the script in one respect: a
+/// symbolic link is refused, which the script's name listing cannot see.
+bool _isSafeModuleEntry(ArchiveFile file) {
+  final name = file.name;
+  if (file.isSymbolicLink || !name.startsWith("modules/") || name.contains(_unsafeEntryCharacter)) {
+    return false;
+  }
+  final path = name.endsWith("/") ? name.substring(0, name.length - 1) : name;
+  return path.split("/").every((segment) => segment.isNotEmpty && segment != "." && segment != "..");
+}
+
+final _unsafeEntryCharacter = RegExp(r'[\\:\x00-\x1f\x7f]');
 
 const _versionFileName = "version_info.json";
 
@@ -776,6 +970,75 @@ Future<T> withModuleUpdateActivity<T>(
   }
 }
 
+/// Where [fetchVerifiedModuleArchive] puts the archive, and what installs it
+/// from there once it has been checked.
+sealed class ModuleArchiveSink {
+  const ModuleArchiveSink();
+}
+
+/// The archive is held in memory and [install] is handed its bytes. The web
+/// download: a browser only ever has the body.
+final class ModuleArchiveBytesSink extends ModuleArchiveSink {
+  final Future<void> Function(List<int> bytes) install;
+
+  const ModuleArchiveBytesSink(this.install);
+}
+
+/// The archive is written to [file] and [install] reads it from there. The
+/// desktop download, which extracts from disk inside an isolate.
+final class ModuleArchiveFileSink extends ModuleArchiveSink {
+  final FilePath file;
+  final Future<void> Function() install;
+
+  const ModuleArchiveFileSink(this.file, this.install);
+}
+
+/// Fetches the archive a pointer names, checks it against that reference, and
+/// only then installs it through [sink].
+///
+/// The one download every automatic update goes through, desktop and web alike:
+/// the archive URL is resolved relative to [pointerUrl] ([resolveArchiveUrl]),
+/// the transfer publishes its phases through [withModuleUpdateActivity], and
+/// the bytes are checked against [archive] and [recognizerVersion]
+/// ([verifyModuleArchiveBytes] / [verifyModuleArchiveFile]) before [sink]'s
+/// install runs. A check that fails throws a [ModuleArchiveMismatchException]
+/// and nothing is installed, so the caller's failure handling reports it like
+/// any other failed download.
+///
+/// [dio] is a parameter so tests can serve the transfer without a network.
+Future<void> fetchVerifiedModuleArchive(
+  RefBase ref, {
+  required Dio dio,
+  required String pointerUrl,
+  required ModuleArchiveRef archive,
+  required String recognizerVersion,
+  required ModuleArchiveSink sink,
+}) async {
+  final url = resolveArchiveUrl(pointerUrl, archive).toString();
+  logger.i("Downloading module archive from $url");
+  await withModuleUpdateActivity(ref, (report) async {
+    switch (sink) {
+      case ModuleArchiveBytesSink(:final install):
+        final response = await dio.get<List<int>>(
+          url,
+          options: Options(responseType: ResponseType.bytes),
+          onReceiveProgress: _moduleDownloadProgress(report),
+        );
+        final bytes = response.data ?? const <int>[];
+        logger.i("Module download finished, verifying and installing");
+        report(const ModuleInstalling());
+        verifyModuleArchiveBytes(bytes, archive, recognizerVersion);
+        await install(bytes);
+      case ModuleArchiveFileSink(:final file, :final install):
+        await dio.download(url, file.path, onReceiveProgress: _moduleDownloadProgress(report));
+        logger.i("Module download finished, verifying and installing");
+        report(const ModuleInstalling());
+        await compute(verifyModuleArchiveFile, (file, archive, recognizerVersion));
+        await install();
+    }
+  });
+}
+
 /// File name of the ONNX-extraction sentinel written into the OPFS `modulesDir`.
 ///
 /// This marker is independent of `version_info.json` (the display-layer JSON
@@ -794,8 +1057,9 @@ const _onnxSentinelFileName = ".onnx_ready";
 /// - the recognizer ONNX set (`<category>/prediction.onnx`), committed by
 ///   [_onnxSentinelFileName].
 ///
-/// A boot on which **either** marker is missing downloads [Const.moduleZipUrl]
-/// once and installs both payloads out of it — the first web boot, where both
+/// A boot on which **either** marker is missing reads the pointer
+/// ([Const.moduleVersionInfoUrl]), downloads the archive it names once, checks
+/// it against the pointer, and installs both payloads out of it — the first web boot, where both
 /// are absent, and the migration boot of a browser that ran the Stage-5
 /// bootstrap and so has only the JSON marker. The missing half is
 /// never installed on its own: the recognizer set is read through the top-level
@@ -806,7 +1070,8 @@ const _onnxSentinelFileName = ".onnx_ready";
 /// license installing them from different builds. Once both markers are present
 /// the boot no longer needs a module, but it still asks whether the published
 /// one moved ([_refreshWebModule]) — the markers say "installed", not "current".
-/// Any download/extract failure is logged and yields a null version — the same
+/// A pointer that cannot be read or names no usable archive, and any
+/// download/check/extract failure, is logged and yields a null version — the same
 /// "no module" outcome the desktop loader reports when nothing is available, so
 /// the record-version check downstream stays inert rather than crashing the boot
 /// — and raises [moduleUpdateFailedProvider] so the dashboard offers the manual
@@ -825,8 +1090,16 @@ Future<ModuleVersion?> _bootstrapWebModule(Ref ref) async {
   // synchronous build frame that the modify-during-build guard checks is done.
   void setUpdateFailed(bool value) => ref.read(moduleUpdateFailedProvider.notifier).set(value);
 
+  final latest = await _downloadLatestModuleVersion();
+  final archive = latest == null ? null : publishedModuleArchive(latest);
+  if (latest == null || archive == null) {
+    // Nothing names bytes that could be checked, so there is nothing to install.
+    logger.w("The published module version names no usable archive; nothing to bootstrap.");
+    setUpdateFailed(true);
+    return null;
+  }
   try {
-    await _downloadAndExtractModuleToOpfs(ref.base, modulesDir);
+    await _downloadAndExtractModuleToOpfs(ref.base, modulesDir, latest, archive);
   } on LongReadNotStartedException {
     // The container went away while the extraction was deferred (this route never
     // refuses). Nothing was written and nothing failed; raising the banner below
@@ -837,87 +1110,112 @@ Future<ModuleVersion?> _bootstrapWebModule(Ref ref) async {
       operation: "bootstrap_web_module",
       exception: exception,
       stackTrace: stackTrace,
-      url: Const.moduleZipUrl,
+      // The archive URL is resolved from the pointer; a DioException carries it itself.
+      url: Const.moduleVersionInfoUrl,
     );
     setUpdateFailed(true);
     return null;
   }
-  // What was just written came out of the currently published zip — all of it,
-  // including on a migration boot — so a version comparison can add nothing on
-  // this boot.
+  // What was just written is the archive the pointer names, checked against it —
+  // all of it, including on a migration boot — so a version comparison can add
+  // nothing on this boot.
   setUpdateFailed(false);
   final local = await ModuleVersionRawData.load(versionFile);
   return local?.toModuleVersion();
 }
 
-/// What a boot should do about the module that is already installed on OPFS.
-enum WebModuleRefreshVerdict {
-  /// The installed module is the published one.
-  upToDate,
-
-  /// The published module differs from the installed one and can be applied.
-  updateAvailable,
-
-  /// Updating is intentionally suppressed: the local module is pinned, or the
-  /// published one requires a newer app build than the one being served.
-  blocked,
-
-  /// The published version could not be read, so nothing can be concluded.
-  checkFailed,
+/// What an automatic module check should do, decided from the installed and
+/// the published version info.
+///
+/// One decision for both platforms ([evaluateModuleUpdate]); only the way each
+/// outcome is applied differs between the desktop loader and the web boot.
+sealed class ModuleUpdateVerdict {
+  const ModuleUpdateVerdict();
 }
 
-/// Decides whether the web build should re-download the recognition module.
+/// The installed module is pinned, so it is kept whatever was published.
+final class ModuleUpdatePinned extends ModuleUpdateVerdict {
+  const ModuleUpdatePinned();
+}
+
+/// The published version could not be obtained, so nothing can be concluded.
+final class ModuleUpdateLatestUnavailable extends ModuleUpdateVerdict {
+  const ModuleUpdateLatestUnavailable();
+}
+
+/// The installed module is the published one.
+final class ModuleUpToDate extends ModuleUpdateVerdict {
+  const ModuleUpToDate();
+}
+
+/// The published module requires a newer app build than this one.
+final class ModuleUpdateRequiresNewerApp extends ModuleUpdateVerdict {
+  const ModuleUpdateRequiresNewerApp();
+}
+
+/// The published module differs from the installed one and can be applied.
+final class ModuleUpdateAvailable extends ModuleUpdateVerdict {
+  /// The published version info (the pointer) the update installs.
+  final ModuleVersionRawData latest;
+
+  /// The archive [latest] names, well-formed ([publishedModuleArchive]).
+  final ModuleArchiveRef archive;
+
+  const ModuleUpdateAvailable(this.latest, this.archive);
+}
+
+/// Decides whether the installed module should be replaced by the published one.
 ///
-/// Mirrors the desktop loader's ordering (pin, then equality, then the required
-/// app version) so a given pair of `version_info.json` files produces the same
-/// decision on both platforms; only the way the outcome is applied differs.
-/// A different version is enough — as on desktop, a rollback is a valid update.
+/// The order is pin, then whether the published version was obtained, then
+/// equality, then the required app version. Pin comes first because a pinned
+/// module is kept whatever was published, so an unreachable pointer has nothing
+/// to tell its user. A different version is enough to update -- a rollback is a
+/// valid update.
 ///
-/// Pure and public so every boot outcome can be tested without a network.
-WebModuleRefreshVerdict evaluateWebModuleRefresh({
+/// A pointer whose `module_archive` is missing or malformed counts as a
+/// published version that could not be obtained ([publishedModuleArchive]).
+///
+/// Pure and public so every outcome can be tested without a network.
+ModuleUpdateVerdict evaluateModuleUpdate({
   required ModuleVersionRawData? local,
   required ModuleVersionRawData? latest,
   required Version appVersion,
 }) {
-  // Pin first, as the desktop loader does. A pinned module is not replaced
-  // whatever the published one says, so whether the published version could be
-  // read cannot change the verdict — and answering `checkFailed` there would
-  // raise the manual-install banner (and its warning toast) on every offline
-  // boot for a user who has deliberately frozen the module, which is exactly
-  // what desktop stays silent about under the same conditions.
   if (local?.pinVersion == true) {
-    return WebModuleRefreshVerdict.blocked;
+    return const ModuleUpdatePinned();
   }
-  if (latest == null) {
-    return WebModuleRefreshVerdict.checkFailed;
+  final archive = latest == null ? null : publishedModuleArchive(latest);
+  if (latest == null || archive == null) {
+    return const ModuleUpdateLatestUnavailable();
   }
   if (local?.recognizerVersion == latest.recognizerVersion) {
-    return WebModuleRefreshVerdict.upToDate;
+    return const ModuleUpToDate();
   }
   // An `application_version` that does not parse blocks the update instead of
   // waving it through: the field states a requirement, and a requirement that
   // cannot be read has not been shown to be met.
   final requiredAppVersion = latest.applicationVersion.toVersionOrNull();
   if (requiredAppVersion == null || requiredAppVersion > appVersion) {
-    return WebModuleRefreshVerdict.blocked;
+    return const ModuleUpdateRequiresNewerApp();
   }
-  return WebModuleRefreshVerdict.updateAvailable;
+  return ModuleUpdateAvailable(latest, archive);
 }
 
-/// Compares the installed module against the published one and re-downloads it
-/// into OPFS when they differ.
+/// The archive [latest] names, or `null` when it names none that a download
+/// could be checked against (missing, or a malformed digest or size).
 ///
-/// The commit markers alone made the very first download permanent: every later
-/// boot found both, skipped the network, and kept running an ever older
-/// recognizer while nothing on screen said so. Recognition quality degrading
-/// silently is worse than a visible failure, so the check runs on every boot and
-/// a check that cannot be completed is reported rather than ignored.
-Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, FilePath versionFile) async {
-  final local = await ModuleVersionRawData.load(versionFile);
-  final appVersion = await ref.watch(localAppVersionLoader.future);
-  ModuleVersionRawData? latest;
+/// The one place that decides whether a pointer is usable: the update verdict
+/// and the web bootstrap, which installs without a verdict, both ask here.
+ModuleArchiveRef? publishedModuleArchive(ModuleVersionRawData latest) {
+  final archive = latest.moduleArchive;
+  return (archive != null && archive.isWellFormed) ? archive : null;
+}
+
+/// Fetches the published version info (the pointer), or `null` after logging
+/// when it cannot be obtained.
+Future<ModuleVersionRawData?> _downloadLatestModuleVersion() async {
   try {
-    latest = await ModuleVersionRawData.download(Uri.parse(Const.moduleVersionInfoUrl));
+    return await ModuleVersionRawData.download(Uri.parse(Const.moduleVersionInfoUrl));
   } catch (exception, stackTrace) {
     await logNetworkException(
       operation: "check_latest_module_version",
@@ -925,29 +1223,45 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
       stackTrace: stackTrace,
       url: Const.moduleVersionInfoUrl,
     );
+    return null;
   }
-  final verdict = evaluateWebModuleRefresh(local: local, latest: latest, appVersion: appVersion);
+}
+
+/// Compares the installed module against the published one and re-downloads it
+/// into OPFS when they differ.
+///
+/// The commit markers alone would make the very first download permanent: every
+/// later boot would find both, skip the network, and keep running an ever older
+/// recognizer while nothing on screen said so. Recognition quality degrading
+/// silently is worse than a visible failure, so the check runs on every boot and
+/// a check that cannot be completed is reported rather than ignored.
+Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, FilePath versionFile) async {
+  final local = await ModuleVersionRawData.load(versionFile);
+  final appVersion = await ref.watch(localAppVersionLoader.future);
+  final latest = await _downloadLatestModuleVersion();
+  final verdict = evaluateModuleUpdate(local: local, latest: latest, appVersion: appVersion);
   logger.i(
     "Web module version: local=${local?.recognizerVersion}"
-    ", latest=${latest?.recognizerVersion}, verdict=${verdict.name}",
+    ", latest=${latest?.recognizerVersion}, verdict=${verdict.runtimeType}",
   );
   void setUpdateFailed(bool value) => ref.read(moduleUpdateFailedProvider.notifier).set(value);
 
   switch (verdict) {
-    case WebModuleRefreshVerdict.upToDate:
-    case WebModuleRefreshVerdict.blocked:
+    case ModuleUpToDate():
+    case ModuleUpdatePinned():
+    case ModuleUpdateRequiresNewerApp():
       setUpdateFailed(false);
       return local?.toModuleVersion();
-    case WebModuleRefreshVerdict.checkFailed:
+    case ModuleUpdateLatestUnavailable():
       // The installed module still works, so this is a warning rather than an
       // outage -- but it has to be visible, because "kept working on an old
       // model" is exactly the state this path exists to prevent.
       setUpdateFailed(true);
       sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
       return local?.toModuleVersion();
-    case WebModuleRefreshVerdict.updateAvailable:
+    case ModuleUpdateAvailable(:final latest, :final archive):
       try {
-        await _downloadAndExtractModuleToOpfs(ref.base, modulesDir);
+        await _downloadAndExtractModuleToOpfs(ref.base, modulesDir, latest, archive);
       } on LongReadNotStartedException {
         // As in the bootstrap above: the element went away while this was
         // deferred, which is neither an install nor a failure to report.
@@ -957,7 +1271,8 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
           operation: "download_modules",
           exception: exception,
           stackTrace: stackTrace,
-          url: Const.moduleZipUrl,
+          // The archive URL is resolved from the pointer; a DioException carries it itself.
+          url: Const.moduleVersionInfoUrl,
         );
         setUpdateFailed(true);
         sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
@@ -965,12 +1280,13 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
       }
       setUpdateFailed(false);
       sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
-      return latest?.toModuleVersion();
+      return latest.toModuleVersion();
   }
 }
 
-/// Downloads the module zip once and writes **both** payloads into [modulesDir]
-/// on OPFS through [_extractModuleArchiveTo].
+/// Downloads the archive [latest] names ([archive]) once through
+/// [fetchVerifiedModuleArchive] and writes **both** payloads into
+/// [PathInfo.modulesDir] on OPFS through [_extractModuleArchiveTo].
 ///
 /// Takes no payload selector on purpose. The recognizer set and the top-level
 /// JSON that interprets it are one published module, so every automatic install
@@ -985,32 +1301,36 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
 /// one. Only the extraction is inside it; the download above is not, for the
 /// reason [runModuleInstall] gives.
 ///
-/// The update phases ([moduleUpdateActivityProvider]) are published here for the
-/// same reason: both callers inherit them.
-Future<void> _downloadAndExtractModuleToOpfs(RefBase ref, DirectoryPath modulesDir) async {
-  logger.i("Bootstrapping web module data from ${Const.moduleZipUrl}");
-  await withModuleUpdateActivity(ref, (report) async {
-    final response = await createDiagnosticDio(operation: "bootstrap_web_module").get<List<int>>(
-      Const.moduleZipUrl,
-      options: Options(responseType: ResponseType.bytes),
-      onReceiveProgress: _moduleDownloadProgress(report),
-    );
-    logger.i("Module download finished, installing");
-    report(const ModuleInstalling());
-    // Validated like a manual install: a body that is not a module (an error page
-    // served with a 200, a truncated transfer) must not reach the extraction, or
-    // the markers would be committed over an empty archive and the fetch would
-    // never be attempted again. See [installModuleArchiveBytes].
-    await runModuleInstall(
-      ref,
-      modulesDir,
-      () => installModuleArchiveBytes(response.data ?? const <int>[], modulesDir, extractJson: true, extractOnnx: true),
-      // Nobody pressed anything to get here — both callers are a boot-time version
-      // check — so there is no surface to refuse on and nothing that could be told
-      // to come back later. See [runModuleInstall].
-      contention: LongReadContention.defer,
-    );
-  });
+/// The download, its update phases ([moduleUpdateActivityProvider]) and the
+/// check against the pointer live in [fetchVerifiedModuleArchive], shared with
+/// the desktop loader, so neither platform can fetch or install an archive the
+/// pointer did not name.
+Future<void> _downloadAndExtractModuleToOpfs(
+  RefBase ref,
+  DirectoryPath modulesDir,
+  ModuleVersionRawData latest,
+  ModuleArchiveRef archive,
+) async {
+  await fetchVerifiedModuleArchive(
+    ref,
+    dio: createDiagnosticDio(operation: "bootstrap_web_module"),
+    pointerUrl: Const.moduleVersionInfoUrl,
+    archive: archive,
+    recognizerVersion: latest.recognizerVersion,
+    sink: ModuleArchiveBytesSink(
+      // Still validated like a manual install after the check: what counts as a
+      // module is one rule, whoever fetched the bytes. See [installModuleArchiveBytes].
+      (bytes) => runModuleInstall(
+        ref,
+        modulesDir,
+        () => installModuleArchiveBytes(bytes, modulesDir, extractJson: true, extractOnnx: true),
+        // Nobody pressed anything to get here — both callers are a boot-time version
+        // check — so there is no surface to refuse on and nothing that could be told
+        // to come back later. See [runModuleInstall].
+        contention: LongReadContention.defer,
+      ),
+    ),
+  );
 }
 
 /// Writes the requested payloads of an already-decoded module [archive] into
@@ -1101,17 +1421,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   final pathInfo = await ref.watch(pathInfoLoader.future);
   final local = await compute(ModuleVersionRawData.load, pathInfo.modulesDir.filePath("version_info.json"));
-  ModuleVersionRawData? latest;
-  try {
-    latest = await ModuleVersionRawData.download(Uri.parse(Const.moduleVersionInfoUrl));
-  } catch (exception, stackTrace) {
-    await logNetworkException(
-      operation: "check_latest_module_version",
-      exception: exception,
-      stackTrace: stackTrace,
-      url: Const.moduleVersionInfoUrl,
-    );
-  }
+  final latest = await _downloadLatestModuleVersion();
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
   // Safe to write providers here: we are past the awaits above, so the
@@ -1121,62 +1431,61 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   if (kDebugMode) {
     logger.w("Updating modules is disabled in debug mode.");
     // The update is disabled here, not attempted, so this is not a failure.
-    // Keep null-safe (the `!` crashed when no local module was present).
+    // No local module may be present, so this stays null-safe.
     setUpdateFailed(false);
     return local?.toModuleVersion();
   }
 
-  if (local?.pinVersion == true) {
-    logger.w("Updating modules is disabled by pin_version flag in local version_info.json.");
-    setUpdateFailed(false);
-    return local!.toModuleVersion();
-  }
-
-  if (local == null && latest == null) {
-    setUpdateFailed(true);
-    sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
-    return null;
-  }
-  if (latest == null) {
-    setUpdateFailed(true);
-    sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
-    return local!.toModuleVersion();
-  }
-  // No need to update. (Rollback is allowed)
-  if (local?.recognizerVersion == latest.recognizerVersion) {
-    setUpdateFailed(false);
-    return local!.toModuleVersion();
-  }
-
-  // Same rule as the web verdict: an unreadable requirement is not a met one.
-  final requiredAppVersion = latest.applicationVersion.toVersionOrNull();
-  if (requiredAppVersion == null || requiredAppVersion > appVersion.local) {
-    logger.i("Updating the module is disallowed because it does not meet the required app version.");
-    // Intentionally blocked, not failed: the proper fix is an app update
-    // (handled by its own banner), not a manual module install.
-    setUpdateFailed(false);
-    return null;
+  final verdict = evaluateModuleUpdate(local: local, latest: latest, appVersion: appVersion.local);
+  final ModuleUpdateAvailable available;
+  switch (verdict) {
+    case ModuleUpdatePinned():
+      logger.w("Updating modules is disabled by pin_version flag in local version_info.json.");
+      setUpdateFailed(false);
+      return local?.toModuleVersion();
+    case ModuleUpdateLatestUnavailable():
+      setUpdateFailed(true);
+      if (local == null) {
+        sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+        return null;
+      }
+      sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
+      return local.toModuleVersion();
+    case ModuleUpToDate():
+      setUpdateFailed(false);
+      return local?.toModuleVersion();
+    case ModuleUpdateRequiresNewerApp():
+      logger.i("Updating the module is disallowed because it does not meet the required app version.");
+      // Intentionally blocked, not failed: the proper fix is an app update
+      // (handled by its own banner), not a manual module install.
+      setUpdateFailed(false);
+      return null;
+    case ModuleUpdateAvailable():
+      available = verdict;
   }
 
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
-    await withModuleUpdateActivity(ref.base, (report) async {
-      await createDiagnosticDio(
-        operation: "download_modules",
-      ).download(Const.moduleZipUrl, downloadPath.path, onReceiveProgress: _moduleDownloadProgress(report));
-      logger.i("Module download finished, installing");
-      report(const ModuleInstalling());
-      // Refuses a body that is not a module before writing anything, and so
-      // reaches the catch below instead of the success toast underneath it.
-      await runModuleInstall(
-        ref.base,
-        pathInfo.modulesDir,
-        () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
-        // Started by this version check and not by a press, so it waits rather
-        // than refusing. See [runModuleInstall].
-        contention: LongReadContention.defer,
-      );
-    });
+    await fetchVerifiedModuleArchive(
+      ref.base,
+      dio: createDiagnosticDio(operation: "download_modules"),
+      pointerUrl: Const.moduleVersionInfoUrl,
+      archive: available.archive,
+      recognizerVersion: available.latest.recognizerVersion,
+      sink: ModuleArchiveFileSink(
+        downloadPath,
+        // Refuses a body that is not a module before writing anything, and so
+        // reaches the catch below instead of the success toast underneath it.
+        () => runModuleInstall(
+          ref.base,
+          pathInfo.modulesDir,
+          () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
+          // Started by this version check and not by a press, so it waits rather
+          // than refusing. See [runModuleInstall].
+          contention: LongReadContention.defer,
+        ),
+      ),
+    );
   } on LongReadNotStartedException {
     // Only the abandoned form can arrive here (this route never refuses): the
     // container went away while the install was parked. Nothing was written and
@@ -1189,7 +1498,8 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
       operation: "download_modules",
       exception: exception,
       stackTrace: stackTrace,
-      url: Const.moduleZipUrl,
+      // The archive URL is resolved from the pointer; a DioException carries it itself.
+      url: Const.moduleVersionInfoUrl,
     );
     setUpdateFailed(true);
     if (_isAccessDeniedError(exception)) {
@@ -1211,7 +1521,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   setUpdateFailed(false);
   sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
-  return latest.toModuleVersion();
+  return available.latest.toModuleVersion();
 });
 
 class AppVersionCheckResult {
