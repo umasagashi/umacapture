@@ -392,11 +392,6 @@ class StorageGroup {
   /// platforms, and a per-platform answer would have to be given twice for every
   /// group added later — the shape this field exists to avoid.
   ///
-  /// It is also **not** the web rule that keeps another tab's scratch out of this
-  /// group: that is `liveTempSessionIds`, applied by the group resolving
-  /// `tempDir` (this tab's own session) instead of `tempRootDir`. That rule is
-  /// about *whose* scratch is listed; this one is about *when* this session's own
-  /// scratch may go.
   final bool writtenByLiveCapture;
 
   /// Whether the group is drawn from something other than the filesystem. Only
@@ -458,7 +453,6 @@ String _deleteWarningKey(String name) => '$_groupKeyPrefix.$name.delete_warning'
 /// represented by a child rather than in their own right) and the unclassified
 /// scan (which subtracts every path the app names).
 Map<String, DirectoryPath> pathInfoDirectories(PathInfo info) => {
-  'tempRootDir': info.tempRootDir,
   'tempDir': info.tempDir,
   'storageDir': info.storageDir,
   'modulesDir': info.modulesDir,
@@ -485,9 +479,6 @@ Map<String, DirectoryPath> pathInfoDirectories(PathInfo info) => {
 /// group's directory really does sit strictly below it. A container that stopped
 /// containing a group would fail that check rather than quietly hide a group.
 const storageGroupContainerGetters = <String>{
-  // The scratch tree as a whole. `tempDir` — this context's slice of it, and the
-  // whole tree on native, where there is no session — is the temp group.
-  'tempRootDir',
   // Holds `sound/` and `chara_detail/`, nothing else.
   'storageDir',
   // Holds active / archive / quarantine / retired / metadata.
@@ -895,15 +886,11 @@ final List<StorageGroup> storageGroups = [
     },
     // Swept unconditionally at startup anyway.
     deleteFriction: StorageDeleteFriction.singleConfirm,
-    // Scratch, swept at startup. Other tabs' sessions are excluded by not being
-    // in this group at all (`liveTempSessionIds`), not by a lock.
+    // Scratch, cleared at startup.
     lockScope: StorageLockScope.unlocked,
     // Blocked while a capture runs: the native core stages a scrape in here, and the line above is
     // why nothing else could stop a delete from taking it out from under one.
     writtenByLiveCapture: true,
-    // `tempDir`, not `tempRootDir`: on native there is no session and the two are
-    // the same directory, while on web `tempDir` is this tab's own slice and the
-    // rest of the root belongs to tabs that are still using it.
     resolve: (info) => [info.tempDir],
   ),
   StorageGroup(

@@ -16,21 +16,14 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/virtual_tree_fs_backend.dart';
 
-/// A layout whose fourteen directories are all distinct, so a containment check
-/// below means what it says.
-///
-/// [PathInfo.tempSession] is non-null on purpose: without a session `tempDir` and
-/// `tempRootDir` are the same directory (asserted below), and "this container
-/// really does contain a group" would be trivially true for a pair that is one
-/// path. The field exists precisely so a test can describe the scoped layout on a
-/// platform that cannot mint a real claim.
+/// A layout whose directories are all distinct, so a containment check below
+/// means what it says.
 PathInfo layoutUnder(String root, {DirectoryPath? dataRoot}) => PathInfo(
   documentDir: DirectoryPath('$root/documents'),
   supportDir: DirectoryPath('$root/support'),
   executableDir: DirectoryPath('$root/exe'),
   downloadDir: DirectoryPath('$root/downloads'),
   dataRoot: dataRoot,
-  tempSession: 'session-1',
 );
 
 /// Every `DirectoryPath` getter declared on `PathInfo`, read out of its source.
@@ -440,21 +433,6 @@ void main() {
           reason: '$container is excluded as a container but no group sits under it',
         );
       }
-    });
-
-    test('the temp pair is two directories only when a session scopes it', () {
-      // Why the checks above use a session-scoped layout. On native there is no
-      // second context to share the scratch tree with, so `tempDir` *is*
-      // `tempRootDir` and the containment above would hold vacuously.
-      final scoped = layoutUnder('/root');
-      expect(scoped.tempDir.path, isNot(scoped.tempRootDir.path));
-      final unscoped = PathInfo(
-        documentDir: DirectoryPath('/root/documents'),
-        supportDir: DirectoryPath('/root/support'),
-        executableDir: DirectoryPath('/root/exe'),
-        downloadDir: DirectoryPath('/root/downloads'),
-      );
-      expect(unscoped.tempDir.path, unscoped.tempRootDir.path);
     });
   });
 
@@ -1059,7 +1037,6 @@ void main() {
           // `platformDirs.downloadsDir()` is null on web and `pathLayoutLoader`
           // falls back to the documents dir, so the two really are one path here.
           downloadDir: DirectoryPath(<String>['umacapture']),
-          tempSession: 'tab-1',
         ),
         spelling: opfsChildSpelling,
         knownNames: const ['storage', 'settings', 'temp', 'modules', 'umacapture'],

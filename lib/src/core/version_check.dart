@@ -505,10 +505,9 @@ Future<void> installModuleArchiveFile((FilePath, DirectoryPath) args) async {
 /// no context instead of a log line. It is also swallowed rather than rethrown,
 /// because cleanup must never replace the outcome its caller already decided.
 ///
-/// What a failure costs is disk, not correctness: the archive is written to the
-/// session-scoped [PathInfo.tempDir] under a fixed name, so the next update
-/// attempt overwrites it and a later launch's `sweepTempSessions` removes the
-/// whole session directory.
+/// What a failure costs is disk, not correctness: the archive is written to
+/// [PathInfo.tempDir] under a fixed name, so the next update attempt overwrites
+/// it and a later launch's startup clear removes it.
 ///
 /// Public only so the two guarantees above -- that it waits, and that a refusal
 /// does not escape -- can be tested; nothing outside this library calls it.

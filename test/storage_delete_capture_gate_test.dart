@@ -31,10 +31,7 @@
 // WHAT THIS SUITE DOES NOT REACH. It does not measure what the native core
 // actually does when its staging area disappears mid-scrape: the gate exists
 // so that question is never asked at runtime, and answering it needs a live
-// capture. It does not reach web's own scratch rule either — that another tab's
-// session is excluded by the group resolving `tempDir` rather than `tempRootDir`
-// — which is a different rule about *whose* files are listed, measured where the
-// session ids are. And the provider itself is substituted here, so nothing below
+// capture. And the provider itself is substituted here, so nothing below
 // `capturingStateProvider` (the platform channel that drives it) is exercised.
 import 'dart:io';
 

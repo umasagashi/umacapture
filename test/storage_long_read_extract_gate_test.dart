@@ -30,8 +30,8 @@
 //    clipboard* on this host, and this machine is shared. The save entry is
 //    asserted behaviourally instead, through `storageSaveFileProvider`.
 //  * It does not reach the browser legs of the zip, the save or the clipboard.
-//  * It does not reach a long reader in another browser tab: the registry is one
-//    tab's memory, which its own doc states.
+//  * It does not reach a long read a web worker performs under the same lock:
+//    the registry is the Dart isolate's memory, which its own doc states.
 //  * It does not reach the window between a claim being released and the OS
 //    closing the handles that claim's owner opened. Nothing in this app can.
 //  * It asserts nothing about a long reader that starts *after* the confirmation
@@ -402,7 +402,7 @@ void main() {
       );
     }
 
-    DirectoryPath tempSession(String name) {
+    DirectoryPath scratchDir(String name) {
       final directory = (_layout.tempDir) / name;
       final file = File(directory.filePath('scratch.bin').path);
       file.parent.createSync(recursive: true);
@@ -411,7 +411,7 @@ void main() {
     }
 
     testWidgets('a claim that arrives while it is open shuts the confirm and leaves the way out', (tester) async {
-      final target = tempSession('session');
+      final target = scratchDir('session');
       final container = _container();
       await pumpDialog(tester, container, target);
 
@@ -450,8 +450,8 @@ void main() {
     });
 
     testWidgets('a claim over a sibling leaves this confirmation alone', (tester) async {
-      final target = tempSession('session');
-      final other = tempSession('other');
+      final target = scratchDir('session');
+      final other = scratchDir('other');
       final container = _container();
       _claim(container, [other]);
       await pumpDialog(tester, container, target);
