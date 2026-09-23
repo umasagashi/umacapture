@@ -28,8 +28,12 @@ class ReportRecordDialog extends ConsumerStatefulWidget {
 
   const ReportRecordDialog({super.key, required this.directory, this.rateLimitLoader = SentryRateLimit.download});
 
-  static void show(RefBase ref, DirectoryPath directory) {
-    CardDialog.show(ref, (_) => ReportRecordDialog(directory: directory));
+  /// Shows the report dialog in place of every open dialog, or, with [over], on top of them.
+  ///
+  /// Every way out of this dialog closes only the dialog on top, so opened [over] it leaves the
+  /// dialogs underneath as they were.
+  static void show(RefBase ref, DirectoryPath directory, {bool over = false}) {
+    CardDialog.show(ref, (_) => ReportRecordDialog(directory: directory), over: over);
   }
 
   @override

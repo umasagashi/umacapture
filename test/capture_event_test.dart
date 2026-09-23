@@ -781,7 +781,7 @@ void main() {
       expect(tile.hint, contains('クリック'));
       expect(tile.tone, CaptureStatusTone.success);
       expect(tile.onTap, isNotNull);
-      expect(tile.tapTooltip, appSentenceAt("$_tr_event.open_table_tooltip"));
+      expect(tile.tooltip, appSentenceAt("$_tr_event.open_table_tooltip"));
     });
 
     testWidgets('an already-captured character links to the record that already exists', (tester) async {
@@ -856,6 +856,21 @@ void main() {
       await _pumpEvent(tester, const CharaCaptureEvent(status: CharaDetailCaptureStatus.succeeded));
 
       expect(_tile(tester).onTap, isNull);
+    });
+
+    testWidgets('an event that names no record says nothing on hover either', (tester) async {
+      // The tooltip is rendered whether or not the tile takes a tap, so "there is nowhere to go"
+      // has to be carried as the absence of a message. The open-the-table sentence would be an
+      // offer this tile cannot keep, and a hover is the only place it would ever appear.
+      for (final event in [
+        const CharaCaptureEvent(status: CharaDetailCaptureStatus.failed, error: 'closed_before_completed'),
+        const CharaCaptureEvent(status: CharaDetailCaptureStatus.succeeded),
+      ]) {
+        await _pumpEvent(tester, event);
+
+        expect(_tile(tester).tooltip, isNull, reason: '${event.status}');
+        expect(find.byType(Tooltip), findsNothing, reason: '${event.status}');
+      }
     });
   });
 

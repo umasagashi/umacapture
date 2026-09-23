@@ -2,6 +2,7 @@ import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/core/app_logger.dart';
 import '/src/core/fs/fs_backend.dart';
@@ -589,5 +590,28 @@ class _BytesRecordImageState extends State<_BytesRecordImage> {
       return builder(context, error, stackTrace ?? StackTrace.empty);
     }
     return SizedBox(width: widget.width, height: widget.height);
+  }
+}
+
+/// A record's trainee icon, or a placeholder where the file is missing or unreadable.
+///
+/// The icon is normally always present; the placeholder guards against a missing or corrupt file
+/// (e.g. a hand-edited archive) so a dialog shows a symbol instead of a red error box.
+class TraineeIcon extends StatelessWidget {
+  const TraineeIcon(this.path, {super.key, this.placeholderSize = 64});
+
+  final FilePath path;
+  final double placeholderSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return RecordImage(
+      path,
+      errorBuilder: (context, error, stackTrace) => Icon(
+        Symbols.hide_image_rounded,
+        size: placeholderSize,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
   }
 }

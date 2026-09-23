@@ -28,6 +28,9 @@ import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
+import '/src/chara_detail/enhancement_merge.dart';
+import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
+import '/src/gui/chara_detail/enhancement_review_list.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_activity.dart';
@@ -860,31 +863,70 @@ String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch
 /// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced
 /// below to remove; leaving its immediate neighbour silent would have reproduced it. `disabled`
 /// and `tooltip` are decided by one expression, so "is it inert" and "why" cannot disagree.
+/// Which reason (if any) makes the inheritance-resolution entry inert **right now**, asked of a
+/// live [WidgetRef].
+///
+/// One function rather than an expression inlined in `build`, because the flow asks the same
+/// question twice at two different moments: `build` asks it with [listen] so the tile comes
+/// back on its own when a claim ends, and the review list's close asks it again without listening,
+/// because a merge the user ran *inside* the list is exactly the thing that can be holding the
+/// store by then. Two spellings of the question would be two rules that can come to disagree.
+ResolveInheritanceBlocker? resolveInheritanceBlockerFor(WidgetRef ref, {required bool listen}) {
+  final resolving = listen
+      ? ref.watch(inheritanceResolutionRunningProvider)
+      : ref.read(inheritanceResolutionRunningProvider);
+  final claims = listen ? ref.watch(longReadRegistryProvider).values : ref.read(longReadRegistryProvider).values;
+  // The layout and not `pathInfoProvider`: this tile only needs to know where the store is, and
+  // it is drawn during a store outage -- the one state in which the app knows that and could not
+  // open the store. Watched for the same reason the claims are: the layout resolves a few frames
+  // into a launch and the tile has to start answering when it does.
+  final layout = listen ? ref.watch(pathLayoutProvider) : ref.read(pathLayoutProvider);
+  // **The record store root, which is the path the resolution itself claims.** Both stores are
+  // read in full and the changed records are written back to whichever one owns them, so the
+  // honest question is the one `CharaDetailRecordStorage.resolveAllInheritance` answers about
+  // itself: `rootDirectory.parent`, the parent of `active/` and `archive/`. Asking about either
+  // half, or about a list of record ids, would be a second derivation of the same fact -- and the
+  // one that goes stale when the store gains another directory.
+  final heldBy = storageDeleteBlockedBy(
+    layout == null ? null : StorageDeletePathsRequest([layout.charaDetailDir]),
+    claims,
+  );
+  return resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
+}
+
 class ResolveInheritanceTile extends ConsumerWidget {
   const ResolveInheritanceTile({super.key});
 
+  /// The flow: the pending enhancement candidates first, the inheritance resolution afterwards.
+  ///
+  /// The order is not a preference. A merge collapses two records that would otherwise make a
+  /// child's parent slot ambiguous, so resolving first would leave exactly the links the merges
+  /// were about to make resolvable. The blocker is re-evaluated when the list is confirmed for the same
+  /// reason: by then the store may be held by a merge's own reload barrier. That re-evaluation chooses
+  /// the sentence (「再解決の実行中です」 before the long reader's); it is not what keeps a whole-store
+  /// rewrite off a held store. The resolution asks the registry itself in the turn it claims and
+  /// refuses there, which covers this path and the direct one alike.
+  void _run(WidgetRef ref) {
+    if (ref.read(pendingEnhancementCandidatesProvider).isEmpty) {
+      unawaited(ref.read(enhancementMergeActionsProvider).resolveInheritance());
+      return;
+    }
+    showEnhancementReviewList(
+      ref.base,
+      onConfirm: () {
+        final blocker = resolveInheritanceBlockerFor(ref, listen: false);
+        if (blocker != null) {
+          Toaster.show(ToastData.warning(description: resolveInheritanceBlockerKey(blocker).tr()));
+          return;
+        }
+        unawaited(ref.read(enhancementMergeActionsProvider).resolveInheritance());
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final resolving = ref.watch(inheritanceResolutionRunningProvider);
-    // Watched, not read: a long read can end while the settings page is open, and the tile has to
-    // come back on its own when it does.
-    final claims = ref.watch(longReadRegistryProvider).values;
-    // The layout and not `pathInfoProvider`: this tile only needs to know where the store is, and
-    // it is drawn during a store outage -- the one state in which the app knows that and could not
-    // open the store. Watched for the same reason the claims are: the layout resolves a few frames
-    // into a launch and the tile has to start answering when it does.
-    final layout = ref.watch(pathLayoutProvider);
-    // **The record store root, which is the path the resolution itself claims.** Both stores are
-    // read in full and the changed records are written back to whichever one owns them, so the
-    // honest question is the one `CharaDetailRecordStorage.resolveAllInheritance` answers about
-    // itself: `rootDirectory.parent`, the parent of `active/` and `archive/`. Asking about either
-    // half, or about a list of record ids, would be a second derivation of the same fact -- and the
-    // one that goes stale when the store gains another directory.
-    final heldBy = storageDeleteBlockedBy(
-      layout == null ? null : StorageDeletePathsRequest([layout.charaDetailDir]),
-      claims,
-    );
-    final blocker = resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
+    final blocker = resolveInheritanceBlockerFor(ref, listen: true);
     return Disabled(
       disabled: blocker != null,
       tooltip: blocker == null ? null : resolveInheritanceBlockerKey(blocker).tr(),
@@ -892,9 +934,7 @@ class ResolveInheritanceTile extends ConsumerWidget {
         title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
         subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
         trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
-        onTap: () {
-          unawaited(ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance());
-        },
+        onTap: () => _run(ref),
       ),
     );
   }

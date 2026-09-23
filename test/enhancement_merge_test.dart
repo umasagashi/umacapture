@@ -1424,6 +1424,49 @@ void main() {
       expect(keyFileData(info.charaDetailMemoDir, 'main'), {'older': 'old note'});
     });
 
+    test('route 1 over a store that offers several pairs keeps the memo and rating of the pair it was '
+        'handed', () async {
+      // A chain of three copies: the just-captured record is the enhanced side of one pair and one
+      // half of an identical pair with the third, so the capture card offers the review list and
+      // the route belongs to the row rather than to the list. The route value that list hands over
+      // is asserted in the UI suite; this is what route 1 then writes, with more than one pair in
+      // the store to pick the wrong one from.
+      writeRecord(info.charaDetailActiveDir, preRecord('older'));
+      writeRecord(info.charaDetailActiveDir, postRecord('captured'));
+      writeRecord(
+        info.charaDetailActiveDir,
+        makeRecord(
+          id: 'newest',
+          card: 7,
+          self: [...coloured(3, 3, 3), ...whites(6)],
+          capturedDate: '2026-03-01T00:00:00+0900',
+        ),
+      );
+      writeKeyFile(info.charaDetailMemoDir, 'main', {
+        'older': 'old note',
+        'captured': 'captured note',
+        'newest': 'newest note',
+      });
+      writeKeyFile(info.charaDetailRatingDir, 'main', {'older': 1.0, 'captured': 4.0});
+
+      final container = await loadedContainer();
+      final candidates = candidatesIn(container);
+      expect(
+        candidates.where((e) => e.olderId == 'captured' || e.newerId == 'captured'),
+        hasLength(greaterThan(1)),
+        reason: 'the captured record has to be in several pairs for this to be the multi-pair case',
+      );
+      final pair = candidates.singleWhere((e) => e.olderId == 'older' && e.newerId == 'captured');
+
+      final result = await container
+          .read(enhancementMergeProvider)
+          .merge(pair, choices: const EnhancementMergeChoices(route: EnhancementMergeRoute.captureCard));
+
+      expect(result.outcome, EnhancementMergeOutcome.merged);
+      expect(keyFileData(info.charaDetailMemoDir, 'main'), {'older': 'old note', 'newest': 'newest note'});
+      expect(keyFileData(info.charaDetailRatingDir, 'main'), {'older': 1.0});
+    });
+
     test('a live metadata controller no column shows is invalidated with the ones on screen', () async {
       // The invalidation is derived from the key files step 4 read, not from a
       // list of the keys a column names: a controller the user stopped showing

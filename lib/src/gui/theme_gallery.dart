@@ -394,6 +394,16 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
+            'factor difference',
+            overlay: s.success.withValues(alpha: 0.15),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Background behind a factor line the enhancement-merge dialog marks as the difference between the '
+          'two records: a coloured factor whose stars went up, or a white factor only this side has.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
             'loading veil',
             overlay: cs.surface.withValues(alpha: 0.85),
             base: cs.onSurface,
@@ -476,6 +486,35 @@ class _BlendSection extends StatelessWidget {
           'CardDialog\'s × button when closeButtonEnabled is false, drawn on the tertiary title band. 38% '
           'matches the strength Material greys a disabled onSurface control to; only the role differs, '
           'because the surface it sits on does.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'hold-to-confirm gauge',
+            overlay: cs.onPrimary.withValues(alpha: 0.3),
+            base: cs.primary,
+            baseLabel: 'primary',
+          ),
+          'HoldToConfirmButton\'s gauge, filling from the leading edge over the primary fill while the button is '
+          'held.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'disabled hold-to-confirm fill',
+            overlay: cs.onSurface.withValues(alpha: 0.12),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'HoldToConfirmButton\'s fill while disabled; 12% is what Material greys a disabled FilledButton to.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'disabled hold-to-confirm label',
+            overlay: cs.onSurface.withValues(alpha: 0.38),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'HoldToConfirmButton\'s label and icon while disabled, drawn over the 12% fill above; 38% matches a '
+          'disabled FilledButton\'s foreground.',
         ),
       ],
       note:
@@ -599,8 +638,11 @@ class _CodeHighlightSection extends StatelessWidget {
 const Map<String, String> _roleUsages = {
   'primary':
       'Brand accent: add-column button, drag/slot accents, data-table accents, progress, feedback drawer, '
-      'storage-group folder icons.',
-  'onPrimary': 'Text and icons on primary fills (add-column button, data-table accents, feedback drawer).',
+      'storage-group folder icons, the hold-to-confirm button\'s fill, and the enhancement merge dialog\'s '
+      'selected-card border.',
+  'onPrimary':
+      'Text and icons on primary fills (add-column button, data-table accents, feedback drawer, hold-to-confirm '
+      'button label, gauge and keyboard-focus ring).',
   'primaryContainer':
       'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
       'column-builder group borders; character avatar; table/stat accents.',
@@ -629,7 +671,9 @@ const Map<String, String> _roleUsages = {
   'surfaceBright': 'Pale water-blue tint filling the NoteCard body (paired with a primaryContainer border).',
   'surfaceContainerLowest':
       'Pale water-blue tint: logic-column and column-builder group backgrounds; data-table striped rows.',
-  'surfaceContainerLow': 'Script name-copy chips; recolored to a pale water-blue tint.',
+  'surfaceContainerLow':
+      'Script name-copy chips; recolored to a pale water-blue tint. Also the enhancement merge dialog\'s '
+      'selected record card background.',
   'surfaceContainer':
       'Panel backgrounds (addon list, side preview); striped script rows; the focused entry of the storage '
       'view\'s row menus.',
@@ -637,7 +681,9 @@ const Map<String, String> _roleUsages = {
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
   'outlineVariant':
-      'Faint outlines: the app-wide chip border (global chipTheme), the column-chip "settings group" frame, and the inset per-row dividers in the column/table settings dialogs.',
+      'Faint outlines: the app-wide chip border (global chipTheme), the column-chip "settings group" frame, the '
+      'inset per-row dividers in the column/table settings dialogs, and the enhancement merge dialog\'s '
+      'unselected record card border.',
   'scrim': 'Dim backdrop behind modal dialogs (DialogLayer), and the capture-preview hover/focus hint.',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
 };

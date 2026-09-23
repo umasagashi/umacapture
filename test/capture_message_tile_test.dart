@@ -102,7 +102,7 @@ void main() {
   // ("ここをクリックするとテーブルへ移動します"), so the two halves — a visible target and a tile
   // that does nothing without one — are what these pin.
   group('the tap affordance', () {
-    Future<int> pumpTappable(WidgetTester tester, {required bool tappable}) async {
+    Future<int> pumpTappable(WidgetTester tester, {required bool tappable, String? tooltip}) async {
       var taps = 0;
       await tester.pumpWidget(
         MaterialApp(
@@ -113,7 +113,7 @@ void main() {
               tone: CaptureStatusTone.success,
               text: 'an outcome',
               onTap: tappable ? () => taps++ : null,
-              tapTooltip: 'open in the table',
+              tooltip: tappable ? 'open in the table' : tooltip,
             ),
           ),
         ),
@@ -139,7 +139,19 @@ void main() {
 
       expect(find.byIcon(Symbols.chevron_right_rounded), findsNothing);
       expect(find.byType(InkWell), findsNothing);
-      expect(find.byType(Tooltip), findsNothing);
+      expect(find.byType(Tooltip), findsNothing, reason: 'a tile with nothing to say says nothing');
+    });
+
+    testWidgets('a tile whose action is withheld still shows the reason it was withheld', (tester) async {
+      // The other half of the rule above. A tile can be inert because there is nowhere to go -- no
+      // chevron, no tooltip -- or because something is holding the action right now, and the second
+      // owes the user a reason. Carrying that reason on the chevron would lose it in exactly the
+      // state that needs it, since the chevron is drawn only for a tile that accepts a tap.
+      await pumpTappable(tester, tappable: false, tooltip: 'a capture is running');
+
+      expect(find.byIcon(Symbols.chevron_right_rounded), findsNothing);
+      expect(find.byType(InkWell), findsNothing);
+      expect(tester.widget<Tooltip>(find.byType(Tooltip)).message, 'a capture is running');
     });
 
     testWidgets('the whole tile is the target, not just the chevron', (tester) async {

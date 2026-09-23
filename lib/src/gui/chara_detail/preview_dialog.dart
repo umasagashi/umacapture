@@ -425,10 +425,21 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final List<DirectoryPath> recordDirs;
   final int initialIdx;
 
-  const CharaDetailPreviewDialog({super.key, required this.recordDirs, required this.initialIdx});
+  /// Whether this preview was opened on top of other dialogs rather than in place of them.
+  ///
+  /// Carried into everything the preview opens in turn, so a dialog it hands over to replaces only
+  /// the preview and leaves the dialogs underneath where they were.
+  final bool over;
 
-  static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
-    CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));
+  const CharaDetailPreviewDialog({super.key, required this.recordDirs, required this.initialIdx, this.over = false});
+
+  /// Shows the preview in place of every open dialog, or, with [over], on top of them.
+  static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx, {bool over = false}) {
+    CardDialog.show(
+      ref,
+      (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx, over: over),
+      over: over,
+    );
   }
 
   @override
@@ -511,7 +522,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                   label: Text("$tr_preview.dialog.report_button.label".tr()),
                   onPressed: () {
                     CardDialog.dismiss(ref.base);
-                    ReportRecordDialog.show(ref.base, widget.recordDirs[currentIdx]);
+                    ReportRecordDialog.show(ref.base, widget.recordDirs[currentIdx], over: widget.over);
                   },
                 ),
               ),
