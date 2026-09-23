@@ -5,7 +5,7 @@
 // inheritance write-back, whole-store inheritance resolution -- are all
 // asynchronous, so a pass-through runner let two of them interleave at their
 // await points; the browser build never had that hole because `navigator.locks`
-// serializes them even across tabs. These tests run the two halves of such a
+// really does make the later request wait. These tests run the two halves of such a
 // race *concurrently* and assert the outcome could only come from real
 // exclusion, so a lock that merely looks present but grants everything at once
 // fails them.

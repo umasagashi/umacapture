@@ -98,7 +98,7 @@ void main() {
   // still there), but a directory that is simply already gone must drop it. Only
   // both together distinguish the two outcomes - with the refusal case alone,
   // "every throw means keep the row" reads as conformance, and a record whose
-  // directory another tab already removed becomes permanently undeletable.
+  // directory something outside this app already removed becomes permanently undeletable.
   test('deleting a record whose directory is already gone still drops the row', () async {
     final root = DirectoryPath(tempRoot.path);
     final activeDir = pathInfoFor(root).charaDetailActiveDir;
@@ -111,7 +111,7 @@ void main() {
     final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
-    // Out of band, as another tab (or an external tool) would.
+    // Out of band, as Explorer or another tool would.
     Directory((activeDir / 'ghost').path).deleteSync(recursive: true);
 
     final bulk = await active.deleteAllAsync(['ghost', 'kept']);

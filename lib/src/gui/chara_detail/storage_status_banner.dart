@@ -13,8 +13,8 @@ import '/src/gui/record_store_banner.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-/// Blocking banner shown whenever this context cannot provide the cross-tab
-/// record lock.
+/// Blocking banner shown whenever this context cannot provide the record
+/// mutation lock.
 ///
 /// Mounted at app level, not on the record tab: every persisted read and write
 /// goes through that lock, so capture, import, archive and the record list all
@@ -76,7 +76,7 @@ class _StoreOutageBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return RecordStoreBanner(
       // A blocked store is not going to clear on its own, so it gets the harder
-      // icon; a busy one is the ordinary "another tab is working" wait.
+      // icon; a busy one is the ordinary "something else is still running" wait.
       icon: outage.transient ? Symbols.hourglass_top_rounded : Symbols.dangerous_rounded,
       message: "$messageKey.${outage.transient ? 'busy' : 'blocked'}".tr(),
       actions: [

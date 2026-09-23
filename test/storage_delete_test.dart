@@ -53,7 +53,7 @@ class _RecordingLocks {
   _RecordingLocks({this.refuse});
 
   /// Names for which acquisition fails with [RecordMutationLockBusy], standing in
-  /// for the 150 s budget expiring against another tab.
+  /// for the 150 s budget expiring against another holder of that name.
   final bool Function(String name)? refuse;
 
   final inner = InProcessNamedLocks();

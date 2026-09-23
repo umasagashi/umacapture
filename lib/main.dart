@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/const.dart';
+import '/src/core/app_instance.dart';
 import '/src/core/bootstrap.dart';
 import '/src/core/localization_util.dart';
 import '/src/core/raw_frame_probe.dart';
@@ -147,11 +148,16 @@ void reportFatalStartupError(String message) {
   runApp(_StartupFailureApp(message: message));
 }
 
+/// A step's answer that the app may not go on yet: [screen] is painted in its place, and the
+/// sequence resumes with the next step once [until] completes (or fails as the step would have).
+typedef StartupWait = ({Widget screen, Future<void> until});
+
 /// One named step of the startup sequence.
 ///
 /// The name is read as the tail of "startup failed while ...", so it is written as a gerund
-/// phrase describing what the step was doing.
-typedef StartupStep = (String, Future<void> Function());
+/// phrase describing what the step was doing. The step answers null to go on at once, or a
+/// [StartupWait] to hold the boot behind a screen until something outside the app happens.
+typedef StartupStep = (String, Future<StartupWait?> Function());
 
 /// The startup sequence, as named steps, in the order they have to run.
 ///
@@ -170,26 +176,43 @@ List<StartupStep> startupSteps() {
   return [
     // First, and before anything is awaited: the browser location is rewritten as the app
     // navigates, and the launch query would be gone by then.
-    ("reading the launch flags", () async => initRawFrameProbeFlag()),
+    ("reading the launch flags", _goesOn(initRawFrameProbeFlag)),
     (
       "configuring the browser context menu",
-      () async {
+      _goesOn(() async {
         // web only: let the app's own context menus (flutter_context_menu) show instead of
         // the browser default. No-op on non-web platforms.
         if (kIsWeb) {
           await BrowserContextMenu.disableContextMenu();
         }
+      }),
+    ),
+    ("registering the data mappers", _goesOn(initializeMappers)),
+    ("reading the configured data root", _goesOn(() async => dataRoot = await readDataRootOverride())),
+    // Before the app instance, whose waiting screen is translated. It reads no store:
+    // easy_localization keeps its saved locale in shared preferences, not in Hive.
+    ("loading the translations", _goesOn(setupLocalization)),
+    // Before the first store opens: a second web tab must not load the settings database or
+    // the record stores while the first one still writes them back from its memory.
+    (
+      "claiming the app instance",
+      () async {
+        final pending = (await claimAppInstance()).waitingFor;
+        return pending == null ? null : (screen: const _AppInstanceWaitingApp(), until: pending);
       },
     ),
-    ("registering the data mappers", () async => initializeMappers()),
-    ("reading the configured data root", () async => dataRoot = await readDataRootOverride()),
-    ("opening the settings database", () => StorageBox.ensureOpened(reset: false, dataRoot: dataRoot)),
-    ("loading the translations", setupLocalization),
+    ("opening the settings database", _goesOn(() => StorageBox.ensureOpened(reset: false, dataRoot: dataRoot))),
     // A release web build with an unverified web license disclosure aborts startup here,
     // before Sentry's app runner swallows it into a "start anyway" path.
-    ("setting up the license information", setupLicense),
+    ("setting up the license information", _goesOn(setupLicense)),
   ];
 }
+
+/// A step that never holds the boot: it runs [body] and answers that the sequence goes on.
+Future<StartupWait?> Function() _goesOn(FutureOr<void> Function() body) => () async {
+  await body();
+  return null;
+};
 
 /// What the refusal screen says when the step named [step] failed with [error].
 ///
@@ -211,14 +234,26 @@ String startupFailureMessage(String step, Object error) =>
 /// cannot tell from a broken deployment. Here the loop, not whoever adds the next step,
 /// decides what is covered.
 ///
-/// [onFatal] is injected so a test can read what would be painted without driving `runApp`.
+/// A step that answers a [StartupWait] has its screen painted through [onWait] and the sequence
+/// holds there until the wait completes; a wait that fails is that step's failure.
+///
+/// [onFatal] and [onWait] are injected so a test can read what would be painted without driving
+/// `runApp`.
 ///
 /// Returns false when a step failed, i.e. when the application must not start.
 @visibleForTesting
-Future<bool> runStartupSequence(List<StartupStep> steps, {void Function(String message)? onFatal}) async {
+Future<bool> runStartupSequence(
+  List<StartupStep> steps, {
+  void Function(String message)? onFatal,
+  void Function(Widget screen)? onWait,
+}) async {
   for (final (name, step) in steps) {
     try {
-      await step();
+      final wait = await step();
+      if (wait != null) {
+        (onWait ?? runApp)(wait.screen);
+        await wait.until;
+      }
     } catch (error, stackTrace) {
       debugPrint("umacapture: startup step '$name' failed\n$stackTrace");
       (onFatal ?? reportFatalStartupError)(startupFailureMessage(name, error));
@@ -263,6 +298,66 @@ class _StartupFailureApp extends StatelessWidget {
                   );
                 },
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What a web tab shows while another tab of the same origin holds the app instance.
+///
+/// The Windows counterpart shows nothing: its second process exits and brings the first window to
+/// the front. A page can neither focus another tab nor close itself, so this one says what to do
+/// and stays; the startup sequence replaces it with the app once the other tab has closed.
+///
+/// Translated, unlike [_StartupFailureApp]: waiting is a normal state the user acts on, and the
+/// translations are loaded by the step before the claim.
+class _AppInstanceWaitingApp extends StatelessWidget {
+  const _AppInstanceWaitingApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return EasyLocalization(
+      path: "assets/translations",
+      useOnlyLangCode: true,
+      useFallbackTranslations: true,
+      supportedLocales: const [Locale('ja')],
+      fallbackLocale: const Locale('ja'),
+      child: Builder(
+        builder: (context) => MaterialApp(
+          debugShowCheckedModeBanner: false,
+          localizationsDelegates: context.localizationDelegates,
+          supportedLocales: context.supportedLocales,
+          locale: context.locale,
+          home: const AppInstanceWaitingScreen(),
+        ),
+      ),
+    );
+  }
+}
+
+/// The body of the waiting screen, apart from its localization root so a test can render it.
+@visibleForTesting
+class AppInstanceWaitingScreen extends StatelessWidget {
+  const AppInstanceWaitingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.tab_outlined, size: 48, color: theme.colorScheme.primary),
+                const SizedBox(height: 16),
+                Text("app.single_tab.waiting".tr(), textAlign: TextAlign.center, style: theme.textTheme.bodyLarge),
+              ],
             ),
           ),
         ),

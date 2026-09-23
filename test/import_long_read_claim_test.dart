@@ -46,7 +46,8 @@
 //    relocation dialog asks, not the dialog: driving `DataRootMigrationController.migrate`
 //    would move real trees, and the registry grants nothing in any case — it
 //    decides whether the button is offered.
-//  * A second tab. The registry is one tab's memory, as its own header says.
+//  * A long read a web worker performs under the same lock. The registry is the
+//    Dart isolate's memory, as its own header says.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

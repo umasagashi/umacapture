@@ -79,7 +79,7 @@ void main() {
   test('a non-transient maintenance failure leaves it as a blocked one, not a bare StateError', () async {
     // The verdict has to survive: `blocked` is what picks the wording that
     // offers the retry as a retry, rather than the `busy` wording that explains
-    // the wait by naming another tab (see `store_outage_remedy_test`).
+    // the wait by naming a still-running operation (see `store_outage_remedy_test`).
     //
     // The cause is written as a bare `StateError` on purpose. Startup no longer
     // refuses for anything recovery reports -- what reaches here is the record

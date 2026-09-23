@@ -8,7 +8,7 @@ import 'record_mutation_lock_shared.dart';
 /// real lock two of them interleave at their `await` points and the later one
 /// writes back a snapshot taken before the earlier one committed. A pass-through
 /// runner left desktop with strictly weaker guarantees than web, whose
-/// `navigator.locks` requests exclude even across tabs.
+/// `navigator.locks` requests really do make the later one wait.
 ///
 /// [InProcessNamedLocks] implements the same grant algorithm, so both platforms
 /// share one semantics — FIFO per name, shared/exclusive modes, a queued

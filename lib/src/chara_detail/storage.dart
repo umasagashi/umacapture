@@ -690,7 +690,8 @@ Future<void> _persistRecordJsonAsync(DirectoryPath recordDir, CharaDetailRecord 
 ///
 /// [emptyOk] is what makes "already gone" a success rather than a failure. The
 /// post-condition callers need is *the directory does not exist*, and a
-/// directory another tab (or an out-of-band deletion) already removed satisfies
+/// directory an out-of-band deletion (Explorer, the native capture process) or a
+/// second press already removed satisfies
 /// it. Without it, `delete(recursive: true)` raises `PathNotFoundException` on
 /// both platforms (`dart:io` by measurement, the web VFS by design), the id
 /// lands in the caller's `failed` set, `removeRecords` never sees it, and the
@@ -1177,7 +1178,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   /// Seam over the bulk scan.
   ///
-  /// Only the web loader can report a record *refused* — a gate, a cross-tab
+  /// Only the web loader can report a record *refused* — a gate, a record
   /// lock, an unusable directory name — and the conditional import resolves to
   /// the desktop loader under `flutter test`, so this is the one place a test can
   /// drive those outcomes: the same reason [recordMutationLock] exists. The one
@@ -1545,7 +1546,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   ///
   /// Refusing the addition instead would be the worse trade: it would discard a
   /// capture the user just made because of a condition that is usually transient
-  /// (another tab holding the record lock), and the record on disk is not in
+  /// (a long operation of this app holding the record lock), and the record on disk is not in
   /// danger either way. So the addition proceeds and the incompleteness is stated
   /// rather than hidden. Desktop reaches this too, for the one cause its scan
   /// can report: a record whose decode failed and whose quarantine move failed
@@ -1554,7 +1555,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// condition was a full page reload, so a user who could not reload saw this
   /// same toast after *every* capture for the rest of the session with no way to
   /// act on it. Re-running the scan is also exactly the advice the sibling
-  /// "another tab is busy" toast gives, so the two now offer the same gesture.
+  /// busy-lock toast gives, so the two now offer the same gesture.
   void _warnIfCandidateSetIncomplete() {
     if (!isIncomplete && !ref.read(charaDetailArchiveStorageLoaderProvider.notifier).isIncomplete) {
       return;
@@ -1579,8 +1580,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// awaits it): the relation-bonus recompute walks archived ancestors, so running
   /// it without the archive would tear down bonuses that depend on them.
   ///
-  /// Both platforms take the asynchronous path. Web must (OPFS writes and the
-  /// cross-tab record locks are async), and the io lock now grants by the same
+  /// Both platforms take the asynchronous path. Web must (OPFS writes and its
+  /// Web Locks record acquisitions are async), and the io lock now grants by the same
   /// algorithm within the UI isolate (`record_mutation_lock_io.dart`; the io
   /// recovery gate stays a passthrough because native has no transaction to
   /// recover), so desktop runs the same code with the same exclusion — and gains
@@ -2089,17 +2090,17 @@ void _surfaceQuarantines(Ref ref, List<RecordQuarantined> quarantined) {
 ///
 /// Kept separate from [_surfaceQuarantines] on purpose. A quarantined record is
 /// permanently undecodable and has already been moved aside; an *unavailable*
-/// record is intact and still in place, and the most common cause — another tab
-/// holding its cross-tab lock past the acquisition budget — clears by itself.
-/// Collapsing the two would tell a user whose second tab is merely mid-
-/// regeneration that their records are corrupt, and the record would meanwhile
+/// record is intact and still in place, and the most common cause — one of this
+/// app's own long operations holding the record's lock past the acquisition
+/// budget — clears by itself. Collapsing the two would tell a user whose record
+/// is merely mid-regeneration that it is corrupt, and the record would meanwhile
 /// have vanished from the list with nothing on screen at all.
 void _surfaceUnavailableRecords(Ref ref, Map<String, Object> unavailable) {
   if (unavailable.isEmpty) {
     return;
   }
   // Transient: the store is fine, the lock was simply still held. Reloading once
-  // the other tab is idle brings the record back, so this is a warning that says
+  // the holder has finished brings the record back, so this is a warning that says
   // to retry rather than an error about broken data — and tapping it *is* the
   // retry. Telling the user to reload without giving them a reload left only the
   // browser's own page reload, which discards the whole session for a condition
@@ -2897,7 +2898,7 @@ Future<void> runArchiveGeometryMigrationIfNeeded(
   entry.push(true);
 }
 
-/// Why this platform cannot provide the cross-tab record lock, or null when it
+/// Why this platform cannot provide the record mutation lock, or null when it
 /// can.
 ///
 /// A `Provider` so the capability is probed once per session and read

@@ -888,7 +888,8 @@ Future<bool> _anyExists(List<PathEntity> entities) async {
 
 Future<List<FsListing>> _childrenOfDirectory(DirectoryPath directory) async {
   // A directory can disappear between the listing that offered it and the
-  // expansion of it (a capture finishing, another tab sweeping temp). An absent
+  // expansion of it (a capture finishing, the startup temp clear, an out-of-band
+  // deletion). An absent
   // directory is an empty level, not a failure: letting the backend throw would
   // turn an ordinary race into a red row.
   if (!await directory.exists()) {

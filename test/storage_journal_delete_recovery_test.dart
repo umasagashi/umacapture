@@ -272,13 +272,13 @@ void main() {
 
   test('a slot created after this session swept is recovered before the journal is deleted', () async {
     final maintenance = _maintenance();
-    // This tab's own startup sweep, over a clean root: it succeeds, so the data
-    // root is memoed as swept.
+    // This session's own startup sweep, over a clean root: it succeeds, so the
+    // data root is memoed as swept.
     await maintenance.runUnlocked(
       RootStorageMaintenanceRequest(recordDataRoot: _layout.charaDetailDir, reason: RootMaintenanceReason.readyToUse),
     );
-    // Only afterwards does the slot appear — another tab, or a write in this
-    // session that failed after carrying `active/<id>/` aside.
+    // Only afterwards does the slot appear — a write in this session that
+    // failed after carrying `active/<id>/` aside.
     _writeParkedSlotMidResume();
 
     final report = await _deleteJournal(_container(maintenance));

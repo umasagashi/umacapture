@@ -180,7 +180,7 @@ class _ResponsiveScaffold extends StatelessWidget {
                       child: Column(
                         children: [
                           // App level, not the record tab: every persisted record
-                          // read and write takes the cross-tab lock, so when it is
+                          // read and write takes the record mutation lock, so when it is
                           // missing capture, import and the record list all fail
                           // together. Renders nothing when the lock is available.
                           const RecordLockUnavailableBanner(),

@@ -118,14 +118,13 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   /// widget is unmounted. The notifiers themselves are container-scoped and
   /// outlive the dialog.
   ///
-  /// The dialog stays up until the delete settles and the wait is unbounded -
-  /// the store takes a cross-tab record lock that makes a second caller *wait*
-  /// rather than refusing it. A second confirm therefore reaches the store after
-  /// the first delete has already erased the records, where every id is missing
-  /// from memory and is counted as failed: the user is told the delete failed
-  /// for records that were deleted. [_deleting] is what stops that, and the same
-  /// flag puts a running indicator in place of the caution box, so the silence
-  /// that provokes the second press is answered at the same time.
+  /// The dialog stays up until the delete settles. A second confirm in that
+  /// time would reach the store while this delete's own claim is on the same
+  /// records, and be refused as though another job held them: the user would be
+  /// told the records are in use, by the delete they had just started.
+  /// [_deleting] is what stops that, and the same flag puts a running indicator
+  /// in place of the caution box, so the silence that provokes the second press
+  /// is answered at the same time.
   ///
   /// **Withdrawing the confirm is not enough on its own, because it is not the
   /// only way back to the tree.** The barrier, the title bar's × and cancel each

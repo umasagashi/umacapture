@@ -246,7 +246,7 @@ final class WebRecordPersistence {
   /// Splitting this into read / compute-unlocked / re-validate-and-publish is
   /// the real fix, but [build] reads the record *and* runs the worker as one
   /// step in the platform channel, so releasing the lock around it would also
-  /// release it around the read — which can then observe another tab mid-publish
+  /// release it around the read — which can then observe another operation mid-publish
   /// (the publish replaces `active/<id>/` by delete-then-copy, not atomically).
   /// Doing it properly means splitting the builder itself, which belongs with
   /// the platform channel rather than here. Until then the wait is at least

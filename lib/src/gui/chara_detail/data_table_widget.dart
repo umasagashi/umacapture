@@ -1666,7 +1666,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Blocking, and ahead of the loader: without the cross-tab lock every record
+    // Blocking, and ahead of the loader: without the record mutation lock every record
     // read throws, so the loader can only ever reach its error branch and paint a
     // raw English exception in a Japanese UI. Draw nothing rather than pretend the
     // table is loading -- and nothing rather than the banner, for the same reason

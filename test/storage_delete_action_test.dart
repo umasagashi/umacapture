@@ -29,7 +29,7 @@
 //     and passes with the key deleted.
 //
 // WHAT THIS SUITE DOES NOT REACH. The delete runs on the io backend behind
-// `WebLikeFsBackend`, so OPFS's own refusal modes and the cross-tab lock timeout
+// `WebLikeFsBackend`, so OPFS's own refusal modes and the lock acquisition timeout
 // are not exercised here (`storage_delete_test.dart` injects the latter at the
 // lock boundary). The settings group's stores are not reached at all: they are
 // not paths, and their own removal path -- one `Hive.deleteBoxFromDisk` per store

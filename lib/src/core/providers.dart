@@ -459,7 +459,7 @@ LongReadDeclaration startupStorageMaintenanceLongReadDeclaration(RefBase ref, Pa
 /// Testable startup boundary called exactly once by [pathInfoLoader].
 ///
 /// Root-scope maintenance takes the *exclusive* root lock before any scan, so it
-/// fails for the same two reasons a store scan does — another tab held the root
+/// fails for the same two reasons a store scan does — something held the root
 /// past the acquisition budget, or whole-store recovery refused — and it fails
 /// one scope higher, where nearly every provider in the app is waiting. Left
 /// bare, that reached the screen as an English `RecordMutationLockBusy` or

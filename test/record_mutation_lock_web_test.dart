@@ -117,8 +117,8 @@ void main() {
   test('a library exception keeps its type across runForRecord', () async {
     // The concrete downstream case: a busy inner record lock must still be a
     // RecordMutationLockBusy after the outer root acquisition, or storage.dart
-    // reports "record permanently broken" where it should say "another tab is
-    // busy, tap to retry".
+    // reports "record permanently broken" where it should say "something is
+    // still running, tap to retry".
     final id = freshId();
     const busy = RecordMutationLockBusy('umacapture:v1:record:x', Duration(seconds: 150));
     Object? caught;

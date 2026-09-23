@@ -2,15 +2,15 @@
 //
 // `_StoreOutageBanner` picks between `<key>.busy` and `<key>.blocked` on one
 // bit: `RecordStoreUnavailable.transient`, which is true for exactly one cause
-// — `RecordMutationLockBusy`, i.e. another tab is holding the lock right now.
-// Everything else is `blocked`. So "another tab" is the *busy* branch's
-// explanation, and the busy branch's remedy is to wait for it. Both blocked
-// sentences used to open by telling the user to close every other tab and try
-// again: advice for a cause that branch has already ruled out, and the one
-// branch where retrying unchanged reproduces the same failure. What the blocked
-// branch can actually offer is its own action button — the startup banner's
-// retry re-runs the interrupted recovery, the store banner's rescan re-lists the
-// store — which is what those sentences now say.
+// — `RecordMutationLockBusy`, i.e. an operation of this app is holding the lock
+// right now. Everything else is `blocked`. So "an operation is still running" is
+// the *busy* branch's explanation, the records are still on disk, and the remedy
+// is to wait for it. The blocked branch has neither: its cause is not going to
+// finish on its own, so prescribing the wait there would be advice for a cause it
+// has already ruled out, and the one branch where retrying unchanged reproduces
+// the same failure. What it can actually offer is its own action button — the
+// startup banner's retry re-runs the interrupted recovery, the store banner's
+// rescan re-lists the store — which is what those sentences say.
 //
 // The pairs are discovered by walking the shipped locale files rather than
 // listed here, so a fourth busy/blocked pair added later is held to the same
@@ -21,11 +21,19 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/localization.dart';
 
-/// The phrase that names the transient cause. Kept as one constant because the
-/// test asserts it on both sides: present in every `busy` sentence, absent from
-/// every `blocked` one. A marker only checked for absence goes stale silently —
-/// reword the busy sentences and it would pass by matching nothing at all.
-const _transientCause = '他のタブ';
+/// The two phrases only a transient outage may carry. Kept as constants because
+/// the test asserts each on both sides: present in every `busy` sentence, absent
+/// from every `blocked` one. A marker only checked for absence goes stale
+/// silently — reword the busy sentences and it would pass by matching nothing at
+/// all.
+///
+/// [_transientCause] is the cause the busy branch states — something is still
+/// running, which is why waiting is the remedy. [_transientReassurance] is what
+/// only that branch may promise: the records are still on disk. Two markers
+/// rather than one because either alone is satisfiable by a sentence that has
+/// lost the other half of the statement.
+const _transientCause = '実行中';
+const _transientReassurance = '記録は失われていません';
 
 /// Every `{busy, blocked}` pair in [json], as dotted keys to their parent.
 List<String> _outagePairs(Map<String, dynamic> json) {
@@ -69,20 +77,22 @@ void main() {
         final sentences = mapAt(json, pair);
         final busy = sentences?['busy'] as String? ?? '';
         final blocked = sentences?['blocked'] as String? ?? '';
-        expect(
-          busy,
-          contains(_transientCause),
-          reason:
-              '$locale: "$pair.busy" is the branch whose cause *is* another tab; '
-              'if it no longer says so, this test can no longer tell the two apart',
-        );
-        expect(
-          blocked,
-          isNot(contains(_transientCause)),
-          reason:
-              '$locale: "$pair.blocked" is reached only when the cause is not a busy lock, '
-              'so it must not prescribe the busy branch remedy',
-        );
+        for (final marker in const [_transientCause, _transientReassurance]) {
+          expect(
+            busy,
+            contains(marker),
+            reason:
+                '$locale: "$pair.busy" is the branch whose cause is an operation still running; '
+                'if it no longer says so, this test can no longer tell the two apart',
+          );
+          expect(
+            blocked,
+            isNot(contains(marker)),
+            reason:
+                '$locale: "$pair.blocked" is reached only when the cause is not a busy lock, '
+                'so it must not prescribe the busy branch remedy',
+          );
+        }
       }
     }
   });

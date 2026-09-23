@@ -22,7 +22,7 @@ final RecordMutationLock platformRecordMutationLock = RecordMutationLock(_webLoc
 /// [RecordMutationLockBusy] instead of a UI that never finishes loading.
 const Duration recordMutationLockAcquireTimeout = Duration(seconds: 150);
 
-/// Whether this context can provide the cross-tab lock the record store needs.
+/// Whether this context can provide the lock the record store needs.
 ///
 /// Probed as a value so the app can check the capability once, at startup, next
 /// to the storage checks, rather than discovering it as a thrown exception on

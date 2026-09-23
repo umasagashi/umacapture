@@ -638,8 +638,8 @@ class _CodeHighlightSection extends StatelessWidget {
 const Map<String, String> _roleUsages = {
   'primary':
       'Brand accent: add-column button, drag/slot accents, data-table accents, progress, feedback drawer, '
-      'storage-group folder icons, the hold-to-confirm button\'s fill, and the enhancement merge dialog\'s '
-      'selected-card border.',
+      'storage-group folder icons, the hold-to-confirm button\'s fill, the enhancement merge dialog\'s '
+      'selected-card border, and the single-tab-instance waiting screen\'s icon.',
   'onPrimary':
       'Text and icons on primary fills (add-column button, data-table accents, feedback drawer, hold-to-confirm '
       'button label, gauge and keyboard-focus ring).',

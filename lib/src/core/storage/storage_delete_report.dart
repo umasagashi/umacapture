@@ -3,8 +3,8 @@
 /// **Why the operation reports instead of returning `void`.** A delete of a
 /// folder is many deletes, and the reasons one of them fails are outside this
 /// app's control: on Windows a file another process still holds is refused, and
-/// on web the cross-tab lock the delete needs is bounded at 150 s and can time
-/// out with another tab still holding it. A path that says nothing therefore has
+/// on either platform the lock the delete needs is bounded at 150 s and can time
+/// out with a long operation still holding it. A path that says nothing therefore has
 /// to choose between claiming a success it did not have and reporting a failure
 /// for the parts that did succeed, and the app may not misstate whether a delete
 /// happened, which rules out the first. The report
@@ -37,8 +37,9 @@ library;
 enum StorageDeleteFailureReason {
   /// The exclusion this delete needed was still held when the acquisition budget
   /// ran out (150 s on both platforms; see `inProcessLockAcquireTimeout` and
-  /// `recordMutationLockAcquireTimeout`). On web this is another tab; in one
-  /// process it can only be a defect of ours.
+  /// `recordMutationLockAcquireTimeout`). The app runs as one instance, so the
+  /// holder is one of its own long operations — or a wedged one, i.e. a defect
+  /// of ours.
   lockBusy,
 
   /// The platform cannot provide the exclusion primitive at all — an insecure

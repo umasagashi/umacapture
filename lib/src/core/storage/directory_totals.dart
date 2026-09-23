@@ -114,8 +114,8 @@ Future<DirectoryTotals> aggregateDirectoryTotals(DirectoryPath directory) async 
 ///    it, and its descendants, which a directory delete removes. Stage 6 owns
 ///    wiring the deletes; the entry point exists now so that wiring is a call and
 ///    not a redesign.
-/// 2. **Something outside this app changed the tree** — Explorer, a second copy
-///    of the app, another browser tab writing the same OPFS origin. Neither
+/// 2. **Something outside this app changed the tree** — Explorer, the native
+///    capture process, any other tool pointed at the data root. Neither
 ///    backend offers change notification and this app runs no watcher, so the
 ///    cache *cannot* detect it and must not pretend to. That is why
 ///    [DirectoryTotals.computedAt] is part of the value and why [clear] exists:

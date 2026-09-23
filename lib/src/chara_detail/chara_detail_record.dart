@@ -675,8 +675,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// OPFS has no directory rename). Returns the destination, or `null` if the
   /// move failed.
   ///
-  /// The destination probe and the move stay in the same critical section, so a
-  /// collision cannot select the same suffix in another tab.
+  /// The destination probe and the move stay in the same critical section, so two
+  /// quarantines running concurrently cannot select the same suffix.
   ///
   /// The name is folded through [safeRecordDirectoryName] for the reason spelled
   /// out there: `WebVfs` splits the joined path on `\` as well as `/`, so a

@@ -465,11 +465,18 @@ typedef _HeldRecord = ({CharaDetailRecordMergeSurface store, CharaDetailRecord r
 /// longer that candidate: a store no longer serves one of them, one's directory
 /// is not on disk, or the two no longer relate the way the candidate says.
 ///
-/// For the merge, which holds the exclusive root lock, because a candidate is
-/// derived before the lock is granted, and the holder the wait was for may have
-/// been a merge that retired one of the two. The directory
-/// test is what sees that retirement before the stores reload: until they do,
-/// memory keeps serving the retired record.
+/// For the merge, which derives a candidate before it is granted the exclusive
+/// root lock and confirms it after: the dialog holds the candidate as a value
+/// while a delete, an archive, a capture or an import moves the stores, the
+/// directories and the records under it. The directory test is what sees a
+/// directory go before the stores reload: until they do, memory keeps serving a
+/// record that is no longer on disk.
+///
+/// The one subject that could move all three legs at once — another merge —
+/// cannot be running: [EnhancementMergeFrame.run] refuses its claim for one, and
+/// merging and dismissing are the two branches of a single button on a single
+/// modal dialog, both withheld while either is in flight
+/// (`enhancementMergeConfirmAction`).
 Future<({_HeldRecord older, _HeldRecord newer})?> _heldCandidate(Ref ref, EnhancementCandidate candidate) async {
   final stores = <CharaDetailRecordMergeSurface>[
     ref.read(charaDetailRecordStorageLoaderProvider.notifier),

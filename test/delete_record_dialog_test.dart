@@ -395,11 +395,8 @@ void main() {
   // them.** The group above pins that a second press cannot be made through the
   // confirm button. It says nothing about the barrier, the title bar's x and
   // cancel, each of which unmounts the dialog outright -- and `_deleting` goes
-  // with the widget, so the rows are listed again with their delete entries live
-  // and the same records can be sent to the store a second time. The store's
-  // cross-tab lock makes that second call *wait* rather than refusing it, so it
-  // arrives after the first delete erased the records, finds every id missing and
-  // reports the whole batch as failed: an error toast for a delete that worked.
+  // with the widget, so the rows are still listed while the delete behind them
+  // runs with nothing on screen that says so.
   //
   // One test per exit and per dialog, so a guard put back for one door and not
   // the others cannot hide behind a neighbour.

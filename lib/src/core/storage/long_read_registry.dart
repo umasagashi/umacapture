@@ -10,10 +10,10 @@
 ///
 /// **It is a strictly smaller window than the lock's, on both platforms, and
 /// that is a real gap rather than an oversight:**
-///  * On the web the exclusion is the Web Locks API, which `record_mutation_lock_shared.dart`
-///    describes as reaching across tabs ("another tab is probably busy with the
-///    record store"). This registry is a Riverpod notifier living in one tab's
-///    memory, so a long read in another tab is invisible to it.
+///  * On the web the exclusion is the Web Locks API, which the page shares with
+///    its workers. This registry is a Riverpod notifier living in the Dart
+///    isolate's memory, so a long read a worker performs under that lock is
+///    invisible to it.
 ///  * On Windows the corresponding blind spot is the native capture process,
 ///    which `storage.dart` already states no in-process acquisition can exclude.
 ///

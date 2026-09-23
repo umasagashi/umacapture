@@ -129,8 +129,8 @@ void main() {
     // The app-level [RecordLockUnavailableBanner] is mounted here rather than
     // asserted about from a distance, because the defect this pins is only
     // visible when BOTH copies are in the same tree: the page used to return the
-    // very same banner as its body, so a record tab opened without the cross-tab
-    // lock stacked two identical remedies. Mounting the page alone cannot see
+    // very same banner as its body, so a record tab opened without the record
+    // mutation lock stacked two identical remedies. Mounting the page alone cannot see
     // that -- it would find one banner either way -- which is why the rest of
     // this file and `record_store_banner_test` stayed green through it.
     //

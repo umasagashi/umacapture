@@ -166,7 +166,7 @@ void main() {
     const timeout = Duration(seconds: 150);
     // Only the record-scoped acquisition for 'lock-busy' times out; the shared
     // root gate and every other record still grant, exactly as Web Locks behaves
-    // when a second tab holds one record mid-regeneration.
+    // when another holder has one record mid-regeneration.
     final busyLock = RecordMutationLock((name, _, action) {
       if (name.contains(base64Url.encode(utf8.encode('lock-busy')).replaceAll('=', ''))) {
         throw RecordMutationLockBusy(name, timeout);

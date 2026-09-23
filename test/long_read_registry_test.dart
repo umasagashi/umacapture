@@ -13,8 +13,9 @@
 //
 // Not covered here, and stated so it is not mistaken for covered:
 //  * The web leg. The registry is platform-agnostic Dart with no branch in it,
-//    but a claim held in another browser tab is invisible to it — see the
-//    library doc for why that gap is the lock's to close and not this one's.
+//    but a long read a web worker performs under the same lock is invisible to
+//    it — see the library doc for why that gap is the lock's to close and not
+//    this one's.
 //  * What either registered operation actually does. The zip's own wiring is
 //    `storage_zip_export_test.dart`'s and the archive's is
 //    `archive_long_read_claim_test.dart`'s; the cases below construct claims

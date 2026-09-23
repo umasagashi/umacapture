@@ -23,7 +23,7 @@
 // WHAT THIS SUITE CANNOT REACH.
 //  * The real web build. `record_loader_web.dart` is not behind the browser side
 //    of a conditional import, so it runs here on the VM against the io backend —
-//    the same Dart, not a browser, and not another tab.
+//    the same Dart, not a browser, and not OPFS.
 //  * The handle-release window on Windows. The claim exists so that timing is
 //    unreachable from the UI; observing it needs a real scan with a delete timed
 //    into it.
