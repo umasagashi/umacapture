@@ -40,6 +40,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
@@ -164,13 +165,20 @@ void main() {
       expect(targets, [charaDetailRecordRatingStorageDataLoader, charaDetailRecordRatingProvider]);
     });
 
-    test('a group-level metadata delete covers both stores', () {
+    test('a group-level metadata delete covers both stores and the dismissals', () {
       final targets = targetsFor(StorageGroupId.metadata, groupOf(StorageGroupId.metadata).resolve(layout));
       expect(targets, [
         charaDetailRecordRatingStorageDataLoader,
         charaDetailRecordRatingProvider,
         charaDetailRecordMemoStorageDataLoader,
         charaDetailRecordMemoProvider,
+        enhancementDismissedPairsProvider,
+      ]);
+    });
+
+    test('the dismissal file invalidates the dismissed pairs', () {
+      expect(targetsFor(StorageGroupId.metadata, [layout.charaDetailEnhancementDismissedFile]), [
+        enhancementDismissedPairsProvider,
       ]);
     });
 

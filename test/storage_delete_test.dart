@@ -245,6 +245,80 @@ void main() {
       // hold while they rewrite these files, so it is the one that excludes them.
       expect(locks.acquired, [(name: _rootLockName, mode: RecordMutationLockMode.exclusive)]);
       expect(serialised, [target.path]);
+      expect(acquiredBeforeSerialising, [
+        [(name: _rootLockName, mode: RecordMutationLockMode.exclusive)],
+      ], reason: 'the controller was dropped outside the root lock');
+    });
+
+    for (final file in ['rating/main.json', 'memo/main.json', 'enhancement_dismissed.json']) {
+      test('a metadata delete of $file waits for a root holder and runs only after it lets go', () async {
+        seed(['documents/storage/chara_detail/metadata/$file']);
+        final locks = _RecordingLocks();
+        fsBackend = _ObstructedFsBackend(realBackend);
+        final serialised = <String>[];
+        final container = containerWith(
+          locks,
+          serializer: (target, action) async {
+            serialised.add(target.path);
+            await action();
+          },
+        );
+        // Stands in for a concurrent merge: it holds the exclusive
+        // root name for as long as it re-keys the metadata files.
+        final holderEntered = Completer<void>();
+        final release = Completer<void>();
+        final holder = locks.inner.run(_rootLockName, RecordMutationLockMode.exclusive, () async {
+          holderEntered.complete();
+          await release.future;
+          return null;
+        });
+        await holderEntered.future;
+
+        final target = FilePath('${layout.charaDetailMetadataDir.path}/$file');
+        var finished = false;
+        final pending = deleteStorageEntry(
+          container.read(refBaseProvider),
+          group: groupOf(StorageGroupId.metadata),
+          target: target,
+        ).whenComplete(() => finished = true);
+        await pumpEventQueue();
+
+        expect(finished, isFalse, reason: 'the delete ran while the root holder was still inside its lock');
+        expect(serialised, isEmpty, reason: 'the controller was dropped before the root lock was granted');
+        expect(File(target.path).existsSync(), isTrue);
+
+        release.complete();
+        await holder;
+        final report = await pending;
+        expect(report.deletedPaths, [target.path]);
+        expect(File(target.path).existsSync(), isFalse);
+      });
+    }
+
+    test('a metadata delete whose root lock never comes free removes nothing and says so', () async {
+      seed(['documents/storage/chara_detail/metadata/enhancement_dismissed.json']);
+      final locks = _RecordingLocks(refuse: (name) => name == _rootLockName);
+      fsBackend = _ObstructedFsBackend(realBackend);
+      final serialised = <String>[];
+      final container = containerWith(
+        locks,
+        serializer: (target, action) async {
+          serialised.add(target.path);
+          await action();
+        },
+      );
+
+      final target = layout.charaDetailEnhancementDismissedFile;
+      final report = await deleteStorageEntry(
+        container.read(refBaseProvider),
+        group: groupOf(StorageGroupId.metadata),
+        target: target,
+      );
+
+      expect(report.deletedPaths, isEmpty);
+      expect(report.reasons, {StorageDeleteFailureReason.lockBusy});
+      expect(serialised, isEmpty);
+      expect(File(target.path).existsSync(), isTrue);
     });
 
     test('a group that is not a record store takes nothing and is not serialised', () async {

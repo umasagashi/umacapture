@@ -375,17 +375,6 @@ Uint8List mergedIdsBytes(MergedIds marker) {
 // The dismissal store ("not the same uma")
 // ===========================================================================
 
-/// The file the user's "these are not the same uma" decisions live in.
-///
-/// A metadata file *beside* the memo and rating directories rather than inside
-/// one: it is keyed by a pair of record ids and not by a storage-set key, so it
-/// is neither a memo nor a rating store and the two directory listings that
-/// build those key lists must not find it.
-const enhancementDismissedFileName = 'enhancement_dismissed.json';
-
-/// Where [enhancementDismissedFileName] lives under [info].
-FilePath enhancementDismissedFile(PathInfo info) => info.charaDetailMetadataDir.filePath(enhancementDismissedFileName);
-
 /// The dismissed pairs, or `null` when the file is there and cannot be used.
 ///
 /// Absent is the empty set. "There and unusable" is a third answer for the same
@@ -434,7 +423,7 @@ String dismissedPairsJson(Iterable<RecordIdPair> pairs) {
 /// because offering too much and overwriting too much are not the same risk.
 final enhancementDismissedPairsProvider = FutureProvider<Set<RecordIdPair>>((ref) async {
   final info = await ref.watch(pathInfoLoader.future);
-  return await readDismissedPairs(enhancementDismissedFile(info)) ?? const <RecordIdPair>{};
+  return await readDismissedPairs(info.charaDetailEnhancementDismissedFile) ?? const <RecordIdPair>{};
 });
 
 /// The gate the enhancement merge and the dismissal writer take the root lock
@@ -445,6 +434,96 @@ final enhancementDismissedPairsProvider = FutureProvider<Set<RecordIdPair>>((ref
 /// name — is that they ask for the same lock. A provider so a test can hold that
 /// lock over a fake.
 final enhancementRecoveryGateProvider = Provider<RecordRecoveryGate>((_) => platformRecordRecoveryGate);
+
+/// How a [EnhancementDismissalStore.dismiss] ended.
+///
+/// Every value but [dismissed] means nothing was written. They are kept apart
+/// because each is told to the user in its own sentence, and one sentence
+/// covering them would be wrong about the others: a busy lock is worth retrying,
+/// an unreadable file is not.
+enum EnhancementDismissOutcome {
+  /// The decision is stored.
+  dismissed,
+
+  /// The existing file could not be read; writing would have replaced every
+  /// decision already in it with this one.
+  unreadable,
+
+  /// The exclusive root lock stayed held by another operation (a merge, a store
+  /// scan, a delete of the file) for the whole acquisition budget.
+  lockBusy,
+
+  /// No root lock could be taken at all, so the write could not be excluded from
+  /// the operations that rewrite the file.
+  lockUnavailable,
+}
+
+/// One record of a candidate: the store serving it, the record, and its directory.
+typedef _HeldRecord = ({CharaDetailRecordMergeSurface store, CharaDetailRecord record, DirectoryPath directory});
+
+/// Both records of [candidate] as they are now, or null when the pair is no
+/// longer that candidate: a store no longer serves one of them, one's directory
+/// is not on disk, or the two no longer relate the way the candidate says.
+///
+/// For the merge, which holds the exclusive root lock, because a candidate is
+/// derived before the lock is granted, and the holder the wait was for may have
+/// been a merge that retired one of the two. The directory
+/// test is what sees that retirement before the stores reload: until they do,
+/// memory keeps serving the retired record.
+Future<({_HeldRecord older, _HeldRecord newer})?> _heldCandidate(Ref ref, EnhancementCandidate candidate) async {
+  final stores = <CharaDetailRecordMergeSurface>[
+    ref.read(charaDetailRecordStorageLoaderProvider.notifier),
+    ref.read(charaDetailArchiveStorageLoaderProvider.notifier),
+  ];
+  final older = _locate(stores, candidate.olderId);
+  final newer = _locate(stores, candidate.newerId);
+  if (older == null || newer == null) {
+    logger.i('${candidate.olderId} / ${candidate.newerId}: one of them is no longer a record this app holds.');
+    return null;
+  }
+  if (!await older.directory.exists() || !await newer.directory.exists()) {
+    logger.i('${candidate.olderId} / ${candidate.newerId}: one of their directories is not on disk.');
+    return null;
+  }
+  if (!_stillTheSameCandidate(ref, candidate, older.record, newer.record)) {
+    logger.i('${candidate.olderId} / ${candidate.newerId}: they no longer relate the way the candidate says.');
+    return null;
+  }
+  return (older: older, newer: newer);
+}
+
+/// Where a record is, or null when no store holds it.
+_HeldRecord? _locate(List<CharaDetailRecordMergeSurface> stores, String id) {
+  for (final store in stores) {
+    final record = store.getBy(id: id);
+    if (record != null) {
+      return (store: store, record: record, directory: store.rootDirectory / id);
+    }
+  }
+  return null;
+}
+
+/// Whether the two records still relate the way the candidate was derived to
+/// say they do.
+///
+/// Re-derived from the records rather than trusted: the candidate list is
+/// computed from a store view that may be several frames old, and the whole of
+/// what authorises replacing one record's content with another's — or recording
+/// that the two are not the same uma — is this relation. [relateRecords] decides
+/// it the same way the derivation did: an exact duplicate needs no factor table,
+/// and any other pair is unrelated (a refusal, not a pass) while the table has
+/// not loaded.
+bool _stillTheSameCandidate(Ref ref, EnhancementCandidate candidate, CharaDetailRecord older, CharaDetailRecord newer) {
+  final info = ref.read(factorInfoLoader).asData;
+  final relation = relateRecords(older, newer, info == null ? null : FactorClassifier.fromInfo(info.value));
+  final enhanced = switch (relation) {
+    EnhancementRelation.unrelated => null,
+    EnhancementRelation.identical => null,
+    EnhancementRelation.firstEnhanced => older.id,
+    EnhancementRelation.secondEnhanced => newer.id,
+  };
+  return relation != EnhancementRelation.unrelated && enhanced == candidate.enhancedId;
+}
 
 /// Records the user's "not the same uma" decisions.
 final class EnhancementDismissalStore {
@@ -460,7 +539,7 @@ final class EnhancementDismissalStore {
   /// write. The lock orders them inside the one app instance; on web the
   /// instance claimed at startup (`app_instance.dart`) keeps a second tab of the
   /// origin from running the app at all.
-  Future<bool> dismiss(EnhancementCandidate candidate) async {
+  Future<EnhancementDismissOutcome> dismiss(EnhancementCandidate candidate) async {
     final info = await _ref.read(pathInfoLoader.future);
     try {
       return await _ref
@@ -482,24 +561,24 @@ final class EnhancementDismissalStore {
         error,
         stackTrace,
       );
-      return false;
+      return EnhancementDismissOutcome.lockBusy;
     } on RecordMutationLockUnavailable catch (error, stackTrace) {
       logger.w('Not dismissing ${candidate.olderId} / ${candidate.newerId}: no root lock to take.', error, stackTrace);
-      return false;
+      return EnhancementDismissOutcome.lockUnavailable;
     }
   }
 
-  Future<bool> _dismissLocked(PathInfo info, EnhancementCandidate candidate) async {
-    final file = enhancementDismissedFile(info);
+  Future<EnhancementDismissOutcome> _dismissLocked(PathInfo info, EnhancementCandidate candidate) async {
+    final file = info.charaDetailEnhancementDismissedFile;
     final current = await readDismissedPairs(file);
     if (current == null) {
       logger.e('Not dismissing ${candidate.olderId} / ${candidate.newerId}: the dismissal file cannot be read.');
-      return false;
+      return EnhancementDismissOutcome.unreadable;
     }
     await info.charaDetailMetadataDir.create(recursive: true);
     await file.writeAsString(dismissedPairsJson({...current, candidate.pair}));
     _ref.invalidate(enhancementDismissedPairsProvider);
-    return true;
+    return EnhancementDismissOutcome.dismissed;
   }
 }
 
@@ -825,20 +904,12 @@ final class EnhancementMerge {
       _ref.read(charaDetailRecordStorageLoaderProvider.notifier),
       _ref.read(charaDetailArchiveStorageLoaderProvider.notifier),
     ];
-    final older = _locate(stores, olderId);
-    final retired = _locate(stores, retiredId);
-    if (older == null || retired == null) {
-      logger.i('Refusing a merge of $olderId and $retiredId: one of them is no longer a record this app holds.');
+    final held = await _heldCandidate(_ref, candidate);
+    if (held == null) {
+      logger.i('Refusing a merge of $olderId and $retiredId: the pair is no longer that candidate.');
       return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.refusedMissing, needsReload: false);
     }
-    if (!await older.directory.exists() || !await retired.directory.exists()) {
-      logger.i('Refusing a merge of $olderId and $retiredId: one of their directories is not on disk.');
-      return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.refusedMissing, needsReload: false);
-    }
-    if (!_stillTheSameCandidate(candidate, older.record, retired.record)) {
-      logger.i('Refusing a merge of $olderId and $retiredId: they no longer relate the way the candidate says.');
-      return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.refusedMissing, needsReload: false);
-    }
+    final (:older, newer: retired) = held;
     final mergedByOlder = await readMergedIds(older.directory);
     final mergedByRetired = await readMergedIds(retired.directory);
     if (mergedByOlder == null || mergedByRetired == null) {
@@ -882,7 +953,7 @@ final class EnhancementMerge {
     }
     final ratingFiles = await _readMetadataKeyFiles(pathInfo.charaDetailRatingDir, RatingDataMapper.fromJson);
     final memoFiles = await _readMetadataKeyFiles(pathInfo.charaDetailMemoDir, MemoDataMapper.fromJson);
-    final dismissed = await readDismissedPairs(enhancementDismissedFile(pathInfo));
+    final dismissed = await readDismissedPairs(pathInfo.charaDetailEnhancementDismissedFile);
     if (ratingFiles == null || memoFiles == null || dismissed == null) {
       logger.i('Refusing a merge of $olderId and $retiredId: a metadata file cannot be read.');
       return const EnhancementMergeResult(
@@ -1036,7 +1107,7 @@ final class EnhancementMerge {
           );
         }
       }
-      await _rekeyDismissals(enhancementDismissedFile(pathInfo), dismissed, seams, olderId, retiredId);
+      await _rekeyDismissals(pathInfo.charaDetailEnhancementDismissedFile, dismissed, seams, olderId, retiredId);
     } catch (error, stackTrace) {
       logger.e('A merge of $olderId and $retiredId could not re-key a metadata file.', error, stackTrace);
       return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.failed, needsReload: true);
@@ -1313,41 +1384,6 @@ final class EnhancementMerge {
       logger.w('Could not read the survivor at ${file.path}.', error, stackTrace);
       return null;
     }
-  }
-
-  /// Where a record is, or null when no store holds it.
-  ({CharaDetailRecordMergeSurface store, CharaDetailRecord record, DirectoryPath directory})? _locate(
-    List<CharaDetailRecordMergeSurface> stores,
-    String id,
-  ) {
-    for (final store in stores) {
-      final record = store.getBy(id: id);
-      if (record != null) {
-        return (store: store, record: record, directory: store.rootDirectory / id);
-      }
-    }
-    return null;
-  }
-
-  /// Whether the two records still relate the way the candidate was derived to
-  /// say they do.
-  ///
-  /// Re-derived from the records rather than trusted: the candidate list is
-  /// computed from a store view that may be several frames old, and the whole of
-  /// what authorises replacing one record's content with another's is this
-  /// relation. [relateRecords] decides it the same way the derivation did: an
-  /// exact duplicate needs no factor table, and any other pair is unrelated
-  /// (a refusal, not a pass) while the table has not loaded.
-  bool _stillTheSameCandidate(EnhancementCandidate candidate, CharaDetailRecord older, CharaDetailRecord retired) {
-    final info = _ref.read(factorInfoLoader).asData;
-    final relation = relateRecords(older, retired, info == null ? null : FactorClassifier.fromInfo(info.value));
-    final enhanced = switch (relation) {
-      EnhancementRelation.unrelated => null,
-      EnhancementRelation.identical => null,
-      EnhancementRelation.firstEnhanced => older.id,
-      EnhancementRelation.secondEnhanced => retired.id,
-    };
-    return relation != EnhancementRelation.unrelated && enhanced == candidate.enhancedId;
   }
 
   /// Every record of [store] that names [retiredId] as a parent, with that slot

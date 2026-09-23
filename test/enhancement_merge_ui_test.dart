@@ -69,7 +69,7 @@ class _Calls {
     outcome: EnhancementMergeOutcome.merged,
     needsReload: false,
   );
-  bool dismissed = true;
+  EnhancementDismissOutcome dismissed = EnhancementDismissOutcome.dismissed;
   MergedIds? merged = (ids: const [], metadataDefaults: null);
   EnhancementMergeChoices? lastChoices;
   String? lastKeptContentId;
@@ -959,6 +959,20 @@ void main() {
       expect(find.byKey(const Key('enhancement_merge_no_factor_difference')), findsNothing);
     });
 
+    testWidgets('R47: both kinds of pair carry the one title', (tester) async {
+      expect(appSentenceAt('$_tr.title'), '統合対象の選択');
+      for (final enhanced in [null, true]) {
+        final pair = enhanced == null ? _pair(enhanced: null) : _pair();
+        await _pump(
+          tester,
+          _container(calls: _Calls(), records: pair.records),
+          EnhancementMergeDialog(candidate: pair.candidate, route: EnhancementMergeRoute.settings),
+        );
+        expect(pair.candidate.identical, enhanced == null, reason: 'positive control: the pair kind is the one meant');
+        expect(find.text(appSentenceAt('$_tr.title')), findsOneWidget);
+      }
+    });
+
     testWidgets('an identical pair lists no factor and says there is no difference, once', (tester) async {
       final pair = _pair(enhanced: null);
       final container = _container(calls: _Calls(), records: pair.records);
@@ -1168,6 +1182,61 @@ void main() {
 
       expect(calls.log, ['dismiss:older/newer'], reason: 'the persisted dismissal and nothing else');
       expect(find.byType(EnhancementMergeDialog), findsNothing);
+    });
+
+    for (final (name, outcome, key) in [
+      (
+        'an unreadable dismissal file',
+        EnhancementDismissOutcome.unreadable,
+        'pages.chara_detail.enhancement_merge.dismiss_failed',
+      ),
+      ('a root lock held elsewhere', EnhancementDismissOutcome.lockBusy, longReadBusyKey),
+      (
+        'a root lock that cannot be taken',
+        EnhancementDismissOutcome.lockUnavailable,
+        'pages.chara_detail.enhancement_merge.dismiss_unavailable',
+      ),
+    ]) {
+      testWidgets('a dismissal refused by $name says so and keeps the dialog open', (tester) async {
+        final pair = _pair();
+        final calls = _Calls()..dismissed = outcome;
+        final container = _container(calls: calls, candidates: [pair.candidate], records: pair.records);
+        final toasts = _collectToasts(container);
+        await _openReview(tester, container);
+        await tester.tap(find.byKey(const Key('enhancement_review_merge_newer_older')));
+        await tester.pumpAndSettle();
+
+        await _toggleCard(tester, 'newer');
+        await _holdConfirm(tester);
+        await tester.pumpAndSettle();
+
+        expect(calls.log, ['dismiss:older/newer']);
+        expect([for (final t in toasts) t.description], [appSentenceAt(key)]);
+        expect(find.byType(EnhancementMergeDialog), findsOneWidget, reason: 'the user can retry from where they were');
+      });
+    }
+
+    testWidgets('a merge over a pair that is no longer the candidate says so, closes and notes the row', (
+      tester,
+    ) async {
+      final pair = _pair();
+      final calls = _Calls()
+        ..result = const EnhancementMergeResult(outcome: EnhancementMergeOutcome.refusedMissing, needsReload: false);
+      final container = _container(calls: calls, candidates: [pair.candidate], records: pair.records);
+      final toasts = _collectToasts(container);
+      await _openReview(tester, container);
+      await tester.tap(find.byKey(const Key('enhancement_review_merge_newer_older')));
+      await tester.pumpAndSettle();
+
+      await _holdConfirm(tester);
+      await tester.pumpAndSettle();
+
+      final sentence = appSentenceAt(enhancementMergeOutcomeKey(EnhancementMergeOutcome.refusedMissing));
+      expect(calls.log, ['merge:older/newer']);
+      expect([for (final t in toasts) t.description], [sentence]);
+      expect(find.byType(EnhancementMergeDialog), findsNothing);
+      expect(find.byKey(const Key('enhancement_review_newer_older')), findsOneWidget, reason: 'the row stays');
+      expect(find.text(sentence), findsOneWidget, reason: 'the refusal note on the row');
     });
 
     testWidgets('a selected card and a held Confirm merge and dismiss nothing', (tester) async {

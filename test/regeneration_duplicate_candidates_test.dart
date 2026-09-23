@@ -20,10 +20,14 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/storage_delete_request.dart';
+import 'package:umacapture/src/core/storage/storage_group.dart';
+import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/enhancement_merge_scratch.dart';
 import 'support/factor_classifier.dart';
 import 'support/records.dart';
+import 'support/riverpod.dart';
 import 'support/settling.dart';
 
 const _olderDate = '2026-01-01T00:00:00+0900';
@@ -175,7 +179,10 @@ void main() {
       writeRecord(info.charaDetailActiveDir, _record('b', _self(2), _newerDate));
       final container = await load();
       final candidate = container.read(pendingEnhancementCandidatesProvider).single;
-      expect(await container.read(enhancementDismissalStoreProvider).dismiss(candidate), isTrue);
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.dismissed,
+      );
       await container.read(enhancementDismissedPairsProvider.future);
       expect(container.read(pendingEnhancementCandidatesProvider), isEmpty);
       expect(
@@ -183,6 +190,48 @@ void main() {
         isEmpty,
         reason: 'the dismissal is persisted across a restart',
       );
+    });
+  });
+
+  group('deleting the dismissal file from storage management', () {
+    test('is listed in the metadata group', () async {
+      final metadata = storageGroupOf(StorageGroupId.metadata);
+      expect(metadata.resolve(info).map((e) => e.path), contains(info.charaDetailEnhancementDismissedFile.path));
+    });
+
+    test('offers a dismissed pair again', () async {
+      // The storage delete evicts record images, which reads the painting binding.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      writeRecord(info.charaDetailActiveDir, _record('a', _self(5), _olderDate));
+      writeRecord(info.charaDetailActiveDir, _record('b', _self(5), _newerDate));
+      final container = await loadedMergeContainer(
+        info: info,
+        overrides: [pathLayoutLoader.overrideWith((ref) async => info)],
+      );
+      // Held open so the second read is the invalidated provider, not a fresh one.
+      final subscription = container.listen(enhancementDismissedPairsProvider, (_, _) {});
+      addTearDown(subscription.close);
+      await container.read(enhancementDismissedPairsProvider.future);
+      final candidate = container.read(pendingEnhancementCandidatesProvider).single;
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.dismissed,
+      );
+      await container.read(enhancementDismissedPairsProvider.future);
+      expect(container.read(pendingEnhancementCandidatesProvider), isEmpty, reason: 'positive control: dismissed');
+
+      final file = info.charaDetailEnhancementDismissedFile;
+      expect(storageGroupOf(StorageGroupId.metadata).resolve(info).map((e) => e.path), contains(file.path));
+      await runStorageDelete(
+        container.read(refBaseProvider),
+        group: storageGroupOf(StorageGroupId.metadata),
+        request: StorageDeletePathsRequest([file]),
+        silent: true,
+      );
+
+      expect(File(file.path).existsSync(), isFalse);
+      await container.read(enhancementDismissedPairsProvider.future);
+      expectOneIdenticalPair(container.read(pendingEnhancementCandidatesProvider));
     });
   });
 

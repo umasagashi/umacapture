@@ -941,7 +941,7 @@ Future<List<FsListing>> _childrenOfGroup(PathInfo info, StorageGroup group) asyn
     // awaited rather than in `soleRoot`, which a build calls.
     return _childrenOfDirectory(sole);
   }
-  // Everything else — the two metadata directories, the single `data_root.json`
+  // Everything else — the metadata directories and file, the single `data_root.json`
   // file — shows the resolved entities themselves as rows.
   return _listingsOfPresent(entities);
 }
@@ -1552,7 +1552,7 @@ class _GroupTile extends ConsumerWidget {
   ///
   /// **Two entries where an entry row has up to six, and the missing four are
   /// missing for one reason.** A group can resolve to more than one root — the
-  /// metadata group is `rating/` and `memo/` — so "copy this" and "open this
+  /// metadata group is `rating/`, `memo/` and the dismissal file — so "copy this" and "open this
   /// folder" have no single path to name, and picking one of the roots silently
   /// is the alternative. The zip and the delete are not in that position: the
   /// zip exists only where the group *is* one directory
@@ -2513,7 +2513,7 @@ Key storageRowMenuEntityKey(PathEntity entity) => ValueKey('storage-tree-menu:${
 ///
 /// Keyed by the group and not by a path, as the group's delete button was
 /// before it: a group's actions can cover more than one root — the metadata
-/// group is `rating/` and `memo/` — so there is no single path that names it.
+/// group is `rating/`, `memo/` and the dismissal file — so there is no single path that names it.
 Key storageRowMenuGroupKey(StorageGroupId id) => ValueKey('storage-tree-menu-group:${id.name}');
 
 /// The one trailing control of a row: the button that opens its menu.

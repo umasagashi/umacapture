@@ -302,6 +302,13 @@ class PathInfo {
 
   DirectoryPath get charaDetailMemoDir => charaDetailMetadataDir / "memo";
 
+  /// The user's "these two records are not the same uma" decisions: a JSON list of record-id pairs.
+  ///
+  /// A file *beside* `rating/` and `memo/` rather than inside one: it is keyed by a pair of record ids and not by a
+  /// storage-set key, so it is neither a memo nor a rating store and the two directory listings that build those key
+  /// lists must not find it.
+  FilePath get charaDetailEnhancementDismissedFile => charaDetailMetadataDir.filePath("enhancement_dismissed.json");
+
   /// The directories this app owns, from which **every other path in this class is derived**.
   ///
   /// Handed to `registerAppRoots` so a diagnostic can say `<app>\chara_detail\active\7\` instead of

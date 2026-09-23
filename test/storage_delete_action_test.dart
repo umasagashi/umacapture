@@ -855,11 +855,12 @@ void main() {
 
   group('the tree offers the button exactly where the group allows one', () {
     test('a group row removes its own roots, and two shapes have no root to name', () {
-      // Two directories, one group: metadata is `rating/` and `memo/`, which is
+      // Three roots, one group: metadata is `rating/`, `memo/` and the dismissal file, which is
       // why the runner takes a list rather than one entity.
       expect(_requestedPaths(_groupOf(StorageGroupId.metadata)), [
         _layout.charaDetailRatingDir.path,
         _layout.charaDetailMemoDir.path,
+        _layout.charaDetailEnhancementDismissedFile.path,
       ]);
       expect(_requestedPaths(_groupOf(StorageGroupId.activeRecords)), [_layout.charaDetailActiveDir.path]);
       for (final id in [

@@ -40,7 +40,7 @@ typedef EnhancementMergeActions = ({
     EnhancementMergeChoices choices,
   })
   merge,
-  Future<bool> Function(EnhancementCandidate candidate) dismiss,
+  Future<EnhancementDismissOutcome> Function(EnhancementCandidate candidate) dismiss,
   Future<void> Function() resolveInheritance,
   Future<MergedIds?> Function(String recordId) readMerged,
 });
@@ -102,6 +102,18 @@ String enhancementMergeOutcomeKey(EnhancementMergeOutcome outcome) => switch (ou
   EnhancementMergeOutcome.failedPublish => "app.enhancement_merge.failed_publish",
   EnhancementMergeOutcome.failed => "app.enhancement_merge.failed",
   EnhancementMergeOutcome.failedDelete => "app.enhancement_merge.failed_delete",
+};
+
+/// The **full** translation key for a refused dismissal's toast sentence, or null for
+/// [EnhancementDismissOutcome.dismissed], which closes the dialog and says nothing.
+///
+/// A busy lock is worded by [longReadBusyKey], the one sentence every refusal behind another
+/// operation shares; the dialog stays open, so "until it completes" is a retry the user can make.
+String? enhancementDismissOutcomeKey(EnhancementDismissOutcome outcome) => switch (outcome) {
+  EnhancementDismissOutcome.dismissed => null,
+  EnhancementDismissOutcome.unreadable => "$tr_merge.dismiss_failed",
+  EnhancementDismissOutcome.lockBusy => longReadBusyKey,
+  EnhancementDismissOutcome.lockUnavailable => "$tr_merge.dismiss_unavailable",
 };
 
 /// Shows the merge dialog for [candidate] and hands its result to [onResult].
@@ -358,7 +370,7 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
       child: CardDialog(
-        dialogTitle: (identical ? "$tr_merge.title_identical" : "$tr_merge.title").tr(),
+        dialogTitle: "$tr_merge.title".tr(),
         // The cross means Cancel: it closes and performs nothing. It is shut with Cancel while a
         // merge or dismissal runs, so the dialog stays to report the outcome.
         closeButtonTooltip: "$tr_merge.close_tooltip".tr(),
@@ -680,23 +692,23 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
   /// Records that the pair is not the same uma, under the same lock-out as [_merge].
   ///
   /// A write to the dismissal store is as un-cancellable as the merge is, and its failure is the
-  /// half the user has to be told about, so the dialog stays put until it has an answer. A refusal
-  /// the user can retry keeps it open; a pair that is no longer the candidate ends it the way the
-  /// merge's refusal over that pair does.
+  /// half the user has to be told about, so the dialog stays put until it has an answer. Every
+  /// refusal it can be given is one the user can retry, so a refusal leaves the dialog open.
   Future<void> _dismiss() async {
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
-    final bool stored;
+    final EnhancementDismissOutcome outcome;
     setState(() => _running = true);
     try {
-      stored = await ref.read(enhancementMergeActionsProvider).dismiss(widget.candidate);
+      outcome = await ref.read(enhancementMergeActionsProvider).dismiss(widget.candidate);
     } finally {
       if (mounted) {
         setState(() => _running = false);
       }
     }
-    if (!stored) {
-      Toaster.show(ToastData.error(description: "$tr_merge.dismiss_failed".tr()));
+    final refusal = enhancementDismissOutcomeKey(outcome);
+    if (refusal != null) {
+      Toaster.show(ToastData.error(description: refusal.tr()));
       return;
     }
     dialogs.dismiss(token);

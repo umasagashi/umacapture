@@ -1931,7 +1931,7 @@ void main() {
       writeRecord(info.charaDetailActiveDir, preRecord('older'));
       writeRecord(info.charaDetailActiveDir, postRecord('retired'));
       writeRecord(info.charaDetailActiveDir, postRecord('x', capturedDate: '2026-03-01T00:00:00+0900'));
-      File(enhancementDismissedFile(info).path)
+      File(info.charaDetailEnhancementDismissedFile.path)
         ..createSync(recursive: true)
         ..writeAsStringSync('[["retired", "x"]]');
 
@@ -1945,7 +1945,7 @@ void main() {
           .firstWhere((c) => c.pair == RecordIdPair('older', 'retired'));
       expect((await container.read(enhancementMergeProvider).merge(candidate)).outcome, EnhancementMergeOutcome.merged);
 
-      expect(await readDismissedPairs(enhancementDismissedFile(info)), {RecordIdPair('older', 'x')});
+      expect(await readDismissedPairs(info.charaDetailEnhancementDismissedFile), {RecordIdPair('older', 'x')});
       await container.read(enhancementDismissedPairsProvider.future);
       expect(container.read(pendingEnhancementCandidatesProvider), isEmpty, reason: 'the re-keyed pair is not offered');
     });
@@ -1955,18 +1955,94 @@ void main() {
       final container = await loadedContainer();
       final candidate = candidatesIn(container).single;
 
-      File(enhancementDismissedFile(info).path)
+      File(info.charaDetailEnhancementDismissedFile.path)
         ..createSync(recursive: true)
         ..writeAsStringSync('{"not": "a list"}');
-      expect(await container.read(enhancementDismissalStoreProvider).dismiss(candidate), isFalse);
-      expect(File(enhancementDismissedFile(info).path).readAsStringSync(), '{"not": "a list"}');
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.unreadable,
+      );
+      expect(File(info.charaDetailEnhancementDismissedFile.path).readAsStringSync(), '{"not": "a list"}');
 
-      File(enhancementDismissedFile(info).path).writeAsStringSync('[["a", "b"]]');
-      expect(await container.read(enhancementDismissalStoreProvider).dismiss(candidate), isTrue);
-      expect(await readDismissedPairs(enhancementDismissedFile(info)), {
+      File(info.charaDetailEnhancementDismissedFile.path).writeAsStringSync('[["a", "b"]]');
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.dismissed,
+      );
+      expect(await readDismissedPairs(info.charaDetailEnhancementDismissedFile), {
         RecordIdPair('a', 'b'),
         RecordIdPair('older', 'retired'),
       });
+    });
+
+    test('dismissing a pair writes nothing and answers lockBusy while another holder has the root lock', () async {
+      seedPair();
+      // A short budget so the refusal is the real acquisition timing out, not a
+      // stand-in exception: that is the path another holder of the root lock produces.
+      final names = InProcessNamedLocks(acquireTimeout: const Duration(milliseconds: 100));
+      final acquired = <(String, RecordMutationLockMode)>[];
+      final gate = createPlatformRecordRecoveryGate(
+        mutationLock: RecordMutationLock((name, mode, action) {
+          acquired.add((name, mode));
+          return names.run(name, mode, action);
+        }),
+      );
+      final container = await loadedMergeContainer(
+        info: info,
+        overrides: [enhancementRecoveryGateProvider.overrideWithValue(gate)],
+      );
+      final candidate = candidatesIn(container).single;
+      final file = File(info.charaDetailEnhancementDismissedFile.path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync('[["a", "b"]]');
+
+      final release = Completer<void>();
+      final entered = Completer<void>();
+      final holder = names.run('umacapture:v1:root', RecordMutationLockMode.exclusive, () async {
+        entered.complete();
+        await release.future;
+        return null;
+      });
+      await entered.future;
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.lockBusy,
+      );
+      expect(file.readAsStringSync(), '[["a", "b"]]', reason: 'the read-modify-write ran outside the root lock');
+
+      release.complete();
+      await holder;
+      expect(
+        await container.read(enhancementDismissalStoreProvider).dismiss(candidate),
+        EnhancementDismissOutcome.dismissed,
+      );
+      expect(await readDismissedPairs(info.charaDetailEnhancementDismissedFile), {
+        RecordIdPair('a', 'b'),
+        RecordIdPair('older', 'retired'),
+      });
+      expect(acquired, [
+        ('umacapture:v1:root', RecordMutationLockMode.exclusive),
+        ('umacapture:v1:root', RecordMutationLockMode.exclusive),
+      ]);
+    });
+
+    test('the merge takes its root lock through the gate the dismissal writer uses', () async {
+      seedPair();
+      final acquired = <(String, RecordMutationLockMode)>[];
+      final names = InProcessNamedLocks();
+      final gate = createPlatformRecordRecoveryGate(
+        mutationLock: RecordMutationLock((name, mode, action) {
+          acquired.add((name, mode));
+          return names.run(name, mode, action);
+        }),
+      );
+      final container = await loadedMergeContainer(
+        info: info,
+        overrides: [enhancementRecoveryGateProvider.overrideWithValue(gate)],
+      );
+
+      expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged);
+      expect(acquired, [('umacapture:v1:root', RecordMutationLockMode.exclusive)]);
     });
 
     test('an enhancement pair waits for the factor table, and recomputes when the store changes', () async {

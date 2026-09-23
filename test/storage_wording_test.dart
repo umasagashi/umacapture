@@ -323,6 +323,19 @@ void main() {
         expect(paragraphs.last, isNot(paragraphs.first), reason: group.id.name);
       }
     });
+
+    test('metadata delete warning names the merge-dismissal effect', () {
+      // Deleting metadata deletes recorded merge dismissals too, so the
+      // warning has to say a dismissed pair reappears as a candidate.
+      final group = storageGroups.firstWhere((g) => g.id == StorageGroupId.metadata);
+      final warning = (group.deleteWarningKey ?? '').tr();
+      expect(
+        warning,
+        'この操作は取り消せません。\n\n'
+        'メモやレーティングの削除は、通常は「殿堂入り管理」テーブル内で行えます。'
+        '「統合しない」の記録を削除すると、その統合候補が再び表示されます。',
+      );
+    });
   });
 
   group('pages.storage.* and the code that names it agree in both directions', () {

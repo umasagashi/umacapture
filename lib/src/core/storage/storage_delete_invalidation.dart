@@ -93,10 +93,11 @@ List<ProviderOrFamily> storageDeleteInvalidationTargets({
       return const [];
     case StorageGroupId.metadata:
       // Both halves of the owner: the store's key list, which is one entry
-      // shorter afterwards, and the controller, which held the whole file.
+      // shorter afterwards, and the controller, which held the whole file. A set,
+      // because the dismissal file's owner names one provider for both halves.
       return [
         for (final target in targets)
-          if (_metadataOwnerOf(info, target) case final owner?) ...[owner.storeList, owner.controller],
+          if (_metadataOwnerOf(info, target) case final owner?) ...{owner.storeList, owner.controller},
       ];
     case StorageGroupId.modules:
       // The version and every file the version describes. [moduleFileLoaders] is
@@ -241,8 +242,8 @@ Future<void> runStorageDeleteSerialized(RefBase ref, PathEntity target, Future<v
   return action();
 }
 
-/// What owns a `metadata/{rating,memo}` path, or null when the path is in
-/// neither store.
+/// What owns a `metadata/{rating,memo}` path or the dismissal file, or null when
+/// the path is none of them.
 ///
 /// One resolver for both callers: the invalidation table takes [storeList] and
 /// [controller], and the serialisation above takes [controller] alone. Splitting
@@ -269,7 +270,7 @@ _MetadataOwner? _metadataOwnerOf(PathInfo info, PathEntity target) {
   // record map keyed by storage set, so it has no key list separate from its
   // contents and one provider answers for both halves — stated here rather than
   // left to be inferred from the two fields naming the same thing.
-  if (placeStorageTarget([enhancementDismissedFile(info)], target) != null) {
+  if (placeStorageTarget([info.charaDetailEnhancementDismissedFile], target) != null) {
     return (storeList: enhancementDismissedPairsProvider, controller: enhancementDismissedPairsProvider);
   }
   final rating = placeStorageTarget([info.charaDetailRatingDir], target);

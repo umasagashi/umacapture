@@ -156,7 +156,7 @@ enum StorageDelegatedAction {
 /// The logical groups the storage-management view shows.
 ///
 /// "Logical" because the view's rows are not the app's directory layout: several
-/// groups map to one directory each, one maps to two ([metadata]), one has no
+/// groups map to one directory each, one maps to two directories and a file ([metadata]), one has no
 /// directory at all ([settings], a Hive box list), and one is the residue of
 /// every other ([unclassified]).
 enum StorageGroupId {
@@ -492,7 +492,7 @@ const storageGroupContainerGetters = <String>{
   'storageDir',
   // Holds active / archive / quarantine / retired / metadata.
   'charaDetailDir',
-  // Holds rating/ and memo/, which are one group together.
+  // Holds rating/, memo/ and the dismissal file, which are one group together.
   'charaDetailMetadataDir',
 };
 
@@ -575,17 +575,20 @@ final List<StorageGroup> storageGroups = [
       StorageOperation.zip,
       StorageOperation.delete,
     },
-    // One file is one whole rating/memo *set* across every record, and the user
-    // typed all of it. Nothing regenerates it.
+    // One file is one whole rating/memo *set* across every record, or every
+    // "not the same uma" decision the user made, and the user typed or chose all
+    // of it. Nothing regenerates it.
     deleteFriction: StorageDeleteFriction.doubleConfirm,
-    // File names are storage-set keys, not record ids, and the writers take no
+    // File names are storage-set keys or the one dismissal file, not record ids,
     // so a record lock would name nobody. The merge and the dismissal writer hold
     // the exclusive root lock while they write these files; the memo and rating
     // controllers take no lock and are dropped instead.
     lockScope: StorageLockScope.exclusiveRootProviderSerialized,
-    // Two directories, one group: rating and memo are the same kind of thing to
-    // the user and are described by one hint.
-    resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir],
+    // Two directories and a file, one group: rating, memo and the dismissed
+    // merge candidates are the same kind of thing to the user — what they
+    // attached to their records — and are described by one hint. Deleting the
+    // file offers every dismissed pair again.
+    resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir, info.charaDetailEnhancementDismissedFile],
   ),
   StorageGroup(
     id: StorageGroupId.quarantine,
