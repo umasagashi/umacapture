@@ -1395,26 +1395,33 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// recover), so desktop runs the same code with the same exclusion — and gains
   /// the double-tap guard and the failure toast that only the asynchronous path
   /// had.
-  void resolveAllInheritance() {
-    // Fire-and-forget, so the in-flight flag is the only thing standing between
-    // a second tap and a second whole-store lock acquisition.
+  /// The returned future completes once the resolution has finished writing
+  /// both stores. Callers that only trigger the run discard it (the UI does);
+  /// callers that need the result on disk await it.
+  ///
+  /// When the double-tap guard below refuses to start a second run, the
+  /// returned future is already complete: it says "this call started nothing",
+  /// not "the run in flight has finished". `inheritanceResolutionRunningProvider`
+  /// is the only signal that tracks the run itself.
+  Future<void> resolveAllInheritance() {
+    // The in-flight flag is the only thing standing between a second tap and a
+    // second whole-store lock acquisition.
     if (ref.read(inheritanceResolutionRunningProvider)) {
-      return;
+      return Future.value();
     }
     ref.read(inheritanceResolutionRunningProvider.notifier).set(true);
-    unawaited(
-      _resolveAllInheritanceAsync().whenComplete(() {
-        // A whole-store resolution can outlive its container (the app closing,
-        // or a test tearing the container down mid-flight). `ref.read` on a
-        // disposed element throws, and this callback is unawaited, so the throw
-        // would surface only as an unhandled async error. Nothing needs
-        // clearing once the container is gone: the flag lives in it.
-        if (!ref.mounted) {
-          return;
-        }
-        ref.read(inheritanceResolutionRunningProvider.notifier).set(false);
-      }),
-    );
+    return _resolveAllInheritanceAsync().whenComplete(() {
+      // A whole-store resolution can outlive its container (the app closing,
+      // or a test tearing the container down mid-flight). `ref.read` on a
+      // disposed element throws, and most callers discard the returned future,
+      // so the throw would surface only as an unhandled async error. Nothing
+      // needs clearing once the container is gone: the flag lives in it, and so
+      // does the state the storage view holds.
+      if (!ref.mounted) {
+        return;
+      }
+      ref.read(inheritanceResolutionRunningProvider.notifier).set(false);
+    });
   }
 
   /// Manual inheritance resolution. All relation reads and both-store writes
@@ -1500,9 +1507,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
           );
       _surfaceInheritance(resolution, alwaysReport: true);
     } catch (error, stackTrace) {
-      // The desktop path reports through Flutter's error handling; this one is
-      // unawaited, so a failure would otherwise be invisible to the user who
-      // asked for the resolution.
+      // The desktop path reports through Flutter's error handling; the future
+      // this one runs on is discarded by the UI, so a failure would otherwise
+      // be invisible to the user who asked for the resolution.
       logger.e("Failed to resolve inheritance.", error, stackTrace);
       Toaster.show(ToastData.error(description: "app.inheritance.failed".tr()));
     }

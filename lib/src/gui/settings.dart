@@ -893,7 +893,7 @@ class ResolveInheritanceTile extends ConsumerWidget {
         subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
         trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
         onTap: () {
-          ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
+          unawaited(ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance());
         },
       ),
     );
