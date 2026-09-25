@@ -36,7 +36,6 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
-import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
@@ -109,10 +108,10 @@ void main() {
       // cache. The cached 64 is what the open view would keep showing.
       seed(layout.charaDetailActiveDir, 'imported.bin', 32);
       applyRecordImportCompletion(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         layout,
         writtenIds: const <String>[],
-        effects: recordImportEffects(scope.read(refBaseProvider)),
+        effects: recordImportEffects(scope.read(containerRefProvider)),
       );
 
       expect(cache.peek(layout.charaDetailDir), isNull);
@@ -130,10 +129,10 @@ void main() {
       expect((await cache.totalsOf(layout.charaDetailActiveDir)).knownBytes, 64);
 
       applyRecordImportCompletion(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         layout,
         writtenIds: const <String>[],
-        effects: recordImportEffects(scope.read(refBaseProvider)),
+        effects: recordImportEffects(scope.read(containerRefProvider)),
       );
 
       expect(cache.peek(layout.charaDetailActiveDir), isNull);
@@ -152,10 +151,10 @@ void main() {
       await cache.totalsOf(layout.tempDir);
 
       applyRecordImportCompletion(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         layout,
         writtenIds: const <String>[],
-        effects: recordImportEffects(scope.read(refBaseProvider)),
+        effects: recordImportEffects(scope.read(containerRefProvider)),
       );
 
       expect(cache.peek(layout.tempDir)?.knownBytes, 32);

@@ -240,7 +240,7 @@ void main() {
       addTearDown(container.dispose);
       final directory = DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1'));
 
-      expect(await ClipboardAlt.pasteEntity(container.read(refBaseProvider), directory, silent: true), isTrue);
+      expect(await ClipboardAlt.pasteEntity(container.read(containerRefProvider), directory, silent: true), isTrue);
       expect(_written, [
         [directory.path],
       ]);

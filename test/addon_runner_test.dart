@@ -14,6 +14,7 @@ import 'package:umacapture/src/addon/execution/external_program_runner.dart';
 import 'package:umacapture/src/addon/execution/webhook_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
+import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/addon.dart' show formatHistoryTimestamp;
 import 'package:umacapture/src/gui/addon/task_dialog.dart';
@@ -31,7 +32,7 @@ void main() {
       port = server.port;
       server.listen((request) => handler(request));
       container = ProviderContainer.test();
-      ref = container.read(refBaseProvider);
+      ref = container.read(containerRefProvider);
     });
 
     tearDown(() async {
@@ -216,7 +217,7 @@ void main() {
 
     setUp(() {
       container = ProviderContainer.test();
-      ref = container.read(refBaseProvider);
+      ref = container.read(containerRefProvider);
     });
     tearDown(() => container.dispose());
 

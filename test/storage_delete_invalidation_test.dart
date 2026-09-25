@@ -60,7 +60,6 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 import 'support/record_write_effects_fixture.dart';
 
 void main() {
@@ -357,7 +356,7 @@ void main() {
       expect(before.data.keys, ['rec-1', 'rec-2', 'rec-3']);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([path]),
@@ -388,7 +387,7 @@ void main() {
       expect((await scope.read(charaDetailRecordRatingProvider('main').future)).data, hasLength(3));
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([path]),
@@ -408,7 +407,7 @@ void main() {
       expect((await scope.read(charaDetailRecordRatingStorageDataLoader.future)).map((e) => e.key), ['main']);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([path]),
@@ -431,7 +430,7 @@ void main() {
       await scope.read(charaDetailRecordRatingProvider('other').future);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([gone]),
@@ -466,7 +465,7 @@ void main() {
       events.clear();
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([path]),

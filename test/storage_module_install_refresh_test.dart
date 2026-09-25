@@ -31,7 +31,6 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/module_install_invalidation.dart';
-import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
@@ -79,7 +78,7 @@ void main() {
     final cache = scope.read(directoryTotalsCacheProvider);
     expect((await cache.totalsOf(layout.modulesDir)).knownBytes, 64);
 
-    await runModuleInstall(scope.read(refBaseProvider), layout, () async {
+    await runModuleInstall(scope.read(containerRefProvider), layout, () async {
       // What an extraction does: more bytes under `modules/`, with nothing
       // telling the cache. The cached 64 is what the open view would keep
       // showing.
@@ -100,7 +99,7 @@ void main() {
     final cache = scope.read(directoryTotalsCacheProvider);
     expect((await cache.totalsOf(layout.tempDir)).knownBytes, 128);
 
-    await runModuleInstall(scope.read(refBaseProvider), layout, () async {}, contention: LongReadContention.defer);
+    await runModuleInstall(scope.read(containerRefProvider), layout, () async {}, contention: LongReadContention.defer);
 
     expect(cache.peek(layout.tempDir), isNull);
   });
@@ -114,7 +113,7 @@ void main() {
     final cache = scope.read(directoryTotalsCacheProvider);
     await cache.totalsOf(layout.charaDetailDir);
 
-    await runModuleInstall(scope.read(refBaseProvider), layout, () async {}, contention: LongReadContention.defer);
+    await runModuleInstall(scope.read(containerRefProvider), layout, () async {}, contention: LongReadContention.defer);
 
     expect(cache.peek(layout.charaDetailDir)?.knownBytes, 64);
   });
@@ -129,7 +128,7 @@ void main() {
     await cache.totalsOf(layout.modulesDir);
 
     await expectLater(
-      runModuleInstall(scope.read(refBaseProvider), layout, () async {
+      runModuleInstall(scope.read(containerRefProvider), layout, () async {
         seed(layout.modulesDir, 'half.onnx', 32);
         throw const FormatException('the archive carries no recognition module');
       }, contention: LongReadContention.defer),
@@ -148,7 +147,7 @@ void main() {
     final scope = ProviderContainer(
       overrides: [pathInfoProvider.overrideWithValue(layout), pathLayoutLoader.overrideWith((ref) async => layout)],
     );
-    final ref = scope.read(refBaseProvider);
+    final ref = scope.read(containerRefProvider);
     scope.dispose();
 
     expect(() => refreshStorageTabAfterModuleInstall(ref, layout), returnsNormally);

@@ -669,7 +669,7 @@ void main() {
 
       final record = _activeDir / 'a';
       final export = exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         record,
         group: storageGroupOf(StorageGroupId.activeRecords),
         silent: true,
@@ -701,7 +701,7 @@ void main() {
       );
       addTearDown(container.dispose);
       final outcome = await exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         _activeDir / 'a',
         group: storageGroupOf(StorageGroupId.activeRecords),
         silent: true,

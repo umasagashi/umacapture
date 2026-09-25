@@ -265,7 +265,7 @@ Future<_HeldDelete> _startHeldSettingsDelete(WidgetTester tester) async {
     ),
   );
   CardDialog.show(
-    container.read(refBaseProvider),
+    container.read(containerRefProvider),
     (_) => StorageDeleteConfirmDialog(
       group: _groupOf(StorageGroupId.settings),
       request: const StorageDeleteSettingsRequest(),
@@ -517,7 +517,7 @@ void main() {
       addTearDown(subscription.close);
 
       final report = await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([_layout.tempDir / 'session']),
@@ -557,7 +557,7 @@ void main() {
       final container = _container();
 
       final report = await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
@@ -651,7 +651,7 @@ void main() {
       final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
       addTearDown(subscription.close);
       await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.settings),
         request: const StorageDeleteSettingsRequest(),
@@ -1016,7 +1016,7 @@ void main() {
       });
 
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.temp),
           request: StorageDeletePathsRequest([file]),
@@ -1082,7 +1082,7 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
           request: const StorageDeleteSettingsRequest(),
@@ -1154,14 +1154,14 @@ void main() {
           home: Scaffold(body: DialogLayer(child: SizedBox.shrink())),
         ),
       );
-      StorageManagerDialog.show(container.read(refBaseProvider));
+      StorageManagerDialog.show(container.read(containerRefProvider));
       await _settle(tester);
       final dialogs = container.read(dialogBuilderProvider.notifier);
       final treeToken = dialogs.currentToken;
       expect(dialogs.entries, hasLength(1));
 
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
           request: const StorageDeleteSettingsRequest(),
@@ -1222,7 +1222,7 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
           request: const StorageDeleteSettingsRequest(),
@@ -1341,7 +1341,7 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.temp),
           request: StorageDeletePathsRequest([file]),

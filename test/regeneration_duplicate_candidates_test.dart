@@ -28,7 +28,6 @@ import 'support/enhancement_merge_scratch.dart';
 import 'support/factor_classifier.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
-import 'support/riverpod.dart';
 import 'support/settling.dart';
 
 const _olderDate = '2026-01-01T00:00:00+0900';
@@ -224,7 +223,7 @@ void main() {
       final file = info.charaDetailEnhancementDismissedFile;
       expect(storageGroupOf(StorageGroupId.metadata).resolve(info).map((e) => e.path), contains(file.path));
       await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         effects: storageDeleteEffects(container),
         group: storageGroupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([file]),

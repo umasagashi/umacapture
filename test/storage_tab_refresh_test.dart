@@ -53,7 +53,6 @@ import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 import 'support/storage_view_sources.dart';
 import 'support/record_write_effects_fixture.dart';
 
@@ -126,7 +125,7 @@ void main() {
       expect(before.map((listing) => listing.entity.path), [file.path]);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
@@ -147,7 +146,7 @@ void main() {
       expect(before.knownBytes, 64);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
@@ -169,7 +168,7 @@ void main() {
       expect(scope.read(directoryTotalsCacheProvider).peek(layout.tempDir)?.knownBytes, 64);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
@@ -197,7 +196,7 @@ void main() {
       await scope.read(storageGroupTotalsProvider(StorageGroupId.quarantine).future);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
@@ -235,7 +234,7 @@ void main() {
         expect(cache.peek(layout.charaDetailActiveDir)?.knownBytes, 16);
 
         await runStorageDelete(
-          scope.read(refBaseProvider),
+          scope.read(containerRefProvider),
           effects: storageDeleteEffects(scope),
           group: group,
           request: StorageDeletePathsRequest(group.resolve(layout)),
@@ -280,7 +279,7 @@ void main() {
         }
 
         await runStorageDelete(
-          scope.read(refBaseProvider),
+          scope.read(containerRefProvider),
           effects: storageDeleteEffects(scope),
           group: group,
           request: StorageDeletePathsRequest([row]),
@@ -319,7 +318,7 @@ void main() {
       File(box.path).deleteSync();
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.settings),
         request: const StorageDeleteSettingsRequest(),

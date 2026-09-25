@@ -37,6 +37,13 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
 /// changes, this provider is invalidated and its element disposed — and *every*
 /// [RefBase] already handed out from it starts throwing `UnmountedRefException`,
 /// including ones belonging to operations already in flight.
+///
+/// **A provider and not an extension on [ProviderContainer].** The ref handed
+/// out here is a real `Ref`, so [RefBase.mounted] keeps answering; a [RefBase]
+/// built on the container itself could not answer it at all, because
+/// riverpod marks `ProviderContainer.disposed` internal. This provider is never
+/// auto-disposed, so the ref stays usable for as long as the container it came
+/// from.
 final containerRefProvider = Provider<RefBase>((ref) => ref.base);
 
 /// A module-level broadcast event stream exposed as a [StreamProvider].

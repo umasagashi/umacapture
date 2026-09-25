@@ -46,7 +46,6 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 import 'support/record_write_effects_fixture.dart';
 
 void main() {
@@ -146,7 +145,7 @@ void main() {
     lines.clear();
 
     await runStorageDelete(
-      scope.read(refBaseProvider),
+      scope.read(containerRefProvider),
       effects: storageDeleteEffects(scope),
       group: metadata(),
       request: StorageDeletePathsRequest([path]),

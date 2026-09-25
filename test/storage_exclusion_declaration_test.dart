@@ -43,8 +43,6 @@ import 'package:umacapture/src/core/storage/storage_exclusion.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/storage_lock_scope.dart';
 
-import 'support/riverpod.dart';
-
 void main() {
   late Directory tempRoot;
   late PathInfo layout;
@@ -111,7 +109,7 @@ void main() {
       Map<LongReadToken, LongReadClaim> whileRunning = const {};
 
       final answer = await runUnderStorageExclusion<int>(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: subject.group,
         target: subject.target,
         intent: StorageExclusionIntent.mutate,
@@ -154,7 +152,7 @@ void main() {
 
     await expectLater(
       runUnderStorageExclusion<void>(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: subject.group,
         target: subject.target,
         intent: StorageExclusionIntent.mutate,
@@ -184,7 +182,7 @@ void main() {
     Map<LongReadToken, LongReadClaim> whileRunning = const {};
 
     await runUnderStorageExclusion<void>(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       group: subject.group,
       target: subject.target,
       intent: StorageExclusionIntent.mutate,

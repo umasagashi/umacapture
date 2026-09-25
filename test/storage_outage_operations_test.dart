@@ -44,7 +44,6 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -136,7 +135,7 @@ void main() {
       final target = _seedFile('documents/storage/unclassified/scratch.bin', 'x');
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.unclassified),
         target: target,
       );
@@ -151,7 +150,7 @@ void main() {
       _seedFile('documents/storage/chara_detail/active/record-1/record.json', '{}');
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.activeRecords),
         target: record,
       );
@@ -165,7 +164,7 @@ void main() {
       final target = _seedFile('documents/storage/chara_detail/metadata/rating/default.json', '{}');
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.metadata),
         target: target,
       );
@@ -187,7 +186,7 @@ void main() {
       // test is that it does not throw, not which of the two it returns.
       await Future<void>.sync(
         () async => invalidateAfterStorageDelete(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           group: _groupOf(StorageGroupId.metadata),
           info: await container.read(pathLayoutLoader.future),
           targets: [target],
@@ -200,7 +199,7 @@ void main() {
       final target = _seedFile('documents/storage/unclassified/notes.json', '{}');
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         target,
         group: _groupOf(StorageGroupId.unclassified),
         silent: true,
@@ -236,7 +235,7 @@ void main() {
       addTearDown(container.dispose);
 
       final outcome = await exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         DirectoryPath('${_tempRoot.path}/documents/storage/unclassified/bundle'),
         group: _groupOf(StorageGroupId.unclassified),
         silent: true,

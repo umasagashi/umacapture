@@ -38,7 +38,6 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -160,13 +159,13 @@ List<String> _bytesNamed(String needle) => _filesUnder(
 
 /// The whole retired group, exactly as the view's group row asks for it.
 Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteStorageEntries(
-  container.read(refBaseProvider),
+  container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.retired),
   targets: _groupOf(StorageGroupId.retired).resolve(_layout),
 );
 
 Future<StorageDeleteReport> _deleteQuarantine(ProviderContainer container) => deleteStorageEntry(
-  container.read(refBaseProvider),
+  container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.quarantine),
   target: _layout.charaDetailQuarantineDir,
 );
@@ -229,7 +228,7 @@ ProviderContainer _container(JournalRootStorageMaintenance maintenance) {
 
 Future<StorageDeleteReport> _deleteJournal(ProviderContainer container) {
   return deleteStorageEntry(
-    container.read(refBaseProvider),
+    container.read(containerRefProvider),
     group: _groupOf(StorageGroupId.retired),
     target: _layout.charaDetailWriteTransactionDir,
   );
@@ -240,7 +239,11 @@ Future<StorageDeleteReport> _deleteJournal(ProviderContainer container) {
 /// carries its group's delete, so a user who expands `v1/` can point at a single
 /// slot directory — or, expanding once more, at something inside one.
 Future<StorageDeleteReport> _deleteRetiredTarget(ProviderContainer container, PathEntity target) {
-  return deleteStorageEntry(container.read(refBaseProvider), group: _groupOf(StorageGroupId.retired), target: target);
+  return deleteStorageEntry(
+    container.read(containerRefProvider),
+    group: _groupOf(StorageGroupId.retired),
+    target: target,
+  );
 }
 
 Future<StorageDeleteReport> _deleteSlot(ProviderContainer container) => _deleteRetiredTarget(container, _slotPath());
@@ -319,7 +322,7 @@ void main() {
     _quarantineDir().createSync(recursive: true);
 
     final report = await deleteStorageEntry(
-      _container(maintenance).read(refBaseProvider),
+      _container(maintenance).read(containerRefProvider),
       group: _groupOf(StorageGroupId.quarantine),
       target: _layout.charaDetailQuarantineDir,
     );

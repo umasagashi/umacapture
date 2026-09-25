@@ -35,7 +35,6 @@ import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/long_read_declarations.dart';
-import 'support/riverpod.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// The lock name `RecordMutationLock` builds for a record id, spelled here so a
@@ -182,7 +181,7 @@ void main() {
       final container = containerWith(locks);
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -203,7 +202,7 @@ void main() {
         final container = containerWith(locks);
 
         final report = await deleteStorageEntry(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           group: groupOf(entry.key),
           target: DirectoryPath('${tempRoot.path}/$dir'),
         );
@@ -235,7 +234,7 @@ void main() {
 
       final target = layout.charaDetailRatingDir.filePath('main.json');
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
         target: target,
       );
@@ -277,7 +276,7 @@ void main() {
         final target = FilePath('${layout.charaDetailMetadataDir.path}/$file');
         var finished = false;
         final pending = deleteStorageEntry(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           group: groupOf(StorageGroupId.metadata),
           target: target,
         ).whenComplete(() => finished = true);
@@ -310,7 +309,7 @@ void main() {
 
       final target = layout.charaDetailEnhancementDismissedFile;
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
         target: target,
       );
@@ -335,7 +334,7 @@ void main() {
       );
 
       await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.modules),
         target: layout.modulesDir,
       );
@@ -358,7 +357,7 @@ void main() {
       );
       final container = containerWith(locks);
       final delete = deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir(id),
       );
@@ -420,7 +419,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -455,7 +454,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -475,7 +474,7 @@ void main() {
       final container = containerWith(locks);
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -502,7 +501,7 @@ void main() {
       addTearDown(container.dispose);
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -516,7 +515,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-gone'),
       );
@@ -543,7 +542,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntries(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
         targets: [layout.charaDetailRatingDir.filePath('main.json'), layout.charaDetailMemoDir.filePath('main.json')],
       );
@@ -583,7 +582,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -613,7 +612,7 @@ void main() {
       final container = containerWith(_RecordingLocks());
 
       final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
         target: activeDir('rec-1'),
       );
@@ -638,7 +637,7 @@ void main() {
         final container = containerWith(_RecordingLocks());
 
         final report = await deleteStorageEntry(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           group: groupOf(StorageGroupId.activeRecords),
           target: activeDir('rec-1'),
         );

@@ -70,7 +70,7 @@ void main() {
   RefBase newRef() {
     final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
     addTearDown(container.dispose);
-    return container.read(refBaseProvider);
+    return container.read(containerRefProvider);
   }
 
   // Installs a backend that rejects the sync surface exactly as the web one does.

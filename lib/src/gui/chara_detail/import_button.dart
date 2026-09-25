@@ -204,7 +204,7 @@ class CharaDetailImportButton extends ConsumerWidget {
     // await, from a context that is certainly still mounted; nothing below touches `ref` at all.
     final container = ProviderScope.containerOf(context, listen: false);
     // Declared here, before the picker's await, from the container the import reports through.
-    final effects = recordImportEffects(container.read(refBaseProvider));
+    final effects = recordImportEffects(container.read(containerRefProvider));
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ["zip"],
@@ -342,7 +342,7 @@ class CharaDetailImportButton extends ConsumerWidget {
       // user navigated away from stays invisible in the table until the app is restarted.
       if (committed) {
         applyRecordImportCompletion(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           pathInfo,
           writtenIds: importedIds,
           effects: effects,

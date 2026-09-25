@@ -52,7 +52,6 @@ import 'package:umacapture/src/core/storage/storage_lock_scope.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
-import 'support/riverpod.dart';
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -184,7 +183,7 @@ void main() {
 
       final scan = io_loader.loadRecordsUnder(
         _activeDir,
-        declaration: bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir),
+        declaration: bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir),
         mutationLock: _pausingLock(entered, resume.future),
       );
       await entered.future;
@@ -213,7 +212,7 @@ void main() {
 
       final scan = io_loader.loadRecordsUnder(
         _activeDir,
-        declaration: bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir),
+        declaration: bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir),
         mutationLock: _pausingLock(entered, resume.future),
       );
       await entered.future;
@@ -252,7 +251,7 @@ void main() {
       // expectation below reads null.
       final scan = web_loader.loadRecordsUnder(
         _activeDir,
-        declaration: bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir),
+        declaration: bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir),
         mutationLock: RecordMutationLock((_, _, action) => action()),
         recoverRecordUnlocked: (_, _) async {},
         snapshotDirectories: (_) async => [_activeDir / 'id-001'],
@@ -326,7 +325,7 @@ void main() {
 
       final scan = web_loader.loadRecordsUnder(
         _activeDir,
-        declaration: bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir),
+        declaration: bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir),
         recoveryGate: web_gate.createPlatformRecordRecoveryGate(
           mutationLock: RecordMutationLock((_, _, action) => action()),
         ),
@@ -359,7 +358,7 @@ void main() {
   group('the claim both legs are given', () {
     test('is the record store root, one path, and calls itself a mutation', () {
       final container = _container();
-      final declaration = bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir);
+      final declaration = bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir);
 
       // Read off the one builder rather than off two call sites: what keeps the
       // legs from claiming differently is that there is a single object, so the
@@ -379,9 +378,10 @@ void main() {
     test('is the same root whichever of the two stores is being scanned', () {
       final container = _container();
       final active =
-          bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _activeDir) as LongReadClaimDeclaration;
+          bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _activeDir)
+              as LongReadClaimDeclaration;
       final archive =
-          bulkRecordScanLongReadDeclaration(container.read(refBaseProvider), _layout.charaDetailArchiveDir)
+          bulkRecordScanLongReadDeclaration(container.read(containerRefProvider), _layout.charaDetailArchiveDir)
               as LongReadClaimDeclaration;
 
       // Not an accident and not laziness: the web gate's per-record recovery hook

@@ -80,7 +80,7 @@ Future<void> _pumpDialog(WidgetTester tester, ProviderContainer container) async
       home: DialogLayer(child: Scaffold(body: SizedBox.shrink())),
     ),
   );
-  StorageManagerDialog.show(container.read(refBaseProvider));
+  StorageManagerDialog.show(container.read(containerRefProvider));
   // Three frames: mount, the entry re-read one microtask later, then the build
   // that draws the tree — `FreshStorageTree.initState` says why it is deferred.
   await tester.pump();

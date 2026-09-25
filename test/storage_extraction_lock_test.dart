@@ -142,7 +142,7 @@ void main() {
     return container;
   }
 
-  RefBase refOf(ProviderContainer container) => container.read(refBaseProvider);
+  RefBase refOf(ProviderContainer container) => container.read(containerRefProvider);
 
   test('a zip of a record folder takes that record lock, and takes it after the dialog', () async {
     final locks = _RecordingLocks();

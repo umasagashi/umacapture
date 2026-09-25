@@ -71,7 +71,7 @@ void main() {
     final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
     addTearDown(subscription.close);
     await container.read(pathInfoLoader.future);
-    return (container.read(refBaseProvider), toasts);
+    return (container.read(containerRefProvider), toasts);
   }
 
   /// Lets the toast stream deliver: `plainToastEventProvider` is a StreamProvider, so a listener

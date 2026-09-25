@@ -9,7 +9,7 @@ import 'package:umacapture/src/core/utils.dart';
 ///
 /// It is the app's and not a copy of it, so a test exercising a runner over this
 /// [RefBase] exercises the one the app hands that runner.
-export 'package:umacapture/src/core/utils.dart' show refBaseProvider;
+export 'package:umacapture/src/core/providers.dart' show containerRefProvider;
 
 /// Pumps [child] with [container] in scope, tying the container's lifetime to
 /// the widget tree.

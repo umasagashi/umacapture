@@ -29,7 +29,6 @@ import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -145,7 +144,7 @@ ProviderContainer _container() {
 }
 
 Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteStorageEntries(
-  container.read(refBaseProvider),
+  container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.retired),
   targets: _groupOf(StorageGroupId.retired).resolve(_layout),
 );

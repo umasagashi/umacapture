@@ -141,7 +141,7 @@ ProviderContainer _container({
   return container;
 }
 
-RefBase _ref(ProviderContainer container) => container.read(refBaseProvider);
+RefBase _ref(ProviderContainer container) => container.read(containerRefProvider);
 
 /// Every file in [directory], as `<relative path with '/'> -> bytes`.
 Map<String, List<int>> _walk(Directory directory) {

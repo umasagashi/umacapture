@@ -585,7 +585,7 @@ void main() {
       File('${dir.path}/record.json').writeAsStringSync(fixtureJson);
     }
 
-    RefBase refOf(ProviderContainer container) => container.read(refBaseProvider);
+    RefBase refOf(ProviderContainer container) => container.read(containerRefProvider);
 
     test('adds the modules_dir placeholder for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);

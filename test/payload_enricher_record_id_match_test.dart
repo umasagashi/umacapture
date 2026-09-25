@@ -48,7 +48,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    return container.read(refBaseProvider);
+    return container.read(containerRefProvider);
   }
 
   // Writes [json] into `active/<directoryName>/record.json` with dart:io directly, so the seeding

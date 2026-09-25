@@ -112,7 +112,7 @@ void main() {
     test('an open range accepts every value', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final result = makeSpec().evaluate(ref, const [
         RelationBonusStatus(null, 0),
@@ -125,7 +125,7 @@ void main() {
     test('a bounded range filters on filterValue, inclusive of both ends', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final spec = makeSpec(predicate: IsInRangeIntegerPredicate(min: 50, max: 100));
       final result = spec.evaluate(ref, const [
@@ -148,7 +148,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final statuses = makeSpec().parse(ref, [record]);
 

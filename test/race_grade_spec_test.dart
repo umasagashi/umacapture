@@ -79,7 +79,7 @@ RaceGradeWinningCountColumnSpec makeSpec({
 List<int> parseWith(RaceGradeWinningCountColumnSpec spec, Set<int> gradeSids, List<CharaDetailRecord> records) {
   final container = ProviderContainer.test(overrides: [raceGradeSidProvider(_grade).overrideWithValue(gradeSids)]);
   addTearDown(container.dispose);
-  return spec.parse(container.read(refBaseProvider), records);
+  return spec.parse(container.read(containerRefProvider), records);
 }
 
 void main() {
@@ -135,14 +135,14 @@ void main() {
     test('an open range accepts every count', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
       expect(makeSpec().evaluate(ref, [0, 1, 10]), [isTrue, isTrue, isTrue]);
     });
 
     test('a bounded range filters counts, inclusive of both ends', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
       final spec = makeSpec(predicate: IsInRangeIntegerPredicate(min: 2, max: 5));
       expect(spec.evaluate(ref, [1, 2, 5, 6]), [isFalse, isTrue, isTrue, isFalse]);
     });

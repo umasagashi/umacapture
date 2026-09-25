@@ -59,7 +59,6 @@ import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/localization.dart';
 import 'support/record_image_fixture.dart';
-import 'support/riverpod.dart';
 import 'support/web_like_fs_backend.dart';
 import 'support/record_write_effects_fixture.dart';
 
@@ -231,7 +230,7 @@ void main() {
       // clock never advances the real event loop the io completes on.
       await tester.runAsync(
         () => runStorageDelete(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           effects: storageDeleteEffects(container),
           group: _groupOf(StorageGroupId.activeRecords),
           request: StorageDeletePathsRequest([shown.parent]),
@@ -274,7 +273,7 @@ void main() {
 
       final report = await tester.runAsync(
         () => runStorageDelete(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
           effects: storageDeleteEffects(container),
           group: _groupOf(StorageGroupId.activeRecords),
           request: StorageDeletePathsRequest([held.parent]),
