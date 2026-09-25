@@ -17,6 +17,7 @@
 #include <chrono>
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <utility>
 
 #include "chara_detail/chara_detail_search_helpers.h"
@@ -1014,12 +1015,12 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
 
         if (!record_info.record_type.has_value()) {
             // assert_ is a no-op in Release; check for real. Without the existing record.json the record_type
-            // cannot be recovered, so skip this record explicitly instead of falling through to json_util::read
-            // and dropping it via an exception that reads as accidental.
+            // cannot be recovered, so the record cannot be recognized. Throw a failure that names the cause
+            // rather than falling through to json_util::read, and let the catch below report it like any other
+            // failed recognize: an update request (the Windows regeneration and wasm updateRecord send no
+            // record_type) reaches on_error with its record_id, a capture request is logged only.
             if (!std::filesystem::exists(record_path)) {
-                log_warning(
-                    "recognize: record.json not found, cannot resolve record_type; skipping id={}", raw_info.record_id);
-                return;
+                throw std::runtime_error("record.json not found, cannot resolve record_type");
             }
             record_info.record_type = loadOldRecord().metadata.record_type.value_or(record::RecordType::Standard);
         }
