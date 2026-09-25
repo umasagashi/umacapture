@@ -432,6 +432,10 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   `typeName` over every scalar alternative and the null pointer, a string payload
   handed to an argument-taking handler, every non-string payload and a missing
   argument rejected, and anything accepted for a handler that takes none.
+- `runner/test_video_frame_grab_reply.cpp` — the video frame grab answer the runner
+  sends back over the method channel: each field under its key, `nextMediaTsMs`
+  stated when there is a successor and **omitted** (not null, not 0) at the clip's
+  last frame, and presence following the optional rather than the value.
 - `util/test_error_util.cpp` — the abort-vs-failure classification an exception is
   reported under: `OperationAborted` (and a subclass) as an abort, a bridge timeout as
   a failure **although its message reads like the abort**, an ordinary

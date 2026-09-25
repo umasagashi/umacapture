@@ -7,6 +7,7 @@
 
 #include "cv/video_frame_grabber.h"
 #include "runner/platform_channel.h"
+#include "runner/video_frame_grab_reply.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
 #include "util/logger_util.h"
@@ -125,16 +126,8 @@ private:
     // reason is stronger here: a decoded game-screen frame is several megabytes, and the standard codec would
     // copy the encoded PNG through the platform thread on top of the decode.
     //
-    // mediaTsMs is in the answer because it is what a report must quote. The requested time and the frame's own
-    // time differ by up to one frame interval by construction -- "the frame displayed at T" is the last frame at
-    // or before T -- and by more when the request was out of range and the grabber clamped it.
-    //
-    // nextMediaTsMs is in the answer because it is the ONE neighbour the contract cannot express. "The previous
-    // frame" is grabAt(mediaTsMs - 1) on an integer-millisecond wire and needs no field; "the next frame" is not
-    // derivable from any answer at all (video_frame_grabber.h's class comment states the asymmetry in full), so
-    // the producer states it. The key is OMITTED, never sent as 0 or null, when the frame is the clip's last:
-    // that is the same absent-means-not-there convention seekBackoffMs / decodedFrames already use on the web
-    // leg, and lib/src/core/video_frame_grab_ops.dart reads an absent field as null on both.
+    // What the answer says about the frame -- which fields, and when nextMediaTsMs is left out -- is
+    // videoFrameGrabReply's (runner/video_frame_grab_reply.h), where it is unit tested.
     static void serveGrab(const std::string &request, const std::shared_ptr<DeferredMethodCall> &call) {
         serve(request, call, [](const json_util::Json &parsed, const std::shared_ptr<DeferredMethodCall> &answer) {
             video::VideoFrameGrabber grabber(pathOf(parsed, "path"));
@@ -151,15 +144,7 @@ private:
             // non-ASCII destination works and a failed write THROWS rather than reporting a success for a file
             // that is not there (cv/frame.h). The throw is turned into a refusal by serve() below.
             grabbed.frame.save(pathOf(parsed, "output"));
-            json_util::Json reply{
-                {"mediaTsMs", grabbed.media_ts_ms},
-                {"seekBackoffMs", grabbed.seek_backoff_ms},
-                {"decodedFrames", grabbed.decoded_frames},
-            };
-            if (grabbed.next_media_ts_ms.has_value()) {
-                reply["nextMediaTsMs"] = grabbed.next_media_ts_ms.value();
-            }
-            answer->succeed(reply.dump());
+            answer->succeed(videoFrameGrabReply(grabbed).dump());
         });
     }
 
