@@ -1909,10 +1909,14 @@ void main() {
       });
     });
 
-    test('the candidate list is empty before the factor table loads, and recomputes when the store changes', () async {
+    test('an enhancement pair waits for the factor table, and recomputes when the store changes', () async {
       seedPair();
       final container = makeContainer();
-      expect(container.read(pendingEnhancementCandidatesProvider), isEmpty, reason: 'no classifier, no answer');
+      expect(
+        container.read(pendingEnhancementCandidatesProvider),
+        isEmpty,
+        reason: 'an enhancement pair needs the classifier',
+      );
 
       await container.read(factorInfoLoader.future);
       await container.read(charaDetailRecordStorageLoaderProvider.future);

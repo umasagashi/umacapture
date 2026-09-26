@@ -478,7 +478,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
       final record = CharaDetailRecordMapper.fromJson(content);
-      _validateDirectoryId(directory, record);
+      validateDirectoryId(directory, record);
       return RecordLoaded(record);
     } catch (exception, stackTrace) {
       return _quarantineOnFailure(directory, exception, stackTrace);
@@ -516,14 +516,22 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     try {
       final content = await directory.filePath("record.json").readAsString();
       final record = CharaDetailRecordMapper.fromJson(content);
-      _validateDirectoryId(directory, record);
+      validateDirectoryId(directory, record);
       return RecordLoaded(record);
     } catch (exception, stackTrace) {
       return _quarantineOnFailureAsyncUnlocked(directory, exception, stackTrace);
     }
   }
 
-  static void _validateDirectoryId(DirectoryPath directory, CharaDetailRecord record) {
+  /// Throws [RecordIdMismatch] unless [record] claims the id of the [directory]
+  /// it was decoded from.
+  ///
+  /// Public because every path that reads a `record.json` off disk owes the same
+  /// check, not only the loaders in this class: mutation authority is derived
+  /// from the directory leaf, so a decode that skips it can hand a caller the
+  /// contents of a record other than the one it asked for. One predicate, called
+  /// from each reader, rather than a second spelling of it beside each one.
+  static void validateDirectoryId(DirectoryPath directory, CharaDetailRecord record) {
     if (record.id != directory.name) {
       throw RecordIdMismatch(expectedId: directory.name, actualId: record.id);
     }

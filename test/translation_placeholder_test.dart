@@ -198,6 +198,8 @@ void main() {
 final Map<String, String Function()> _renderers = {
   // `importRefusalKey(refusal).tr(namedArgs: …)` — key chosen by a function call.
   'pages.chara_detail.import.refused.already_archived': () => _refusalToast(RecordImportRefusal.alreadyArchived),
+  'pages.chara_detail.import.refused.duplicate_of_existing': () =>
+      _refusalToast(RecordImportRefusal.duplicateOfExisting),
   'pages.chara_detail.import.refused.not_stored': () => _refusalToast(RecordImportRefusal.notStored),
   // `template.tr(namedArgs: …)` — key chosen by a `switch` into a local.
   'pages.dashboard.app_updater.download_failed.template': () =>

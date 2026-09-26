@@ -917,7 +917,7 @@ final class EnhancementMerge {
     // *pre-merge* record back over the content the user approved, at the one
     // moment when that content is the only copy left. The decision lives on disk; re-publishing it is the same bytes.
     // The other choice, keeping the retired copy's content, is refused above.
-    final applied = alreadyApplied ? await _publishedSurvivor(content.directory, olderId) : null;
+    final applied = alreadyApplied ? await _publishedSurvivor(content.directory) : null;
     if (alreadyApplied && applied == null) {
       logger.e('Refusing a merge of $olderId and $retiredId: the survivor already published cannot be read back.');
       return const EnhancementMergeResult(
@@ -1290,27 +1290,28 @@ final class EnhancementMerge {
     return false;
   }
 
-  /// The survivor an earlier merge published under [olderId], read off disk.
+  /// The survivor an earlier merge published under [directory]'s name, read off
+  /// disk.
   ///
   /// Both halves come out of the same read: the record, for what memory adopts
   /// at the end, and the exact bytes, so re-publishing changes no byte of a
   /// decision that was already made. Null when the file cannot be read, cannot
-  /// be decoded, or does not call itself [olderId] - the last is the loader's
-  /// own directory-id rule, and a directory that fails it is not a record whose
-  /// content anything may be built from.
-  Future<({CharaDetailRecord record, Uint8List bytes})?> _publishedSurvivor(
-    DirectoryPath directory,
-    String olderId,
-  ) async {
+  /// be decoded, or does not call itself after the directory it was read from -
+  /// the last is the loader's own directory-id rule, spelled once as
+  /// [CharaDetailRecord.validateDirectoryId], and a directory that fails it is
+  /// not a record whose content anything may be built from. The name is taken
+  /// from [directory] rather than passed in beside it, so the two cannot be
+  /// handed a pair that disagrees.
+  Future<({CharaDetailRecord record, Uint8List bytes})?> _publishedSurvivor(DirectoryPath directory) async {
     final file = directory.filePath('record.json');
     try {
       final bytes = await file.readAsBytes();
       final record = CharaDetailRecordMapper.fromJson(utf8.decode(bytes));
-      if (record.id != olderId) {
-        logger.w('The record at ${file.path} calls itself ${record.id}, not $olderId.');
-        return null;
-      }
+      CharaDetailRecord.validateDirectoryId(directory, record);
       return (record: record, bytes: bytes);
+    } on RecordIdMismatch catch (error) {
+      logger.w('The record at ${file.path} calls itself ${error.actualId}, not ${error.expectedId}.');
+      return null;
     } catch (error, stackTrace) {
       logger.w('Could not read the survivor at ${file.path}.', error, stackTrace);
       return null;

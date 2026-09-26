@@ -11,6 +11,22 @@ import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 typedef RecordPersistenceFile = ({String recordId, List<String> relativeSegments, Uint8List bytes});
+
+/// Whether the named record should be published at all, asked as the
+/// publication reaches it.
+///
+/// [committed] holds the ids this same call has already written, in the order
+/// they committed. It is the only vantage point from which "does the store
+/// already hold an equivalent copy" can be answered about a batch: asked before
+/// the batch starts, the answer counts records that have not been written yet
+/// and might never be, and one the store then refuses has already withheld the
+/// copy that could have landed; asked afterwards, the batch is over.
+///
+/// A record the answer withholds is not published and gets no entry in
+/// [WebRecordPersistenceResult.statuses]. The caller that withheld it is the one
+/// that knows why, and filing it here would put that reason under a name meant
+/// for the store's own refusals.
+typedef RecordPublicationDecision = bool Function(String recordId, Set<String> committed);
 typedef RecordFileWriter = Future<void> Function(FilePath target, Uint8List bytes);
 typedef PersistentHarvestedRecordFile = ({String path, Uint8List bytes});
 typedef PlatformRecordUpdateBuilder = Future<Iterable<PersistentHarvestedRecordFile>?> Function();
@@ -24,14 +40,16 @@ final class WebRecordPersistenceResult extends SetBase<String> {
   ]) : statuses = Map.unmodifiable(statuses),
        failures = Map.unmodifiable(failures),
        _committedIds = Set.unmodifiable(
-         statuses.entries
-             .where(
-               (entry) =>
-                   entry.value == WebRecordPersistenceStatus.completed ||
-                   entry.value == WebRecordPersistenceStatus.cleanupPending,
-             )
-             .map((entry) => entry.key),
+         statuses.entries.where((entry) => isCommitted(entry.value)).map((entry) => entry.key),
        );
+
+  /// Whether [status] means the record's files are in the store.
+  ///
+  /// The single definition of "committed", so the set this class publishes and
+  /// the set a run hands its [RecordPublicationDecision] while it is still
+  /// going cannot come to answer that differently.
+  static bool isCommitted(WebRecordPersistenceStatus status) =>
+      status == WebRecordPersistenceStatus.completed || status == WebRecordPersistenceStatus.cleanupPending;
 
   final Map<String, WebRecordPersistenceStatus> statuses;
 
@@ -111,11 +129,31 @@ final class WebRecordPersistence {
     return _recoveryGate.ensureReadyUnlocked(storageDir, recordId);
   }
 
-  Future<WebRecordPersistenceResult> persistFiles(DirectoryPath storageDir, List<RecordPersistenceFile> files) async {
+  /// Publishes every record [files] describes, and answers one verdict per
+  /// record.
+  ///
+  /// **The whole batch is validated before the first byte of it is written.**
+  /// Whether a payload has the shape of a record follows from its own bytes and
+  /// from nothing this call does, so it is settled while there is still nothing
+  /// on disk to disagree with, and an unreadable payload rejects the call
+  /// outright. A batch that wrote some records and then threw over a later one
+  /// would leave those on disk with no result naming them: invisible to the
+  /// caller that produced them, absent from the table it reloads, and free to be
+  /// added a second time by whatever arrives next.
+  ///
+  /// Records are published in the sorted order the record locks are taken in,
+  /// under one acquisition of the whole set, and [shouldPublish] -- when one is
+  /// given -- is asked about each record as it is reached.
+  Future<WebRecordPersistenceResult> persistFiles(
+    DirectoryPath storageDir,
+    List<RecordPersistenceFile> files, {
+    RecordPublicationDecision? shouldPublish,
+  }) async {
     if (files.isEmpty) return WebRecordPersistenceResult(const {});
     final grouped = _validatedPayloads(files);
     final statuses = <String, WebRecordPersistenceStatus>{};
     final failures = <String, Object>{};
+    final committed = <String>{};
     // A publication writes the files it was handed and returns; the caller that
     // *produced* those bytes (an import, a capture) is the operation with a
     // window, and it is the one that would announce.
@@ -137,9 +175,17 @@ final class WebRecordPersistence {
       grouped,
       (recordId, payload) async {
         try {
+          // Inside the `try` with the publication it decides on, and not ahead
+          // of it: a decision that throws is this record's outcome, exactly as a
+          // publication that throws is. Let out of the batch it would take down
+          // every record after it -- and leave the ones before it written with
+          // nothing naming them, which is the state the whole-batch validation
+          // above exists to make impossible.
+          if (shouldPublish != null && !shouldPublish(recordId, UnmodifiableSetView(committed))) return;
           final (status, failure) = await _publishRecordUnlocked(storageDir, recordId, payload);
           statuses[recordId] = status;
           if (failure != null) failures[recordId] = failure;
+          if (WebRecordPersistenceResult.isCommitted(status)) committed.add(recordId);
         } catch (error, stackTrace) {
           // The user has just captured or imported this record; losing the reason
           // here leaves nothing anywhere to explain why it was not stored.

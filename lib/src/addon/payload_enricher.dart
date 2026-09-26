@@ -68,10 +68,26 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
   } catch (_) {
     // Storage not ready yet; fall through to the on-disk copy.
   }
-  final file = (ref.read(pathInfoProvider).charaDetailActiveDir / recordId).filePath(recordJsonName);
+  final directory = ref.read(pathInfoProvider).charaDetailActiveDir / recordId;
+  final file = directory.filePath(recordJsonName);
   try {
     if (!file.existsSync()) return null;
-    return CharaDetailRecordMapper.fromJson(file.readAsStringSync());
+    final record = CharaDetailRecordMapper.fromJson(file.readAsStringSync());
+    // The same check the canonical loader applies, called rather than respelled:
+    // skipping the quarantine side effect is what this path wants, and that is not
+    // a reason to skip the identity check too. Without it a directory whose
+    // `record.json` names some other record answers a lookup for this one, and the
+    // contents of the wrong record reach a webhook body or a `{record_json}`
+    // placeholder.
+    CharaDetailRecord.validateDirectoryId(directory, record);
+    return record;
+  } on RecordIdMismatch catch (error) {
+    // "Not found" is the honest answer: the directory holds no record with the
+    // requested id. Logged rather than thrown, because every caller here treats an
+    // unresolvable record as a missing one and the scan will quarantine the
+    // directory on its own.
+    logger.w("Refusing the on-disk record for $recordId: $error");
+    return null;
   } on UnsupportedError {
     // The on-disk fallback is io-only: OPFS has no synchronous main-thread API,
     // so the web FsBackend rejects the whole sync surface. Without this, a web

@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
+import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/fs/web_record_persistence.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/web_record_write_transaction.dart';
@@ -26,6 +28,16 @@ enum RecordImportRefusal {
   /// regardless of the store it came from. The copy the user already has is left
   /// byte-for-byte untouched, so the correct advice is "nothing to do".
   alreadyArchived,
+
+  /// The store already holds a record with this one's contents under a different
+  /// id, so writing it would put the same chara in the table twice.
+  ///
+  /// The zip format addresses records by id, and an id collision is an overwrite;
+  /// content duplication is a separate question, asked here so that a record
+  /// exported, re-captured and imported again does not arrive as a second row of
+  /// the same chara. Decided with the capture path's own duplicate rule, so the
+  /// two entrances to the store agree on what "the same record" is.
+  duplicateOfExisting,
 
   /// Anything else the store refused or threw on for this record.
   ///
@@ -53,10 +65,20 @@ class RecordImportResult {
   /// of vanishing between the two maps.
   final Map<String, RecordImportRefusal> refusals;
 
+  /// The records this import actually wrote, decoded.
+  ///
+  /// A selection is imported one zip at a time, so the caller weighing a later
+  /// zip against "what this selection has already taken" needs the records
+  /// themselves and not just their ids. Only committed ones are listed: a record
+  /// that failed to persist is not in the store and must not withhold a copy of
+  /// it that arrives later.
+  final List<CharaDetailRecord> acceptedRecords;
+
   const RecordImportResult({
     required this.recordIds,
     required this.skippedEntries,
     this.refusals = const <String, RecordImportRefusal>{},
+    this.acceptedRecords = const <CharaDetailRecord>[],
   });
 
   int get recordCount => recordIds.length;
@@ -219,6 +241,7 @@ class RecordZipService {
     int maxTotalUncompressedBytes = defaultMaxTotalUncompressedBytes,
     int maxEntryCount = defaultMaxEntryCount,
     int maxEntryUncompressedBytes = defaultMaxEntryUncompressedBytes,
+    bool Function(CharaDetailRecord record, Iterable<CharaDetailRecord> stored)? isDuplicate,
   }) async {
     final archive = ZipDecoder().decodeBytes(bytes);
     if (archive.length > maxEntryCount) {
@@ -283,8 +306,82 @@ class RecordZipService {
       final (recordId, fileName) = parsed;
       files.add((recordId: recordId, relativeSegments: [fileName], bytes: content));
     }
-    final result = await (persistence ?? platformWebRecordPersistence).persistFiles(storageDir, files);
-    return RecordImportResult(recordIds: result.committedIds, skippedEntries: skipped, refusals: _refusals(result));
+    final grouped = <String, List<RecordPersistenceFile>>{};
+    for (final file in files) {
+      grouped.putIfAbsent(file.recordId, () => <RecordPersistenceFile>[]).add(file);
+    }
+    final store = persistence ?? platformWebRecordPersistence;
+    final duplicateRule = isDuplicate;
+    // Decoded up front, judged one at a time. What a record *is* follows from
+    // its own bytes and from nothing the store does, so it is settled here; a
+    // body the mapper cannot read is simply absent, which is how a record no
+    // question of sameness has an answer for stays out of every comparison.
+    final decoded = <String, CharaDetailRecord>{};
+    if (duplicateRule != null) {
+      for (final entry in grouped.entries) {
+        final record = _decodeRecord(entry.value);
+        if (record != null) decoded[entry.key] = record;
+      }
+    }
+    List<CharaDetailRecord> recordsOf(Iterable<String> ids) {
+      final records = <CharaDetailRecord>[];
+      for (final id in ids) {
+        final record = decoded[id];
+        if (record != null) records.add(record);
+      }
+      return records;
+    }
+
+    final refusals = <String, RecordImportRefusal>{};
+    // The whole zip goes to the store as one batch -- one acquisition, every
+    // record lock taken once -- and the duplicate rule is asked inside it, as
+    // each record is reached. The rule asks "is an equivalent copy already in
+    // the store", and only a record the store took is in the store: answering
+    // for every record before the batch starts would answer it with records that
+    // had not been written yet and might never be, and a copy the store then
+    // refuses -- its id is held by `archive/`, its slot is torn -- would already
+    // have withheld the one equivalent copy that could have landed, leaving the
+    // zip to import neither. Weighing each record against the ones this run has
+    // committed leaves a provisional admission with nothing to suppress.
+    final result = await store.persistFiles(
+      storageDir,
+      files,
+      shouldPublish: duplicateRule == null
+          ? null
+          : (recordId, committed) {
+              final record = decoded[recordId];
+              if (record == null) return true;
+              if (!duplicateRule(record, recordsOf(committed))) return true;
+              refusals[recordId] = RecordImportRefusal.duplicateOfExisting;
+              return false;
+            },
+    );
+    refusals.addAll(_refusals(result));
+    return RecordImportResult(
+      recordIds: result.committedIds,
+      skippedEntries: skipped,
+      refusals: refusals,
+      acceptedRecords: recordsOf(result.committedIds),
+    );
+  }
+
+  /// The record [files] carries in its `record.json`, or `null` when it carries
+  /// none or the one it carries does not decode.
+  ///
+  /// A record with no readable `record.json` is never weighed against anything
+  /// and never becomes something to weigh others against: the question "is this
+  /// a duplicate" has no answer for it. Only a confirmed duplicate is withheld,
+  /// so a record that does not decode is still handed to the store.
+  static CharaDetailRecord? _decodeRecord(List<RecordPersistenceFile> files) {
+    for (final file in files) {
+      if (file.relativeSegments.last != "record.json") continue;
+      try {
+        return CharaDetailRecordMapper.fromJson(utf8.decode(file.bytes));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /// The non-committed half of [result], classified into the reasons the import

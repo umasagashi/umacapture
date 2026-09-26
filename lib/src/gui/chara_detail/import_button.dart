@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_zip.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
@@ -58,6 +59,7 @@ List<PathEntity> recordImportLongReadPaths(PathInfo pathInfo) => [pathInfo.chara
 @visibleForTesting
 String importRefusalKey(RecordImportRefusal refusal) => switch (refusal) {
   RecordImportRefusal.alreadyArchived => "$tr_import.refused.already_archived",
+  RecordImportRefusal.duplicateOfExisting => "$tr_import.refused.duplicate_of_existing",
   RecordImportRefusal.notStored => "$tr_import.refused.not_stored",
 };
 
@@ -69,6 +71,10 @@ String importRefusalKey(RecordImportRefusal refusal) => switch (refusal) {
 @visibleForTesting
 ToastType importRefusalToastType(RecordImportRefusal refusal) => switch (refusal) {
   RecordImportRefusal.alreadyArchived => ToastType.warning,
+  // A duplicate is the same "you already own this, do nothing" as an archived
+  // copy: the record the user wanted is in the table, under the id it was
+  // captured with.
+  RecordImportRefusal.duplicateOfExisting => ToastType.warning,
   RecordImportRefusal.notStored => ToastType.error,
 };
 
@@ -116,6 +122,18 @@ List<ToastData> importRefusalToasts(Map<String, RecordImportRefusal> refusals) {
 /// the store, not which side of it this control is on.
 LongReadKind? _importBlockedBy(PathInfo pathInfo, Iterable<LongReadClaim> claims) =>
     storageDeleteBlockedBy(StorageDeletePathsRequest(recordImportLongReadPaths(pathInfo)), claims);
+
+/// The active record store, or null when this container has not built one.
+///
+/// [ProviderContainer.exists] and not a plain read: reading the provider would
+/// *create* the store, and creating it scans the record directory and reports what
+/// it finds. A duplicate check must not be the thing that starts a scan, and a
+/// container with no store holds no records to duplicate, so there is nothing to
+/// ask it. The store is built long before this toolbar can be pressed in the app.
+CharaDetailRecordStorage? _loadedRecordStorage(ProviderContainer container) {
+  if (!container.exists(charaDetailRecordStorageLoaderProvider)) return null;
+  return container.read(charaDetailRecordStorageLoaderProvider.notifier);
+}
 
 /// Toolbar control that imports records from Stage-4-compatible zips.
 ///
@@ -193,6 +211,22 @@ class CharaDetailImportButton extends ConsumerWidget {
         Toaster.show(ToastData.error(description: longReadBusyMessage()));
         return;
       }
+      // The capture path's duplicate rule, asked of every record a zip carries, so a
+      // chara the user already has does not arrive a second time under a new id.
+      // Read once here rather than per record: the store does not change while the
+      // import holds the claim below. If the store is not loaded there is nothing to
+      // duplicate and nothing to ask, so the import proceeds without a duplicate
+      // lookup.
+      final CharaDetailRecordStorage? storage = _loadedRecordStorage(container);
+      // The records this selection has already taken, across every zip in it. The
+      // store cannot answer for a record that is only now arriving, so without
+      // this a chara the selection carries twice lands twice -- creating exactly
+      // the pair the check above exists to keep out.
+      final selectionRecords = <CharaDetailRecord>[];
+      bool isDuplicate(CharaDetailRecord record, Iterable<CharaDetailRecord> stored) =>
+          storage?.duplicateCharaIdOf(record) != null ||
+          duplicateCharaIdIn(selectionRecords, record) != null ||
+          duplicateCharaIdIn(stored, record) != null;
       final importedIds = <String>{};
       // Keyed by record id for the same reason `importedIds` is a set: one record
       // split across several pieces of one export is one record, and is refused
@@ -227,12 +261,17 @@ class CharaDetailImportButton extends ConsumerWidget {
               for (final file in result.files) {
                 try {
                   final bytes = await file.readAsBytes();
-                  final importResult = await RecordZipService.import(bytes, pathInfo.storageDir);
+                  final importResult = await RecordZipService.import(
+                    bytes,
+                    pathInfo.storageDir,
+                    isDuplicate: isDuplicate,
+                  );
                   committed = true;
                   // Union, because the same record may appear in more than one of the
                   // pieces a single export was split into, and it is imported once.
                   importedIds.addAll(importResult.recordIds);
                   refusals.addAll(importResult.refusals);
+                  selectionRecords.addAll(importResult.acceptedRecords);
                 } catch (error, stackTrace) {
                   // Per zip: one unreadable piece of a split export must not discard the
                   // pieces that follow it -- the user picked them all in one dialog and

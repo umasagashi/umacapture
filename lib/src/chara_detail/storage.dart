@@ -696,20 +696,85 @@ Future<void> _persistRecordJsonAsync(DirectoryPath recordDir, CharaDetailRecord 
 /// lands in the caller's `failed` set, `removeRecords` never sees it, and the
 /// row becomes permanently undeletable with an error toast on every retry.
 /// The `exists()` check below still catches a delete that silently did nothing.
-Future<void> _deleteDirectoryVerifiedAsync(DirectoryPath directory) async {
+/// `record.json` is erased last, and on its own, because a recursive delete that
+/// stops partway keeps whatever it has already erased erased. With the decode
+/// source taken first, what survives a failure is a directory the next scan
+/// cannot read, so the scan moves it aside as unreadable and the user is told a
+/// record is broken when what actually happened is that a delete failed. Taking
+/// every other entry first means a stop at any point leaves a directory that
+/// still decodes, and a failed delete stays a failed delete.
+@visibleForTesting
+Future<void> deleteRecordDirectoryVerifiedAsync(DirectoryPath directory) async {
+  await _eraseExceptRecordJsonAsync(directory);
+  await directory.filePath("record.json").delete(emptyOk: true);
   await directory.delete(recursive: true, emptyOk: true);
   if (await directory.exists()) {
     throw StateError('Record directory still exists after delete: ${directory.path}');
   }
 }
 
+/// Synchronous counterpart of [deleteRecordDirectoryVerifiedAsync], including
+/// its erasure order: the two run on the same store and a partial failure has
+/// the same consequence on either.
 void _deleteDirectoryVerifiedSync(DirectoryPath directory) {
+  _eraseExceptRecordJsonSync(directory);
+  directory.filePath("record.json").deleteSync(emptyOk: true);
   directory.deleteSync(recursive: true, emptyOk: true);
   if (directory.existsSync()) {
     throw StateError('Record directory still exists after delete: ${directory.path}');
   }
 }
 
+/// Erases every entry of [directory] except its `record.json`.
+///
+/// Leaves the directory decodable for as long as anything of it is left, so an
+/// erasure that stops here is still a record and not a casualty. A directory
+/// that is already gone has nothing to erase and is not an error - the caller
+/// wants the same post-condition either way.
+Future<void> _eraseExceptRecordJsonAsync(DirectoryPath directory) async {
+  if (!await directory.exists()) return;
+  await for (final entry in directory.list()) {
+    if (entry.name == "record.json") continue;
+    await entry.delete(recursive: true, emptyOk: true);
+  }
+}
+
+/// Synchronous counterpart of [_eraseExceptRecordJsonAsync].
+void _eraseExceptRecordJsonSync(DirectoryPath directory) {
+  if (!directory.existsSync()) return;
+  for (final entry in directory.listSync()) {
+    if (entry.name == "record.json") continue;
+    entry.deleteSync(recursive: true, emptyOk: true);
+  }
+}
+
+/// Whether [existing] already holds a record under [id].
+///
+/// One spelling of "the store knows this id", asked by the addition plan when it
+/// decides what a rejection may do to the arriving record's directory.
+bool _holdsRecordId(Iterable<CharaDetailRecord> existing, String id) => existing.any((e) => e.id == id);
+
+/// The id of the record in [existing] that [record] duplicates in content, or
+/// null when it duplicates none.
+///
+/// The one place the store answers "is this the same record". Both entrances use
+/// it - capture, when a freshly read chara arrives, and import, when a zip
+/// carries one - so the two cannot drift into different ideas of sameness.
+///
+/// A record matching *itself* by id is not a duplicate: re-adding or re-importing
+/// a known id replaces that record, which is what both the capture path and the
+/// interchange format mean by a colliding id. Only the record being replaced is
+/// left out, though: every *other* record is still asked, because a replacement
+/// whose new contents are another stored record's plants exactly the pair this
+/// check exists to keep out. Leaving the replaced record out by id, rather than
+/// stopping at whichever match the scan meets first, keeps the answer a property
+/// of the record set and not of the order [existing] happens to be listed in.
+String? duplicateCharaIdIn(Iterable<CharaDetailRecord> existing, CharaDetailRecord record) =>
+    existing.firstWhereOrNull((e) => e.id != record.id && record.isSameChara(e))?.id;
+
+/// has to re-read. A replacement whose new contents are another stored record's
+/// is refused with exactly this answer: the directory it would have written into
+/// is the stored record's, and it is kept.
 final class RecordDeleteResult {
   const RecordDeleteResult({required this.succeeded, required this.failed});
 
@@ -741,7 +806,7 @@ void _discardRejectedDuplicateSync(DirectoryPath directory) {
 /// OPFS import path.
 Future<void> _discardRejectedDuplicateAsync(DirectoryPath directory) async {
   try {
-    await _deleteDirectoryVerifiedAsync(directory);
+    await deleteRecordDirectoryVerifiedAsync(directory);
   } catch (error, stackTrace) {
     logger.e("Failed to delete the rejected duplicate ${directory.path}.", error, stackTrace);
     Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
@@ -933,7 +998,17 @@ class _AdditionPlan {
   /// The full resolution, for the inheritance toasts.
   final InheritanceResolution? resolution;
 
-  const _AdditionPlan.duplicate(this.duplicatedId)
+  /// Whether the store already holds a record under the incoming record's id.
+  ///
+  /// The rejection branch drops `<root>/<incoming id>/` on the premise that the
+  /// directory belongs to the record now arriving. When the id is one the store
+  /// already holds, that directory is the stored record's own and deleting it
+  /// destroys data the user captured earlier. So the premise is resolved here, by
+  /// asking the record set, and carried to the branch as a fact -- rather than
+  /// left for the branch to assume from the shape of the verdict it was handed.
+  final bool incomingIdIsStored;
+
+  const _AdditionPlan.duplicate(this.duplicatedId, {required this.incomingIdIsStored})
     : resolvedRecord = null,
       activePersists = const [],
       archiveUpdates = const [],
@@ -946,6 +1021,7 @@ class _AdditionPlan {
     required this.archiveUpdates,
     required this.newState,
     required this.resolution,
+    required this.incomingIdIsStored,
   }) : duplicatedId = null;
 }
 
@@ -1188,17 +1264,32 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// Shared by the synchronous [add] (desktop capture) and the asynchronous
   /// [addFromFileAsync] (web incremental import) so both agree on the outcome and
   /// differ only in how they execute the resulting file I/O (sync vs. async FS).
+  /// Every record a new one has to be weighed against: the active set plus the
+  /// archived one.
+  ///
+  /// Archived records count, so a re-capture of an archived chara is rejected as a
+  /// duplicate and inheritance can link across both sets. Falls back to
+  /// active-only if the archive failed to preload (see build()).
+  ///
+  /// Public so the import path weighs its records against the same set the capture
+  /// path does, with the versions an import has just written laid over it.
+  List<CharaDetailRecord> existingRecords() => [
+    ..._records,
+    ...?ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value,
+  ];
+
+  /// [duplicateCharaIdIn] over everything this store weighs a new record against.
+  String? duplicateCharaIdOf(CharaDetailRecord record) => duplicateCharaIdIn(existingRecords(), record);
+
   _AdditionPlan _resolveAddition(CharaDetailRecord record) {
     final activeRecords = _records;
-    // Consider archived records too, so a re-capture of an archived chara is
-    // rejected as a duplicate and inheritance can link across both sets. Falls
-    // back to active-only if the archive failed to preload (see build()).
+    final existing = existingRecords();
     final archiveRecords =
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
-    final existing = [...activeRecords, ...archiveRecords];
-    final duplicated = existing.firstWhereOrNull((e) => record.isSameChara(e));
-    if (duplicated != null && duplicated.id != record.id) {
-      return _AdditionPlan.duplicate(duplicated.id);
+    final incomingIdIsStored = _holdsRecordId(existing, record.id);
+    final duplicatedId = duplicateCharaIdIn(existing, record);
+    if (duplicatedId != null) {
+      return _AdditionPlan.duplicate(duplicatedId, incomingIdIsStored: incomingIdIsStored);
     }
 
     // Link this record to existing parents/children (in either the active or the
@@ -1243,6 +1334,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       archiveUpdates: archiveUpdates,
       newState: newState,
       resolution: resolution,
+      incomingIdIsStored: incomingIdIsStored,
     );
   }
 
@@ -1277,7 +1369,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   void add(CharaDetailRecord record, {bool notifyDuplicate = true}) {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
-      _discardRejectedDuplicateSync(rootDirectory / record.id);
+      // A directory named by an id the store already holds is that stored
+      // record's, not this arrival's, so there is nothing here to discard.
+      if (!plan.incomingIdIsStored) {
+        _discardRejectedDuplicateSync(rootDirectory / record.id);
+      }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
@@ -1404,7 +1500,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   Future<void> _addAsync(CharaDetailRecord record, {bool notifyDuplicate = true}) async {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
-      await _discardRejectedDuplicateAsync(rootDirectory / record.id);
+      // See [add]: a stored id's directory is never this arrival's to discard.
+      if (!plan.incomingIdIsStored) {
+        await _discardRejectedDuplicateAsync(rootDirectory / record.id);
+      }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
@@ -1857,7 +1956,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// retirement runs this same primitive, so a failure injected here is the one
   /// the ordinary delete reports rather than a merge-specific invention.
   @visibleForTesting
-  Future<void> deleteRecordDirectory(DirectoryPath directory) => _deleteDirectoryVerifiedAsync(directory);
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => deleteRecordDirectoryVerifiedAsync(directory);
 
   /// Erases one record's directory, answering whether it is gone.
   ///
@@ -2297,7 +2396,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// Seam over the one destructive call of an archived record delete. See
   /// [CharaDetailRecordStorage.deleteRecordDirectory].
   @visibleForTesting
-  Future<void> deleteRecordDirectory(DirectoryPath directory) => _deleteDirectoryVerifiedAsync(directory);
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => deleteRecordDirectoryVerifiedAsync(directory);
 
   /// Erases one archived record's directory, answering whether it is gone.
   Future<bool> _deleteOneUnlocked(String id) async {
