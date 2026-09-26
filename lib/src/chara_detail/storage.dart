@@ -26,19 +26,13 @@ import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
 import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/record_write_invalidation.dart';
+import '/src/core/storage/storage_delete.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/capture.dart';
-// For `storageDeleteBlockedBy`, the app's one answer to "is a registered long
-// reader holding any of these paths". The predicate underneath it
-// (`storageDeleteAwaitsExtraction`) is documented as the single place one storage
-// path is matched against another, and re-deriving it on this side is how the
-// two would come to disagree silently; that it currently lives under `gui/` is a
-// historic placement, not a statement that the question is a widget's.
-import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
@@ -186,7 +180,7 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   Timer? _watchdog;
 
   // The registry entry for the batch in flight, or null when no batch is running
-  // (and when the batch names no records -- see [_claimBatch]).
+  // (and for a batch begun through [beginBatch], which names no records).
   LongReadToken? _token;
 
   // The registry [_token] belongs to, held from the claim to the release rather
@@ -270,6 +264,14 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // store outage reject `start` -- which the `platformControllerLoader` await
     // above can already do, at the same three call sites, none of which await it.
     final pathInfo = await ref.read(pathInfoLoader.future);
+    // **An empty batch is not begun**, because it would name nothing and could
+    // not end: a batch of no records completes the moment it begins (`Progress(
+    // total: 0)` reports `isCompleted`), so [_finish] is never reached and a
+    // claim taken for it -- the journal and the module directory are named for
+    // any batch -- would stay registered for the rest of the session.
+    if (records.isEmpty) {
+      return;
+    }
     // What this batch writes, derived once by [regenerateRecordLongReadPaths] and
     // not listed here: the surfaces that decide whether a batch may start ask that
     // same function, and the claim and the question ran apart for as long as they
@@ -277,16 +279,10 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // while a re-recognition on web publishes through the write transaction
     // journal for its whole length. Its doc carries which folders those are and
     // why both platforms name them.
-    //
-    // **An empty batch names nothing at all**, which the journal would otherwise
-    // undo: a batch of no records completes the moment it begins (`Progress(total:
-    // 0)` reports `isCompleted`), so [_finish] is never reached and a claim taken
-    // for it would stay registered for the rest of the session. [_claimBatch]
-    // declines an empty list, and this is what keeps the list empty when there is
-    // no batch to hold anything.
-    final paths = records.isEmpty
-        ? const <PathEntity>[]
-        : regenerateRecordLongReadPaths(pathInfo: pathInfo, recordIds: [for (final record in records) record.id]);
+    final paths = regenerateRecordLongReadPaths(
+      pathInfo: pathInfo,
+      recordIds: [for (final record in records) record.id],
+    );
     // The long-read half of the same rule the import refusal above states, and it
     // is here for the same reason: three of the five entrances are controls that
     // can withdraw themselves and say why, and the other two are not controls at
@@ -295,28 +291,37 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // and the geometry files under a directory an archive is moving away or a zip
     // is reading — the collision the registry exists to name.
     //
-    // Asked of the *same* list the claim below is taken over, so "what this batch
-    // would touch" is derived once. Read rather than watched: `start` is not a
-    // build, and the claim it is about to take settles the question for the rest
-    // of the batch.
+    // Asked and claimed in one call, over the one list, so "what this batch would
+    // touch" is derived once and nothing can register between the question and
+    // the claim. Read rather than watched: `start` is not a build, and the claim
+    // settles the question for the rest of the batch.
+    //
+    // **A start while a batch is running is refused by the same question.** Every
+    // batch names the journal and the module directory, so the batch in flight is
+    // always holding part of what the next one would claim. A batch is never
+    // replaced, and a batch never begins over another's claim.
+    //
+    // **The unscoped half of the registry's protocol and not `holdWhenFree`.** The
+    // batch's end is a state transition, not a Dart scope: [_finish] is reached
+    // from a native callback ([updated]/[fail]) and from the watchdog timer, and
+    // neither of those is on this stack -- all three call sites of [start] fire and
+    // forget. There is no block to wrap, which is the same reason
+    // `StorageZipProgress` claims by hand. The release is [_closeBatch]'s, and both
+    // ways a batch can end reach it.
     //
     // No sentence anywhere: this is past every control, and the two UI-less
     // entrances have nothing to show one on. The controls carry their own.
-    //
-    // An empty batch is asked about nothing rather than asked about an empty
-    // request: `StorageDeletePathsRequest` is documented as never empty, and a
-    // batch that names no record is one [_claimBatch] already declines to claim
-    // for.
-    final blockedBy = paths.isEmpty
-        ? null
-        : storageDeleteBlockedBy(StorageDeletePathsRequest(paths), ref.read(longReadRegistryProvider).values);
-    if (blockedBy != null) {
+    final claimant = ref.read(longReadRegistryProvider.notifier);
+    final LongReadToken token;
+    try {
+      token = claimant.claimUntilReleasedWhenFree(kind: LongReadKind.regeneration, paths: paths);
+    } on LongReadNotStartedException catch (e) {
       logger.i(
-        "Declined to regenerate ${records.length} record(s): ${blockedBy.name} is holding a folder they live in.",
+        "Declined to regenerate ${records.length} record(s): ${e.heldBy?.name} is holding a folder they live in.",
       );
       return;
     }
-    _beginBatch(records.length, paths);
+    _beginBatch(records.length, token: token, claimant: claimant);
     for (final record in records) {
       platformController.updateRecord(record.id);
     }
@@ -330,41 +335,22 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   /// directory it could say it was holding. A test that means to observe the
   /// claim has to drive [start].
   @visibleForTesting
-  void beginBatch(int total) => _beginBatch(total, const []);
+  void beginBatch(int total) => _beginBatch(total);
 
-  void _beginBatch(int total, List<PathEntity> paths) {
+  /// Begins a batch of [total] records that holds [token], taken from [claimant].
+  ///
+  /// The token and the registry it came from arrive together because
+  /// [_releaseClaim] needs both: a token kept without its registry is a claim
+  /// nothing releases.
+  void _beginBatch(int total, {LongReadToken? token, LongReadRegistry? claimant}) {
+    assert(_token == null, 'a batch began over the claim of a batch still in flight; start refuses that');
     _counted.clear();
     _successCount = 0;
     _failureCount = 0;
-    _claimBatch(paths);
+    _token = token;
+    _claimant = claimant;
     state = Progress(total: total);
     _armWatchdog();
-  }
-
-  /// Registers [paths] with the long-read registry for the batch that is starting.
-  ///
-  /// **Why the unscoped half of the registry's protocol and not `hold`.** The
-  /// batch's end is a state transition, not a Dart scope: [_finish] is reached
-  /// from a native callback ([updated]/[fail]) and from the watchdog timer, and
-  /// neither of those is on [start]'s stack -- all three call sites of [start]
-  /// fire and forget. There is no block to wrap, which is the same reason
-  /// `StorageZipProgress` claims by hand. The release is [_closeBatch]'s, and both
-  /// ways a batch can end reach it.
-  ///
-  /// **A batch that names no records registers nothing**, and that is not a
-  /// shortcut either: `Progress(total: 0)` already reports `isCompleted`, so no
-  /// record is ever counted and [_finish] is never reached -- a claim taken here
-  /// would stay on for the rest of the session with nothing left to take it off.
-  void _claimBatch(List<PathEntity> paths) {
-    // A re-entrant start replaces the batch -- the previous batch's outstanding
-    // callbacks land in the new `_counted` -- so it has to replace the claim too.
-    _releaseClaim();
-    if (paths.isEmpty) {
-      return;
-    }
-    final claimant = ref.read(longReadRegistryProvider.notifier);
-    _token = claimant.claimUntilReleased(kind: LongReadKind.regeneration, paths: paths);
-    _claimant = claimant;
   }
 
   /// Announces that regeneration of [id] rewrote its directory under `active/`.
@@ -669,6 +655,22 @@ DirectoryPath recordDirOfId(PathInfo pathInfo, RecordSource source, String id) {
   return root / id;
 }
 
+/// What a delete of [recordIds] from [source] holds in the long-read registry:
+/// each record's own directory.
+///
+/// One derivation for both sides of that registration. The store claims these
+/// paths around its erasure ([CharaDetailRecordMutator.deleteAsync] and
+/// [CharaDetailRecordMutator.deleteAllAsync]), and the delete confirmations ask
+/// about the same paths before they offer the press
+/// (`delete_record_dialog.dart`'s `recordDeleteAwaitsExtraction`), so the two
+/// cannot come to disagree about what a record delete touches. The erasure writes
+/// no journal, so the directories are the whole of it.
+List<PathEntity> recordDeleteLongReadPaths({
+  required PathInfo pathInfo,
+  required RecordSource source,
+  required Iterable<String> recordIds,
+}) => [for (final id in recordIds) recordDirOfId(pathInfo, source, id)];
+
 /// Resolves the directory holding [record]'s files for the given [source].
 DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) =>
     recordDirOfId(pathInfo, source, record.id);
@@ -902,11 +904,20 @@ abstract interface class CharaDetailRecordMutator {
 
   /// Deletes the record [id]. Once the delete reports, [effects] is applied: the images to its
   /// directory if it is gone and to nothing if it is not, the totals to the record root either way.
+  ///
+  /// **Claimed as a delete before the first `await`**, through [holdForDelete] over
+  /// [recordDeleteLongReadPaths]: asked and registered in one turn, so while another job holds the
+  /// record's directory this throws [LongReadNotStartedException] having removed nothing and
+  /// applied nothing. The claim is released after the store's list has dropped what was erased and
+  /// [effects] has been applied, so a writer that asks the registry never finds the record unheld
+  /// while the app still remembers it.
   Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects});
 
   /// Deletes every id in [ids]. Once the batch reports, [effects] is applied: the images to the
   /// directories of the ids in [RecordDeleteResult.succeeded] and to no other, the totals to the
   /// record root.
+  ///
+  /// Claimed as one delete over every id in [ids], and refused and released as [deleteAsync] is.
   Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects});
 }
 
@@ -996,14 +1007,17 @@ const _importMergeDeclaration = LongReadDeclaration.none(
   reason: 'one record read plus the inheritance merge its plan names; shorter than a claim is worth',
 );
 
-/// What a record delete announces to the long-read registry: nothing.
+/// What a record delete's acquisition announces: nothing, because the delete
+/// announced itself one frame up.
 ///
-/// A delete is the *destructive* side of this arrangement — the operation whose
-/// button the registry withholds while somebody else holds the paths. It is also
-/// short: it removes a directory and republishes. Announcing it would grey out
-/// the surface it was started from, for the length of its own run.
-const _recordDeleteDeclaration = LongReadDeclaration.none(
-  reason: 'a delete is the destructive side the registry withholds, not a long read that withholds anything',
+/// `deleteAsync` and `deleteAllAsync` take the delete's claim through
+/// [holdForDelete] around the gate call, asking and registering in one turn.
+/// Declaring it at the gate instead would register without asking, which is
+/// the half that lets a delete start underneath a job that already holds the
+/// record. The wording follows `_declaredByTheMergeFrame`, which is the same
+/// arrangement.
+const _declaredByTheDeleteClaim = LongReadDeclaration.none(
+  reason: 'a claim already taken above this seam, by holdForDelete around the gate call',
 );
 
 /// What the whole-store inheritance resolution's *acquisitions* announce:
@@ -1379,9 +1393,6 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     ..._records,
     ...?ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value,
   ];
-
-  /// [duplicateCharaIdIn] over everything this store weighs a new record against.
-  String? duplicateCharaIdOf(CharaDetailRecord record) => duplicateCharaIdIn(existingRecords(), record);
 
   _AdditionPlan _resolveAddition(CharaDetailRecord record) {
     final activeRecords = _records;
@@ -1772,14 +1783,21 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       // not a statement about what is written, and `modules/` and `settings/`
       // are under it and are never touched here.
       //
-      // [LongReadRegistry.hold] and not `claimUntilReleased`: the resolution is
-      // one `Future`, so the release belongs to a scope and there is nothing for
+      // A scoped hold and not `claimUntilReleased`: the resolution is one
+      // `Future`, so the release belongs to a scope and there is nothing for
       // this method to forget.
+      //
+      // **Asked and claimed in one turn, and refused while something holds the
+      // store** ([LongReadContention.refuse]): the resolution is started by a
+      // press, and the entry's own gate is drawn from a registry that can be one
+      // frame older than the press. The confirm path asks again before calling
+      // here, but only to choose its sentence; which claim wins is decided here.
       await ref
           .read(longReadRegistryProvider.notifier)
-          .hold(
+          .holdWhenFree(
             kind: LongReadKind.inherit,
             paths: [rootDirectory.parent],
+            contention: LongReadContention.refuse,
             action: (_) => _runForStableRecordSet<void>(
               recoveryGate: recordRecoveryGate,
               storageRoot: rootDirectory.parent.parent,
@@ -1818,6 +1836,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
             ),
           );
       _surfaceInheritance(resolution, alwaysReport: true);
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing was read or written. The refusal is the app's one long-read
+      // sentence, which every press-started writer without a refusal of its own
+      // reports (the merge and the relocation carry theirs) — not
+      // "app.inheritance.failed", which would call a busy store a failure.
+      announceLongReadNotStarted(exception, operation: 'An inheritance resolution');
     } catch (error, stackTrace) {
       // The desktop path reports through Flutter's error handling; the future
       // this one runs on is discarded by the UI, so a failure would otherwise
@@ -2052,13 +2076,19 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   @override
   Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
-    final result = await recordRecoveryGate.runForRecord(
-      rootDirectory.parent.parent,
-      id,
-      () => deleteAllUnlocked({id}),
-      declaration: _recordDeleteDeclaration,
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.active, recordIds: [id]),
+      action: (_) async {
+        final result = await recordRecoveryGate.runForRecord(
+          rootDirectory.parent.parent,
+          id,
+          () => deleteAllUnlocked({id}),
+          declaration: _declaredByTheDeleteClaim,
+        );
+        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+      },
     );
-    return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
   }
 
   /// Deletes every id in [ids], accounting for each one separately.
@@ -2077,23 +2107,29 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// The map's values are unused: a delete's whole per-record payload is the id.
   @override
   Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
-    final succeeded = <String>{};
-    final failed = <String>{};
-    await recordRecoveryGate.runPerRecord(
-      rootDirectory.parent.parent,
-      {for (final id in ids) id: null},
-      (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
-      declaration: _recordDeleteDeclaration,
-      onNotReady: (id, error, stackTrace) {
-        failed.add(id);
-        logger.e("Cannot delete active record $id: its recovery did not finish.", error, stackTrace);
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.active, recordIds: ids),
+      action: (_) async {
+        final succeeded = <String>{};
+        final failed = <String>{};
+        await recordRecoveryGate.runPerRecord(
+          rootDirectory.parent.parent,
+          {for (final id in ids) id: null},
+          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          declaration: _declaredByTheDeleteClaim,
+          onNotReady: (id, error, stackTrace) {
+            failed.add(id);
+            logger.e("Cannot delete active record $id: its recovery did not finish.", error, stackTrace);
+          },
+        );
+        return _declareDeleted(
+          _reportDeleted(succeeded: succeeded, failed: failed),
+          info: _pathInfo,
+          store: rootDirectory,
+          effects: effects,
+        );
       },
-    );
-    return _declareDeleted(
-      _reportDeleted(succeeded: succeeded, failed: failed),
-      info: _pathInfo,
-      store: rootDirectory,
-      effects: effects,
     );
   }
 
@@ -2519,13 +2555,19 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// Permanently deletes an archived record's directory and republishes.
   @override
   Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
-    final result = await recordRecoveryGate.runForRecord(
-      rootDirectory.parent.parent,
-      id,
-      () => deleteAllUnlocked({id}),
-      declaration: _recordDeleteDeclaration,
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.archive, recordIds: [id]),
+      action: (_) async {
+        final result = await recordRecoveryGate.runForRecord(
+          rootDirectory.parent.parent,
+          id,
+          () => deleteAllUnlocked({id}),
+          declaration: _declaredByTheDeleteClaim,
+        );
+        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+      },
     );
-    return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
   }
 
   /// The archive's counterpart of [CharaDetailRecordStorage.deleteAllAsync], and
@@ -2533,23 +2575,29 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// recovery failure must not be a precondition of the whole batch.
   @override
   Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
-    final succeeded = <String>{};
-    final failed = <String>{};
-    await recordRecoveryGate.runPerRecord(
-      rootDirectory.parent.parent,
-      {for (final id in ids) id: null},
-      (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
-      declaration: _recordDeleteDeclaration,
-      onNotReady: (id, error, stackTrace) {
-        failed.add(id);
-        logger.e("Cannot delete archived record $id: its recovery did not finish.", error, stackTrace);
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.archive, recordIds: ids),
+      action: (_) async {
+        final succeeded = <String>{};
+        final failed = <String>{};
+        await recordRecoveryGate.runPerRecord(
+          rootDirectory.parent.parent,
+          {for (final id in ids) id: null},
+          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          declaration: _declaredByTheDeleteClaim,
+          onNotReady: (id, error, stackTrace) {
+            failed.add(id);
+            logger.e("Cannot delete archived record $id: its recovery did not finish.", error, stackTrace);
+          },
+        );
+        return _declareDeleted(
+          _reportDeleted(succeeded: succeeded, failed: failed),
+          info: _pathInfo,
+          store: rootDirectory,
+          effects: effects,
+        );
       },
-    );
-    return _declareDeleted(
-      _reportDeleted(succeeded: succeeded, failed: failed),
-      info: _pathInfo,
-      store: rootDirectory,
-      effects: effects,
     );
   }
 
@@ -2775,6 +2823,9 @@ class CharaArchiveController extends Notifier<Progress> {
   /// [effects] is applied once the batch ends, to the ids the executor reports as moved: both
   /// directories of each, the one it left and the one it now occupies. An id that failed is still
   /// where it was, so nothing cached under it is dropped.
+  ///
+  /// A batch over something a long reader holds does not start: it moves nothing, publishes no
+  /// [Progress], and says [longReadBusyMessage].
   Future<void> archive(
     List<String> ids,
     archive_executor.ArchiveImageOption option, {
@@ -2786,10 +2837,6 @@ class CharaArchiveController extends Notifier<Progress> {
     final pathInfo = await ref.read(pathInfoLoader.future);
     final activeRoot = pathInfo.charaDetailActiveDir;
     final archiveRoot = pathInfo.charaDetailArchiveDir;
-    // Whole-batch busy state: one isolate handles every record, so there is no
-    // per-record callback to advance a percentage. Mark it indeterminate so the
-    // indicator spins rather than sitting frozen at 0%.
-    state = Progress(total: ids.length, indeterminate: true);
     // Snapshot the to-be-archived records before they leave the active store, so
     // the archive store can be updated in memory (see below) without a re-scan.
     final activeStore = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
@@ -2825,72 +2872,97 @@ class CharaArchiveController extends Notifier<Progress> {
     // and closes after the stores have been brought back in step, so there is no
     // frame in which the record is listed as active, unheld, and already gone from
     // disk. What it is *not* is a second exclusion — see `long_read_registry.dart`.
-    await ref
-        .read(longReadRegistryProvider.notifier)
-        .hold(
-          kind: LongReadKind.archive,
-          paths: archiveRecordLongReadPaths(pathInfo: pathInfo, recordIds: ids),
-          action: (_) async {
-            try {
-              // The selected executor owns the platform execution model while preserving
-              // one index-aligned asynchronous result contract for this controller. It
-              // also owns the record locks (per record on web, whole batch on desktop), so
-              // this controller must not take one itself: the locks are not re-entrant.
-              final results = await archive_executor.archiveRecords(
-                archive_executor.ArchiveBatchArgs(items),
-                recoveryGate: debugRecoveryGate,
-              );
-              for (var i = 0; i < ids.length; i++) {
-                if (results[i]) {
-                  archived.add(ids[i]);
-                } else {
-                  failed++;
+    //
+    // Asked for and taken in one turn, and refused rather than waited for: the
+    // dialog's confirm was built from a registry that can be older than this call,
+    // so a delete, a zip or a relocation that claimed these records since turns the
+    // batch away here, before anything moves, instead of the batch starting
+    // underneath it.
+    try {
+      await ref
+          .read(longReadRegistryProvider.notifier)
+          .holdWhenFree(
+            kind: LongReadKind.archive,
+            paths: archiveRecordLongReadPaths(pathInfo: pathInfo, recordIds: ids),
+            contention: LongReadContention.refuse,
+            action: (_) async {
+              try {
+                // Whole-batch busy state: one isolate handles every record, so there is no
+                // per-record callback to advance a percentage. Mark it indeterminate so the
+                // indicator spins rather than sitting frozen at 0%.
+                //
+                // Published inside the claim and not before asking for it: a refused batch
+                // never enters this action, and the `finally` below -- the only thing that
+                // clears the overlay -- is this action's, so a progress raised above the ask
+                // would be left over the record table by every refusal.
+                state = Progress(total: ids.length, indeterminate: true);
+                // The selected executor owns the platform execution model while preserving
+                // one index-aligned asynchronous result contract for this controller. It
+                // also owns the record locks (per record on web, whole batch on desktop), so
+                // this controller must not take one itself: the locks are not re-entrant.
+                final results = await archive_executor.archiveRecords(
+                  archive_executor.ArchiveBatchArgs(items),
+                  recoveryGate: debugRecoveryGate,
+                );
+                for (var i = 0; i < ids.length; i++) {
+                  if (results[i]) {
+                    archived.add(ids[i]);
+                  } else {
+                    failed++;
+                  }
+                }
+                if (archived.isNotEmpty) {
+                  ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
+                  // Move the records into the archive store in memory, mirroring the active
+                  // store's surgical removal, instead of invalidating and re-scanning every
+                  // archived directory from disk. A no-op if the archive view never loaded.
+                  final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
+                  ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
+                }
+              } catch (error, stackTrace) {
+                // Catches everything on purpose, rather than listing the types that reach
+                // here. They are not enumerable from this side and the list would go stale:
+                // the executor's gate throws `RecordMutationLockBusy` /
+                // `RecordMutationLockUnavailable` when the acquisition budget runs out,
+                // web's record recovery throws a bare `StateError` from inside the lock and
+                // *before* the executor's own try/catch is entered
+                // (`_ensureRecordReady`/`_archiveRecordAsyncLocked`), and desktop can fail to
+                // spawn the `compute` isolate or to serialize its arguments. A type this
+                // clause did not name would land straight back on the defect it replaces.
+                logger.e('Failed to archive ${ids.length} chara detail record(s).', error, stackTrace);
+                // Whatever the batch did not account for never happened, so report it as
+                // failed instead of leaving it unmentioned -- the same accounting the
+                // regeneration watchdog does with its unaccounted records, and what makes
+                // the toast below fire on this path too.
+                failed = ids.length - archived.length;
+              } finally {
+                // The progress overlay replaces the record table while this is non-empty
+                // (`data_table_widget.dart`), and nothing else ever clears it: the provider
+                // is not auto-disposed and is never invalidated or refreshed, so a
+                // `Progress` left published here hides the table -- in both record sources
+                // -- until the app is restarted. That is the accident
+                // [CharaDetailRecordRegenerationController]'s watchdog exists for; a timer
+                // is not the right shape here because this failure arrives as a thrown
+                // error rather than as a callback that never comes, so the release can be
+                // immediate and exact instead of waiting out an inactivity window.
+                //
+                // Guarded like the regeneration controller's delayed tail: the container can
+                // go away mid-archive (app shutdown, a test teardown), and writing `state`
+                // throws once the element is disposed.
+                if (ref.mounted) {
+                  state = Progress.none;
                 }
               }
-              if (archived.isNotEmpty) {
-                ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
-                // Move the records into the archive store in memory, mirroring the active
-                // store's surgical removal, instead of invalidating and re-scanning every
-                // archived directory from disk. A no-op if the archive view never loaded.
-                final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
-                ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
-              }
-            } catch (error, stackTrace) {
-              // Catches everything on purpose, rather than listing the types that reach
-              // here. They are not enumerable from this side and the list would go stale:
-              // the executor's gate throws `RecordMutationLockBusy` /
-              // `RecordMutationLockUnavailable` when the acquisition budget runs out,
-              // web's record recovery throws a bare `StateError` from inside the lock and
-              // *before* the executor's own try/catch is entered
-              // (`_ensureRecordReady`/`_archiveRecordAsyncLocked`), and desktop can fail to
-              // spawn the `compute` isolate or to serialize its arguments. A type this
-              // clause did not name would land straight back on the defect it replaces.
-              logger.e('Failed to archive ${ids.length} chara detail record(s).', error, stackTrace);
-              // Whatever the batch did not account for never happened, so report it as
-              // failed instead of leaving it unmentioned -- the same accounting the
-              // regeneration watchdog does with its unaccounted records, and what makes
-              // the toast below fire on this path too.
-              failed = ids.length - archived.length;
-            } finally {
-              // The progress overlay replaces the record table while this is non-empty
-              // (`data_table_widget.dart`), and nothing else ever clears it: the provider
-              // is not auto-disposed and is never invalidated or refreshed, so a
-              // `Progress` left published here hides the table -- in both record sources
-              // -- until the app is restarted. That is the accident
-              // [CharaDetailRecordRegenerationController]'s watchdog exists for; a timer
-              // is not the right shape here because this failure arrives as a thrown
-              // error rather than as a callback that never comes, so the release can be
-              // immediate and exact instead of waiting out an inactivity window.
-              //
-              // Guarded like the regeneration controller's delayed tail: the container can
-              // go away mid-archive (app shutdown, a test teardown), and writing `state`
-              // throws once the element is disposed.
-              if (ref.mounted) {
-                state = Progress.none;
-              }
-            }
-          },
-        );
+            },
+          );
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing moved and no progress went up. The dialog that started this has
+      // already closed, so the toast is the only place the refusal can be said, and
+      // nothing below applies: no directory changed, and "archived" / "failed" would
+      // both be false.
+      announceLongReadNotStarted(exception, operation: 'An archive of ${ids.length} record(s)');
+      return;
+    }
     // The batch moved record directories out of `active/` and into `archive/`,
     // both of which the storage view measures, and the dialog that started it
     // dismissed without awaiting -- so unlike every other record mutation driven

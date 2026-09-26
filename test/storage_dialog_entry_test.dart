@@ -492,7 +492,9 @@ void main() {
         overrides: [
           pathLayoutLoader.overrideWith((ref) async => _info),
           pathInfoProvider.overrideWithValue(_info),
-          settingsStoreDeleteProvider.overrideWithValue(() async => const StorageDeleteReport(deleted: [], failed: [])),
+          settingsStoreDeleteProvider.overrideWithValue(
+            (_) async => const StorageDeleteReport(deleted: [], failed: []),
+          ),
         ],
       );
       addTearDown(container.dispose);

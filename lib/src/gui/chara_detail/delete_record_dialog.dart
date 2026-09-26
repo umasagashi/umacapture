@@ -45,8 +45,9 @@ const tr_delete_record = "pages.chara_detail.delete_record";
 /// removes, taken in both directions — and deriving it a second time here is how
 /// the two surfaces would come to disagree silently about which deletes a zip
 /// covers. All this adds is the step from "these record ids" to "these
-/// directories", through [recordDirOfId], which is the same resolver every other
-/// reader of a record's folder goes through.
+/// directories", through [recordDeleteLongReadPaths], which is the list the
+/// store's delete claims: the press is withheld over exactly what the delete
+/// would hold.
 ///
 /// **Why the refusal sits on the confirmation and not on the two entrances.**
 /// The storage view withholds its row button and its menu entry, because there
@@ -69,7 +70,7 @@ bool recordDeleteAwaitsExtraction({
   required Iterable<String> recordIds,
   required StorageZipState? extraction,
 }) {
-  final targets = [for (final id in recordIds) recordDirOfId(pathInfo, source, id)];
+  final targets = recordDeleteLongReadPaths(pathInfo: pathInfo, source: source, recordIds: recordIds);
   if (targets.isEmpty) {
     return false;
   }
@@ -145,11 +146,16 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   /// **Withdrawing the confirm is not enough on its own, because it is not the
   /// only way back to the tree.** The barrier, the title bar's × and cancel each
   /// unmount this dialog just as thoroughly, and [_deleting] goes with the
-  /// widget — so the row the delete was started from is live again, still listed,
-  /// and a second delete of the same ids can be started, which is exactly what
-  /// the paragraph above says must not happen. All three are shut here for the
-  /// duration of the delete: the barrier through the controller, the other two
-  /// through [BulkConfirmDialog.leaveEnabled] where the dialog is built.
+  /// widget — so the row the delete was started from is still listed while the
+  /// delete behind it runs with nothing on screen that says so. All three are
+  /// shut here for the duration of the delete: the barrier through the
+  /// controller, the other two through [BulkConfirmDialog.leaveEnabled] where the
+  /// dialog is built.
+  ///
+  /// **A refused delete leaves the dialog up.** The store asks the registry and
+  /// claims the records in one turn, and a job that holds any of them turns the
+  /// whole batch away before anything is removed: the question this dialog asked
+  /// is still open, so it stays and [build] says why.
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
@@ -161,8 +167,16 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     // column disappears and stale checks are dropped even when the delete fails
     // or the dialog is closed before it finishes.
     exitSelection(ref);
+    var notStarted = false;
     try {
       await storage.deleteAllAsync(widget.recordIds, effects: effects);
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing was removed: the question this dialog asked is still open, so it
+      // stays up and says why, and [build]'s refusal takes over from here. An
+      // abandoned registry is the container going away, and then there is nothing
+      // left to keep it up for.
+      notStarted = exception.heldBy != null;
+      announceLongReadNotStarted(exception, operation: 'A record delete');
     } catch (error, stackTrace) {
       // deleteAllAsync reports its own per-record failures; this covers the whole
       // batch failing (e.g. the record lock could not be acquired), which would
@@ -182,7 +196,9 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
       }
       // Token-scoped: the user may have opened another dialog while the delete
       // ran, and an unqualified dismiss would close that one instead.
-      dialogs.dismiss(token);
+      if (!notStarted) {
+        dialogs.dismiss(token);
+      }
     }
   }
 
@@ -204,7 +220,11 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     // one it could not. Read rather than watched: the data root does not move
     // under an open dialog.
     final layout = ref.read(pathLayoutProvider);
+    // Not asked while this dialog's own delete runs: the registry holds that
+    // delete's claim over these very records for the whole run, so asking would
+    // answer about this dialog's own work.
     final awaitingExtraction =
+        !_deleting &&
         layout != null &&
         recordDeleteBlockedBy(pathInfo: layout, source: widget.source, recordIds: widget.recordIds, claims: claims) !=
             null;
@@ -267,7 +287,8 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
   /// Deletes the record, then closes this dialog. See
   /// [_BulkDeleteRecordDialogState._confirm] for why the post-await work is
   /// prepared before the await, and why a second confirm has to be withdrawn
-  /// rather than served — and why all three exits are shut while it runs.
+  /// rather than served, why all three exits are shut while it runs, and why a
+  /// refused delete leaves the dialog up.
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
@@ -275,8 +296,12 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    var notStarted = false;
     try {
       await storage.deleteAsync(widget.recordId, effects: effects);
+    } on LongReadNotStartedException catch (exception) {
+      notStarted = exception.heldBy != null;
+      announceLongReadNotStarted(exception, operation: 'A record delete');
     } catch (error, stackTrace) {
       logger.e("Failed to delete record ${widget.recordId}.", error, stackTrace);
       Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
@@ -285,7 +310,9 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
       if (mounted) {
         setState(() => _deleting = false);
       }
-      dialogs.dismiss(token);
+      if (!notStarted) {
+        dialogs.dismiss(token);
+      }
     }
   }
 
@@ -301,15 +328,17 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
     // Watched, not read: a long read can end while this dialog is open. No
     // `claims.isNotEmpty` guard around the layout as in the bulk dialog, because
     // this one has already read it for the trainee icon above: here it is not a
-    // dependency the gate introduces.
+    // dependency the gate introduces. Not asked while this dialog's own delete
+    // runs, for the reason the bulk dialog gives.
     final awaitingExtraction =
+        !_deleting &&
         recordDeleteBlockedBy(
-          pathInfo: pathInfo,
-          source: widget.source,
-          recordIds: [widget.recordId],
-          claims: ref.watch(longReadRegistryProvider).values,
-        ) !=
-        null;
+              pathInfo: pathInfo,
+              source: widget.source,
+              recordIds: [widget.recordId],
+              claims: ref.watch(longReadRegistryProvider).values,
+            ) !=
+            null;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
       child: CardDialog(

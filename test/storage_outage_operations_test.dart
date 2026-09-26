@@ -12,7 +12,7 @@
 //
 // The failure this is written against is not a wrong answer but an unhandled
 // one: `pathInfoProvider` is `pathInfoLoader.value!`, so *reading* it during an
-// outage throws a `TypeError`, and `deleteStorageEntry` catches only the two
+// outage throws a `TypeError`, and `_deleteStorageEntry` catches only the two
 // lock exceptions. The user got a red screen instead of the repair the view was
 // opened for.
 //
@@ -44,6 +44,7 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 
 import 'support/localization.dart';
+import 'support/storage_delete_claim.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -134,10 +135,10 @@ void main() {
       final container = _container();
       final target = _seedFile('documents/storage/unclassified/scratch.bin', 'x');
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.unclassified),
-        target: target,
+        targets: [target],
       );
 
       expect(report.failed, isEmpty);
@@ -149,10 +150,10 @@ void main() {
       final record = _layout.charaDetailActiveDir / 'record-1';
       _seedFile('documents/storage/chara_detail/active/record-1/record.json', '{}');
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.activeRecords),
-        target: record,
+        targets: [record],
       );
 
       expect(report.failed, isEmpty);
@@ -163,10 +164,10 @@ void main() {
       final container = _container();
       final target = _seedFile('documents/storage/chara_detail/metadata/rating/default.json', '{}');
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.metadata),
-        target: target,
+        targets: [target],
       );
 
       expect(report.failed, isEmpty);

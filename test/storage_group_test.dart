@@ -931,7 +931,7 @@ void main() {
       // The point of the whole change: a stalled journal has to be reachable. The
       // request is built from the declaration, so it does not shrink on the
       // platform where the journals are usually absent.
-      final request = storageGroupDeleteRequest(info, storageGroupOf(StorageGroupId.retired));
+      final request = storageGroupDeleteRequest(info, storageGroupOf(StorageGroupId.retired), onWeb: false);
       expect(request, isA<StorageDeletePathsRequest>());
       expect((request as StorageDeletePathsRequest).targets.map((e) => e.path), [
         info.charaDetailRetiredDir.path,

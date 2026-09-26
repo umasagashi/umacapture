@@ -122,7 +122,7 @@ void main() {
 
     // The import entrance, asked the same question about the same store.
     expect(
-      active.duplicateCharaIdOf(incoming),
+      duplicateCharaIdIn(active.existingRecords(), incoming),
       reAddedId == 'aaa' ? 'bbb' : 'aaa',
       reason: 'a replacement is weighed against every other record, whichever twin the scan lists first',
     );
@@ -154,7 +154,7 @@ void main() {
     // one dropped -- so those tests keep a directory because of the id rule and
     // not because a rejection never drops one.
     final incoming = twinContent('ccc');
-    expect(active.duplicateCharaIdOf(incoming), 'aaa');
+    expect(duplicateCharaIdIn(active.existingRecords(), incoming), 'aaa');
 
     writeRecord(activeDir, incoming); // the recognizer drops the dir before add()
     container.read(charaDetailCaptureStateProvider.notifier).started('ccc');

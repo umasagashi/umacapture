@@ -83,6 +83,18 @@ class _OutageStorage extends CharaDetailRecordStorage {
   }
 }
 
+/// Opens [gate] and waits for [pending] to settle, however the case ended.
+///
+/// The record locks are process-wide and named by record id and by the shared
+/// root, not by the case's temporary directory, so a case that fails while
+/// [pending] is parked on [gate] would otherwise keep them held, and every later
+/// case in this file that takes the same lock would wait until it timed out.
+/// [pending]'s own outcome is the case's to assert; here it only has to end.
+Future<void> _settle(Completer<void> gate, Future<Object?> pending) async {
+  if (!gate.isCompleted) gate.complete();
+  await pending.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() {
@@ -285,10 +297,9 @@ void main() {
   });
 
   group('the claim and the barrier', () {
-    test('a record mutation requested during the merge runs only after it returns', () async {
-      // The real `InProcessNamedLocks`: the frame takes the exclusive root
-      // lock through `runForRoot`, and a per-record delete cannot be granted
-      // inside it.
+    test('a record delete requested during the merge is refused before it removes anything', () async {
+      // The merge's claim covers the store, so the delete's one-turn ask finds it
+      // and turns away: the delete never reaches the lock the merge holds.
       writeRecord(info.charaDetailActiveDir, makeRecord(id: 'older', card: 1));
       writeRecord(info.charaDetailActiveDir, makeRecord(id: 'retired', card: 1));
       writeRecord(info.charaDetailActiveDir, makeRecord(id: 'victim', card: 5));
@@ -304,7 +315,62 @@ void main() {
       await active.deleteAsync('control', effects: recordDeleteEffects(container));
       expect(Directory((info.charaDetailActiveDir / 'control').path).existsSync(), isFalse);
 
+      final park = Completer<void>();
+      var entered = false;
+      final merged = frameOf(container).run(
+        body: (_) async {
+          entered = true;
+          await park.future;
+          return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.merged, needsReload: false);
+        },
+      );
+      addTearDown(() => _settle(park, merged));
+      await waitUntil(() => entered, describe: 'the merge body to be entered');
+
+      await expectLater(
+        active.deleteAsync('victim', effects: recordDeleteEffects(container)),
+        throwsA(isA<LongReadNotStartedException>().having((e) => e.heldBy, 'heldBy', LongReadKind.merge)),
+      );
+      expect(victimDir.existsSync(), isTrue, reason: 'the record was erased under a running merge');
+      expect(active.getBy(id: 'victim'), isNotNull, reason: 'the refused delete dropped the record from the list');
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        isNot(contains(LongReadKind.delete)),
+        reason: 'the refused delete left a claim behind',
+      );
+
+      park.complete();
+      expect((await merged).outcome, EnhancementMergeOutcome.merged);
+      expect(victimDir.existsSync(), isTrue, reason: 'the refused delete ran after the merge after all');
+    });
+
+    test('a record lock requested during the merge is granted only after it returns', () async {
+      // The real `InProcessNamedLocks`: the frame takes the exclusive root lock
+      // through `runForRoot`, and a per-record acquisition cannot be granted
+      // inside it. Asked through the store's own gate, and not through a delete,
+      // because the delete asks the registry first and never reaches the lock
+      // while the merge's claim is on (the case above).
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'older', card: 1));
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'retired', card: 1));
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'victim', card: 5));
+
+      final container = makeContainer();
+      await loadStores(container);
+      final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+      const unannounced = LongReadDeclaration.none(reason: 'the lock alone is what this case measures');
       final events = <String>[];
+
+      // The control, first and with no merge running: the acquisition this case
+      // waits for is one that is granted on its own.
+      await active.recordRecoveryGate.runForRecord(
+        active.rootDirectory.parent.parent,
+        'victim',
+        () async => events.add('control-granted'),
+        declaration: unannounced,
+      );
+      expect(events, ['control-granted']);
+      events.clear();
+
       final park = Completer<void>();
       final merged = frameOf(container).run(
         body: (_) async {
@@ -314,24 +380,26 @@ void main() {
           return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.merged, needsReload: false);
         },
       );
+      addTearDown(() => _settle(park, merged));
       await waitUntil(() => events.contains('body-start'), describe: 'the merge body to be entered');
 
-      final deleted = active
-          .deleteAsync('victim', effects: recordDeleteEffects(container))
-          .then((_) => events.add('delete-done'));
-      // Long enough for the delete to have been granted if anything were going to
+      final granted = active.recordRecoveryGate.runForRecord(
+        active.rootDirectory.parent.parent,
+        'victim',
+        () async => events.add('granted'),
+        declaration: unannounced,
+      );
+      // Long enough for the lock to have been granted if anything were going to
       // grant it: the control above needed less.
       for (var turn = 0; turn < 200; turn++) {
         await Future<void>.delayed(Duration.zero);
       }
-      expect(events, ['body-start'], reason: 'the delete ran while the merge held the root lock');
-      expect(victimDir.existsSync(), isTrue, reason: 'the record was erased under a running merge');
+      expect(events, ['body-start'], reason: 'the record lock was granted while the merge held the root lock');
 
       park.complete();
       expect((await merged).outcome, EnhancementMergeOutcome.merged);
-      await deleted;
-      expect(events, ['body-start', 'body-end', 'delete-done']);
-      expect(victimDir.existsSync(), isFalse, reason: 'the delete never happened, so nothing was being held back');
+      await granted;
+      expect(events, ['body-start', 'body-end', 'granted']);
     });
 
     test('a slot present at the lock is drained, the body is not entered, and the merge does not return '
@@ -366,6 +434,8 @@ void main() {
       gate = Completer<void>();
       final (:body, :entered) = probeBody();
       final first = frameOf(container).run(body: body);
+      final parked = gate;
+      addTearDown(() => _settle(parked, first));
       var firstDone = false;
       unawaited(first.then((_) => firstDone = true));
 

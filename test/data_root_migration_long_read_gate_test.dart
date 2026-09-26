@@ -8,10 +8,10 @@
 //
 // WHY THIS IS NOT ALREADY COVERED BY THE ROOT RECORD SCOPE. `migrate` takes the
 // exclusive root scope before it closes Hive, and a relocation that cannot get it
-// reports `refusedSessionIntact` — which is why the sixth long reader looked at
-// first sight like a surface that could not be hurt. It can. The scope is not
+// reports `refusedSessionIntact` — which is why the relocation looks at first
+// sight like a surface that could not be hurt. It can. The scope is not
 // what a long reader takes: `StorageZipProgress.begin` and
-// `CharaDetailRecordRegenerationController._claimBatch` both claim the registry
+// `CharaDetailRecordRegenerationController.start` both claim the registry
 // directly, with no gate and therefore no lock, so a relocation started while a
 // zip is bundling the active store acquires the scope with nothing in its way.
 // The registry is the only place that collision is written down.
@@ -28,14 +28,16 @@
 // with it), so no second sentence is written and nothing is greyed with no
 // explanation beside it.
 //
+// WHO ASKS. The relocation's own claim, `dataRootRelocationLongReadDeclaration`:
+// it asks the registry in the turn it registers and refuses, so there is no
+// answer computed at the dialog for a reader to arrive after. Every case below
+// hands `migrate` that real declaration over a real registry.
+//
 // WHAT THIS SUITE DOES NOT REACH.
 //  * The dialog's own wiring. `_DataRootMigrationDialog._migrate` is private, so
-//    the step it performs is asserted here against the same controller rather
-//    than through the widget. What it is NOT any more is a copy of that step: the
-//    fold used to be written out again in this file, which is a stand-in that
-//    agrees with the dialog until one of the two gains a term — and one has
-//    (`dataRootRelocationBlockedBy` subtracts a live capture). The function is
-//    named in `storage_settings.dart` and called from both.
+//    that it passes this declaration is not asserted through the widget; the
+//    dialog asks nothing of the registry itself, so there is no second
+//    answer for it to get wrong, only the choice of declaration.
 //  * Web, where `migrate` refuses before any of this on `kIsWeb`.
 //  * A real relocation racing a real zip on disk. The refusal exists so that
 //    timing is unreachable; asserting the damage would be asserting the defect.
@@ -50,7 +52,6 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
-import 'package:umacapture/src/gui/storage_settings.dart';
 
 import 'support/localization.dart';
 
@@ -66,14 +67,42 @@ ProviderContainer _container() {
 
 bool _relocated() => (_target / 'storage' / 'chara_detail' / 'active' / 'rec-1').existsSync();
 
-/// The question `_DataRootMigrationDialog._migrate` asks before it calls
-/// [DataRootMigrationController.migrate].
+/// What one relocation attempt did: its outcome, and whether it reached the root lock.
+typedef _Attempt = ({MigrationOutcome outcome, bool sessionUsable, bool lockEntered});
+
+/// Runs a relocation with the declaration the dialog passes, over [container]'s registry.
 ///
-/// The dialog's own function, not a copy of it. It used to be the fold written out again here,
-/// which agreed with the dialog until the day one of them gained a term the other did not — so the
-/// exclusion below could have been asserted against a stand-in that never had it.
-LongReadKind? _blockedBy(ProviderContainer container, DataRootMigrationController controller) {
-  return dataRootRelocationBlockedBy(controller, container.read(longReadRegistryProvider).values);
+/// The lock refuses rather than running the copy: a relocation past it calls
+/// `StorageBox.markHiveClosed()`, which is one-way for the process. Reaching the lock at all is
+/// the difference these cases measure — a refusal by the claim comes before it, so a refused
+/// attempt never enters.
+Future<_Attempt> _attempt(ProviderContainer container, DataRootMigrationController controller) async {
+  var lockEntered = false;
+  final gate = RecordRecoveryGate(
+    mutationLock: RecordMutationLock((name, mode, action) async {
+      lockEntered = true;
+      throw const RecordMutationLockBusy('record-root', Duration(seconds: 1));
+    }),
+  );
+  final outcome = await controller.migrate(
+    _target,
+    isCapturing: false,
+    declaration: dataRootRelocationLongReadDeclaration(container.read(containerRefProvider), controller),
+    recoveryGate: gate,
+  );
+  return (outcome: outcome, sessionUsable: outcome.sessionUsable, lockEntered: lockEntered);
+}
+
+/// Whether a relocation attempted now is refused by its claim (never reaches the lock).
+Future<bool> _refused(ProviderContainer container, DataRootMigrationController controller) async {
+  final attempt = await _attempt(container, controller);
+  expect(attempt.outcome, MigrationOutcome.refusedSessionIntact, reason: 'both exits here are refusals');
+  expect(
+    container.read(longReadRegistryProvider).values.where((claim) => claim.kind == LongReadKind.relocate),
+    isEmpty,
+    reason: 'a refused or finished attempt must not leave its claim behind',
+  );
+  return !attempt.lockEntered;
 }
 
 void _hold(ProviderContainer container, DirectoryPath directory) {
@@ -106,19 +135,19 @@ void main() {
     if (_tempRoot.existsSync()) _tempRoot.deleteSync(recursive: true);
   });
 
-  group('what the dialog asks before it starts one', () {
-    test('a zip anywhere under a moved tree answers, and one outside them does not', () {
+  group('what the relocation\'s claim asks before it starts one', () {
+    test('a zip anywhere under a moved tree refuses it, and one outside them does not', () async {
       final container = _container();
       final controller = DataRootMigrationController(source: _source);
 
-      // The control first: with nothing registered the question answers null, so
-      // a "held" reading below cannot come from a predicate that always fires.
-      expect(_blockedBy(container, controller), isNull);
+      // The control first: with nothing registered the attempt reaches the lock,
+      // so a refusal below cannot come from a claim that always refuses.
+      expect(await _refused(container, controller), isFalse);
 
       _hold(container, _source.charaDetailActiveDir / 'rec-1');
       expect(
-        _blockedBy(container, controller),
-        LongReadKind.zip,
+        await _refused(container, controller),
+        isTrue,
         reason: 'a record inside `storage/` is inside a tree the relocation renames away',
       );
       container.read(storageZipProgressProvider.notifier).finish();
@@ -127,10 +156,10 @@ void main() {
       // is where a zip is *written*, and nothing about writing one there should
       // stop a relocation.
       _hold(container, _source.downloadDir);
-      expect(_blockedBy(container, controller), isNull);
+      expect(await _refused(container, controller), isFalse);
     });
 
-    test('a live capture is stopped rather than refused for, so it alone does not answer', () {
+    test('a live capture is stopped rather than refused for, so it alone does not refuse', () async {
       // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *a relocation started while the user
       // is capturing is turned away with 「他の処理がレコードを使用中」 instead of stopping the
       // capture and going ahead.*
@@ -140,7 +169,8 @@ void main() {
       // during a capture. `migrate` already takes `isCapturing` and `stopCapture` — its doc states
       // that the flag is there so the capture can be stopped and not so the relocation can be
       // refused — and this exclusion is what keeps that decision intact now that the same fact is
-      // also on the registry.
+      // also on the registry. The exclusion is data the declaration carries
+      // (`disregarding`), so this case builds the real declaration.
       final container = _container();
       final controller = DataRootMigrationController(source: _source);
       final registry = container.read(longReadRegistryProvider.notifier);
@@ -149,20 +179,22 @@ void main() {
         kind: LongReadKind.liveCapture,
         paths: [_source.charaDetailActiveDir],
       );
-      expect(_blockedBy(container, controller), isNull, reason: 'a live capture is this seam\'s to stop');
+      expect(await _refused(container, controller), isFalse, reason: 'a live capture is this seam\'s to stop');
 
-      // The control, over the very same path: any other kind holding it still refuses, so the null
-      // above comes from the kind and not from a fold that stopped seeing the tree.
+      // The control, over the very same path: any other kind holding it still refuses, so the pass
+      // above comes from the kind and not from a claim that stopped seeing the tree.
       final other = registry.claimUntilReleased(kind: LongReadKind.zip, paths: [_source.charaDetailActiveDir]);
-      expect(_blockedBy(container, controller), LongReadKind.zip);
+      expect(await _refused(container, controller), isTrue);
 
+      // And once that holder lets go, the relocation is allowed again: the refusal is the holder's,
+      // not a state the attempt left behind.
       registry.release(other);
-      expect(_blockedBy(container, controller), isNull);
+      expect(await _refused(container, controller), isFalse);
       registry.release(capture);
     });
 
     test('the trees asked about are the ones the copy moves, not a second list', () {
-      // The claim, the copy and this question all read `movedRoots`; a fourth
+      // The claim (which is also the question) and the copy both read `movedRoots`; a fourth
       // tree added to the migration therefore moves all three at once. Asserted
       // as an identity rather than by re-listing the three, because re-listing
       // them here is precisely the failure this arrangement exists to prevent.
@@ -173,58 +205,42 @@ void main() {
   });
 
   group('the refusal itself', () {
-    test('a relocation told a long reader holds a tree moves nothing and never reaches the lock', () async {
-      var lockEntered = false;
-      final gate = RecordRecoveryGate(
-        mutationLock: RecordMutationLock((name, mode, action) async {
-          lockEntered = true;
-          return await action();
-        }),
-      );
+    test('a relocation refused by its claim moves nothing and never reaches the lock', () async {
+      final container = _container();
+      final controller = DataRootMigrationController(source: _source);
+      _hold(container, _source.charaDetailActiveDir / 'rec-1');
 
-      final outcome = await DataRootMigrationController(source: _source).migrate(
-        _target,
-        isCapturing: false,
-        blockedBy: LongReadKind.zip,
-        declaration: const LongReadDeclaration.none(reason: 'the refusal is what this case observes'),
-        recoveryGate: gate,
-      );
+      final attempt = await _attempt(container, controller);
 
-      expect(outcome, MigrationOutcome.refusedSessionIntact);
+      expect(attempt.outcome, MigrationOutcome.refusedSessionIntact);
       expect(
-        outcome.sessionUsable,
+        attempt.sessionUsable,
         isTrue,
         reason: 'nothing was closed, so the dialog must offer the way back rather than quit/restart',
       );
-      expect(lockEntered, isFalse, reason: 'the refusal has to come before the wait, or it saves the user nothing');
+      expect(
+        attempt.lockEntered,
+        isFalse,
+        reason: 'the refusal has to come before the wait, or it saves the user nothing',
+      );
       expect(_relocated(), isFalse);
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        [LongReadKind.zip],
+        reason: 'a refused claim registers nothing of its own',
+      );
     });
 
-    test('the same arrangement with nothing held goes through, so the refusal is what stopped it', () async {
+    test('the same arrangement with nothing held reaches the lock, so the refusal is what stopped it', () async {
       // The control the case above cannot be. Same gate, same target, same
-      // directories on disk; only the answer to "is anything holding it" differs.
-      var lockEntered = false;
-      final gate = RecordRecoveryGate(
-        mutationLock: RecordMutationLock((name, mode, action) async {
-          lockEntered = true;
-          return await action();
-        }),
-      );
+      // directories on disk; only whether anything is holding them differs.
+      final attempt = await _attempt(_container(), DataRootMigrationController(source: _source));
 
-      // Deliberately stopped at the lock rather than run to completion: a
-      // relocation that gets past it calls `StorageBox.markHiveClosed()`, which is
-      // one-way for the process. Reaching the lock at all is the whole difference
-      // being measured.
-      final outcome = DataRootMigrationController(source: _source).migrate(
-        _target,
-        isCapturing: false,
-        blockedBy: null,
-        declaration: const LongReadDeclaration.none(reason: 'the claim is asserted by its own suite'),
-        recoveryGate: gate,
+      expect(
+        attempt.lockEntered,
+        isTrue,
+        reason: 'the claim refuses every relocation, so the case above proves nothing',
       );
-      await outcome.timeout(const Duration(seconds: 30), onTimeout: () => MigrationOutcome.failedAfterClose);
-
-      expect(lockEntered, isTrue, reason: 'the arrangement refuses every relocation, so the case above proves nothing');
     });
   });
 

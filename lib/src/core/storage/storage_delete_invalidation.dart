@@ -294,7 +294,8 @@ void invalidateAfterStorageDelete(
 /// screen stale in exactly the case the user is most likely to look at it twice.
 ///
 /// An empty [touched] clears the cache instead of dropping nothing. That is the
-/// settings delete, whose request names no path at all yet removes the
+/// settings delete, whose request names no file it removes — only the directory
+/// the stores live in, for its claim, and none on web — yet which removes the
 /// files Windows sizes that group by; "no paths" must not read as "nothing
 /// changed".
 ///

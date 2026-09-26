@@ -19,6 +19,10 @@ import '/src/core/path_entity.dart';
 
 sealed class StorageDeleteRequest {
   const StorageDeleteRequest();
+
+  /// What a delete of this request claims in the long-read registry, and what the
+  /// view asks the registry about before offering it: one derivation for both.
+  List<PathEntity> get longReadPaths;
 }
 
 /// Removes filesystem entries, under the exclusion their group declares.
@@ -29,13 +33,26 @@ class StorageDeletePathsRequest extends StorageDeleteRequest {
   /// "no delete" and "a delete that removes nothing" cannot be spelled the same
   /// way.
   final List<PathEntity> targets;
+
+  @override
+  List<PathEntity> get longReadPaths => targets;
 }
 
 /// Removes every settings store.
 ///
-/// Carries no field: the stores are enumerated from [StorageBoxKey] at the point
-/// of deletion (`settings_store_delete.dart`), and a list captured here would be
-/// a second enumeration to keep in step with the first.
+/// Carries where the stores live and not which stores there are: the stores are
+/// enumerated from [StorageBoxKey] at the point of deletion
+/// (`settings_store_delete.dart`), and a list of them captured here would be a
+/// second enumeration. [storeDirectories] is what the delete claims and what the
+/// view asks about before offering it, so the two cannot disagree.
 class StorageDeleteSettingsRequest extends StorageDeleteRequest {
-  const StorageDeleteSettingsRequest();
+  const StorageDeleteSettingsRequest({required this.storeDirectories});
+
+  /// The directories the settings stores live in, as far as this platform puts
+  /// them in any: `settings/` on Windows, nothing on web (see
+  /// `settingsStoreDirectories`).
+  final List<DirectoryPath> storeDirectories;
+
+  @override
+  List<PathEntity> get longReadPaths => storeDirectories;
 }

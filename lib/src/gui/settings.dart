@@ -814,10 +814,11 @@ enum ResolveInheritanceBlocker {
 
   /// A registered long reader is holding the record store this resolution reads and writes back.
   ///
-  /// **This is the direction the tile was blind to.** `resolveAllInheritance` announces itself
-  /// (`LongReadKind.inherit` over the record store root), so every *other* surface was already
-  /// withheld while a resolution ran — but the tile itself asked nothing, and a resolution could be
-  /// started on top of a zip, an export, a scan or a module relocation that had the same tree open.
+  /// **This is the direction the tile has to ask about itself.** `resolveAllInheritance` announces
+  /// itself (`LongReadKind.inherit` over the record store root), so every *other* surface is withheld
+  /// while a resolution runs — but that announcement does not withhold the tile, and without this a
+  /// resolution could be started on top of a zip, an export, a scan or a module relocation that had
+  /// the same tree open.
   /// Named last on purpose; see [resolveInheritanceBlockerOf].
   longRead,
 }
@@ -826,9 +827,9 @@ enum ResolveInheritanceBlocker {
 ///
 /// **[longRead] is last, for the reason [resolveRegenerateAllBlocker] states.** A resolution that is
 /// running holds a claim of its own over the whole record store, so [resolving] and a non-null
-/// [heldBy] are true together for the whole of the most common case — and there 「再解決の実行中です」
-/// is both true and specific, while the long reader's sentence would answer "why?" with 「他の処理」
-/// about the user's own resolution.
+/// [heldBy] are true together for the whole of the most common case — and there the `resolving` sentence
+/// is both true and specific, while the long reader's sentence ([longReadBusyKey]) would answer "why?"
+/// with "another operation" about the user's own resolution.
 @visibleForTesting
 ResolveInheritanceBlocker? resolveInheritanceBlockerOf({required bool resolving, required LongReadKind? heldBy}) {
   if (resolving) {
@@ -848,8 +849,8 @@ ResolveInheritanceBlocker? resolveInheritanceBlockerOf({required bool resolving,
 @visibleForTesting
 String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch (blocker) {
   ResolveInheritanceBlocker.resolving => "$tr_settings.about.resolve_inheritance.blocked.resolving",
-  // Not a sentence of this control's own: the one refusal every long reader produces is worded
-  // once, in `long_read_registry.dart`, so this arm cost no new string.
+  // Not a sentence of this control's own: every long reader refuses with the one sentence
+  // `long_read_registry.dart` words, and this arm names that same key.
   ResolveInheritanceBlocker.longRead => longReadBusyKey,
 };
 
@@ -903,7 +904,7 @@ class ResolveInheritanceTile extends ConsumerWidget {
   /// child's parent slot ambiguous, so resolving first would leave exactly the links the merges
   /// were about to make resolvable. The blocker is re-evaluated when the list is confirmed for the same
   /// reason: by then the store may be held by a merge's own reload barrier. That re-evaluation chooses
-  /// the sentence (「再解決の実行中です」 before the long reader's); it is not what keeps a whole-store
+  /// the sentence (the `resolving` sentence before the long reader's); it is not what keeps a whole-store
   /// rewrite off a held store. The resolution asks the registry itself in the turn it claims and
   /// refuses there, which covers this path and the direct one alike.
   void _run(WidgetRef ref) {
@@ -1086,10 +1087,9 @@ enum RegenerateAllBlocker {
 
   /// A registered long reader is holding the active store this batch would rewrite.
   ///
-  /// The tile stopped a batch of this kind before it explained one:
   /// `CharaDetailRecordRegenerationController.start` — the funnel all five regeneration entry
-  /// points share — refuses while a long reader holds the records, so the tap did nothing and
-  /// said nothing. This is that refusal, given a reason.
+  /// points share — refuses while a long reader holds the records, so without this the tap would
+  /// do nothing and say nothing. This is that refusal, given a reason.
   ///
   /// Named last on purpose; see [resolveRegenerateAllBlocker].
   longRead,

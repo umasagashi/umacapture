@@ -59,13 +59,47 @@ import 'storage_group.dart';
 export 'storage_delete_report.dart';
 export 'storage_exclusion.dart' show StorageDeleteSerializer, storageDeleteSerializerProvider, storageLockGateProvider;
 
+/// Proof that the caller is inside a delete's claim.
+///
+/// Only [holdForDelete] makes one (the constructor is private to this library),
+/// so a delete that has not asked the registry has no value to pass and does
+/// not compile. It carries nothing else: that the claim names exactly what is
+/// erased is the caller's contract, kept by building both from one request.
+final class StorageDeleteClaim {
+  StorageDeleteClaim._();
+}
+
+/// Runs [action] as a delete of [paths], if nothing is holding any of them.
+///
+/// **Asking and claiming are one step, and this is the only place a delete takes
+/// either.** [LongReadRegistry.holdWhenFree] with [LongReadContention.refuse]: a
+/// path something already holds throws [LongReadNotStartedException] before
+/// [action] is called, and otherwise [LongReadKind.delete] is registered over
+/// [paths] before this returns its future, so a writer asking after that finds
+/// it. The claim is released however [action] ends.
+///
+/// [action] receives the [StorageDeleteClaim] an erase requires.
+Future<T> holdForDelete<T>(
+  LongReadRegistry registry, {
+  required List<PathEntity> paths,
+  required Future<T> Function(StorageDeleteClaim claim) action,
+}) {
+  return registry.holdWhenFree(
+    kind: LongReadKind.delete,
+    paths: paths,
+    // A delete has a person in front of it, so it never parks: see [LongReadContention].
+    contention: LongReadContention.refuse,
+    action: (_) => action(StorageDeleteClaim._()),
+  );
+}
+
 /// Deletes [target], which must belong to [group], under that group's exclusion.
 ///
 /// Never throws for a filesystem or lock failure: every one of those is a state
 /// the user has to be told about, so it comes back in the report. An
 /// [ArgumentError] from the plan does propagate — that is a caller pairing a path
 /// with the wrong group, which is a defect and not a delete outcome.
-Future<StorageDeleteReport> deleteStorageEntry(
+Future<StorageDeleteReport> _deleteStorageEntry(
   RefBase ref, {
   required StorageGroup group,
   required PathEntity target,
@@ -77,12 +111,12 @@ Future<StorageDeleteReport> deleteStorageEntry(
       group: group,
       target: target,
       intent: StorageExclusionIntent.mutate,
-      // The destructive side of the whole arrangement: this is the operation the
-      // registry withholds while somebody else holds the paths, and it is the
-      // one caller that must never announce a claim of its own — the menu entry it
-      // was pressed from reads the same registry.
+      // Announced once, above this seam: runStorageDelete took the delete's claim
+      // over the whole request before the first target reached here, and asking
+      // again for one target would find that claim and refuse this delete with its
+      // own registration.
       declaration: const LongReadDeclaration.none(
-        reason: 'a delete is the destructive side the registry withholds, not a long read that withholds anything',
+        reason: 'claimed once above this seam, by runStorageDelete over the whole request',
       ),
       // **The set is taken before whole-store recovery runs, not after.** The
       // exclusion is already held here, so nothing of ours can add to the
@@ -127,14 +161,24 @@ Future<StorageDeleteReport> deleteStorageEntry(
 /// separate records must not hold every record's lock for the whole batch — and
 /// the counts are added up once, in [StorageDeleteReport.merge], so the figure
 /// the user is shown does not depend on which caller assembled it.
+///
+/// **Runs only inside a delete's claim over [targets]**, which [claim] is the
+/// proof of: the caller took it through [holdForDelete] over the whole request,
+/// before any target was touched, so a request any part of which another job is
+/// holding never reaches here. This function asks nothing of the registry
+/// itself.
+///
+/// An [ArgumentError] from a target's plan propagates: a target paired with the
+/// wrong group is a defect in the caller and not a delete outcome.
 Future<StorageDeleteReport> deleteStorageEntries(
   RefBase ref, {
+  required StorageDeleteClaim claim,
   required StorageGroup group,
   required List<PathEntity> targets,
 }) async {
   final reports = <StorageDeleteReport>[];
   for (final target in targets) {
-    reports.add(await deleteStorageEntry(ref, group: group, target: target));
+    reports.add(await _deleteStorageEntry(ref, group: group, target: target));
   }
   return StorageDeleteReport.merge(reports);
 }

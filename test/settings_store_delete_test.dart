@@ -32,11 +32,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
 import 'package:umacapture/src/core/storage/settings_boxes.dart';
-import 'package:umacapture/src/core/storage/settings_store_delete.dart';
 import 'package:umacapture/src/core/storage/storage_delete_report.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
+import 'support/storage_delete_claim.dart';
 
 /// Every file the eight stores occupy on a native filesystem.
 List<File> _storeFiles(Directory dir) => [
@@ -55,7 +55,7 @@ void main() {
     // touches anything. A synthetic cause, deliberately: what is being asserted
     // is that one store's refusal neither aborts the other seven nor arrives as
     // an exception the UI would have to interpret.
-    final report = await deleteSettingsStores();
+    final report = await deleteSettingsStoresUnderClaim();
 
     expect(report.deletedCount, 0);
     // Named as stores rather than as paths, and each carrying the translation key
@@ -83,7 +83,7 @@ void main() {
       expect(file.existsSync(), isTrue, reason: 'ensureOpened must have created ${p.basename(file.path)}');
     }
 
-    final report = await deleteSettingsStores();
+    final report = await deleteSettingsStoresUnderClaim();
 
     // Counted by the machine on both sides: the report names exactly the stores
     // the enum declares, so a ninth key would have to be deleted for this to pass.

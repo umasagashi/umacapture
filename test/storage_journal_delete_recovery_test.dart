@@ -38,6 +38,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/storage_delete_claim.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -158,16 +159,16 @@ List<String> _bytesNamed(String needle) => _filesUnder(
 ).where((path) => File(path).readAsStringSync().contains(needle)).toList();
 
 /// The whole retired group, exactly as the view's group row asks for it.
-Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteStorageEntries(
+Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteUnderClaim(
   container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.retired),
   targets: _groupOf(StorageGroupId.retired).resolve(_layout),
 );
 
-Future<StorageDeleteReport> _deleteQuarantine(ProviderContainer container) => deleteStorageEntry(
+Future<StorageDeleteReport> _deleteQuarantine(ProviderContainer container) => deleteUnderClaim(
   container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.quarantine),
-  target: _layout.charaDetailQuarantineDir,
+  targets: [_layout.charaDetailQuarantineDir],
 );
 
 /// How many times the archive journal's recovery was driven.
@@ -227,10 +228,10 @@ ProviderContainer _container(JournalRootStorageMaintenance maintenance) {
 }
 
 Future<StorageDeleteReport> _deleteJournal(ProviderContainer container) {
-  return deleteStorageEntry(
+  return deleteUnderClaim(
     container.read(containerRefProvider),
     group: _groupOf(StorageGroupId.retired),
-    target: _layout.charaDetailWriteTransactionDir,
+    targets: [_layout.charaDetailWriteTransactionDir],
   );
 }
 
@@ -239,10 +240,10 @@ Future<StorageDeleteReport> _deleteJournal(ProviderContainer container) {
 /// carries its group's delete, so a user who expands `v1/` can point at a single
 /// slot directory — or, expanding once more, at something inside one.
 Future<StorageDeleteReport> _deleteRetiredTarget(ProviderContainer container, PathEntity target) {
-  return deleteStorageEntry(
+  return deleteUnderClaim(
     container.read(containerRefProvider),
     group: _groupOf(StorageGroupId.retired),
-    target: target,
+    targets: [target],
   );
 }
 
@@ -321,10 +322,10 @@ void main() {
     _writeParkedSlotMidResume();
     _quarantineDir().createSync(recursive: true);
 
-    final report = await deleteStorageEntry(
+    final report = await deleteUnderClaim(
       _container(maintenance).read(containerRefProvider),
       group: _groupOf(StorageGroupId.quarantine),
-      target: _layout.charaDetailQuarantineDir,
+      targets: [_layout.charaDetailQuarantineDir],
     );
 
     expect(report.failed, isEmpty);

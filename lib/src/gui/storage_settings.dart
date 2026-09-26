@@ -11,8 +11,6 @@ import '/src/core/data_root_migration.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
-import '/src/core/storage/long_read_registry.dart';
-import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/storage_tree.dart';
@@ -28,34 +26,6 @@ const tr_storage = "pages.settings.storage";
 /// mutually dependent for the sake of one prefix.
 // ignore: constant_identifier_names
 const tr_settings_system = "pages.settings.system";
-
-/// Which registered long reader, if any, refuses a relocation driven by [controller].
-///
-/// **A function and not an expression at the call site, because a suite has to be able to ask the
-/// question the dialog asks.** `_DataRootMigrationDialog._migrate` is private, so the long-read
-/// gate used to be asserted against a copy of this fold written in the test — which agrees with the
-/// dialog exactly until one of them changes, and one of them just did.
-///
-/// Asked over [DataRootMigrationController.movedRoots] — the controller's own enumeration of what
-/// the copy moves, which the relocation's claim also reads — so the question and the claim cannot
-/// name different sets, and through the app's single containment predicate rather than a comparison
-/// written here.
-///
-/// **[LongReadKind.liveCapture] is subtracted, and it is the only kind that is.** A running session
-/// announces itself over the record store, which `movedRoots` contains, so asked plainly this fold
-/// would refuse every relocation attempted while the user is capturing. That is not this seam's
-/// rule: a relocation *stops* a capture rather than refusing for one — `DataRootMigrationController.migrate`
-/// takes `isCapturing` and `stopCapture` for exactly that, and its doc says the flag is there so the
-/// capture can be stopped and not so the relocation can be refused. The subtraction lives here,
-/// beside the caller that passes those two arguments, rather than inside `migrate`, whose rule stays
-/// the simple one it was: a holder is a refusal.
-@visibleForTesting
-LongReadKind? dataRootRelocationBlockedBy(DataRootMigrationController controller, Iterable<LongReadClaim> claims) {
-  return storageDeleteBlockedBy(
-    StorageDeletePathsRequest(controller.movedRoots),
-    claims.where((claim) => claim.kind != LongReadKind.liveCapture),
-  );
-}
 
 /// A single settings row, meant to live inside the System settings card, that
 /// shows where the app currently keeps its data (records/images, recognition
@@ -428,8 +398,10 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   /// Whether the finished attempt left this session usable.
   ///
   /// True for the clear-override path (it never closes Hive) and for a
-  /// migration refused before the close — the root record scope being held by a
-  /// startup scan, which moves nothing and is over as soon as the scan is. False
+  /// migration refused before the close — a registered long reader holding a
+  /// tree it would move, the root record scope being held (by a startup scan,
+  /// for one), or web, where there is no data root to move. None of these
+  /// moves anything. False
   /// once Hive has been closed, where quit and restart are the only safe exits.
   bool _sessionUsable = false;
 
@@ -504,15 +476,12 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
     final outcome = await _controller.migrate(
       _targetRoot,
       isCapturing: ref.read(capturingStateProvider),
-      // Read here and passed by value, like `isCapturing` and for the same
-      // reason. Asked over `movedRoots` — the controller's own enumeration of
-      // what the copy moves — so the question and the claim cannot name
-      // different sets, and through the app's single containment predicate
-      // rather than a comparison written here.
-      blockedBy: dataRootRelocationBlockedBy(_controller, ref.read(longReadRegistryProvider).values),
       // Built off the container-scoped ref for the same reason `stopCapture` is:
       // the claim is registered inside `migrate`, after this dialog could have
-      // gone away, so a `WidgetRef` read there would throw.
+      // gone away, so a `WidgetRef` read there would throw. It is also what asks
+      // whether a long reader holds a moved tree — in the turn it registers, so
+      // this dialog asks nothing of the registry itself; a holder comes back as
+      // the refused outcome this dialog already renders.
       declaration: dataRootRelocationLongReadDeclaration(base, _controller),
       stopCapture: () async => base.read(platformControllerProvider)?.stopCapture(),
     );

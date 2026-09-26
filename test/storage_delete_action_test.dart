@@ -145,7 +145,7 @@ List<String>? _pathsOf(StorageDeleteRequest? request) {
   return request is StorageDeletePathsRequest ? [for (final target in request.targets) target.path] : null;
 }
 
-List<String>? _requestedPaths(StorageGroup group) => _pathsOf(storageGroupDeleteRequest(_layout, group));
+List<String>? _requestedPaths(StorageGroup group) => _pathsOf(storageGroupDeleteRequest(_layout, group, onWeb: false));
 
 ProviderContainer _container({StorageDeleteReport? storeOutcome, Future<void>? storeGate}) {
   final container = ProviderContainer(
@@ -169,7 +169,7 @@ ProviderContainer _container({StorageDeleteReport? storeOutcome, Future<void>? s
       // instead of racing a clock the fake one does not advance. Every other test
       // here passes none and keeps the microtask it was written against.
       if (storeOutcome case final outcome?)
-        settingsStoreDeleteProvider.overrideWithValue(() async {
+        settingsStoreDeleteProvider.overrideWithValue((_) async {
           await storeGate;
           return outcome;
         }),
@@ -268,7 +268,7 @@ Future<_HeldDelete> _startHeldSettingsDelete(WidgetTester tester) async {
     container.read(containerRefProvider),
     (_) => StorageDeleteConfirmDialog(
       group: _groupOf(StorageGroupId.settings),
-      request: const StorageDeleteSettingsRequest(),
+      request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
       subject: 'settings',
     ),
     over: true,
@@ -406,7 +406,7 @@ void main() {
             // exercised as the view actually builds it rather than through a path
             // request it would never be given.
             request:
-                storageGroupDeleteRequest(_layout, group) ??
+                storageGroupDeleteRequest(_layout, group, onWeb: false) ??
                 StorageDeletePathsRequest([FilePath('${_tempRoot.path}/nothing.bin')]),
             subject: 'nothing.bin',
           ),
@@ -654,7 +654,7 @@ void main() {
         container.read(containerRefProvider),
         effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.settings),
-        request: const StorageDeleteSettingsRequest(),
+        request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
       );
       // The toast travels through a stream provider, so the listener runs a turn
       // later than the delete returns.
@@ -876,13 +876,17 @@ void main() {
         // Offers no delete at all.
         StorageGroupId.dataRootConfig,
       ]) {
-        expect(storageGroupDeleteRequest(_layout, _groupOf(id)), isNull, reason: '\${id.name} asked for a delete');
+        expect(
+          storageGroupDeleteRequest(_layout, _groupOf(id), onWeb: false),
+          isNull,
+          reason: '\${id.name} asked for a delete',
+        );
       }
     });
 
     test('the settings group asks for its stores, never for the path it also names', () {
       final group = _groupOf(StorageGroupId.settings);
-      expect(storageGroupDeleteRequest(_layout, group), isA<StorageDeleteSettingsRequest>());
+      expect(storageGroupDeleteRequest(_layout, group, onWeb: false), isA<StorageDeleteSettingsRequest>());
       // The hazard the ordering inside `storageGroupDeleteRequest` exists for.
       // The group *does* resolve to `settings/` — Windows sizes it by that
       // directory — so a resolver that fell through to the path branch would ask
@@ -1085,7 +1089,7 @@ void main() {
         container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1164,7 +1168,7 @@ void main() {
         container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1225,7 +1229,7 @@ void main() {
         container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1371,7 +1375,7 @@ void main() {
     });
 
     // **NOT HERE: the guard's narrowness.** `_confirm` rethrows `ArgumentError`
-    // rather than announcing it, because `deleteStorageEntry` states that a path
+    // rather than announcing it, because `deleteStorageEntries` states that a path
     // paired with the wrong group is a defect and not a delete outcome. That
     // cannot be asserted from this suite: the button drops `_confirm`'s future,
     // so the rethrow reaches the zone, and `flutter_test` reports a dropped-future

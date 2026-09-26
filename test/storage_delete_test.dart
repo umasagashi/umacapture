@@ -35,7 +35,7 @@ import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/long_read_declarations.dart';
-import 'support/web_like_fs_backend.dart';
+import 'support/storage_delete_claim.dart';
 
 /// The lock name `RecordMutationLock` builds for a record id, spelled here so a
 /// test can assert on the name rather than on the call that produced it.
@@ -69,32 +69,6 @@ class _RecordingLocks {
   }
 }
 
-/// Delegates to the io backend but refuses [refuse] paths, and pauses on
-/// [pauseOn] until the returned completer is completed.
-///
-/// This is how a held file is produced deterministically: actually holding one
-/// open depends on the operating system's sharing rules, which differ between the
-/// two platforms this engine has to work on, so the refusal is injected at the
-/// boundary the engine talks to instead.
-class _ObstructedFsBackend extends WebLikeFsBackend {
-  _ObstructedFsBackend(super.inner, {this.refuse, this.pauseOn, this.gate});
-
-  final bool Function(String path)? refuse;
-  final bool Function(String path)? pauseOn;
-  final Future<void>? gate;
-
-  @override
-  Future<void> delete(String path, {bool recursive = false}) async {
-    if (pauseOn?.call(path) ?? false) {
-      await gate;
-    }
-    if (refuse?.call(path) ?? false) {
-      throw FileSystemException('The process cannot access the file because it is being used', path);
-    }
-    return super.delete(path, recursive: recursive);
-  }
-}
-
 /// Records the path of every **recursive** delete the engine issues.
 ///
 /// The read-only fallback works by re-issuing the refused delete recursively, and
@@ -102,7 +76,7 @@ class _ObstructedFsBackend extends WebLikeFsBackend {
 /// recursive call on a directory would remove entries the report never named.
 /// That is a property of the call, not of the outcome, so it is observed here at
 /// the backend boundary rather than inferred from what survived.
-class _RecursionWatchingFsBackend extends _ObstructedFsBackend {
+class _RecursionWatchingFsBackend extends ObstructedFsBackend {
   _RecursionWatchingFsBackend(super.inner, {super.refuse});
 
   final recursiveRoots = <String>[];
@@ -177,13 +151,13 @@ void main() {
     test('an active record takes the shared root and then its own record name', () async {
       seed(['documents/storage/chara_detail/active/rec-1/record.json']);
       final locks = _RecordingLocks();
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final container = containerWith(locks);
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.isComplete, isTrue);
@@ -198,13 +172,13 @@ void main() {
         final dir = 'documents/storage/chara_detail/${entry.value}/2026-08-29-broken_1';
         seed(['$dir/record.json']);
         final locks = _RecordingLocks();
-        fsBackend = _ObstructedFsBackend(realBackend);
+        fsBackend = ObstructedFsBackend(realBackend);
         final container = containerWith(locks);
 
-        final report = await deleteStorageEntry(
+        final report = await deleteUnderClaim(
           container.read(containerRefProvider),
           group: groupOf(entry.key),
-          target: DirectoryPath('${tempRoot.path}/$dir'),
+          targets: [DirectoryPath('${tempRoot.path}/$dir')],
         );
 
         expect(report.isComplete, isTrue);
@@ -220,7 +194,7 @@ void main() {
     test('metadata takes the exclusive root and, inside it, goes through the serialiser', () async {
       seed(['documents/storage/chara_detail/metadata/rating/main.json']);
       final locks = _RecordingLocks();
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final serialised = <String>[];
       final acquiredBeforeSerialising = <List<_Acquisition>>[];
       final container = containerWith(
@@ -233,10 +207,10 @@ void main() {
       );
 
       final target = layout.charaDetailRatingDir.filePath('main.json');
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
-        target: target,
+        targets: [target],
       );
 
       expect(report.deletedPaths, [target.path]);
@@ -253,7 +227,7 @@ void main() {
       test('a metadata delete of $file waits for a root holder and runs only after it lets go', () async {
         seed(['documents/storage/chara_detail/metadata/$file']);
         final locks = _RecordingLocks();
-        fsBackend = _ObstructedFsBackend(realBackend);
+        fsBackend = ObstructedFsBackend(realBackend);
         final serialised = <String>[];
         final container = containerWith(
           locks,
@@ -275,10 +249,10 @@ void main() {
 
         final target = FilePath('${layout.charaDetailMetadataDir.path}/$file');
         var finished = false;
-        final pending = deleteStorageEntry(
+        final pending = deleteUnderClaim(
           container.read(containerRefProvider),
           group: groupOf(StorageGroupId.metadata),
-          target: target,
+          targets: [target],
         ).whenComplete(() => finished = true);
         await pumpEventQueue();
 
@@ -297,7 +271,7 @@ void main() {
     test('a metadata delete whose root lock never comes free removes nothing and says so', () async {
       seed(['documents/storage/chara_detail/metadata/enhancement_dismissed.json']);
       final locks = _RecordingLocks(refuse: (name) => name == _rootLockName);
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final serialised = <String>[];
       final container = containerWith(
         locks,
@@ -308,10 +282,10 @@ void main() {
       );
 
       final target = layout.charaDetailEnhancementDismissedFile;
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
-        target: target,
+        targets: [target],
       );
 
       expect(report.deletedPaths, isEmpty);
@@ -323,7 +297,7 @@ void main() {
     test('a group that is not a record store takes nothing and is not serialised', () async {
       seed(['support/modules/version_info.json']);
       final locks = _RecordingLocks();
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final serialised = <String>[];
       final container = containerWith(
         locks,
@@ -333,10 +307,10 @@ void main() {
         },
       );
 
-      await deleteStorageEntry(
+      await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.modules),
-        target: layout.modulesDir,
+        targets: [layout.modulesDir],
       );
 
       expect(locks.acquired, isEmpty);
@@ -350,16 +324,16 @@ void main() {
     ({Future<StorageDeleteReport> delete, Completer<void> release, _RecordingLocks locks}) parkedDelete(String id) {
       final release = Completer<void>();
       final locks = _RecordingLocks();
-      fsBackend = _ObstructedFsBackend(
+      fsBackend = ObstructedFsBackend(
         realBackend,
         pauseOn: (path) => path.endsWith('record.json'),
         gate: release.future,
       );
       final container = containerWith(locks);
-      final delete = deleteStorageEntry(
+      final delete = deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir(id),
+        targets: [activeDir(id)],
       );
       return (delete: delete, release: release, locks: locks);
     }
@@ -415,13 +389,13 @@ void main() {
         'documents/storage/chara_detail/active/rec-1/b.png',
         'documents/storage/chara_detail/active/rec-1/record.json',
       ]);
-      fsBackend = _ObstructedFsBackend(realBackend, refuse: (path) => path.endsWith('b.png'));
+      fsBackend = ObstructedFsBackend(realBackend, refuse: (path) => path.endsWith('b.png'));
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.isPartial, isTrue);
@@ -450,13 +424,13 @@ void main() {
         'documents/storage/chara_detail/active/rec-1/a.png',
         'documents/storage/chara_detail/active/rec-1/nested/b.png',
       ]);
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.isComplete, isTrue);
@@ -469,14 +443,14 @@ void main() {
 
     test('a lock that never frees is reported, not thrown (the web 150 s budget)', () async {
       seed(['documents/storage/chara_detail/active/rec-1/record.json']);
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final locks = _RecordingLocks(refuse: (name) => name == _recordLockName('rec-1'));
       final container = containerWith(locks);
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.deletedPaths, isEmpty);
@@ -488,7 +462,7 @@ void main() {
 
     test('a build with no exclusion primitive refuses before touching anything', () async {
       seed(['documents/storage/chara_detail/active/rec-1/record.json']);
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final container = ProviderContainer(
         overrides: [
           pathInfoProvider.overrideWithValue(layout),
@@ -500,10 +474,10 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.failed.single.reason, StorageDeleteFailureReason.lockUnavailable);
@@ -511,13 +485,13 @@ void main() {
     });
 
     test('a target that is already gone is a success covering nothing', () async {
-      fsBackend = _ObstructedFsBackend(realBackend);
+      fsBackend = ObstructedFsBackend(realBackend);
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-gone'),
+        targets: [activeDir('rec-gone')],
       );
 
       expect(report.isComplete, isTrue);
@@ -538,10 +512,10 @@ void main() {
         'documents/storage/chara_detail/metadata/rating/main.json',
         'documents/storage/chara_detail/metadata/memo/main.json',
       ]);
-      fsBackend = _ObstructedFsBackend(realBackend, refuse: (path) => path.contains('memo'));
+      fsBackend = ObstructedFsBackend(realBackend, refuse: (path) => path.contains('memo'));
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntries(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.metadata),
         targets: [layout.charaDetailRatingDir.filePath('main.json'), layout.charaDetailMemoDir.filePath('main.json')],
@@ -581,10 +555,10 @@ void main() {
       fsBackend = backend;
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       // Before the fallback existed this was a partial report naming `a.png` as a
@@ -611,10 +585,10 @@ void main() {
       fsBackend = backend;
       final container = containerWith(_RecordingLocks());
 
-      final report = await deleteStorageEntry(
+      final report = await deleteUnderClaim(
         container.read(containerRefProvider),
         group: groupOf(StorageGroupId.activeRecords),
-        target: activeDir('rec-1'),
+        targets: [activeDir('rec-1')],
       );
 
       expect(report.isPartial, isTrue);
@@ -636,10 +610,10 @@ void main() {
         fsBackend = backend;
         final container = containerWith(_RecordingLocks());
 
-        final report = await deleteStorageEntry(
+        final report = await deleteUnderClaim(
           container.read(containerRefProvider),
           group: groupOf(StorageGroupId.activeRecords),
-          target: activeDir('rec-1'),
+          targets: [activeDir('rec-1')],
         );
 
         expect(report.isPartial, isTrue);

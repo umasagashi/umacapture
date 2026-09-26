@@ -39,6 +39,7 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
+import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
@@ -87,6 +88,7 @@ List<String> _namesOf(LongReadKind kind) => [
     LongReadKind.videoImport => const ['動画', 'クリップ'],
     LongReadKind.liveCapture => const ['キャプチャ', '録画', '画面'],
     LongReadKind.merge => const ['統合', 'マージ'],
+    LongReadKind.delete => const ['削除'],
   },
 ];
 
@@ -123,13 +125,6 @@ LongReadKind? _holderNamedBy(String sentence) {
 /// parsing what is inside it.
 final RegExp _extensionOnRecordMutationLock = RegExp(r'\bextension\b[^{]*?\bon\s+RecordMutationLock\b\s*\{');
 
-/// The call by which a surface says it is about to delete or extract.
-///
-/// Named once and used by both the scan and its reason, so a rename shows up as
-/// the "found nothing" control failing rather than as a case that keeps passing
-/// about a function that no longer exists.
-const String _blockerCall = 'storageActionBlockerOf';
-
 /// What a surface has to be reading to have asked the other half of the same
 /// question.
 const String _registryRead = 'longReadRegistryProvider';
@@ -164,42 +159,7 @@ bool _isOwnDeclaration(String source, List<int> boundaries, int matchStart) {
   return source.lastIndexOf('\n', matchStart) + 1 == start;
 }
 
-/// Whether any declaration in [source] asks the capture/import blocker without
-/// also subscribing to the registry somewhere in the same declaration.
-///
-/// The blocker's own declaration is not a call and is skipped by [_isOwnDeclaration],
-/// the same rule that finds the slices.
-///
-/// [source] must already have been through [_codeOnly] when it comes from a real
-/// file, for [_subscribesToRegistry]'s reason: until the sixth pass this one
-/// case handed over raw text, so a declaration that called the blocker and named
-/// `longReadRegistryProvider` only in a doc line or a log string paired itself
-/// on the strength of what it said about itself. The `talkingProbe` control in
-/// the case below is what holds that shut.
-bool _blockerWithoutRegistry(String source) {
-  final boundaries = _topLevelBoundaries(source);
-  for (final match in '$_blockerCall('.allMatches(source)) {
-    if (_isOwnDeclaration(source, boundaries, match.start)) {
-      continue;
-    }
-    final start = boundaries.lastWhere((boundary) => boundary <= match.start);
-    final end = boundaries.firstWhere((boundary) => boundary > match.start, orElse: () => source.length);
-    if (!_subscribesToRegistry(source.substring(start, end))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// The closed set of calls by which a file in `lib/` has already said it is
-/// about to destroy, or spend a long time rewriting, something in the user's
-/// stores.
-///
-/// The same move the blocker case makes, with a wider anchor: nothing in the
-/// code says "this widget is destructive", but a file that calls
-/// `runStorageDelete` or `RecordZipService.import` has declared it *by calling
-/// it*. So the rule below is a pairing rule over an existing classification
-/// rather than a judgement about widgets.
+/// [content] parsed as the file at [path], for an instrument control.
 ///
 /// **Each entry is spelled as far as the notifier it belongs to, not as a
 /// verb.** A bare `.start(` matches five unrelated files (`action_runner.dart`,
@@ -275,11 +235,7 @@ const String _claimHandle = '$_registryRead.notifier';
 /// Whether [code] reads the registry's answer anywhere.
 ///
 /// [code] must already have been through [_codeOnly] when it comes from a real
-/// file, and both censuses that reach here now do it: the round through
-/// [_roundOver] and the blocker case through the same [_libSources] map. One
-/// rule about what counts as a mention, applied in one place — the blocker case
-/// used to carry no rule at all, which is a difference no reader of either case
-/// could see from the case itself.
+/// file, which [_roundOver] does before it asks.
 bool _subscribesToRegistry(String code) {
   for (final read in _registryReads) {
     for (final match in read.allMatches(code)) {
@@ -613,7 +569,7 @@ void main() {
       await expectLater(held, completes, reason: 'the release ran against a disposed element and threw');
     });
 
-    test('is the only way lib holds paths, apart from three counted exceptions', () {
+    test('is the only way lib holds paths, apart from counted exceptions', () {
       // A claim nobody releases blocks its paths for the rest of the session with
       // nothing to notice it, so the unscoped half of the protocol is not left to
       // a reading of the doc: a file in `lib/` reaching for it uninvited turns
@@ -628,6 +584,11 @@ void main() {
       // and a fourth hand-written claim appearing in it would have been invisible
       // here. Spelt as a count, adding an entry costs nothing, because the
       // sanction stops covering the file the moment the file stops matching it.
+      //
+      // **Every hand-released claim method is looked for, not one name.** The
+      // methods are read off `LongReadRegistry` (every public one answering a
+      // `LongReadToken`), so a claim written with whatever method comes next is
+      // found exactly as a `claimUntilReleased` is.
       //
       // The counts are asserted in both directions from one comparison, so
       // renaming the method cannot quietly turn the scan into a search for a
@@ -695,25 +656,20 @@ void main() {
       // `lib/`, the record mutation lock is acquired without the
       // `LongReadDeclaration` the gate makes mandatory.*
       //
-      // It used to falsify something narrower, and the difference was not
-      // academic. The old scan asked "does a file call `runFor…` on a receiver
-      // whose **name** contains `lock`?" — a question about a variable name,
-      // which is the author's to choose and carries no meaning. A third bypass
-      // written as `final mutex = platformRecordMutationLock; await
-      // mutex.runForRoot(…);` compiled, ran, held the whole store open, left
-      // every delete button live, and left this case green; renaming `mutex` to
-      // `lock` and changing nothing else turned it red. A test whose answer
-      // depends on an identifier reports "nothing found" for every spelling
-      // nobody thought of, and there is no spelling it could not have missed.
-      //
-      // So the axis is the claim rather than the value. What actually separates
-      // a gate call from a direct acquisition is not who the receiver is but
-      // what is passed: `RecordRecoveryGate`'s three methods take a *required*
-      // `declaration:`, and `RecordMutationLock`'s take no such parameter, so an
-      // acquisition that skips the declaration cannot be spelled with one and a
-      // call that carries one cannot be reaching the lock. Every call of an
-      // acquisition method is therefore examined, whatever its receiver looks
-      // like, and judged on its argument list.
+      // The axis is the claim rather than the value. A scan that asks whether a
+      // call's receiver is *named* like a lock answers a question about a
+      // variable name, which is the author's to choose and carries no meaning:
+      // `final mutex = platformRecordMutationLock; await mutex.runForRoot(…);`
+      // compiles, runs, holds the whole store open, leaves every delete button
+      // live, and is green to it. What actually separates a gate call from a
+      // direct acquisition is not who the receiver is but what is passed:
+      // `RecordRecoveryGate`'s four methods take a *required* `declaration:`,
+      // and `RecordMutationLock`'s take no such parameter, so an acquisition that
+      // skips the declaration cannot be spelled with one and a call that carries
+      // one cannot be reaching the lock. Every use of an acquisition method is
+      // therefore examined, whatever its receiver looks like — a variable, a
+      // chain the formatter broke across lines, a cascade, an implicit `this` —
+      // and judged on its own argument list.
       //
       // WHAT THIS STILL CANNOT SEE — the list is short but it is not empty, and
       // "nothing found" from this case means "none of these":
@@ -940,208 +896,154 @@ void main() {
     });
   });
 
-  group('the round of the surfaces', () {
-    test('a surface that asks the capture blocker asks the registry too, because the step that used to check that '
-        'was a human one', () {
-      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *somewhere in
-      // `lib/`, a surface decides whether to offer a destructive or an
-      // extracting control from the capture/import blocker alone, without ever
-      // asking the registry whether a long reader is holding the same thing.*
-      //
-      // WHY THIS IS A CASE AND NOT A PARAGRAPH IN A DOC. Adding a long reader
-      // takes several steps, and the last of them — "go round the surfaces that
-      // could act on what it holds and make each one subscribe" — is the only one
-      // with no mechanical half at all: forgetting it compiles, runs, and leaves
-      // a live button over a folder something else is rewriting.
-      // `long_read_registry.dart` says as much in its own words, that the round
-      // is "still owed once per surface rather than once per long-reader kind",
-      // and the file that first shipped without it was found by hand rather than
-      // by anything here. This case is that round done by machine, for the part
-      // of it a machine can decide.
-      //
-      // THE AXIS IS A DECLARATION THAT ALREADY CLASSIFIED ITSELF. Nothing in the
-      // code says "this widget is destructive"; asking for that would be asking a
-      // scan to understand what a button does. But a surface that calls
-      // `storageActionBlockerOf` has *already declared* it is about to delete or
-      // extract — that is what [StorageAction] is — and the registry is the
-      // second half of the same question the blocker is the first half of. So the
-      // rule is a pairing rule over an existing classification, not a judgement
-      // about widgets.
-      //
-      // THE UNIT IS THE SURFACE, NOT THE STATEMENT. A widget may resolve the
-      // blocker in `build`, where a watch is legal, and ask the registry in a
-      // callback or a nested builder it hands that answer to; `storage_tree.dart`
-      // was shaped that way when this case was written, and a per-method rule
-      // would have called it a violation and been wrong. So the slice is the
-      // whole top-level declaration — which for a widget is the class, and for
-      // the two `storage_tree.dart` helpers, which are the only anchored
-      // declarations left in `lib` today, is the function.
-      //
-      // WHAT THIS CANNOT SEE. "Nothing found" here means "none of these", and
-      // the list is not short:
-      //  * **A surface that asks neither.** This is the big one and it is the
-      //    reason the paragraph above says "for the part a machine can decide":
-      //    the scan is anchored on the blocker call, so a control with no anchor
-      //    at all is outside its field of view entirely. Three record-page
-      //    surfaces were in exactly that position when this case was written
-      //    (`chara_detail/export_button.dart`, `archive_record_dialog.dart`,
-      //    `regenerate_record_dialog.dart`); they subscribe to the registry now,
-      //    and this case saw neither the gap nor its closing, because none of the
-      //    three asks the capture blocker and so none of them is in scope here at
-      //    all. The same is true of the three surfaces the same round added it to
-      //    afterwards (the record table's re-recognition entry,
-      //    `CharaDetailRecordRegenerationController.start`, and the data-root
-      //    relocation). Every one of them was found by a person reading the tree.
-      //    The initial inventory was human work and this case does not replace it;
-      //    what it does is stop the inventory from decaying once it has been made.
-      //  * **A surface that asks both and uses neither.** The scan sees that the
-      //    registry was read, never that the answer reached an `enabled` or an
-      //    `onPressed`.
-      //  * **A surface that asks about the wrong path.** `storage_tree.dart`
-      //    asks separately about the row's entity and about its zip target
-      //    precisely because they are not always the same; a scan that counts
-      //    readings cannot tell a right subject from a wrong one.
-      //  * **A class holding two controls where only one of them subscribes.**
-      //    The slice is the declaration, so one reading anywhere in it satisfies
-      //    the whole class.
-      //  * **Dart outside `lib/`, and the non-Dart front ends.** The same
-      //    boundary the two cases above have.
-      //  * **THE OTHER DIRECTION, WHICH THIS CASE NEVER ASKS FOR.** The pairing
-      //    is one-way: the anchor is the capture blocker and the requirement is
-      //    the registry, so a surface that asks the *registry* and never the
-      //    capture blocker is not a violation here and is not even in scope --
-      //    it has no anchor. That is not a corner case, it is most of the app:
-      //    the record page's deletes, exports, archives and re-recognitions, the
-      //    two module installs and the settings page's inheritance pass all ask
-      //    the registry alone, and every one of them was blind to a running
-      //    capture for the whole of this branch while passing this case green.
-      //    Two defects lived in that gap -- a module install that could be
-      //    started mid-capture, and a capture that could be started mid-zip --
-      //    and neither case in this group could see either. What closed them was
-      //    putting the capture on the registry
-      //    ([LongReadKind.liveCapture]) so that the one question these cases do
-      //    ask now covers it; the missing direction itself is still not asked
-      //    for, and a third census asking it would be a third round of the same
-      //    inventory rather than a new fact.
-      const sanctioned = <String>{};
+  group('asking and claiming in one turn', () {
+    // The rule [LongReadRegistry.holdWhenFree] states for a scoped hold, in its two other shapes. What each
+    // case asserts is that the registration is on the registry by the time the call returns, with no
+    // `await` between: a writer that asks and then claims across a turn can be overtaken by a claim that
+    // arrives in the gap, and the ask has then answered a question about a registry that no longer exists.
+    test('a hand-released claim over free paths is on the registry when the call returns', () {
+      final container = _container();
+      final a = _activeDir / 'a';
 
-      // The instrument's controls, on synthetic sources rather than on `lib/`,
-      // so a scan that had stopped recognising either shape could not pass by
-      // finding nothing. The compliant probe is the one that matters most: it is
-      // what says a green result comes from surfaces that subscribe rather than
-      // from a slicer that quietly returned the whole file every time.
-      const violatingProbe =
-          'class _Probe extends ConsumerWidget {\n'
-          '  @override\n'
-          '  Widget build(BuildContext context, WidgetRef ref) {\n'
-          '    final blocker = storageActionBlockerOf(ref, group, StorageAction.delete);\n'
-          '    return Text(blocker.toString());\n'
-          '  }\n'
-          '}\n'
-          '\n'
-          'final somethingElse = longReadRegistryProvider;\n';
-      const compliantProbe =
-          'class _Probe extends ConsumerWidget {\n'
-          '  @override\n'
-          '  Widget build(BuildContext context, WidgetRef ref) {\n'
-          '    final blocker = storageActionBlockerOf(ref, group, StorageAction.delete);\n'
-          '    return _menu(ref);\n'
-          '  }\n'
-          '\n'
-          '  Widget _menu(WidgetRef ref) => Text(ref.watch(longReadRegistryProvider).toString());\n'
-          '}\n';
-      expect(
-        _blockerWithoutRegistry(violatingProbe),
-        isTrue,
-        reason:
-            'the scan does not recognise its own falsifying example — a surface reading the blocker whose file '
-            'mentions the registry somewhere else entirely — so it is not checking anything',
-      );
-      expect(
-        _blockerWithoutRegistry(compliantProbe),
-        isFalse,
-        reason:
-            'the scan called a subscribing surface a violation, so its slice is not the declaration it claims to be '
-            'and every green result below is green for the wrong reason',
-      );
-      // The third shape: the blocker's own declaration mentions the name without
-      // calling it, and reads no registry because it is not a surface. Skipping
-      // it by its column rather than by its file name is what keeps the defining
-      // file in scope for a violation written *into* it later, so the rule that
-      // does the skipping is worth a control of its own.
-      const declarationProbe =
-          'StorageActionBlocker? storageActionBlockerOf(WidgetRef ref, StorageGroup group, StorageAction action) {\n'
-          '  return storageActionBlocker(group, action, activity: ref.watch(captureActivityProvider));\n'
-          '}\n';
-      expect(
-        _blockerWithoutRegistry(declarationProbe),
-        isFalse,
-        reason: 'the scan read the blocker\'s own declaration as a surface that failed to subscribe',
-      );
-      // The fourth shape, and the instrument's own defect until the sixth pass:
-      // a surface whose only mention of the registry is a doc line or a log
-      // string has not subscribed to anything. This case ran on raw text and so
-      // paired that surface on the strength of what it said about itself — the
-      // exact failure its sister census holds down with `talkingFixture`, which
-      // is why the probe is written to the same shape. `storage_delete_action.dart`
-      // carries that doc line today and is compliant for an entirely different
-      // reason, so the shape is not hypothetical.
-      const talkingProbe =
-          '/// Watches longReadRegistryProvider as well as the capture blocker.\n'
-          'class _Probe extends ConsumerWidget {\n'
-          '  @override\n'
-          '  Widget build(BuildContext context, WidgetRef ref) {\n'
-          '    logger.i("longReadRegistryProvider says nothing here");\n'
-          '    final blocker = storageActionBlockerOf(ref, group, StorageAction.delete);\n'
-          '    return Text(blocker.toString());\n'
-          '  }\n'
-          '}\n';
-      expect(
-        _blockerWithoutRegistry(_codeOnly(talkingProbe)),
-        isTrue,
-        reason:
-            'the scan let a surface pass on the strength of a comment or a log string, which is what it did for '
-            'five passes: strip comments and literals before asking, as the round below has always done',
-      );
+      final token = _registry(container).claimUntilReleasedWhenFree(kind: LongReadKind.zip, paths: [a]);
 
-      // The same corpus the round below reads, so neither census can be looking
-      // at a different `lib/` from the other, and stripped by the same rule.
-      final anchored = <String>[];
-      final unpaired = <String>{};
-      final blockerSources = _libSources();
-      for (final path in blockerSources.keys.toList()..sort()) {
-        final code = _codeOnly(blockerSources[path]!);
-        if (!code.contains('$_blockerCall(')) {
-          continue;
-        }
-        anchored.add(path);
-        if (_blockerWithoutRegistry(code)) {
-          unpaired.add(path);
-        }
-      }
+      final claim = container.read(longReadRegistryProvider)[token];
+      expect(claim?.kind, LongReadKind.zip, reason: 'the call returned a token the registry does not hold');
+      expect(claim?.holds.map((hold) => hold.directoryPath), [a.path]);
 
-      expect(
-        unpaired.where((path) => !sanctioned.any(path.endsWith)),
-        isEmpty,
-        reason:
-            'this surface has already said it is about to delete or extract, and it is weighing only the half of '
-            'that question a capture answers; go through storageDeleteRefusalOf / storageExtractRefusalOf, which '
-            'read both and order them, or say here why this one cannot',
-      );
-      // Without this the case would be green on a codebase where the helper had
-      // been renamed and the scan therefore matched nothing at all — the exact
-      // shape of silence the two cases above are also built to refuse.
-      expect(
-        anchored.length,
-        2,
-        reason:
-            'the set of files that call $_blockerCall changed size. If it fell to zero the classification this case '
-            'is anchored on was renamed and the scan is searching for a string that no longer occurs; if it moved '
-            'either way, check that each file still weighs both halves and correct this number — a count is what '
-            'makes the change visible, which emptiness alone never was',
-      );
+      _registry(container).release(token);
+      expect(container.read(longReadRegistryProvider), isEmpty, reason: 'the token does not release the claim');
     });
 
+    test('a hand-released claim over held paths is refused in the call, and registers nothing', () {
+      final container = _container();
+      final a = _activeDir / 'a';
+      final holder = _registry(container).claimUntilReleased(kind: LongReadKind.archive, paths: [_activeDir]);
+      final before = container.read(longReadRegistryProvider);
+
+      expect(
+        () => _registry(container).claimUntilReleasedWhenFree(kind: LongReadKind.zip, paths: [a]),
+        throwsA(isA<LongReadNotStartedException>().having((e) => e.heldBy, 'heldBy', LongReadKind.archive)),
+        reason: 'a claim was taken over a folder another long reader holds',
+      );
+      expect(container.read(longReadRegistryProvider), same(before), reason: 'the refusal registered something');
+
+      // The control: a path the holder does not cover is claimed, so the refusal above was about the paths.
+      final elsewhere = _registry(
+        container,
+      ).claimUntilReleasedWhenFree(kind: LongReadKind.zip, paths: [_layout.downloadDir / 'other']);
+      expect(container.read(longReadRegistryProvider).keys, unorderedEquals([holder, elsewhere]));
+    });
+
+    test('a disregarded kind does not stop a writer, and another kind on the same path still does', () async {
+      final container = _container();
+      final registry = _registry(container);
+      final a = _activeDir / 'a';
+      const disregarding = {LongReadKind.liveCapture};
+      final capture = registry.claimUntilReleased(kind: LongReadKind.liveCapture, paths: [a]);
+
+      expect(registry.heldBy([a], disregarding: disregarding), isNull);
+      expect(registry.heldBy([a]), LongReadKind.liveCapture, reason: 'the default must still see every kind');
+      final claimed = registry.claimUntilReleasedWhenFree(
+        kind: LongReadKind.zip,
+        paths: [a],
+        disregarding: disregarding,
+      );
+      registry.release(claimed);
+      expect(
+        await registry.holdWhenFree(
+          kind: LongReadKind.delete,
+          paths: [a],
+          contention: LongReadContention.refuse,
+          disregarding: disregarding,
+          action: (_) async => 'ran',
+        ),
+        'ran',
+      );
+
+      // The same path held by a kind outside the set is still an answer, on all three.
+      final zip = registry.claimUntilReleased(kind: LongReadKind.zip, paths: [a]);
+      expect(registry.heldBy([a], disregarding: disregarding), LongReadKind.zip);
+      expect(
+        () => registry.claimUntilReleasedWhenFree(kind: LongReadKind.archive, paths: [a], disregarding: disregarding),
+        throwsA(isA<LongReadNotStartedException>().having((e) => e.heldBy, 'heldBy', LongReadKind.zip)),
+      );
+      await expectLater(
+        registry.holdWhenFree(
+          kind: LongReadKind.delete,
+          paths: [a],
+          contention: LongReadContention.refuse,
+          disregarding: disregarding,
+          action: (_) async => 'ran',
+        ),
+        throwsA(isA<LongReadNotStartedException>().having((e) => e.heldBy, 'heldBy', LongReadKind.zip)),
+      );
+      expect(container.read(longReadRegistryProvider).keys, unorderedEquals([capture, zip]));
+    });
+
+    test('a declaration that asks registers in the turn runDeclared is called, before its action runs', () async {
+      final container = _container();
+      final a = _activeDir / 'a';
+      final declaration = LongReadDeclaration.claimWhenFree(
+        registry: _registry(container),
+        kind: LongReadKind.zip,
+        paths: [a],
+        contention: LongReadContention.refuse,
+      );
+      final until = Completer<void>();
+      var began = false;
+
+      final run = declaration.runDeclared(() async {
+        began = true;
+        await until.future;
+        return 'done';
+      });
+
+      // Not awaited: the claim has to be there already, in the caller's own turn.
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        [LongReadKind.zip],
+        reason: 'the declaration had not registered by the time runDeclared returned',
+      );
+      expect(began, isTrue);
+      until.complete();
+      expect(await run, 'done');
+      expect(container.read(longReadRegistryProvider), isEmpty, reason: 'the claim outlived the region');
+    });
+
+    test(
+      'a declaration that asks over held paths does not run its action, and a throwing action is released',
+      () async {
+        final container = _container();
+        final registry = _registry(container);
+        final a = _activeDir / 'a';
+        LongReadDeclaration declaration() => LongReadDeclaration.claimWhenFree(
+          registry: registry,
+          kind: LongReadKind.zip,
+          paths: [a],
+          contention: LongReadContention.refuse,
+        );
+        final holder = registry.claimUntilReleased(kind: LongReadKind.delete, paths: [a]);
+        var ran = false;
+
+        await expectLater(
+          declaration().runDeclared(() async => ran = true),
+          throwsA(isA<LongReadNotStartedException>().having((e) => e.heldBy, 'heldBy', LongReadKind.delete)),
+        );
+        expect(ran, isFalse, reason: 'the guarded action ran over a claim the declaration was told to refuse');
+        expect(container.read(longReadRegistryProvider).keys, [holder]);
+
+        registry.release(holder);
+        await expectLater(
+          declaration().runDeclared<void>(() async => throw StateError('the run blew up')),
+          throwsA(isA<StateError>()),
+        );
+        expect(container.read(longReadRegistryProvider), isEmpty, reason: 'a throwing action left its claim behind');
+      },
+    );
+  });
+
+  group('the round of the surfaces', () {
     test('a file that calls a destructive entry point reaches the registry somewhere in the same file, because four '
         'rounds of this were done by hand and two files were still missed', () {
       // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *somewhere in
@@ -1149,25 +1051,23 @@ void main() {
       // entry points without anything in that file ever asking the registry
       // whether a long reader is already holding what it is about to write.*
       //
-      // WHY THIS AND NOT THE CASE ABOVE. That case is anchored on
-      // `storageActionBlockerOf`, and says in its own words that a surface which
-      // asks neither is outside its field of view — "the big one". Two files
-      // were sitting in exactly that blind spot for the whole of this branch:
-      // `chara_detail/import_button.dart` called `RecordZipService.import` and
-      // `module_update_dialog.dart` called `installModuleFromZip` /
-      // `installModuleFromZipBytes`, and neither read the registry at all. Both
-      // were found by a person reading the tree, on the fourth pass. This case
-      // widens the anchor to the destructive calls themselves so that the fifth
-      // one does not have to be a person.
+      // WHY THE ANCHOR IS THE DESTRUCTIVE CALL. The capture blocker cannot be
+      // asked without the registry at all — `storage_action_blocker.dart` keeps
+      // that reading private to the two refusal helpers, which read both — but a
+      // surface that asks *neither* is untouched by that. A file that calls one
+      // of the anchored entry points (`RecordZipService.import`,
+      // `installModuleFromZip`, `installModuleFromZipBytes`, …) and reads the
+      // registry nowhere is invisible to every other check. This case anchors on
+      // the destructive calls themselves so that finding such a file does not
+      // depend on a person reading the tree.
       //
-      // THE UNIT IS THE FILE, NOT THE DECLARATION, and that is a real
-      // difference from the case above. `archive_record_dialog.dart` calls
-      // `.archive(` from inside two `State` classes and reads the registry from
-      // a top-level helper above them; sliced per declaration it is a violation,
-      // and it is not one. A `ConsumerStatefulWidget` is two top-level
-      // declarations by construction, so the declaration slice cannot express a
-      // widget that decides in its `State` what its file resolved at the top.
-      // The price is stated below.
+      // THE UNIT IS THE FILE, NOT THE DECLARATION, and that is deliberate.
+      // `archive_record_dialog.dart` calls `.archive(` from inside two `State`
+      // classes and reads the registry from a top-level helper above them;
+      // sliced per declaration it is a violation, and it is not one. A
+      // `ConsumerStatefulWidget` is two top-level declarations by construction,
+      // so the declaration slice cannot express a widget that decides in its
+      // `State` what its file resolved at the top. The price is stated below.
       //
       // WHAT THIS CANNOT SEE.
       //  * **A file with no anchor.** Still the big one, and it has only moved:
@@ -1187,18 +1087,18 @@ void main() {
       //  * **THE CAPTURE BLOCKER, WHICH THIS CASE NEVER REQUIRES.** The one
       //    thing an anchored file has to reach is the registry: `_registryReads`
       //    lists `longReadRegistryProvider`, `storageDeleteRefusalOf` and
-      //    `storageExtractRefusalOf`, and `storageActionBlockerOf` is not in that
+      //    `storageExtractRefusalOf`, and the capture blocker is not in that
       //    vocabulary. So a file that asks the registry and never asks what the
       //    capture card is doing is green here, and until
       //    [LongReadKind.liveCapture] existed that was seven of the nine anchored
       //    files -- only `storage_delete_action.dart` reached both, and
       //    `storage_settings.dart` reads the capture flag to *stop* a capture
-      //    rather than to refuse for one. Together with the same omission in the
-      //    case above, that is why a running capture was invisible to every
-      //    record-page and settings-page control for four rounds. It is a
-      //    property of what these cases require, not of the files they scan, and
-      //    what removed the exposure was making the capture answerable through
-      //    the question they do require rather than adding a third census.
+      //    rather than to refuse for one. That is why a running capture was
+      //    invisible to every record-page and settings-page control for four
+      //    rounds. It is a property of what this case requires, not of the files
+      //    it scans, and what removed the exposure was making the capture
+      //    answerable through the question it does require rather than adding a
+      //    second census.
       const sanctioned = <String>{};
 
       // The instrument's controls, on synthetic sources. The first is the shape
@@ -1664,14 +1564,13 @@ void main() {
     });
   });
 
-  // The sentence a withheld control shows was rewritten to stop naming the zip
-  // when the archive became the second registered kind. Nothing was holding that
-  // rewrite in place: with every assertion in the repository written as
-  // `appSentenceAt('<key>')`, putting 「ZIP」 back left the whole suite green.
+  // The sentence a withheld control shows names no kind of holder — not the zip,
+  // not the archive. With every other assertion in the repository written as
+  // `appSentenceAt('<key>')`, nothing else holds that: putting 「ZIP」 back into
+  // it would leave the rest of the suite green.
   //
-  // There were three of them then, and eight by the time the last subscriber was
-  // wired; they are now **one**, `app.long_read_busy`, so that a newly withheld
-  // surface costs no translation entry. This group is where that one sentence is
+  // There is **one** such sentence, `app.long_read_busy`, so that a newly
+  // withheld surface costs no translation entry. This group is where that one sentence is
   // held to its requirements, because the sentence belongs to the registry rather
   // than to any of the screens that show it.
   //
@@ -1735,6 +1634,39 @@ void main() {
             '$longReadBusyKey names a specific long reader again; it is shown for whichever kind holds the path, '
             'so naming one makes it wrong for every other kind — the enumeration this registry exists to delete',
       );
+    });
+
+    // A press whose claim is refused at the moment its work would start is told
+    // the same sentence as a withheld control, once; one whose registry went away
+    // is told nothing, because nobody is left to read it.
+    Future<List<ToastData>> toastsOf(LongReadNotStartedException exception) async {
+      final container = _container();
+      final toasts = <ToastData>[];
+      final subscription = container.listen<AsyncValue<ToastData>>(
+        plainToastEventProvider,
+        (_, current) => current.whenData(toasts.add),
+      );
+      addTearDown(subscription.close);
+      // Subscribe before announcing: the toast stream is broadcast, so an event
+      // added before the provider listens is lost rather than delivered late.
+      await pumpEventQueue();
+      announceLongReadNotStarted(exception, operation: 'A test press');
+      await pumpEventQueue();
+      return toasts;
+    }
+
+    test('a refused press is told the busy sentence once', () async {
+      final toasts = await toastsOf(const LongReadNotStartedException.busy(LongReadKind.regeneration));
+      expect(
+        toasts.map((toast) => (toast.type, toast.description)),
+        [(ToastType.error, appSentenceAt(longReadBusyKey))],
+        reason: 'a refused press has to say why nothing happened, once, in the sentence a withheld control shows',
+      );
+    });
+
+    test('an abandoned press is told nothing', () async {
+      final toasts = await toastsOf(const LongReadNotStartedException.abandoned());
+      expect(toasts, isEmpty, reason: 'the container the toast would speak through is the one that went away');
     });
   });
 

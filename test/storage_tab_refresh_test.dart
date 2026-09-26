@@ -89,7 +89,7 @@ void main() {
       overrides: [
         pathInfoProvider.overrideWithValue(layout),
         pathLayoutLoader.overrideWith((ref) async => layout),
-        if (storeOutcome case final outcome?) settingsStoreDeleteProvider.overrideWithValue(() async => outcome),
+        if (storeOutcome case final outcome?) settingsStoreDeleteProvider.overrideWithValue((_) async => outcome),
       ],
     );
     addTearDown(result.dispose);
@@ -298,8 +298,9 @@ void main() {
   });
 
   group('the settings delete refreshes the view as well', () {
-    // Its request names no path at all, so the per-path invalidate has nothing to
-    // work with and the cache is cleared instead. Windows sizes this group by the
+    // Its request names no file it removes -- only the directory the stores live
+    // in, for the claim -- so there is no per-path invalidate to make and the cache
+    // is cleared instead. Windows sizes this group by the
     // directory the stores' files live in, so without the clear the group keeps
     // reporting the bytes of files that are gone.
     test('the settings total stops counting the removed store files', () async {
@@ -321,7 +322,7 @@ void main() {
         scope.read(containerRefProvider),
         effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.settings),
-        request: const StorageDeleteSettingsRequest(),
+        request: StorageDeleteSettingsRequest(storeDirectories: [layout.settingsDir]),
         silent: true,
       );
 

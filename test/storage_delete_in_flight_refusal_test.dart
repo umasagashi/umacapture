@@ -15,9 +15,12 @@
 //
 // THE REACHABLE INPUT IS NOT A USER GESTURE. `_confirm` shuts the barrier, the ×
 // and cancel for the whole run, so nothing the user can touch starts a long read
-// from here. `runModuleInstall` does: its download deliberately holds no claim
-// and takes one only when it begins writing into `modules/`, so an automatic
-// update that lands mid-delete is a claim with no gesture behind it.
+// from here. And a writer that asks first cannot land one either: the delete
+// claims its own paths for the whole run, so an automatic module install over
+// them waits and a press is refused. What can land mid-run is a reader that
+// registers without asking — a zip, the live capture, a startup sweep — and the
+// registry then holds both claims at once; the dialog, which stops asking once
+// its run has started, must say nothing about either.
 //
 // EVERY ASSERTION HAS ITS CONTROL. "No card while the delete runs" and "no card
 // ever" are one observation seen once, and the second would ship the refusal
@@ -75,7 +78,8 @@ ProviderContainer _container() {
   return container;
 }
 
-/// The claim an automatic module install would land, as the registry sees it.
+/// The claim a reader that registers without asking would land, as the registry
+/// sees it.
 ///
 /// `claimUntilReleased` and not `hold`, because it has to outlive the call that
 /// registers it. The kind is immaterial and the path is not:

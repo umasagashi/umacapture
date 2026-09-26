@@ -545,7 +545,7 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
 /// refuses outright, so in neither case can an install begin underneath a reader
 /// that has the module open.
 ///
-/// Three of the four routes pass [LongReadContention.defer]: the desktop
+/// Two of the four routes pass [LongReadContention.defer]: the desktop
 /// auto-updater and the web bootstrap/refresh are started by a version check
 /// rather than by a press, so they have no surface to refuse on, and the only
 /// outcome they can report is `setUpdateFailed(true)`, "更新に失敗しました", which
@@ -553,7 +553,7 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
 /// answer the withheld buttons give (see [longReadBusyMessage]): the work runs
 /// when the job holding the folder finishes.
 ///
-/// **The fourth route passes [LongReadContention.refuse], and the asymmetry is
+/// **The other two pass [LongReadContention.refuse], and the asymmetry is
 /// the surface.** A user is standing in front of `ModuleManualUpdateDialog`,
 /// whose only two exits — the barrier and the × — are shut for the length of the
 /// install, and there is no cancel; parking that dialog behind a re-recognition
@@ -635,13 +635,7 @@ Future<T> runModuleInstall<T>(
 /// Returns false, which is what both routes return for "no install landed", and
 /// what the dialog re-opens its exits on.
 bool _reportManualInstallNotStarted(LongReadNotStartedException exception) {
-  final heldBy = exception.heldBy;
-  if (heldBy == null) {
-    logger.i("A manual module install was dropped: the app went away while it was deferred.");
-    return false;
-  }
-  logger.i("A manual module install was refused: $heldBy is holding the modules directory.");
-  Toaster.show(ToastData.error(description: longReadBusyMessage()));
+  announceLongReadNotStarted(exception, operation: 'A manual module install');
   return false;
 }
 

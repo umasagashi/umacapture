@@ -29,6 +29,7 @@ import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/localization.dart';
+import 'support/storage_delete_claim.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -143,7 +144,7 @@ ProviderContainer _container() {
   return container;
 }
 
-Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteStorageEntries(
+Future<StorageDeleteReport> _deleteRetiredGroup(ProviderContainer container) => deleteUnderClaim(
   container.read(containerRefProvider),
   group: _groupOf(StorageGroupId.retired),
   targets: _groupOf(StorageGroupId.retired).resolve(_layout),

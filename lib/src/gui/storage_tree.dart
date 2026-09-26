@@ -390,7 +390,7 @@ final List<ProviderOrFamily> storageTabContentProviders = [
 /// [touched] narrows which cached totals go. A delete knows the subtrees it
 /// changed, so it names them and the rest of the walk survives. The default —
 /// an empty list — drops all of them, which is both what the settings delete
-/// needs (it removes Hive stores and so names no path at all, yet files on
+/// needs (it removes Hive stores and names no file they occupy, yet files on
 /// disk go with them) and what an entry
 /// needs: nothing tells this app what changed while the view was closed, so
 /// nothing it cached can be trusted.
@@ -584,10 +584,9 @@ final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(
 ///    still refuses. That refusal is right, but not because anything contends:
 ///    the reader is holding the handles either way.
 ///
-/// [StorageDeleteSettingsRequest] is never covered: it removes Hive stores, which
-/// are not paths at all, and the settings group offers no zip for one to be
-/// running from. That is an answer about the request's shape, not a group id, so a
-/// second store-shaped delete inherits it.
+/// [StorageDeleteSettingsRequest] is covered by what holds the directories its
+/// stores live in: `settings/` on Windows, which a relocation moves wholesale,
+/// and nothing on web, where the stores are IndexedDB databases with no path.
 ///
 /// **"Extraction" is now a historic name.** [extraction] is one
 /// [StorageHold] — one path some long-running job is holding open — and the zip
@@ -605,7 +604,9 @@ bool storageDeleteAwaitsExtraction(StorageDeleteRequest? request, StorageZipStat
     // this screen cannot be imported. The atom moved to the claim's own file so
     // that both askers reach one derivation of "inside".
     StorageDeletePathsRequest(:final targets) => targets.any((target) => longReadHoldCovers(extraction, target)),
-    StorageDeleteSettingsRequest() => false,
+    StorageDeleteSettingsRequest(:final storeDirectories) => storeDirectories.any(
+      (directory) => longReadHoldCovers(extraction, directory),
+    ),
   };
 }
 
@@ -664,135 +665,11 @@ LongReadKind? storageExtractBlockedBy(PathEntity? target, Iterable<LongReadClaim
   return storageDeleteBlockedBy(StorageDeletePathsRequest([target]), claims);
 }
 
-/// Why a storage control is withheld at this moment — one value carrying both
-/// refusals a destructive or extracting surface has to weigh, already ordered.
-///
-/// **The order lives here now, and used to live at every surface.** The copy
-/// slot, the zip slot, the delete slot and the delete confirmation each wrote
-/// the same `switch ((blocker, heldBy))` putting the activity blocker first, and
-/// each restated the same reason for it beside the copy. Four hand-written
-/// orderings are four places for the fifth surface to put them the other way
-/// round: both orders compile, both produce a dead button, and the only
-/// difference is that one of them tells the user to wait for something they
-/// could have stopped instead.
-///
-/// **Asking is what subscribes, which is the point.** The two answers come from
-/// two different places — `captureActivityProvider` inside
-/// [storageActionBlockerOf], and [longReadRegistryProvider] — and a surface that
-/// asked only the first is the defect these helpers exist to make unspellable:
-/// there is one call, it reads both, and half of it cannot be left out. What
-/// keeps a *new* surface from going back to asking the blocker on its own is the
-/// scan in `long_read_registry_test.dart`, which is the machine half of a step
-/// that was until now owed to every surface by hand.
-///
-/// Sealed rather than a `(blocker, kind)` pair so a surface that renders the two
-/// refusals differently — the delete confirmation shows one as a warning and the
-/// other as a note — is made to say which is which by a `switch` the compiler
-/// checks, instead of by re-deriving the priority a third time.
-sealed class StorageRefusal {
-  const StorageRefusal({required this.message});
-
-  /// What the withheld control says for itself.
-  ///
-  /// Resolved where the refusal is built, because the activity sentence is
-  /// composed from the blocker and the action and only the builder holds both.
-  final String message;
-}
-
-/// Something the user started is writing into the group; it can be stopped.
-final class StorageActivityRefusal extends StorageRefusal {
-  const StorageActivityRefusal({required this.blocker, required super.message});
-
-  final StorageActionBlocker blocker;
-}
-
-/// A registered long reader is holding what the control would touch; the only
-/// remedy is to wait for it.
-final class StorageLongReadRefusal extends StorageRefusal {
-  const StorageLongReadRefusal({required this.kind, required super.message});
-
-  /// Carried for a surface that wants to say more than the shipped sentence
-  /// does. None does today — there is one sentence, and it is subjectless about
-  /// the holder, for [longReadBusyMessage]'s reasons.
-  final LongReadKind kind;
-}
-
-/// The refusal in force for extracting [target] out of [group], or null when the
-/// control may be offered.
-///
-/// Both questions are asked before either is answered, so the widget's
-/// subscription does not depend on which refusal wins: an early return past
-/// `ref.watch` would leave a control that is dead for a capture deaf to a claim
-/// arriving behind it, and it would come back only because the capture ending
-/// happened to rebuild it.
-///
-/// A null [target] answers null, which is [storageExtractBlockedBy]'s answer for
-/// a row with nothing to hand over — the activity blocker is still weighed,
-/// because a group being written into is a fact about the group and not about
-/// the row.
-///
-/// **The activity sentence composed here — `pages.storage.blocked.verb.extract`
-/// — reaches no screen at all, and since the row's buttons became one ⋮ that is a
-/// fact about the app rather than about which groups happen to exist.** The one
-/// surface that renders a [StorageRefusal.message] is the row's menu button
-/// tooltip; that control covers a delete and the extractions together, so
-/// [storageRowMenuRefusalOf] re-composes the activity sentence with
-/// [StorageAction.any] whichever side it took, and no row can carry this verb any
-/// more — not even the row-with-no-delete shape that used to be the one way to
-/// reach it. The long-read half below is unaffected: it carries
-/// [longReadBusyMessage], which is the delete side's sentence too.
-///
-/// The verb is kept rather than retired, for two reasons that are about the code
-/// and not about a screen. The composition in `storageActionBlockedMessage` is
-/// exhaustive over (blocker, action), so retiring the member would be retiring
-/// the *distinction* — this helper would then have nothing but [StorageAction.any]
-/// to ask with, and an extraction control that names its own action (which is
-/// what every one of them did until the fold, and what a control outside a row
-/// would do again) could not be written without reinstating it. And the delete
-/// side's counterpart is not in the same position: `storage_delete_action.dart`
-/// renders `…verb.delete` on the confirmation, so the pair is not dead symmetry.
-/// `storage_row_menu_gate_test.dart` asserts the choice directly, since no widget
-/// can.
-StorageRefusal? storageExtractRefusalOf(WidgetRef ref, {required StorageGroup group, required PathEntity? target}) {
-  final claims = ref.watch(longReadRegistryProvider).values;
-  final blocker = storageActionBlockerOf(ref, group, StorageAction.extract);
-  if (blocker != null) {
-    return StorageActivityRefusal(
-      blocker: blocker,
-      message: storageActionBlockedMessage(blocker, StorageAction.extract),
-    );
-  }
-  if (target == null) {
-    return null;
-  }
-  final kind = storageExtractBlockedBy(target, claims);
-  return kind == null ? null : StorageLongReadRefusal(kind: kind, message: longReadBusyMessage());
-}
-
-/// The refusal in force for the delete [request] on [group], or null when the
-/// control may be offered. [storageExtractRefusalOf]'s counterpart, and it reads
-/// both answers up front for the same reason.
-StorageRefusal? storageDeleteRefusalOf(
-  WidgetRef ref, {
-  required StorageGroup group,
-  required StorageDeleteRequest? request,
-}) {
-  final claims = ref.watch(longReadRegistryProvider).values;
-  final blocker = storageActionBlockerOf(ref, group, StorageAction.delete);
-  if (blocker != null) {
-    return StorageActivityRefusal(
-      blocker: blocker,
-      message: storageActionBlockedMessage(blocker, StorageAction.delete),
-    );
-  }
-  final kind = storageDeleteBlockedBy(request, claims);
-  return kind == null ? null : StorageLongReadRefusal(kind: kind, message: longReadBusyMessage());
-}
-
 /// The refusal that closes a row's **whole menu**, or null when it may be
 /// opened. One answer for the three entrances a row's menu has.
 ///
-/// **Why a row needs an answer of its own rather than one of the two above.** A
+/// **Why a row needs an answer of its own rather than [storageDeleteRefusalOf] or
+/// [storageExtractRefusalOf].** A
 /// menu is not one operation: an entry row's carries extractions (copy, save,
 /// zip) and a delete side by side, and each entry still asks for itself, on
 /// every frame it paints ([_StorageMenuItem]). What this decides is the
@@ -802,9 +679,9 @@ StorageRefusal? storageDeleteRefusalOf(
 /// Both are asked, and neither may be skipped on the strength of the other
 /// answering first:
 ///
-///  * They are **not** the same reading. [storageActionBlockerOf] does return
-///    the same blocker for both — `storageActionBlocker` deliberately does not
-///    look at the action, and says why — but the long-read halves ask about
+///  * They are **not** the same reading. The capture half does return the same
+///    blocker for both — [storageActionBlocker] deliberately does not look at
+///    the action, and says why — but the long-read halves ask about
 ///    different paths, and the two sentences differ in their verb.
 ///  * A row can offer an extraction and **no delete at all**: `data_root.json`
 ///    sits in the one group whose [StorageDeleteFriction] is `notOffered`, so
@@ -1220,9 +1097,12 @@ class StorageTreeView extends ConsumerWidget {
   Widget _buildTree(BuildContext context, WidgetRef ref, PathInfo info) {
     final expanded = ref.watch(storageTreeExpansionProvider);
     final rows = <_TreeRow>[const _SummaryRow()];
-    for (final group in visibleStorageGroups(onWeb: ref.watch(storageOnWebProvider))) {
+    final onWeb = ref.watch(storageOnWebProvider);
+    for (final group in visibleStorageGroups(onWeb: onWeb)) {
       final id = (group: group.id, path: null);
-      rows.add(_GroupRow(group, id, storageGroupZipTarget(info, group), storageGroupDeleteRequest(info, group)));
+      rows.add(
+        _GroupRow(group, id, storageGroupZipTarget(info, group), storageGroupDeleteRequest(info, group, onWeb: onWeb)),
+      );
       if (expanded.contains(id)) {
         // Only when there is one. An opened group used to lead with its own
         // paragraph; that sentence is now the delete confirmation's alone, so a
@@ -1946,10 +1826,11 @@ class _BoxTile extends ConsumerWidget {
     // **`target: null`, and that is the whole answer to "why is this row not
     // asking the registry?".** What this menu copies is the text of a Hive
     // store's values, and a store is not a path: the long-read folds match one
-    // storage path against another, so there is nothing to hand them, exactly as
-    // `storageDeleteAwaitsExtraction` answers false for
-    // [StorageDeleteSettingsRequest] and for the same reason — an answer about
-    // the target's shape, not about this group. Written as a null argument to the
+    // storage path against another, so there is nothing to hand them — an answer
+    // about the target's shape, not about this group. The group's delete is asked
+    // about `settings/` because that directory is what it claims, the place it
+    // erases the stores from; a copy reads one store and claims nothing. Written
+    // as a null argument to the
     // shared helper rather than as a call this row simply does not make, so the
     // absence is a decision on the page instead of an omission that reads like
     // one; the activity half is still weighed, because a group being written into

@@ -5,9 +5,10 @@
 // leaves the delete buttons over its records live while it rewrites them, or
 // leaves them greyed after it has stopped.*
 //
-// The scan in `long_read_registry_test.dart` cannot answer either half. It reads
-// `lib/` as text and asks whether `claimUntilReleased(` is written where it is
-// sanctioned; a claim that is written but never reached, or reached but never
+// The scan in `long_read_registry_test.dart` cannot answer either half. It parses
+// `lib/` and asks whether each hand-released claim method (`claimUntilReleased`,
+// `claimUntilReleasedWhenFree`) is referred to where it is sanctioned; a claim
+// that is written but never reached, or reached but never
 // released, is a green scan and a wedged delete button. The registry is observed
 // here at run time instead, from a listener that collects every state the batch
 // passes through -- so "it was claimed at some point" and "it is not claimed at
@@ -15,8 +16,8 @@
 // taken between them.
 //
 // Driven through `start`, never through `beginBatch`: that door takes a count and
-// no records, so it claims nothing by construction and the four existing
-// regeneration suites that use it observe none of this.
+// no records, so it claims nothing by construction and the suites that drive a
+// batch through it observe none of this.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/regeneration_long_read_claim_test.dart
 import 'dart:io';
@@ -247,6 +248,50 @@ void main() {
       isEmpty,
       reason: 'a claim taken before the refusals in start would be left on by a batch that never began',
     );
+  });
+
+  test('a start while a batch is running is refused, and the running batch keeps its claim and its count', () async {
+    final container = containerFor();
+    final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+    await controller.start([record('r1')]);
+    final running = container.read(longReadRegistryProvider);
+    expect(running, hasLength(1));
+
+    // A different record, so the only folders the two batches share are the
+    // journal and the module directory -- which every batch names. That is what
+    // refuses the second start, and it is why no start ever replaces a batch.
+    await controller.start([record('r2')]);
+
+    expect(
+      container.read(longReadRegistryProvider),
+      running,
+      reason: 'the refused start took a claim of its own or dropped the running batch\'s',
+    );
+    expect(controller.state.total, 1, reason: 'the refused start replaced the running batch');
+
+    // The running batch still ends on its own record, and its end still releases.
+    controller.fail('r1');
+    expect(controller.failureCount, 1);
+    expect(container.read(longReadRegistryProvider), isEmpty, reason: 'the running batch\'s claim outlived it');
+  });
+
+  test('an empty start begins no batch and leaves a running one alone', () async {
+    final container = containerFor();
+    final seen = _RegistrySeen(container);
+    final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+    await controller.start(const []);
+    expect(seen.everyClaim, isEmpty, reason: 'a batch of no records can never end, so nothing may be claimed for it');
+
+    await controller.start([record('r1')]);
+    final running = container.read(longReadRegistryProvider);
+    await controller.start(const []);
+
+    expect(container.read(longReadRegistryProvider), running, reason: 'an empty start released the running batch');
+    expect(controller.state.total, 1, reason: 'an empty start replaced the running batch');
+    controller.fail('r1');
+    expect(container.read(longReadRegistryProvider), isEmpty);
   });
 
   // The completion tail runs 200 ms after the batch's claim is already released,

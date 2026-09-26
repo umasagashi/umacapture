@@ -1,5 +1,5 @@
-// The data-root relocation is the sixth long reader to register, and the widest
-// one: it is the only registered kind that holds trees outside the record store.
+// The data-root relocation is the widest long reader: it holds all three trees
+// it moves -- `storage/`, `modules/` and the settings box -- in one claim.
 //
 //   .fvm/flutter_sdk/bin/flutter test test/data_root_relocation_long_read_claim_test.dart
 //
@@ -158,7 +158,6 @@ void main() {
       isCapturing: true,
       // Nothing else is holding the trees here; what these cases watch is the
       // claim this relocation makes for itself.
-      blockedBy: null,
       declaration: dataRootRelocationLongReadDeclaration(container.read(containerRefProvider), controller),
       stopCapture: () async => stopCalled = true,
       recoveryGate: busyGate,
@@ -222,7 +221,6 @@ void main() {
     final outcome = await controller.migrate(
       _target,
       isCapturing: false,
-      blockedBy: null,
       declaration: dataRootRelocationLongReadDeclaration(container.read(containerRefProvider), controller),
       recoveryGate: gate,
     );

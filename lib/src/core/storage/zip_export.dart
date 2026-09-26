@@ -266,13 +266,13 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
   /// not of `state` for the same reason — the field is written and read back
   /// within this call, with nothing recomputed in between.
   ///
-  /// **And asked of [_run] rather than of the registry**, which is the shape
-  /// this guard used to have. `holdsKind(LongReadKind.zip)` answers "is a zip
-  /// claim registered", and [releaseForDialog] makes that `false` on purpose
-  /// while a run is still in flight, so the old spelling admitted a second run
-  /// for exactly as long as a save dialog stood open. The slot is a fact about
-  /// this notifier, not about the registry. A press that arrives in that window
-  /// is now answered the way any press that beats a rebuild is:
+  /// **And asked of [_run] rather than of the registry.**
+  /// `holdsKind(LongReadKind.zip)` answers "is a zip claim registered", and
+  /// [releaseForDialog] makes that `false` on purpose while a run is still in
+  /// flight, so asking the registry would admit a second run for exactly as
+  /// long as a save dialog stood open. The slot is a fact about this notifier,
+  /// not about the registry. A press that arrives in that window is answered
+  /// the way any press that beats a rebuild is:
   /// [StorageZipOutcome.alreadyRunning], with nothing started.
   ///
   /// **Why the unscoped half of the registry's protocol, and not `hold`.** The
@@ -282,7 +282,8 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
   /// [exportDirectoryAsZip]'s own `finally`, which is the only production caller
   /// of [begin]. A long reader whose work *is* one `Future` must use
   /// `LongReadRegistry.hold` — there is a case in `long_read_registry_test.dart`
-  /// that fails if a second file in `lib/` spells this pair out by hand.
+  /// that fails if a file or member in `lib/` it does not sanction spells this
+  /// pair out by hand.
   bool begin(DirectoryPath directory) {
     if (_run != null) {
       return false;
@@ -391,13 +392,15 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
   /// two arguments for one fact is how those come to differ.
   ///
   /// **This is the "gate" half of the picker re-check**, the shape
-  /// `ModuleManualUpdateDialog._install` and `Exporter.export` already use: the
+  /// `ModuleManualUpdateDialog._install` and `exportLongReadDeclaration` already use: the
   /// surfaces `watch` the registry so the control is withheld frame by frame,
   /// and the moment an answer comes back from a modal dialog the same question
   /// is asked once more with a `read`, because the frame that offered the
-  /// control is old by then and no rebuild happened in between. Asked through
-  /// [LongReadRegistry.heldBy], the derivation the buttons fold over, so the
-  /// gate and the button cannot come to disagree about what "holding" means.
+  /// control is old by then and no rebuild happened in between. Asked and
+  /// claimed in one call, [LongReadRegistry.claimUntilReleasedWhenFree], whose
+  /// question is [LongReadRegistry.heldBy] -- the derivation the buttons fold
+  /// over, so the gate and the button cannot come to disagree about what
+  /// "holding" means.
   ///
   /// The refusal it earns is the app's one long-read sentence and the caller
   /// raises it: nothing has started, so what the user is told is the same
@@ -411,11 +414,13 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
       // will ever release.
       return false;
     }
-    final registry = ref.read(longReadRegistryProvider.notifier);
-    if (registry.heldBy([run.directory]) != null) {
+    try {
+      run._token = ref
+          .read(longReadRegistryProvider.notifier)
+          .claimUntilReleasedWhenFree(kind: LongReadKind.zip, paths: [run.directory]);
+    } on LongReadNotStartedException {
       return false;
     }
-    run._token = registry.claimUntilReleased(kind: LongReadKind.zip, paths: [run.directory]);
     return true;
   }
 

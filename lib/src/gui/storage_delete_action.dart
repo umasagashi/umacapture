@@ -39,7 +39,9 @@ import 'package:material_symbols_icons/symbols.dart';
 import '/src/core/app_restart.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/storage/record_write_effects.dart';
+import '/src/core/storage/settings_boxes.dart';
 import '/src/core/storage/settings_store_delete.dart';
 import '/src/core/storage/storage_delete.dart';
 import '/src/core/storage/storage_delete_invalidation.dart';
@@ -48,8 +50,8 @@ import '/src/core/storage/storage_group.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/storage_action_blocker.dart';
 import '/src/gui/storage_status.dart';
-import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 
 /// Whether the view offers a delete for [group] at all.
@@ -100,7 +102,9 @@ StorageDeleteRequest? storageRowDeleteRequest(StorageGroup group, PathEntity ent
 /// branch would hand the view a request to erase `*.hive` and `*.lock` as files.
 /// That is precisely the removal stage 0 measured breaking: a sharing violation
 /// on Windows, an indefinite `blocked` on web. Its request therefore names
-/// no path at all and is finished by `settings_store_delete.dart`.
+/// no path to erase and is finished by `settings_store_delete.dart`; the one
+/// path it carries is the directory the stores live in, for the delete to claim
+/// ([settingsStoreDirectories], which is why [onWeb] is asked for).
 ///
 /// Two shapes have no group-level answer, each for its own reason:
 ///
@@ -108,12 +112,12 @@ StorageDeleteRequest? storageRowDeleteRequest(StorageGroup group, PathEntity ent
 ///    root of its own to name;
 ///  * **the font cache** is a filter over a directory it does not own, so
 ///    deleting that directory would take the recognition modules with it.
-StorageDeleteRequest? storageGroupDeleteRequest(PathInfo info, StorageGroup group) {
+StorageDeleteRequest? storageGroupDeleteRequest(PathInfo info, StorageGroup group, {required bool onWeb}) {
   if (!storageGroupOffersDelete(group)) {
     return null;
   }
   if (group.isSynthetic) {
-    return const StorageDeleteSettingsRequest();
+    return StorageDeleteSettingsRequest(storeDirectories: settingsStoreDirectories(info, onWeb: onWeb));
   }
   if (group.isResidualBucket || group.nameFilter != null) {
     return null;
@@ -315,6 +319,8 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
     // tooltip alike — is covered by the one decision, and the next one will be
     // too. The acknowledgement checkbox already gives way at exactly this point
     // for the same reason: nothing below is asking the user anything any more.
+    // The registry holds the delete's own claim for the whole run as well, so
+    // asking would answer about this dialog's own work.
     final refusal = _deleting ? null : storageDeleteRefusalOf(ref, group: widget.group, request: widget.request);
     final confirmEnabled = refusal == null && !_deleting && (!_needsAcknowledgement || _acknowledged);
     return ConstrainedBox(
@@ -483,8 +489,10 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
   ///
   /// The dismiss below is therefore only for the paths the runner does not reach:
   /// it threw. A token that is no longer in the stack dismisses nothing, so the
-  /// ordinary path passes through it untouched. Both the notifier and the token are
-  /// read before the await for the reason `DialogController.currentToken` gives —
+  /// ordinary path passes through it untouched. The one throw it skips is a
+  /// refusal to start ([LongReadNotStartedException] with a holder): nothing ran,
+  /// so the confirmation is still the question on screen and stays up. Both the
+  /// notifier and the token are read before the await for the reason `DialogController.currentToken` gives —
   /// they outlive this widget, and `WidgetRef` does not.
   Future<void> _confirm() async {
     if (_deleting) {
@@ -495,6 +503,7 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
     final base = ref.read(containerRefProvider);
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    var notStarted = false;
     try {
       await runStorageDelete(
         base,
@@ -503,8 +512,15 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
         effects: storageViewDeleteEffects(base),
         confirmationToken: token,
       );
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing was removed and nothing was asked of the platform: the question
+      // this dialog asked is still open, so it stays up and says why, and
+      // [build]'s refusal takes over from here. An abandoned registry is the
+      // container going away, and then there is nothing left to keep it up for.
+      notStarted = exception.heldBy != null;
+      announceLongReadNotStarted(exception, operation: 'A storage delete');
     } on ArgumentError {
-      // Deliberately outside the guard below. `deleteStorageEntry` states that
+      // Deliberately outside the guard below. `deleteStorageEntries` states that
       // this one propagates: it means a caller paired a path with a group the
       // path is not inside, which is a defect and not a delete outcome. Turning
       // it into "the file could not be deleted" would make a wiring bug
@@ -528,7 +544,9 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
       if (mounted) {
         setState(() => _deleting = false);
       }
-      dialogs.dismiss(token);
+      if (!notStarted) {
+        dialogs.dismiss(token);
+      }
     }
   }
 }
@@ -543,6 +561,16 @@ typedef StorageDeleteMessage = ({ToastType type, String description});
 /// before anything is said to the user: a toast announcing a deletion while the
 /// table it came from still lists the entry — or while the picture it removed is
 /// still on screen — is the exact state those two exist to remove.
+///
+/// **The request is claimed as one, and for as long as the app remembers what
+/// it named.** Through [holdForDelete], over [StorageDeleteRequest.longReadPaths],
+/// before this function's first `await`: a request any part of which another
+/// job is holding throws [LongReadNotStartedException] having removed nothing,
+/// so there is no report, nothing to invalidate and no confirmation to close;
+/// the caller answers it with [announceLongReadNotStarted] and keeps the
+/// confirmation up. The claim is released after the invalidations and the
+/// declared effects, and before the confirmation closes: everything that makes
+/// the app forget runs under it, and nothing that only speaks does.
 ///
 /// [confirmationToken] is the dialog the delete was confirmed from. It is closed
 /// once the report is in and before anything is said, so the panel a partial
@@ -567,9 +595,94 @@ Future<StorageDeleteReport> runStorageDelete(
   bool silent = false,
   int? confirmationToken,
 }) async {
+  final report = await holdForDelete(
+    ref.read(longReadRegistryProvider.notifier),
+    paths: request.longReadPaths,
+    action: (claim) => _deleteAndForget(ref, claim: claim, group: group, request: request, effects: effects),
+  );
+  // The confirmation this delete was asked from, closed here and nowhere else.
+  //
+  // **It belongs to this function because the order does.** Everything in
+  // [_deleteAndForget] is "make the app forget what went"; everything below is
+  // "say what happened", and the confirmation has to be gone between the two — a
+  // result panel opened over an answered confirmation would stack on it, and
+  // closing it afterwards would take the panel with it (`DialogController.dismiss`
+  // with a token drops that entry and everything above). The delete's claim ends
+  // at the same seam: what makes the app forget runs under it, and nothing that
+  // only speaks does.
+  //
+  // Null for every caller that has no confirmation open — the tests, and anything
+  // `silent`. A token whose dialog has already gone dismisses nothing.
+  if (confirmationToken != null) {
+    CardDialog.dismiss(ref, confirmationToken);
+  }
+  final message = storageDeleteOutcomeMessage(report);
+  if (silent) {
+    return report;
+  }
+  Toaster.show(ToastData(type: message.type, description: message.description));
+  switch (request) {
+    case StorageDeleteSettingsRequest():
+      // The settings delete's last stage, and it is not conditioned on the outcome: whether or
+      // not the stores went, this session no longer has any. See
+      // `deleteSettingsStores` for why a failed removal leaves the boxes just as
+      // unusable as a successful one. The same panel carries whatever a partial
+      // delete left behind, so
+      // a partial failure is still named here rather than being displaced by the
+      // restart demand.
+      CardDialog.show(
+        ref,
+        (_) => StorageDeleteResultDialog(
+          report: report,
+          headline: message.description,
+          notice: 'pages.storage.delete.restart_required'.tr(),
+          onRestart: restartApp,
+        ),
+        barrierDismissible: false,
+        // Over the tree, like the confirmation it follows: the view the delete
+        // was asked from is not replaced, so the rows just refreshed stay on
+        // screen behind the panel. Not a way back to them, though — this is the
+        // panel whose × is shut too (see `closeButtonEnabled` there), and the
+        // restart is what ends it.
+        over: true,
+      );
+    case StorageDeletePathsRequest():
+      if (!report.isComplete) {
+        // A partial delete owes the paths as well as the sentence, and a toast cannot
+        // hold a list. The toast is still shown, because the toast is where a
+        // delete's *result* is announced and a panel the user dismisses would
+        // otherwise be the only record that anything happened.
+        CardDialog.show(
+          ref,
+          (_) => StorageDeleteResultDialog(report: report, headline: message.description),
+          over: true,
+        );
+      }
+  }
+  return report;
+}
+
+/// The part of [runStorageDelete] that runs under the delete's claim: the
+/// removal, and then everything that makes the app forget what the removal took.
+///
+/// Returns once the last of those has run, which is what releases the claim, so
+/// a writer that asks the registry after that release finds the app already
+/// forgetting — never still remembering entries that are gone.
+Future<StorageDeleteReport> _deleteAndForget(
+  RefBase ref, {
+  required StorageDeleteClaim claim,
+  required StorageGroup group,
+  required StorageDeleteRequest request,
+  required RecordWriteEffects effects,
+}) async {
   final StorageDeleteReport report = switch (request) {
-    StorageDeletePathsRequest(:final targets) => await deleteStorageEntries(ref, group: group, targets: targets),
-    StorageDeleteSettingsRequest() => await ref.read(settingsStoreDeleteProvider)(),
+    StorageDeletePathsRequest(:final targets) => await deleteStorageEntries(
+      ref,
+      claim: claim,
+      group: group,
+      targets: targets,
+    ),
+    StorageDeleteSettingsRequest() => await ref.read(settingsStoreDeleteProvider)(claim),
   };
   switch (request) {
     case StorageDeletePathsRequest(:final targets):
@@ -625,65 +738,6 @@ Future<StorageDeleteReport> runStorageDelete(
       // only the directory the stores live in, for the claim, and none on web --
       // so every total is re-measured.
       effects.totals.apply(const TotalsScope.everything());
-  }
-  // The confirmation this delete was asked from, closed here and nowhere else.
-  //
-  // **It belongs to this function because the order does.** Everything above is
-  // "make the app forget what went"; everything below is "say what happened", and
-  // the confirmation has to be gone between the two — a result panel opened over
-  // an answered confirmation would stack on it, and closing it afterwards would
-  // take the panel with it (`DialogController.dismiss` with a token drops that
-  // entry and everything above). This is the same seam the invalidate and the
-  // declared effects are applied at, for the same reason: the ordering is the
-  // thing being decided, and it is decided once.
-  //
-  // Null for every caller that has no confirmation open — the tests, and anything
-  // `silent`. A token whose dialog has already gone dismisses nothing.
-  if (confirmationToken != null) {
-    CardDialog.dismiss(ref, confirmationToken);
-  }
-  final message = storageDeleteOutcomeMessage(report);
-  if (silent) {
-    return report;
-  }
-  Toaster.show(ToastData(type: message.type, description: message.description));
-  switch (request) {
-    case StorageDeleteSettingsRequest():
-      // The settings delete's last stage, and it is not conditioned on the outcome: whether or
-      // not the stores went, this session no longer has any. See
-      // `deleteSettingsStores` for why a failed removal leaves the boxes just as
-      // unusable as a successful one. The same panel carries whatever a partial
-      // delete left behind, so
-      // a partial failure is still named here rather than being displaced by the
-      // restart demand.
-      CardDialog.show(
-        ref,
-        (_) => StorageDeleteResultDialog(
-          report: report,
-          headline: message.description,
-          notice: 'pages.storage.delete.restart_required'.tr(),
-          onRestart: restartApp,
-        ),
-        barrierDismissible: false,
-        // Over the tree, like the confirmation it follows: the view the delete
-        // was asked from is not replaced, so the rows just refreshed stay on
-        // screen behind the panel. Not a way back to them, though — this is the
-        // panel whose × is shut too (see `closeButtonEnabled` there), and the
-        // restart is what ends it.
-        over: true,
-      );
-    case StorageDeletePathsRequest():
-      if (!report.isComplete) {
-        // A partial delete owes the paths as well as the sentence, and a toast cannot
-        // hold a list. The toast is still shown, because the toast is where a
-        // delete's *result* is announced and a panel the user dismisses would
-        // otherwise be the only record that anything happened.
-        CardDialog.show(
-          ref,
-          (_) => StorageDeleteResultDialog(report: report, headline: message.description),
-          over: true,
-        );
-      }
   }
   return report;
 }

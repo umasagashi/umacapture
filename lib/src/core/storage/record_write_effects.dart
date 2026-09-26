@@ -111,16 +111,13 @@ final class RecordImageDrop extends RecordImageEffect {
 
 /// A write that leaves every cached picture and preview correct.
 final class RecordImageUnaffected extends RecordImageEffect {
-  const RecordImageUnaffected({required this.reason})
-    : assert(reason != '', 'a write that drops nothing has to say why; an empty reason says nothing');
+  const RecordImageUnaffected({required this.reason});
 
   /// Why this write leaves the cached pictures and previews correct.
   final String reason;
 
   @override
-  void apply(RecordImageScope scope) {
-    assert(reason.trim().isNotEmpty, 'a write that drops nothing has to say why; a blank reason says nothing');
-  }
+  void apply(RecordImageScope scope) {}
 }
 
 /// The storage view's totals a write can have falsified.
@@ -214,16 +211,13 @@ final class RecordTotalsRemeasure extends RecordTotalsEffect {
 
 /// A write that leaves every total correct.
 final class RecordTotalsUnaffected extends RecordTotalsEffect {
-  const RecordTotalsUnaffected({required this.reason})
-    : assert(reason != '', 'a write that re-measures nothing has to say why; an empty reason says nothing');
+  const RecordTotalsUnaffected({required this.reason});
 
   /// Why this write leaves the storage view's totals correct.
   final String reason;
 
   @override
-  void apply(TotalsScope scope) {
-    assert(reason.trim().isNotEmpty, 'a write that re-measures nothing has to say why; a blank reason says nothing');
-  }
+  void apply(TotalsScope scope) {}
 }
 
 /// Drops every [recordPreviewReaders] entry a write under [changed] can have made stale.

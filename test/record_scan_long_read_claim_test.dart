@@ -27,8 +27,10 @@
 //  * The handle-release window on Windows. The claim exists so that timing is
 //    unreachable from the UI; observing it needs a real scan with a delete timed
 //    into it.
-//  * Anything the registry grants or refuses. It grants and refuses nothing; the
-//    lock is unchanged and is asserted elsewhere.
+//  * Anything the registry grants or refuses. This pass claims through
+//    `LongReadRegistry.hold`, which grants nothing and refuses nothing; the
+//    refusals are `holdWhenFree`'s, made to the writers that ask it, and the lock
+//    is asserted elsewhere.
 import 'dart:async';
 import 'dart:io';
 

@@ -81,7 +81,6 @@ void main() {
       isCapturing: true,
       // No registered long reader in these cases: they are about the root record
       // scope, which is the other half of the refusal.
-      blockedBy: null,
       declaration: undeclaredInTest,
       stopCapture: () async => stopCalled = true,
       recoveryGate: gate,
@@ -122,7 +121,6 @@ void main() {
       isCapturing: true,
       // No registered long reader in these cases: they are about the root record
       // scope, which is the other half of the refusal.
-      blockedBy: null,
       declaration: undeclaredInTest,
       stopCapture: () async => stopCalled = true,
       recoveryGate: gate,

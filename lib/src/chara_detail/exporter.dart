@@ -21,10 +21,8 @@ import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
-import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/storage/zip_own_output.dart';
 import '/src/core/utils.dart';
-import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 
 part 'exporter.mapper.dart';
@@ -99,24 +97,40 @@ final exportRecoveryGateProvider = Provider<RecordRecoveryGate>((_) => platformR
 
 /// What [ZipExporter] announces to the long-read registry while it packs.
 ///
-/// **The record export is a long reader and now says so.** It walks every
+/// **The record export is a long reader and says so.** It walks every
 /// selected record directory and reads each file in it — on desktop inside a
 /// `compute` isolate whose handles outlive the lock, which is the window the
-/// registry exists for. Until this existed, [ZipExporter]'s own comment was the
-/// only statement of the problem ("Nothing in the UI prevents that overlap"),
-/// and it was true of deletes as well as of writers: the record page's delete
-/// dialog and the storage view both offered to remove a directory the export
-/// was in the middle of reading.
+/// registry exists for. Without this claim the record page's delete dialog and
+/// the storage view would both offer to remove a directory the export is in
+/// the middle of reading.
 ///
 /// One function for both legs, for the reason [exportRecoveryGateProvider] is
 /// one provider for both: desktop takes the gate around its `compute`, web
 /// takes it inside [RecordZipService.export], and a claim written separately at
 /// those two points would be free to name different paths.
+///
+/// **It asks before it claims**, in the turn the gate starts, so both legs are
+/// refused by a long reader already holding what they would pack. On desktop
+/// that turn comes after the save dialog, which locks the parent window but not
+/// the event loop: an automatic module install can register over
+/// `modules/labels.json` — the one file the export shares with a writer that
+/// takes no lock — while the dialog is up, and the question `export_button.dart`
+/// asked while drawing the confirm is a frame older than that. The refusal is
+/// [LongReadNotStartedException.busy], which [Exporter] announces as the one
+/// sentence every withheld control carries.
+///
+/// The question lives here and not in [Exporter.export] because it is the
+/// claim's question: a format that declares no claim — CSV and JSON build their
+/// bytes from memory and open no record file — has nothing to be refused over.
+///
+/// [LongReadContention.refuse] because a press started it and the user is in
+/// front of the screen to be told.
 LongReadDeclaration exportLongReadDeclaration(RefBase ref, List<PathEntity> paths) {
-  return LongReadDeclaration.claim(
+  return LongReadDeclaration.claimWhenFree(
     registry: ref.read(longReadRegistryProvider.notifier),
     kind: LongReadKind.export,
     paths: paths,
+    contention: LongReadContention.refuse,
   );
 }
 
@@ -259,56 +273,14 @@ abstract class Exporter {
     if (savedPath == null) {
       return;
     }
-    // Asked again now the picker has returned, and this is the second of the two
-    // moments the one refusal covers. `export_button.dart` asks it while it draws
-    // the confirm, and that answer is a frame old by the time the user has chosen
-    // a file: the native dialog locks the parent window but not the event loop, so
-    // an automatic module install can register between the two — the one writer
-    // the export shares a file with (`modules/labels.json`) and the one that takes
-    // no lock at all. Nothing else can arrive here without a gesture, and no
-    // gesture is possible while the dialog is up.
-    //
-    // The same derivation the button asked and the claim below takes, read rather
-    // than watched: this is not a build, and the claim `_export` is about to take
-    // settles the question for the rest of the run.
-    //
-    // The layout and not `pathInfoProvider`, the step `export_button.dart`
-    // explains: an export needs to know where the store is, not that it was
-    // successfully prepared. A layout the app has not resolved is nothing to ask
-    // about — the claim it would be compared against is derived from that same
-    // layout — so the run goes on to fail on its own terms if it is going to.
-    final layout = ref.read(pathLayoutProvider);
-    final blockedBy = layout == null
-        ? null
-        : storageDeleteBlockedBy(
-            StorageDeletePathsRequest(
-              recordExportLongReadPaths(
-                pathInfo: layout,
-                source: source,
-                recordIds: recordIds,
-                // The desktop leg: `_exportWeb` returned above, and web has no
-                // picker window for anything to arrive through.
-                isWeb: false,
-              ),
-            ),
-            ref.read(longReadRegistryProvider).values,
-          );
-    if (blockedBy != null) {
-      // Said and not merely declined: the user has chosen a file and pressed save,
-      // so silence here reads as an export that worked. The sentence is the one
-      // every withheld control in the app shows — see [longReadBusyMessage], whose
-      // doc states why one sentence covers both moments — and not the failure
-      // toast below, because nothing was attempted and nothing failed.
-      logger.i("Declined to export ${recordIds.length} record(s): ${blockedBy.name} is holding a file it reads.");
-      Toaster.show(ToastData.error(description: longReadBusyMessage()));
-      return;
-    }
     final path = FilePath(savedPath);
     final notifier = ref.read(exportingStateProvider.notifier);
     notifier.set(true);
     try {
       await _export(path);
       onSuccess?.call(ExportResult.fileWritten(path));
+    } on LongReadNotStartedException catch (exception) {
+      _announceNotStarted(exception);
     } catch (e, st) {
       _reportFailure(e, st);
     } finally {
@@ -347,11 +319,20 @@ abstract class Exporter {
         lockParentWindow: false,
       );
       onSuccess?.call(ExportResult.downloadRequested(defaultFileName));
+    } on LongReadNotStartedException catch (exception) {
+      _announceNotStarted(exception);
     } catch (e, st) {
       _reportFailure(e, st);
     } finally {
       notifier.set(false);
     }
+  }
+
+  /// Said and not merely declined, on both legs: the user pressed export, so
+  /// silence reads as an export that worked. Not [_reportFailure], because
+  /// nothing was attempted and nothing failed.
+  void _announceNotStarted(LongReadNotStartedException exception) {
+    announceLongReadNotStarted(exception, operation: 'An export of ${recordIds.length} record(s)');
   }
 
   void _reportFailure(Object error, StackTrace stackTrace) {
@@ -610,12 +591,11 @@ class ZipExporter extends Exporter {
     final records = resolveSelectedRecords();
     final recordDirs = records.map((record) => recordDirOf(info, source, record)).toList();
     final labelsFile = info.modulesDir.filePath(exportLabelsFileName);
-    // No early return for an empty selection. It used to take one — straight to
-    // `compute`, past the gate and past the declaration — on the reasoning that
-    // an export naming no record needs no record lock. But it still opens
-    // `labels.json`, and the branch was therefore the "empty batch escapes the
-    // claim" shape the regeneration controller was already found to have: the
-    // one export that announces nothing is the one that runs unannounced.
+    // No early return for an empty selection. An export naming no record needs
+    // no record lock, but it still opens `labels.json`, so a return straight to
+    // `compute` — past the gate and past the declaration — would be the "empty
+    // batch escapes the claim" shape: the one export that announces nothing
+    // would be the one that runs unannounced.
     // `runForRecords` over an empty id list is the shared root acquisition and
     // nothing else, so the common path costs this case an acquisition nobody
     // contends for and gives it the claim over the file it does read.
@@ -627,9 +607,10 @@ class ZipExporter extends Exporter {
     // regeneration batch started by a capture running in another tab of the app
     // rewrites `record.json` and the images in place, and `addDirectory` walking
     // them at that moment either packs a torn file or throws on one that moved.
-    // Nothing in the UI prevents that overlap -- the export button is disabled
-    // only while another export runs, and the capture card's mutual exclusion
-    // covers the four capture features, not exporting.
+    // The format dialog withholds its confirm while a registered long reader
+    // holds a path this export reads, but that is asked once, at the press, and
+    // excludes nothing for the length of the walk; the capture card's mutual
+    // exclusion covers the four capture features, not exporting.
     //
     // The lock is taken here on the main isolate rather than inside `_run`, for
     // the same platform reason `archive_executor_io.dart` states: the desktop

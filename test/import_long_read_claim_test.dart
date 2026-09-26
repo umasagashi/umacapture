@@ -8,16 +8,17 @@
 // fetch on web) and the gap between two zips are inside no acquisition at all,
 // and `WebRecordPersistence.persistFiles` — the only thing that does acquire —
 // declares `LongReadDeclaration.none` on the stated grounds that "the producer
-// above owns the window". Nothing above owned it. A data-root relocation asks
-// `storageDeleteBlockedBy` over the roots it is about to rename, that question
-// was answered `null` for the whole import, and the relocation therefore ran:
-// the loop kept writing the rest of the selection into the store that had just
-// been renamed away, where the next startup does not look.
+// above owns the window". Nothing above owned it. A data-root relocation's own
+// claim asks the registry whether anything holds the roots it is about to
+// rename, and an import that holds nothing lets it through: the loop keeps
+// writing the rest of the selection into the store that has just been renamed
+// away, where the next startup does not look.
 //
 // WHAT IS ASSERTED, in the terms the app itself uses:
-//  * the claim exists for the whole run, and the *relocation's own question* —
-//    `storageDeleteBlockedBy` over `DataRootMigrationController.movedRoots` —
-//    refuses while it does;
+//  * the claim exists for the whole run, and the *relocation's own claim* —
+//    `dataRootRelocationLongReadDeclaration`, the declaration the dialog hands
+//    `migrate`, over `DataRootMigrationController.movedRoots` — is refused for
+//    `LongReadKind.import` while it does and let through once it is gone;
 //  * the claim comes off however the run ends: normally, with every zip
 //    refused, from a toolbar that was disposed mid-run, and (never taken) from
 //    a cancelled pick;
@@ -42,10 +43,11 @@
 //    VM, which reproduces OPFS's *prohibition* on synchronous FS calls and
 //    nothing else about a browser; the Web Locks half of the exclusion is not
 //    modelled here at all.
-//  * The relocation actually running. What is checked is the predicate the
-//    relocation dialog asks, not the dialog: driving `DataRootMigrationController.migrate`
-//    would move real trees, and the registry grants nothing in any case — it
-//    decides whether the button is offered.
+//  * The relocation's copy, and its dialog. What is run is the relocation's
+//    declaration around an action that does nothing, not `migrate`; that
+//    `migrate` runs that declaration before it closes or copies anything is
+//    `data_root_migration_long_read_gate_test.dart`'s case, and that the dialog
+//    hands it this declaration is driven by neither suite.
 //  * A long read a web worker performs under the same lock. The registry is the
 //    Dart isolate's memory, as its own header says.
 import 'dart:async';
@@ -63,10 +65,8 @@ import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
-import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
-import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
@@ -217,9 +217,34 @@ void main() {
   bool recordLanded(PathInfo info, String id) =>
       Directory('${info.charaDetailActiveDir.path}${Platform.pathSeparator}$id').existsSync();
 
+  /// The relocation's own answer: which registered long reader, if any, its claim is refused for.
+  ///
+  /// Asked by running `dataRootRelocationLongReadDeclaration` — the declaration the relocation
+  /// dialog hands `migrate` — over a real `DataRootMigrationController`, so the trees it asks about
+  /// and the kinds it disregards are the ones a relocation uses. The guarded action does nothing, so
+  /// a claim that is let through registers and is released within this call.
+  Future<LongReadKind?> relocationRefusedBy(ProviderContainer container, PathInfo info) async {
+    final declaration = dataRootRelocationLongReadDeclaration(
+      container.read(containerRefProvider),
+      DataRootMigrationController(source: info),
+    );
+    try {
+      await declaration.runDeclared(() async {});
+    } on LongReadNotStartedException catch (exception) {
+      final heldBy = exception.heldBy;
+      if (heldBy == null) {
+        // Abandoned: the registry went away, which names no holder and answers nothing.
+        rethrow;
+      }
+      return heldBy;
+    }
+    return null;
+  }
+
   /// Taps the button, opens the run's two edges in turn, and samples the registry
-  /// on the frames between them, answering what was seen. The samples are
-  /// `(claim count, what the relocation's question answers)`.
+  /// on the frames between them, answering what was seen: the claim count on
+  /// every sampled frame, and what the relocation's own claim was refused for on
+  /// the frames the run is parked.
   ///
   /// **Both edges belong to the test, and for one reason.** The whole run is over
   /// in a fraction of a second — a claim measured at ~80 ms with two zips and
@@ -257,19 +282,23 @@ void main() {
   /// two zips would be invisible to it. `container.listen` cannot miss a
   /// transition, so the count sequence is asserted here, once, for every case
   /// that comes through: up to one claim, and back to none.
-  Future<List<(int, LongReadKind?)>> runImportSampling(
+  ///
+  /// **The relocation is asked only while the run is parked.** Asking runs its
+  /// claim, and a claim that is let through registers: asked on the frames after
+  /// [firstReadGate], where the import's own claim may already be gone while the
+  /// spinner is still up, it would add transitions to the very count sequence
+  /// asserted above. Nothing is lost by it: that sequence proves the import held
+  /// one claim, unchanged, from its registration to its release, so the answer on
+  /// the parked frames is the answer for the whole run.
+  Future<({List<int> claimCounts, List<LongReadKind?> refusals})> runImportSampling(
     WidgetTester tester,
     ProviderContainer container,
     PathInfo info, {
     required Completer<void> layoutGate,
     required Completer<void> firstReadGate,
   }) async {
-    // The question the relocation dialog asks, built the way it builds it: over
-    // the controller's own enumeration of the trees it is about to rename, so a
-    // fourth tree added to the migration is asked about here without this suite
-    // being edited.
-    final movedRoots = DataRootMigrationController(source: info).movedRoots;
-    final samples = <(int, LongReadKind?)>[];
+    final sampledCounts = <int>[];
+    final refusals = <LongReadKind?>[];
     final claimCounts = <int>[];
     final toasts = <ToastData>[];
     final toastSubscription = container.listen<AsyncValue<ToastData>>(
@@ -283,10 +312,7 @@ void main() {
     );
     addTearDown(registrySubscription.close);
     bool spinning() => find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
-    void sample() {
-      final claims = container.read(longReadRegistryProvider).values;
-      samples.add((claims.length, storageDeleteBlockedBy(StorageDeletePathsRequest(movedRoots), claims)));
-    }
+    void sample() => sampledCounts.add(container.read(longReadRegistryProvider).length);
 
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
@@ -303,6 +329,7 @@ void main() {
     );
     for (var frame = 0; frame < _sampledFrames; frame++) {
       sample();
+      refusals.add(await relocationRefusedBy(container, info));
       await tester.pump();
     }
     firstReadGate.complete();
@@ -317,11 +344,11 @@ void main() {
       1,
       0,
     ], reason: 'the import must take one claim and give it back once, not one per zip and not none');
-    return samples;
+    return (claimCounts: sampledCounts, refusals: refusals);
   }
 
   group('the claim', () {
-    testWidgets('is held for the whole run, and the relocation\'s own question refuses while it is', (tester) async {
+    testWidgets('is held for the whole run, and the relocation\'s own claim is refused while it is', (tester) async {
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
       final firstReadGate = Completer<void>();
       picker.answerWithPaths([
@@ -344,21 +371,26 @@ void main() {
       // written; otherwise every assertion below holds vacuously.
       expect(recordLanded(info, 'uuid-1'), isTrue);
       expect(recordLanded(info, 'uuid-2'), isTrue);
-      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
+      expect(samples.claimCounts, isNotEmpty, reason: 'the run was never sampled with its spinner up');
       expect(
-        samples.map((sample) => sample.$1).toSet(),
+        samples.claimCounts.toSet(),
         {1},
-        reason: 'the import must announce exactly one claim, for its whole length: $samples',
+        reason: 'the import must announce exactly one claim, for its whole length: ${samples.claimCounts}',
       );
       expect(
-        samples.map((sample) => sample.$2).toSet(),
+        samples.refusals.toSet(),
         {LongReadKind.import},
-        reason: 'the relocation would have been offered while the import was still writing: $samples',
+        reason: 'the relocation would have run while the import was still writing: ${samples.refusals}',
       );
       expect(
         container.read(longReadRegistryProvider),
         isEmpty,
         reason: 'a claim nobody releases withholds every delete over the store for the rest of the session',
+      );
+      expect(
+        await relocationRefusedBy(container, info),
+        isNull,
+        reason: 'the relocation is still refused after the import that caused it has finished',
       );
     });
 
@@ -386,9 +418,9 @@ void main() {
       );
 
       expect(recordLanded(info, 'uuid-web'), isTrue);
-      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
-      expect(samples.map((sample) => sample.$1).toSet(), {1});
-      expect(samples.map((sample) => sample.$2).toSet(), {LongReadKind.import});
+      expect(samples.claimCounts, isNotEmpty, reason: 'the run was never sampled with its spinner up');
+      expect(samples.claimCounts.toSet(), {1});
+      expect(samples.refusals.toSet(), {LongReadKind.import});
       expect(container.read(longReadRegistryProvider), isEmpty);
     });
 
@@ -421,8 +453,8 @@ void main() {
         firstReadGate: firstReadGate,
       );
 
-      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
-      expect(samples.map((sample) => sample.$1).toSet(), {1}, reason: 'a failing import holds the store too');
+      expect(samples.claimCounts, isNotEmpty, reason: 'the run was never sampled with its spinner up');
+      expect(samples.claimCounts.toSet(), {1}, reason: 'a failing import holds the store too');
       expect(container.read(longReadRegistryProvider), isEmpty);
       expect(tester.widget<IconButton>(find.byType(IconButton)).onPressed, isNotNull);
     });
@@ -545,13 +577,12 @@ void main() {
       // registry frame by frame, but the picker is a modal dialog and this
       // control's own comment says the user may leave it open for minutes; no
       // frame is built while it is up, so a claim taken between the tap and the
-      // selection is walked straight past by an import that was authorised
-      // before it existed. Nothing downstream catches it: the `hold` this run
-      // takes grants nothing and refuses nothing, so arriving second at the
-      // registry is not an error anybody reports. The refusal has to be a second
-      // reading at the moment of writing, and it has to be said out loud —
-      // discarding the files silently would leave the user watching a toolbar
-      // that ignored the zips they just chose.
+      // selection would be walked straight past by an import that was authorised
+      // before it existed. The refusal is the run's own ask-and-claim at the
+      // moment of writing, and it has to be said out loud — discarding the files
+      // silently would leave the user watching a toolbar that ignored the zips
+      // they just chose — and said as what it is: the import's generic failure
+      // sentence would tell the user their zips were broken.
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
       final container = resolvedContainerFor(info);
       final toasts = <ToastData>[];
@@ -600,8 +631,19 @@ void main() {
       // against `tr()` would compare the toast with itself.
       expect(
         toasts.map((toast) => toast.description),
-        contains(appSentenceAt(longReadBusyKey)),
-        reason: 'the picked zips were dropped without telling the user why',
+        [appSentenceAt(longReadBusyKey)],
+        reason: 'the picked zips were dropped without the one long-read sentence, or with a failure beside it',
+      );
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        [LongReadKind.relocate],
+        reason: 'the refused run left an import claim behind',
+      );
+      await tester.pump();
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: 'the refused run left the importing spinner up, and the button with it',
       );
       expect(tester.takeException(), isNull);
     });
