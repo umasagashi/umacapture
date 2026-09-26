@@ -357,10 +357,10 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
                 // line above still names what is being deleted, and the spinner
                 // says the rest.
                 // The view's own glyph (`storage_status.dart`), not a raw
-                // `CircularProgressIndicator`: `storage_status_test.dart` pins that
-                // this view has exactly one spinner and that every surface waits with
-                // it, so a second construction here would be a second dialect of
-                // "busy" on the same screen. Sized to the paragraph it replaces.
+                // `CircularProgressIndicator`: every surface of this view waits with
+                // that one spinner, so a second construction here would be a second
+                // dialect of "busy" on the same screen. Sized to the paragraph it
+                // replaces.
                 if (_deleting)
                   Center(
                     child: Padding(
@@ -938,7 +938,8 @@ class StorageDeleteResultDialog extends ConsumerWidget {
                   const SizedBox(height: 12),
                   Text('pages.storage.delete.result_heading'.tr(), style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  for (final failure in report.failed) _survivor(theme, failure.subject, failure.detail),
+                  for (final failure in report.failed)
+                    _survivor(theme, failure.subject, storageDeleteFailureDetailText(failure.detail)),
                   for (final retention in report.retained)
                     _survivor(theme, retention.subject, _retentionDetail(retention.reason)),
                 ],

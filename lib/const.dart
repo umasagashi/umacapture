@@ -134,6 +134,14 @@ class CurrentPlatform {
   /// browser the capability does cover — this is the union of the two, which is
   /// why it earns its own name.
   static bool supportsFileDrop() {
-    return isWeb() || isDesktop();
+    return supportsFileDropFor(web: isWeb());
+  }
+
+  /// [supportsFileDrop] with the web term taken as an argument, so a test on
+  /// the VM — where `kIsWeb` is a constant false — can answer it for a browser.
+  /// The host OS is still read from [defaultTargetPlatform].
+  @visibleForTesting
+  static bool supportsFileDropFor({required bool web}) {
+    return web || isDesktop();
   }
 }

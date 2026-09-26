@@ -363,13 +363,10 @@ final storageSettingsBoxesProvider = FutureProvider<List<SettingsBoxListing>>((r
 /// is. The preview opens over the tree and covers it, barrier and all, so the
 /// row's delete is out of reach until the preview is closed, which
 /// disposes both providers. So no preview can survive a delete to show stale
-/// contents. `storage_tab_refresh_test.dart` pins this list against every
-/// `FutureProvider` declared anywhere in the view's *own* sources — the files
-/// reachable from this one by import that nothing outside the view imports, which
-/// today includes `storage_file_preview.dart` — so moving a provider to another
-/// file of the view does not put it out of reach of the check. A provider is
-/// excused only by being `autoDispose`, which is read off its declaration; that
-/// is what excuses the preview's two, and nothing excuses a plain one.
+/// contents. The rule for the list is the same one: a plain `FutureProvider`
+/// the view owns belongs here, and an `autoDispose` one does not. Nothing checks
+/// it; a provider left off only shows the previous figures until the app
+/// restarts.
 final List<ProviderOrFamily> storageTabContentProviders = [
   originStorageUsageProvider,
   storageGroupTotalsProvider,
@@ -407,9 +404,9 @@ final List<ProviderOrFamily> storageTabContentProviders = [
 /// refresh to plain `AsyncLoading`, which is what puts the view's own pending
 /// sentences back on screen. Measured rather than reasoned about: the first
 /// version of this reload dropped everything correctly and the view still showed
-/// `4 B` while walking, and `storage_view_reload_test.dart` — which also
-/// counts the watches so a sixth provider cannot be added without one — is where
-/// that showed up.
+/// `4 B` while walking, and `storage_view_reload_test.dart` is where that
+/// showed up. Every watch of these providers in the view carries it; nothing
+/// checks that a new one does.
 void reloadStorageTab(RefBase ref, {List<PathEntity> touched = const []}) {
   final cache = ref.read(directoryTotalsCacheProvider);
   if (touched.isEmpty) {
@@ -1373,8 +1370,8 @@ class _GroupTile extends ConsumerWidget {
     // is still the entry's own question, re-asked on every frame it paints; this
     // is the start of the subscription and not a second reading of it.
     //
-    // `unwrapPrevious()` for the reason `storage_view_reload_test.dart` enforces
-    // over every watch of these providers: a refresh hands the previous answer
+    // `unwrapPrevious()` for the reason [reloadStorageTab] gives for every
+    // watch of these providers: a refresh hands the previous answer
     // back with `isLoading` set. Nothing is read off it here — the line's whole
     // work is the subscription — but a watch whose value would be wrong to read
     // is not a shape to leave in the file for the next reader to copy.

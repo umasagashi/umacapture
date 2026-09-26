@@ -14,6 +14,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+// `analyzer` reaches this package transitively; see `support/source_syntax.dart` for why it is not a
+// direct dependency.
+// ignore: depend_on_referenced_packages
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -22,6 +26,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/version_check.dart';
+
+import 'support/source_syntax.dart';
 
 const _pointerUrl = "https://data.umacapture.com/umacapture/version_info.json";
 const _version = "2026-09-18T11:00:00+0900";
@@ -227,33 +233,47 @@ void main() {
   });
 
   group('every automatic download goes through fetchVerifiedModuleArchive', () {
-    final source = File('lib/src/core/version_check.dart').readAsStringSync();
+    // Read through the parser, so a call is found however the formatter lays it
+    // out and a mention in a comment is not a call.
+    final source = parseDartFile('lib/src/core/version_check.dart');
 
-    String body(String signature, String next) {
-      final start = source.indexOf(signature);
-      expect(start, greaterThan(0), reason: '$signature was renamed; update this test');
-      final end = source.indexOf(next, start);
-      expect(end, greaterThan(start), reason: 'the declaration after $signature moved; update this test');
-      return source.substring(start, end);
+    AstNode declaration(String name) {
+      expect(source.diagnostics, isEmpty, reason: 'version_check.dart does not parse, so nothing below looked at it');
+      return topLevelDeclaration(source.unit, name) ?? fail('$name was renamed; update this test');
     }
 
     test('the web download and the desktop loader both call it', () {
-      for (final (signature, next) in [
-        ('Future<void> _downloadAndExtractModuleToOpfs(', 'Future<void> _extractModuleArchiveTo('),
-        ('final moduleVersionLoader = FutureProvider', 'class AppVersionCheckResult'),
-      ]) {
-        expect(body(signature, next), contains('fetchVerifiedModuleArchive('), reason: signature);
+      for (final name in ['_downloadAndExtractModuleToOpfs', 'moduleVersionLoader']) {
+        expect(callsOf(declaration(name), 'fetchVerifiedModuleArchive'), isNotEmpty, reason: name);
       }
     });
 
     test('nothing else publishes a download phase or builds a download progress callback', () {
-      final shared = body('Future<void> fetchVerifiedModuleArchive(', '/// File name of the ONNX-extraction sentinel');
-      final rest = source.replaceFirst(shared, '');
-      // Declarations and doc references remain outside; calls do not.
-      expect(RegExp(r'[^\[]withModuleUpdateActivity\(ref').allMatches(rest), isEmpty);
-      expect(RegExp(r'_moduleDownloadProgress\(report\)').allMatches(rest), isEmpty);
-      expect(RegExp(r'(\)\s*|dio)\.download\(').allMatches(rest), isEmpty);
-      expect(RegExp(r'get<List<int>>\(').allMatches(rest), isEmpty);
+      final shared = declaration('fetchVerifiedModuleArchive');
+      final elsewhere = [
+        for (final reference in referencesIn(source.unit))
+          if (!_isWithin(reference.node, shared) && _downloadsOnItsOwn(reference))
+            '${source.locate(reference.node)} ${reference.name}',
+      ];
+      expect(elsewhere, isEmpty);
     });
   });
 }
+
+bool _isWithin(AstNode node, AstNode ancestor) => node.thisOrAncestorMatching((at) => at == ancestor) != null;
+
+/// Whether [reference] is one of the steps [fetchVerifiedModuleArchive] owns: publishing the update
+/// phase, building the progress callback, or transferring the archive bytes.
+bool _downloadsOnItsOwn(NameReference reference) => switch (reference.name) {
+  // Any use, a tear-off included: handing either of these to other code is how a
+  // second route would publish phases.
+  'withModuleUpdateActivity' || '_moduleDownloadProgress' => true,
+  // The one other `download` fetches the version pointer, which names the archive
+  // and is not one.
+  'download' => reference.arguments != null && reference.receiver?.toSource() != 'ModuleVersionRawData',
+  'get' => switch (reference.node) {
+    MethodInvocation(:final typeArguments?) => typeArguments.toSource() == '<List<int>>',
+    _ => false,
+  },
+  _ => false,
+};

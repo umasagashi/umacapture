@@ -17,7 +17,7 @@
 //     is interpolated into `VideoFrameGrabException`'s message three files away
 //     (`video_frame_grab_io.dart`'s `what`), and `error.toString()` is what a breadcrumb carries.
 //
-//  2. `the web import front end` reads `video_import_web.dart` as text. Not a choice, though the
+//  2. `the web import front end` reads `video_import_web.dart` through the parser. Not a choice, though the
 //     reason is narrower than the one written here before: a browser suite DOES exist — the files
 //     carrying `@TestOn('browser')` (`record_mutation_lock_web_test.dart`,
 //     `storage_persistence_web_test.dart`), which CI runs in its own `Browser tests` job. That
@@ -90,6 +90,7 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 
+import 'support/source_syntax.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// A clip whose name is a disclosure, not a serial number.
@@ -366,32 +367,38 @@ void main() {
     // `video_import_web.dart` imports `package:web`, so it does not compile on the VM and the
     // behavioural guard above cannot reach it. This scan is the substitute and it is weaker: it
     // rules on what is written in this one file and knows nothing about what a value carries.
-    late String source;
+    late CompilationUnit source;
 
-    setUpAll(() => source = _read('lib/src/core/video_import_web.dart'));
+    setUpAll(() => source = _parse('lib/src/core/video_import_web.dart'));
 
     test('no logger call in the web leg interpolates the clip name', () {
       final calls = _loggerCalls(source);
       // Vacuity. A scanner that stopped matching would enumerate nothing and the assertion below
       // would pass while reading an empty list — how a guard of this shape dies.
       expect(calls.length, greaterThanOrEqualTo(3), reason: 'the scanner found no logger calls; it is broken');
-      expect(calls.join('\n'), contains('could not be started'), reason: 'the scanner missed a known call');
+      expect(
+        calls.map((call) => call.toSource()).join('\n'),
+        contains('could not be started'),
+        reason: 'the scanner missed a known call',
+      );
 
       for (final call in calls) {
         for (final interpolation in _interpolations(call)) {
           expect(
             _namesTheClip(interpolation),
             isFalse,
-            reason: 'a web log line interpolates "$interpolation", which reaches Sentry as a breadcrumb: $call',
+            reason:
+                'a web log line interpolates "$interpolation", which reaches Sentry as a breadcrumb: '
+                '${call.toSource()}',
           );
         }
       }
     });
 
     test('the web leg redacts the producer\'s settled message before anything can publish it', () {
-      final statements = _statementsReadingSettledMessage(source);
-      expect(statements, hasLength(1), reason: 'the scanner lost the settled outcome; it is broken');
-      expect(statements.single, contains('withoutSecrets'));
+      final reads = _settledMessageReads(source);
+      expect(reads, hasLength(1), reason: 'the scanner lost the settled outcome; it is broken');
+      expect(reads.every(_isRedacted), isTrue, reason: 'the settled message is read outside `withoutSecrets`');
     });
 
     test('the web leg still names the container, which is publishable and is the useful part', () {
@@ -402,42 +409,57 @@ void main() {
     test('the scanner does flag a leak, so a green run above means something', () {
       // The detector run against the line this stage removed. Without this case, a `_namesTheClip`
       // that had stopped matching would make every assertion above vacuously true.
-      const leaking = "logger.i('Video import of \$fileName was not started: \$blocker');";
-      final calls = _loggerCalls(leaking);
+      // Laid out the way `dart format` breaks a long call, so the reading is not tied to one layout.
+      const leaking = "logger\n    .i(\n  'Video import of \$fileName was not started: \$blocker',\n);";
+      final calls = _loggerCalls(_snippet(leaking));
       expect(calls, hasLength(1));
       expect(_interpolations(calls.single), containsAll(<String>['fileName', 'blocker']));
       expect(_interpolations(calls.single).any(_namesTheClip), isTrue);
 
       // And the two other spellings the same claim is written in elsewhere in this repository.
-      expect(_interpolations(_loggerCalls("logger.e('grab \${file.name} failed');").single).any(_namesTheClip), isTrue);
-      expect(_interpolations(_loggerCalls("logger.e('probe \${source.name}');").single).any(_namesTheClip), isTrue);
-
-      // A clean line is not flagged, so the detector is not simply saying yes.
       expect(
-        _interpolations(_loggerCalls("logger.i('a \"\$container\" clip: \$blocker');").single).any(_namesTheClip),
+        _interpolations(_loggerCalls(_snippet("logger.e('grab \${file.name} failed');")).single).any(_namesTheClip),
+        isTrue,
+      );
+      expect(
+        _interpolations(_loggerCalls(_snippet("logger.e('probe \${source.name}');")).single).any(_namesTheClip),
+        isTrue,
+      );
+
+      // A clean line is not flagged, so the detector is not simply saying yes; and a call that only a
+      // comment spells is not a call.
+      expect(
+        _interpolations(
+          _loggerCalls(_snippet("logger.i('a \"\$container\" clip: \$blocker');")).single,
+        ).any(_namesTheClip),
         isFalse,
       );
+      expect(_loggerCalls(_snippet("// logger.i('\$fileName');\nfinal x = 1;")), isEmpty);
     });
   });
 
   group('the Windows leg passes the same reading, so the two legs are checked alike', () {
     test('no logger call in the io leg interpolates the clip name', () {
-      final calls = _loggerCalls(_read('lib/src/core/video_import_io.dart'));
+      final calls = _loggerCalls(_parse('lib/src/core/video_import_io.dart'));
       expect(calls.length, greaterThanOrEqualTo(6), reason: 'the scanner found too few logger calls; it is broken');
       for (final call in calls) {
         for (final interpolation in _interpolations(call)) {
-          expect(_namesTheClip(interpolation), isFalse, reason: 'an io log line interpolates "$interpolation": $call');
+          expect(
+            _namesTheClip(interpolation),
+            isFalse,
+            reason: 'an io log line interpolates "$interpolation": ${call.toSource()}',
+          );
         }
       }
       // `withoutSecrets('$error', [path, fileName])` passes the names as *secrets to remove*, not as
       // text, so the rule is about interpolations and not about the identifiers appearing at all.
-      expect(calls.join('\n'), contains('withoutSecrets'));
+      expect(calls.expand((call) => callsOf(call.argumentList, 'withoutSecrets')), isNotEmpty);
     });
 
     test('the io leg redacts the producer\'s settled message, read the same way the web leg is', () {
-      final statements = _statementsReadingSettledMessage(_read('lib/src/core/video_import_io.dart'));
-      expect(statements, hasLength(1), reason: 'the scanner lost the settled outcome; it is broken');
-      expect(statements.single, contains('withoutSecrets'));
+      final reads = _settledMessageReads(_parse('lib/src/core/video_import_io.dart'));
+      expect(reads, hasLength(1), reason: 'the scanner lost the settled outcome; it is broken');
+      expect(reads.every(_isRedacted), isTrue, reason: 'the settled message is read outside `withoutSecrets`');
     });
   });
 
@@ -723,29 +745,35 @@ $body
       // The route the breadcrumb spy cannot see: `captureException` is a Sentry **event**, and in a
       // suite the hub is disabled, so what it was handed is unobservable. This reads it instead —
       // the same substitute the worker client gets, for the same reason.
-      final body = _methodBody(_read('lib/src/core/sentry_util.dart'), 'Future<void> addFile(FilePath path) async');
-      expect(body.length, greaterThan(200), reason: 'the method body came back nearly empty; the scanner is broken');
-      final statements = _statementsReadingTheAttachmentFailure(body);
-      expect(statements, hasLength(1), reason: 'the scanner did not find the one read that exists; it is broken');
-      for (final statement in statements) {
+      final methods = nodesOf<MethodDeclaration>(
+        _parse('lib/src/core/sentry_util.dart'),
+      ).where((method) => enclosingDeclarationName(method) == 'ScopeExtension.addFile').toList();
+      expect(methods, hasLength(1), reason: 'Scope.addFile is gone or doubled; this case is anchored on it');
+      final reads = methods.expand(nodesOf<CatchClause>).expand(_attachmentFailureReads).toList();
+      // Today the caught exception and `path.path`, both handed to `withoutSecrets`.
+      expect(reads, isNotEmpty, reason: 'the reading found no read in any catch of addFile; it is broken');
+      for (final read in reads) {
         expect(
-          statement.contains('withoutSecrets'),
+          _isRedacted(read),
           isTrue,
-          reason: 'this statement republishes the platform exception or the absolute path raw: $statement',
+          reason: 'this republishes the platform exception or the absolute path raw: ${read.toSource()}',
         );
       }
     });
 
     test('the scanner does flag an unredacted read, so a green run above means something', () {
       const leaking =
-          'logger.e("Failed to add file attachment. file=\${path.path}", exception, stackTrace);\n'
-          'captureException(exception, stackTrace);';
-      expect(_statementsReadingTheAttachmentFailure(leaking), hasLength(2));
-      expect(_statementsReadingTheAttachmentFailure(leaking).every((s) => s.contains('withoutSecrets')), isFalse);
-      // And a comment that merely mentions the word is not a read: prose is stripped before the
-      // split, which is what stops this rule from failing on its own explanation.
-      const commented = '// the exception is dropped here, path.path with it\nfinal x = 1;';
-      expect(_statementsReadingTheAttachmentFailure(commented), isEmpty);
+          'try {} catch (exception, stackTrace) {\n'
+          '  logger.e("Failed to add file attachment. file=\${path.path}", exception, stackTrace);\n'
+          '  captureException(exception, stackTrace);\n'
+          '}';
+      final reads = nodesOf<CatchClause>(_snippet(leaking)).expand(_attachmentFailureReads).toList();
+      expect(reads, hasLength(3));
+      expect(reads.where(_isRedacted), isEmpty);
+      // And a comment that merely mentions the word is not a read, so this rule does not fail on its
+      // own explanation.
+      const commented = 'try {} catch (exception) {\n  // the exception is dropped here, path.path with it\n}';
+      expect(nodesOf<CatchClause>(_snippet(commented)).expand(_attachmentFailureReads), isEmpty);
     });
   });
 }
@@ -855,17 +883,29 @@ String _methodBody(String source, String signature) {
 
 int _occurrences(String text, String needle) => needle.allMatches(text).length;
 
-/// Every statement of [source] that reads the settled outcome's message — the producer's own
-/// sentence, which `buildImportErrorReportScope` publishes as `import.message`.
+/// Every read of the settled outcome's message at or under [root] — the producer's own sentence,
+/// which `buildImportErrorReportScope` publishes as `import.message`.
 ///
 /// The io leg is guarded behaviourally as well (the payload group drives it), so this rule exists
 /// for the web leg, where nothing can be run; it is applied to both so the two legs are read alike
 /// and a divergence between them shows up as a failure rather than as an absence.
-List<String> _statementsReadingSettledMessage(String source) => source
-    .split(';')
-    .where((statement) => statement.contains('settled.message'))
-    .map((statement) => statement.trim())
-    .toList();
+List<AstNode> _settledMessageReads(AstNode root) => [
+  for (final reference in referencesIn(root))
+    if (reference.name == 'message' && reference.receiver?.toSource() == 'settled') reference.node,
+];
+
+/// Whether [node] sits in the arguments of a `withoutSecrets` call within its own statement.
+///
+/// Within the statement, so a value copied into a local first and redacted on the next line is
+/// reported: the rule reads one expression, not the flow of a value between statements.
+bool _isRedacted(AstNode node) {
+  for (AstNode? at = node.parent; at != null && at is! Statement; at = at.parent) {
+    if (at is MethodInvocation && at.methodName.name == 'withoutSecrets' && node.offset >= at.argumentList.offset) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /// One string the worker wrote arriving at a log line or a Sentry call.
 typedef _WorkerTextFlow = ({String member, String sink, String value});
@@ -1239,23 +1279,22 @@ void _collectWorkerTextLeaves(AstNode node, Set<String> text, List<String> found
   }
 }
 
-/// Every statement of [body] that names the caught platform exception or the attachment's absolute
-/// path — i.e. the two values in `Scope.addFile` whose printed form quotes the user's profile.
+/// Every read, in [clause]'s body, of the caught platform exception or of the attachment's absolute
+/// path (`path.path`) — the two values in `Scope.addFile` whose printed form quotes the user's
+/// profile.
 ///
-/// The identifier is matched as a word rather than as `$exception`, so `captureException(exception,
-/// …)` — the route a suite cannot observe, because the hub is disabled — is caught as well as the
-/// interpolated one.
-///
-/// Line comments are stripped first. Without that the rule fails on its own explanation: the code it
-/// guards has to *say* which value it is dropping, and a chunk of prose containing the word would be
-/// read as a republication of it. Stripping `//` would also cut a `https://` inside a string literal,
-/// which is why it is applied to one extracted method body and not to a file.
-List<String> _statementsReadingTheAttachmentFailure(String body) => body
-    .replaceAll(RegExp(r'//[^\n]*'), '')
-    .split(';')
-    .where((statement) => RegExp(r'\bexception\b').hasMatch(statement) || statement.contains('path.path'))
-    .map((statement) => statement.trim())
-    .toList();
+/// Any use of the exception counts, so `captureException(exception, …)` — the route a suite cannot
+/// observe, because the hub is disabled — is caught as well as the interpolated one. Comments are not
+/// code, so the prose that says which value is being dropped is not read as a republication of it.
+List<AstNode> _attachmentFailureReads(CatchClause clause) {
+  final exception = clause.exceptionParameter?.name.lexeme;
+  return [
+    for (final reference in referencesIn(clause.body))
+      if ((reference.name == exception && reference.receiver == null) ||
+          (reference.name == 'path' && reference.receiver?.toSource() == 'path'))
+        reference.node,
+  ];
+}
 
 String _read(String relativePath) {
   final file = File(relativePath);
@@ -1263,46 +1302,29 @@ String _read(String relativePath) {
   return file.readAsStringSync();
 }
 
-/// Every `logger.<level>(…)` call in [source], as source text, parentheses balanced.
-///
-/// Quoted spans are skipped so a bracket inside a message cannot end a call early. Raw strings and
-/// nested interpolation braces are not modelled; the vacuity cases above are what stands between
-/// that simplification and a scanner that silently finds nothing.
-List<String> _loggerCalls(String source) {
-  final calls = <String>[];
-  final start = RegExp(r'logger\.(v|d|i|w|e|wtf)\(');
-  for (final match in start.allMatches(source)) {
-    var depth = 1;
-    var index = match.end;
-    String? quote;
-    while (index < source.length && depth > 0) {
-      final char = source[index];
-      if (quote != null) {
-        if (char == r'\') {
-          index += 2;
-          continue;
-        }
-        if (char == quote) quote = null;
-      } else if (char == "'" || char == '"') {
-        quote = char;
-      } else if (char == '(') {
-        depth++;
-      } else if (char == ')') {
-        depth--;
-      }
-      index++;
-    }
-    if (depth == 0) calls.add(source.substring(match.start, index));
-  }
-  return calls;
+/// The Dart file at [relativePath], parsed. A file the parser could not read fails here, rather than
+/// yielding a recovery tree with statements missing from it.
+CompilationUnit _parse(String relativePath) {
+  final source = ParsedSource.parse(_read(relativePath), path: relativePath);
+  expect(source.diagnostics, isEmpty, reason: '$relativePath does not parse; the reading would be partial');
+  return source.unit;
 }
 
-/// The expressions interpolated into [call]: `$name` and the inside of `${…}`.
-List<String> _interpolations(String call) => RegExp(r'\$\{([^}]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)')
-    .allMatches(call)
-    .map((match) => (match.group(1) ?? match.group(2) ?? '').trim())
-    .where((expression) => expression.isNotEmpty)
-    .toList();
+/// [statements] parsed as the body of a function, for the cases that run a reading on a snippet.
+CompilationUnit _snippet(String statements) => ParsedSource.parse('void f() {\n$statements\n}', path: 'snippet').unit;
+
+const _logLevels = {'v', 'd', 'i', 'w', 'e', 'wtf'};
+
+/// Every `logger.<level>(…)` call at or under [root], however it is laid out.
+List<MethodInvocation> _loggerCalls(AstNode root) => [
+  for (final call in nodesOf<MethodInvocation>(root))
+    if (call.realTarget case SimpleIdentifier(name: 'logger') when _logLevels.contains(call.methodName.name)) call,
+];
+
+/// The expressions interpolated into [call]'s strings: `$name` and the inside of `${…}`.
+List<String> _interpolations(AstNode call) => [
+  for (final interpolation in nodesOf<InterpolationExpression>(call)) interpolation.expression.toSource(),
+];
 
 /// Whether [expression] evaluates to something that names the user's clip.
 ///

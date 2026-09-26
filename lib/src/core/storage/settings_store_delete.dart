@@ -98,7 +98,7 @@ Future<StorageDeleteReport> deleteSettingsStores(StorageDeleteClaim claim) async
           // Refused by the platform, which is the only kind of failure reachable
           // here: this delete takes no lock, so neither lock reason can arise.
           reason: StorageDeleteFailureReason.refused,
-          detail: error.toString(),
+          detail: StorageDeletePlatformDetail(error),
         ),
       );
     }

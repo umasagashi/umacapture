@@ -22,6 +22,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
+import 'package:umacapture/src/core/fs/record_recovery_reason.dart';
 import 'package:umacapture/src/core/fs/root_storage_maintenance.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -30,6 +31,7 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/localization.dart';
 import 'support/storage_delete_claim.dart';
+import 'support/storage_recovery_clause.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -220,7 +222,11 @@ void main() {
       contains(_slotPath().path),
       reason: 'the delete has to say which slot it would not remove',
     );
-    expect(report.failed.single.detail, isNotEmpty, reason: 'a refusal the user cannot describe is not a report');
+    expectRecoveryIncompleteFailure(
+      report.failed.single,
+      recordId: _recordId,
+      reason: RecordRecoveryIncompleteReason.supersededCopyNotSaved,
+    );
   });
 
   // The per-record seam, which no delete reaches: the gate the whole app reads

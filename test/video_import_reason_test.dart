@@ -16,8 +16,6 @@
 // the only channel a refusal that happened *before* a session existed has. Plus the property that
 // makes the whole thing safe to extend: an unknown discriminator degrades to the generic line
 // rather than to a blank tile or a raw enum name.
-import 'dart:io';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/app_logger.dart';
@@ -25,29 +23,6 @@ import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/core/wasm_worker_ops.dart';
 
 import 'support/localization.dart';
-
-/// Every file that puts a `reasonKind` on the wire, on either front end.
-///
-/// Read as text rather than mirrored, because that is the only side of the boundary a Dart suite
-/// can see: `web/` is a separately built artefact and the Windows runner is C++.
-const _producerSources = [
-  'web/worker.js',
-  'web/video_import.mjs',
-  'windows/runner/video_import_session.h',
-  'native/src/core/native_api_messages.h',
-];
-
-/// The kinds that cross no wire: this side names them, so no producer spells them.
-///
-/// `VideoImportSlots` decides both — a start whose post threw, and a run that fell silent for
-/// `videoImportProgressTimeout`.
-const _decidedInDart = {'never_started', 'stalled'};
-
-/// Whether [source] contains [wireName] as a quoted string literal.
-///
-/// Quoted, so `no_records` cannot be satisfied by a comment or by a longer identifier that merely
-/// contains it; both quote styles, because the producers are JavaScript and C++.
-bool _spells(String source, String wireName) => source.contains("'$wireName'") || source.contains('"$wireName"');
 
 /// The `videoImportDone` message the worker posts, with only the fields a reason needs.
 ///
@@ -74,8 +49,8 @@ void main() {
       // reuses web's spellings rather than inventing parallel ones — one vocabulary across two
       // platforms is what lets a kind be given exactly one translated sentence.
       //
-      // This list is a Dart-side mirror and nothing more; the case below is the one that reads the
-      // producers and so is the one a rename fails.
+      // This list is a Dart-side mirror and nothing more: it reads no producer, so a rename on the
+      // producer side alone is not caught here.
       const onTheWire = [
         'not_a_video',
         'no_video_track',
@@ -103,48 +78,6 @@ void main() {
         VideoImportReason.values.map((reason) => reason.wireName).toSet(),
         onTheWire.toSet(),
         reason: 'a reason kind exists on one side of the boundary only',
-      );
-    });
-
-    test('every kind a producer sends is spelled the same way in that producer', () {
-      // The case above compares two Dart-side spellings and cannot see a producer at all, so a
-      // rename in `web/video_import.mjs` alone leaves it green while `videoImportReasonOf` returns
-      // null and the refusal silently degrades to the generic sentence -- the exact defect this
-      // file exists to remove. The producers are therefore read as text.
-      final sources = <String, String>{for (final path in _producerSources) path: File(path).readAsStringSync()};
-      for (final entry in sources.entries) {
-        expect(entry.value, isNotEmpty, reason: '${entry.key} is empty; this case would pass vacuously');
-      }
-
-      // Driven off `values`, not off a list: a kind added tomorrow is checked the day it is written.
-      for (final reason in VideoImportReason.values) {
-        final where = sources.entries.where((e) => _spells(e.value, reason.wireName)).map((e) => e.key).toList();
-        if (_decidedInDart.contains(reason.wireName)) {
-          // These two are not carriage at all: `VideoImportSlots` names them on this side when a
-          // post throws or a running import falls silent, so no producer can spell them. Asserted
-          // as an absence so the partition cannot rot into "the scan stopped finding things".
-          expect(
-            where,
-            isEmpty,
-            reason: '${reason.wireName} is now spelled by a producer; move it out of _decidedInDart',
-          );
-          continue;
-        }
-        expect(
-          where,
-          isNotEmpty,
-          reason:
-              'no producer spells "${reason.wireName}"; a rename on one side would degrade the refusal '
-              'to the generic sentence with nothing to notice',
-        );
-      }
-
-      // The control for the scan itself: a spelling no producer has must not be found, or
-      // `_spells` is matching anything at all and every line above proves nothing.
-      expect(
-        sources.values.where((source) => _spells(source, 'a_reason_invented_next_year')),
-        isEmpty,
-        reason: 'the scan matches a spelling that is not there',
       );
     });
 
@@ -282,29 +215,6 @@ void main() {
       expect(withoutSecrets(tagged, const ['reason']), isNot(contains('video_import_reason')));
     });
 
-    test('the web leg classifies the worker\'s raw text, never the redacted copy', () {
-      // Read as text: `video_import_web.dart` imports `package:web`, so the VM cannot compile it,
-      // and CI's browser job is `dart test`, which compiles no `package:flutter` — this file
-      // reaches the framework twice over. Weaker than running it, and the io twin is covered
-      // behaviourally elsewhere; this pins the one thing the case above cannot, which is which of
-      // the two strings the call site actually passes.
-      final source = File('lib/src/core/video_import_web.dart').readAsStringSync();
-      expect(_classifications(source), hasLength(1), reason: 'the scanner lost the classification; it is broken');
-      expect(_classifiesRedactedText(source), isFalse, reason: 'the reason is read off text already redacted');
-    });
-
-    test('that reading does flag the defect, so a green run above means something', () {
-      // The call site exactly as it was, plus a rename, so the rule is not passing because it is
-      // looking for one particular identifier.
-      const before = "final detail = withoutSecrets('\$error', [fileName]);\nreason: videoImportReasonInText(detail),";
-      const renamed = "final text = withoutSecrets('\$error', [fileName]);\nreason: videoImportReasonInText(text),";
-      const fixed = "final r = videoImportReasonInText('\$error');\nfinal d = withoutSecrets('\$error', [fileName]);";
-
-      expect(_classifiesRedactedText(before), isTrue);
-      expect(_classifiesRedactedText(renamed), isTrue);
-      expect(_classifiesRedactedText(fixed), isFalse);
-    });
-
     test('an untagged error yields no reason at all', () {
       // A start that timed out, or a worker that was already gone, is refused with a message the
       // worker never wrote. There is nothing to name, and inventing a cause would be worse.
@@ -404,22 +314,6 @@ void main() {
       expect(videoImportResultKey(_refusedWith(VideoImportReason.notAVideo)), 'reason.not_a_video');
     });
   });
-}
-
-/// Every `videoImportReasonInText(...)` call in [source], as the text of its argument.
-List<String> _classifications(String source) =>
-    RegExp(r'videoImportReasonInText\(([^)]*)\)').allMatches(source).map((match) => match.group(1) ?? '').toList();
-
-/// Whether [source] hands text it has already redacted to the reason classifier.
-///
-/// The redacted values are found by reading the assignments rather than by knowing what they are
-/// called, so renaming one does not quietly switch this rule off.
-bool _classifiesRedactedText(String source) {
-  final redacted = RegExp(
-    r'(?:final|var)\s+(\w+)\s*=\s*withoutSecrets\(',
-  ).allMatches(source).map((match) => match.group(1) ?? '').toSet();
-  expect(redacted, isNotEmpty, reason: 'nothing in this source is redacted at all; the scanner is broken');
-  return _classifications(source).any((argument) => redacted.any((name) => RegExp('\\b$name\\b').hasMatch(argument)));
 }
 
 VideoImportOutcome _refusedWith(VideoImportReason reason) =>

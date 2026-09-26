@@ -308,11 +308,9 @@ class PathInfo {
   /// is `(dataRoot ?? documentDir) / …` or `supportDir / …`, so covering the bases covers the tree,
   /// and `withoutUserPaths` matches the longest root first.
   ///
-  /// **This list cannot be derived by the machine at runtime** — Flutter has no `dart:mirrors`, so
-  /// nothing can enumerate a class's fields. It is instead derived by the machine at *test* time:
-  /// `test/app_root_scrub_test.dart` reads this file and fails when a `DirectoryPath` field exists
-  /// that is neither listed here nor named in that test's stated exclusions. A field that escaped
-  /// both would not leak anything new — its paths simply fall back to `<redacted>`, losing the
+  /// **This list is written by hand** — Flutter has no `dart:mirrors`, so nothing can enumerate a
+  /// class's fields — and nothing checks that a new `DirectoryPath` field is added to it. A field left
+  /// out would not leak anything new: its paths simply fall back to `<redacted>`, losing the
   /// diagnostic detail rather than the privacy.
   ///
   /// [downloadDir] is deliberately **excluded**: it is the OS downloads folder, which belongs to the

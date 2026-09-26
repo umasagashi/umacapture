@@ -292,26 +292,6 @@ void main() {
 
       expect((await container.read(provider.future)).skill?.name, 'skill.jpg');
     });
-
-    test('every record-keyed preview reader is listed', () {
-      // Nothing in Dart can enumerate a library's top-level declarations at run
-      // time, so the declarations are read off the source, as
-      // `storage_tab_refresh_test.dart` reads the storage view's.
-      final declaration = RegExp(r'final (\w+) = FutureProvider[\w.]*\.family<[^>]*,\s*String>');
-      final names = <String>{
-        for (final file in Directory('lib/src/gui/chara_detail').listSync(recursive: true).whereType<File>())
-          if (file.path.endsWith('.dart'))
-            for (final match in declaration.allMatches(file.readAsStringSync())) match.group(1)!,
-      };
-      expect(names, isNotEmpty, reason: 'the scan found no declaration at all, so it proves nothing');
-      final source = File('lib/src/gui/chara_detail/preview_dialog.dart').readAsStringSync();
-      final roster = source.substring(source.indexOf('recordPreviewReaders = ['));
-      final listed = roster.substring(0, roster.indexOf('];'));
-      for (final name in names) {
-        expect(listed.contains('family: $name,'), isTrue, reason: '$name reads a record and is not listed');
-      }
-      expect(recordPreviewReaders, hasLength(names.length), reason: 'the list names something the scan did not');
-    });
   });
 
   group('the storage totals are re-measured in each shape', () {

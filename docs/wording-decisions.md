@@ -8,7 +8,7 @@ taken at all.
 **Change an approved sentence only after confirming the change with the app's author.** No machine
 check enforces this. `test/storage_wording_test.dart` checks the `pages.storage.*` wording's
 *properties* (no implementation vocabulary, no remedy the view does not offer, two paragraphs in a
-delete warning, no unfilled placeholder, keys and code naming each other in both directions), and a
+delete warning, no unfilled placeholder), and a
 property holds through a reword that quietly drops a clause — a reword that drops a clause is still
 two paragraphs and still carries no jargon. That is why the clauses are written out below.
 

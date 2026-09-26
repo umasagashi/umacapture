@@ -112,10 +112,7 @@ final class JournalRootStorageMaintenance implements RootStorageMaintenance {
     // is not an exclusion (`long_read_registry.dart` says so in its opening
     // paragraph), so how the lock is taken and whether the work is announced are
     // separate decisions, and only the first of them is what this comment
-    // sanctions. The sanctioned set in `long_read_registry_test.dart` covers that
-    // decision, and it is a set and not a count: an acquisition outside it turns
-    // that case red wherever it is written, so a further bypass cannot appear
-    // unnoticed however many there come to be.
+    // sanctions.
     return _mutationLock.runForRoot(() => runUnlocked(request));
   }
 

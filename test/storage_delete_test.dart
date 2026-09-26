@@ -406,7 +406,7 @@ void main() {
       // The Windows "file is in use" case, the named reason a delete is expected
       // to fail on: the platform's own words
       // travel with the path, so the caller does not have to re-derive them.
-      expect(report.failed.single.detail, contains('being used'));
+      expect(storageDeleteFailureDetailText(report.failed.single.detail), contains('being used'));
       // Not attempted rather than reported as a second failure, but still named:
       // the user asked for it to go and it did not.
       expect(report.retained, [
@@ -563,7 +563,11 @@ void main() {
 
       // Before the fallback existed this was a partial report naming `a.png` as a
       // survivor, with its parent retained underneath it.
-      expect(report.isComplete, isTrue, reason: report.failed.map((e) => e.detail).join(' / '));
+      expect(
+        report.isComplete,
+        isTrue,
+        reason: report.failed.map((e) => storageDeleteFailureDetailText(e.detail)).join(' / '),
+      );
       expect(report.deletedPaths, contains(readOnly.path));
       expect(report.retained, isEmpty);
       expect(Directory(activePath('rec-1')).existsSync(), isFalse);

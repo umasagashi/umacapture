@@ -215,8 +215,7 @@ Future<void> startVideoImport({
         // and spelled out again rather than hoisted into a local the log line shares. Each boundary the
         // runner's sentence crosses applies the rule itself — the breadcrumb above, the payload here —
         // because "a later line redacts it" is the property that stops holding the moment the later line
-        // moves; `test/app_root_scrub_test.dart` scans this file for exactly that shortcut, and
-        // `test/video_import_breadcrumb_privacy_test.dart` reads the log statement for the same call.
+        // moves; `test/video_import_breadcrumb_privacy_test.dart` reads the log statement for the same call.
         // The second pass below then runs over text that is already clean, which is a no-op.
         //
         // `settle` rather than `release` because only `release` carries the constant. The one behavioural

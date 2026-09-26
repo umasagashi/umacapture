@@ -444,10 +444,9 @@ String _deleteWarningKey(String name) => '$_groupKeyPrefix.$name.delete_warning'
 /// `dart:mirrors`, so nothing can enumerate a class's members. It is instead
 /// derived by the machine at *test* time: `test/storage_group_test.dart` reads
 /// `providers.dart`, extracts every `DirectoryPath get`, and fails when one is
-/// missing from here. That is deliberately a stronger reading than
-/// `app_root_scrub_test.dart`'s, which extracts *fields* and asserts it finds no
-/// getters — every logical group below is a getter, so an extractor built like
-/// that one would stay green forever as groups were added.
+/// missing from here. It extracts *getters* rather than fields because every
+/// logical group below is a getter, so an extractor that read fields would stay
+/// green forever as groups were added.
 ///
 /// Two things read this table: [storageGroupContainerGetters] (which of these are
 /// represented by a child rather than in their own right) and the unclassified

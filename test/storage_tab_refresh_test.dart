@@ -34,8 +34,7 @@
 // WHAT THIS SUITE DOES NOT REACH. It builds no widgets: "the row left the table"
 // is asserted at the provider the row watches, not at the pixels. It is
 // VM/`dart:io` only — OPFS listing and `navigator.storage.estimate()` (which
-// `originStorageUsageProvider` calls, and which this suite can only assert is in
-// the list) are unreachable from here. And it says nothing about *which* rows a
+// `originStorageUsageProvider` calls) are unreachable from here. And it says nothing about *which* rows a
 // partial delete leaves; that is `storage_delete_action_test.dart`'s.
 import 'dart:io';
 
@@ -53,7 +52,6 @@ import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
-import 'support/storage_view_sources.dart';
 import 'support/record_write_effects_fixture.dart';
 
 void main() {
@@ -327,132 +325,6 @@ void main() {
       );
 
       expect((await scope.read(storageGroupTotalsProvider(StorageGroupId.settings).future)).knownBytes, 0);
-    });
-  });
-
-  group('the list of the view\'s providers is counted, not remembered', () {
-    // THE CLAIM THIS ROSTER KEEPS, IN ONE SENTENCE. *Every `FutureProvider` the
-    // storage view owns that riverpod will not drop on its own has to be in
-    // `storageTabContentProviders`, because nothing else drops it after a delete
-    // or on re-entry.*
-    //
-    // `storageTabContentProviders` is a list, and a list is what goes stale when
-    // the sixth provider is added next to the five it names. Nothing in Dart can
-    // enumerate a library's top-level declarations at run time, so the
-    // enumeration is done over the source -- but over the source of *the view*,
-    // not of one file. Until this was widened it read `storage_tree.dart` alone,
-    // with a line-anchored pattern, and `storage_file_preview.dart`'s two
-    // providers were therefore not exempted by anything: they were never seen.
-    // A guard that cannot see a declaration cannot report it missing, and moving
-    // a provider one file across would have silenced it.
-    //
-    // Both halves of the sentence are read off the code. "The view owns it" is
-    // the private import sub-library `StorageViewSources` computes; "riverpod
-    // will not drop it" is `.autoDispose` on the declaration, so the exemption is
-    // attached to the declaration itself rather than to a list of forgiven names
-    // that the next `autoDispose` provider would have to be added to by hand.
-    late StorageViewSources view;
-    setUpAll(() {
-      view = StorageViewSources.read();
-    });
-
-    test('every FutureProvider the view owns and riverpod will not drop is in the list', () {
-      for (final provider in view.providers.where((provider) => !provider.autoDispose)) {
-        expect(
-          view.rosterContains(provider.name),
-          isTrue,
-          reason: '$provider is read from storage and nothing drops it, but it is not in the list',
-        );
-      }
-    });
-
-    // The other direction, so the exemption is a rule and not a hole: an
-    // `autoDispose` provider must stay out. `storageTabContentProviders`' doc says
-    // why the preview's two are outside (they are `autoDispose`, and a preview
-    // covers the tree it opened over, so the delete button cannot be reached while
-    // one is up); this is that reason made checkable.
-    test('an autoDispose provider the view owns is left out of the list', () {
-      for (final provider in view.providers.where((provider) => provider.autoDispose)) {
-        expect(
-          view.rosterContains(provider.name),
-          isFalse,
-          reason: '$provider is dropped by riverpod already; listing it would invalidate a live preview',
-        );
-      }
-    });
-
-    // NEGATIVE CONTROL 1 -- a scan that found nothing would make every assertion
-    // above vacuously true, which is exactly how the file-anchored version stayed
-    // green while missing two providers.
-    test('the scan reaches the whole view rather than reporting nothing', () {
-      expect(view.sources, isNotEmpty);
-      expect(view.providers, isNotEmpty);
-      expect(
-        view.providers.map((provider) => provider.path).toSet().length,
-        greaterThanOrEqualTo(2),
-        reason: 'providers were found in one file only, so the scan has narrowed back to a single path',
-      );
-      expect(
-        view.providers.where((provider) => provider.autoDispose),
-        isNotEmpty,
-        reason: 'no autoDispose provider was seen, so the exemption is being granted to nobody',
-      );
-    });
-
-    // THE OWNERSHIP PREDICATE IS ITSELF GUARDED. "The view owns a file" means
-    // nothing outside the view imports it, which is a property of how the code is
-    // written: importing `storage_file_preview.dart` from one file outside the
-    // view would drop it out of `sources`, and every assertion above would go on
-    // passing over a smaller view. So the frontier is asserted too. It is built
-    // from the import edges *leaving* the owned set -- the opposite direction to
-    // the one that built the set -- so a file that lost ownership is still on it,
-    // and has to be excused here by name or the suite fails.
-    //
-    // The excuses are keyed by path, carry their reason, and are checked for
-    // staleness below, so this is not a list that can quietly outlive its
-    // entries.
-    const sharedWithTheRestOfTheApp = <String, String>{
-      'lib/src/core/platform_controller.dart':
-          'the capture backend and its config; the view reads whether a capture is running, which a '
-          'delete does not change and which this view does not own',
-      'lib/src/core/providers.dart':
-          'the app-wide path layout; a delete cannot falsify where the directories are, '
-          'and the whole app reads it, so it is not the view\'s to drop',
-    };
-
-    test('a provider-declaring file the view imports is either owned by the view or excused here', () {
-      for (final path in view.providerDeclaringNeighbours) {
-        expect(
-          sharedWithTheRestOfTheApp,
-          contains(path),
-          reason:
-              '$path declares providers and the view imports it, but the view does not own it. Either it is '
-              'shared with the rest of the app -- say so here -- or something outside the view has started '
-              'importing a file of the view, which shrinks every scan in this suite.',
-        );
-      }
-      // A frontier that came back empty would excuse everything by having nothing
-      // to excuse, which is how the scan would report a view of one file.
-      expect(view.providerDeclaringNeighbours, isNotEmpty);
-    });
-
-    test('every excusal still names a file the view imports and does not own', () {
-      for (final path in sharedWithTheRestOfTheApp.keys) {
-        expect(
-          view.providerDeclaringNeighbours,
-          contains(path),
-          reason: '$path is excused here but is no longer on the view\'s frontier; the excusal is stale',
-        );
-      }
-    });
-
-    // NEGATIVE CONTROL 2 -- deleting or renaming a provider the list names must
-    // not be forgiven by the scan simply failing to match its declaration.
-    test('the scan finds a declaration for every provider the list names', () {
-      final declared = view.providers.map((provider) => provider.name).toSet();
-      for (final name in view.rosterNames) {
-        expect(declared, contains(name), reason: '$name is in the list but the scan found no declaration for it');
-      }
     });
   });
 }

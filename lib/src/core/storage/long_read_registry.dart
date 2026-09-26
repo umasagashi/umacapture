@@ -107,18 +107,13 @@ bool longReadHoldCovers(StorageHold hold, PathEntity target) {
 /// claim site and not before, which is what a reader can rely on without
 /// counting what is below or asking when the rest arrive.
 ///
-/// **That rule is now counted, and the round of the surfaces is counted with
-/// it, but the two are not counted equally well.** `long_read_registry_test.dart`
-/// reads the members out of this declaration and requires each to be named at a
-/// claim site; a member added with none fails. It cannot see the opposite
-/// omission — an operation that is long and never became a member — because
-/// this enum is where "long" is written down, so there is nothing to compare
-/// against. The surface side is anchored instead on the closed set of the app's
-/// destructive entry points: a file that calls one has to reach the registry
-/// somewhere in the same file. That set is a human inventory, so a screen with
-/// no anchor is still invisible, and the header's "still owed once per surface"
-/// stands — what the count adds is that the inventory, once made, stops rotting
-/// silently.
+/// Neither that rule nor the round of the surfaces is checked by a test. A
+/// member with no claim site costs nothing a user can see, and a surface that
+/// never subscribes shows a control that should have been withheld, and
+/// pressing it is refused or made to wait by the operation it starts (asking
+/// the registry when it claims, or taking the record lock) — except a video
+/// import, which never refuses by design. The header's "still owed once per
+/// surface" stands.
 ///
 /// **The kind is load-bearing, not a label.** Three readings would give the
 /// wrong answer if it were dropped: [holdsKind] (the zip's single-flight rule

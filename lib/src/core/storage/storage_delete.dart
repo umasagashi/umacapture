@@ -30,15 +30,12 @@
 /// **The one sentence this library does compose**, and why it is here rather
 /// than with the others. A slot whole-store recovery could not empty is *this
 /// app* declining to delete, not a platform refusing, so there is no platform
-/// message for [StorageDeleteFailure.detail] to carry and the field's producer
-/// has to supply one. That producer is here. What it must not do is write the
-/// words out: a `detail` is rendered verbatim in the result panel, so a
-/// hand-written one reaches the user with no key, no translation and nothing for
-/// the walk over `pages.storage.*` to see — which is exactly what it did, in
-/// English, until [storageRecoveryIncompleteDetail] gave it the shipped keys
-/// every other sentence on that screen goes through. **Both halves of it**: the
-/// frame first, and then the clause in its brackets, which went on arriving as
-/// recovery's own English for as long as the reason was a `String`.
+/// message for [StorageDeleteFailure.detail] to carry. The detail carries the
+/// facts instead ([StorageDeleteRecoveryIncompleteDetail]), and
+/// [storageRecoveryIncompleteDetail] renders them from the shipped keys every
+/// other sentence on that screen goes through — **both halves of it**: the frame,
+/// and the clause in its brackets, which is chosen by the recovery reason as a
+/// value rather than taken from recovery's own English.
 library;
 
 import 'dart:io' show FileSystemException;
@@ -143,14 +140,14 @@ Future<StorageDeleteReport> _deleteStorageEntry(
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(target.path),
       reason: StorageDeleteFailureReason.lockBusy,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   } on RecordMutationLockUnavailable catch (error, stackTrace) {
     logger.w('Storage delete has no exclusion primitive: ${target.path}', error, stackTrace);
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(target.path),
       reason: StorageDeleteFailureReason.lockUnavailable,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   }
 }
@@ -355,7 +352,7 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(root.path),
       reason: StorageDeleteFailureReason.refused,
-      detail: surveyFailure.toString(),
+      detail: StorageDeletePlatformDetail(surveyFailure),
     );
   }
   final List<PathEntity> extant;
@@ -368,7 +365,7 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(root.path),
       reason: StorageDeleteFailureReason.refused,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   }
   return _deleteOne(root, deepestFirst: extant, plan: plan, outcome: outcome);
@@ -451,7 +448,7 @@ Future<StorageDeleteReport> _deleteOne(
           StorageDeleteFailure(
             subject: StorageDeletePathSubject(entity.path),
             reason: StorageDeleteFailureReason.recoveryIncomplete,
-            detail: storageRecoveryIncompleteDetail(recordId: undrained.recordId, reason: undrained.reason),
+            detail: StorageDeleteRecoveryIncompleteDetail(recordId: undrained.recordId, reason: undrained.reason),
           ),
         );
       }
@@ -500,7 +497,7 @@ Future<StorageDeleteReport> _deleteOne(
         StorageDeleteFailure(
           subject: StorageDeletePathSubject(entity.path),
           reason: StorageDeleteFailureReason.refused,
-          detail: error.toString(),
+          detail: StorageDeletePlatformDetail(error),
         ),
       );
       survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
@@ -588,6 +585,18 @@ Future<bool> _deletedByClearingReadOnly(PathEntity entity, Object error) async {
 
 PathEntity _typed(FsEntry entry) => entry.isDirectory ? DirectoryPath(entry.path) : FilePath(entry.path);
 
+/// The sentence a survivor row shows for [detail].
+///
+/// A `switch` over the sealed type, so a third kind of detail stops this file
+/// compiling until it is given a rendering.
+String storageDeleteFailureDetailText(StorageDeleteFailureDetail detail) => switch (detail) {
+  StorageDeletePlatformDetail(:final error) => error.toString(),
+  StorageDeleteRecoveryIncompleteDetail(:final recordId, :final reason) => storageRecoveryIncompleteDetail(
+    recordId: recordId,
+    reason: reason,
+  ),
+};
+
 /// What the result panel says about a slot recovery could not empty.
 ///
 /// **Two keys rather than one sentence with a blank in it.** [recordId] is
@@ -599,13 +608,9 @@ PathEntity _typed(FsEntry entry) => entry.isDirectory ? DirectoryPath(entry.path
 /// shown with a hole in it.
 ///
 /// **[reason] arrives as a value, and the clause it fills the brackets with is
-/// shipped like every other sentence on this screen.** It used to arrive as the
-/// English prose recovery wrote at the point of failure, and this function put
-/// it in the brackets unchanged: 「… の保存途中のデータを回収できませんでした
-/// （its manifest could not be read）。」 went to the user, with no key, no
-/// translation, and nothing for the walk over `pages.storage.*` to see. Fixing
-/// the sentence *around* it left that hole open, because the hole was the
-/// argument and not the frame.
+/// shipped like every other sentence on this screen.** Recovery's own English
+/// prose stays in the log: in the brackets it would reach the user with no key,
+/// no translation, and nothing for the walk over `pages.storage.*` to see.
 ///
 /// A `switch` over the enum and not a lookup table, for the reason the delete
 /// toast's own `_causeOf` states: it is exhaustive, so a twentieth

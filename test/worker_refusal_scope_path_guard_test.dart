@@ -1,102 +1,56 @@
-// The rule `web/worker.js` uses to decide which path segments it may create in MEMFS, and whether it is the
-// same rule as the store's canon on the Dart side (`isSafeRecordId`, lib/src/core/fs/record_id_safety.dart).
+// The store's canonical path-segment rule (`isSafeRecordId`, lib/src/core/fs/record_id_safety.dart), held to the
+// table `web/worker.js` is held to, so the store and the worker that writes into it cannot disagree about a
+// segment.
 // Run: .fvm/flutter_sdk/bin/flutter test test/worker_refusal_scope_path_guard_test.dart
 //
-// THE DEFECT THIS PINS. `handleUpdateRecord` validated its `recordId` structurally and said why — the handler
-// ends in an unconditional `fsRemoveRecursive` of `active/<recordId>` — while the file paths in the same
-// message, which are what actually drive the `FS.mkdir` / `FS.writeFile`, were split and used unchecked. A
-// `..` segment survives `filter(Boolean)`, so `../../modules/version_info.json` walked out of the storage
-// root and over a file the recognizer reads. Not a vulnerability: the only producer is Dart's own record
-// store and a dedicated worker has no cross-origin message surface, so there is no attacker. It is the
-// guard's own stated reasoning ("the guard, rather than the caller, is what makes the delete safe to read")
-// not being applied to the write in the same handler.
+// THE DEFECT THIS PINS. The worker's `updateRecord` handler writes and deletes MEMFS paths built out of the
+// record id and the file paths in the message. A `..` segment in either would walk out of the storage root and
+// over a file the recognizer reads. The worker refuses such a segment by its own rule (`isSafePathSegment`),
+// which has to be the store's rule: a segment one side accepts and the other refuses is a divergence between
+// the store and the code that writes into it.
 //
-// WHAT THIS TEST CAN AND CANNOT PROVE. `web/worker.js` is JavaScript: nothing in `flutter test` can load or
-// execute it, so no Dart test can observe the guard refusing anything. The falsification available here is
-// therefore about the RULE, not about the code path — this reads the file as text, lifts the character class
-// out of it, and checks that the class decides every case the way `isSafeRecordId` decides it, so the two
-// cannot drift apart unnoticed. It would still pass an implementation that declared the right class and never
-// consulted it; the call sites are asserted structurally below for exactly that reason, and even that is a
-// weaker statement than execution. The worker's own Node harnesses (`tool/test_web_*.mjs`) are what execute
-// the file, and they exercise the well-formed paths only.
+// HOW THE TWO SIDES ARE HELD TOGETHER. Neither side reads the other's source. `test/fixtures/
+// safe_path_segment_cases.json` lists the segments that must be accepted and the ones that must be refused;
+// this file asserts the store's verdict on every entry, and `tool/test_web_video_import.mjs` asserts the
+// worker's by delivering an `updateRecord` to the real `web/worker.js` and watching what it stages and what
+// it refuses. Neither side can prove anything about a segment the table does not list.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/fs/record_id_safety.dart';
 
+/// The shared table, as `accepted` and `refused` segment lists.
+({List<String> accepted, List<String> refused}) readCases() {
+  final table =
+      jsonDecode(File('test/fixtures/safe_path_segment_cases.json').readAsStringSync()) as Map<String, dynamic>;
+  List<String> listOf(String key) => [for (final entry in table[key] as List<dynamic>) entry as String];
+  return (accepted: listOf('accepted'), refused: listOf('refused'));
+}
+
 void main() {
-  final source = File('web/worker.js').readAsStringSync();
+  final cases = readCases();
 
-  group('the worker s storage-path rule', () {
-    test('is the same character class as the store s canonical record-id rule', () {
-      final declaration = RegExp(r'const SAFE_PATH_SEGMENT_PATTERN = /(.+)/;').firstMatch(source);
-      expect(declaration, isNotNull, reason: 'web/worker.js no longer declares a single path-segment class');
-      final classSource = declaration?.group(1) ?? '';
-      final workerRule = RegExp(classSource);
+  group('the store s path-segment rule, against the table the worker is held to', () {
+    test('lists both verdicts, and no segment under both', () {
+      // An empty side would make its loop below pass without asserting anything.
+      expect(cases.accepted, isNotEmpty);
+      expect(cases.refused, isNotEmpty);
+      expect(cases.accepted.toSet().intersection(cases.refused.toSet()), isEmpty);
+      // The two dot segments are the ones the character class alone cannot refuse.
+      expect(cases.refused, containsAll(<String>['.', '..']));
+    });
 
-      // Every case the canon distinguishes, plus the two the class alone cannot: `.` and `..` are spelled
-      // entirely with characters the class allows, which is why both predicates name them separately.
-      const cases = <String>[
-        '3f2b0c9a-1d4e-4a77-9d13-2b6a5c0e77aa',
-        'record.json',
-        'record_1700000000.json',
-        'trainee.jpg',
-        'chara_detail',
-        'active',
-        'a-b_c.d',
-        '',
-        '.',
-        '..',
-        '../..',
-        'a/b',
-        r'a\b',
-        'a b',
-        'ら',
-        'C:',
-      ];
-      for (final candidate in cases) {
-        final workerAccepts = candidate != '.' && candidate != '..' && workerRule.hasMatch(candidate);
-        expect(
-          workerAccepts,
-          isSafeRecordId(candidate),
-          reason: 'the worker and the store disagree about "$candidate"',
-        );
+    test('accepts every segment the table accepts', () {
+      for (final segment in cases.accepted) {
+        expect(isSafeRecordId(segment), isTrue, reason: 'the store refuses "$segment", which the worker stages');
       }
     });
 
-    test('names the two dot segments the class cannot exclude', () {
-      // Read off the worker's own predicate rather than assumed by the loop above: if these two comparisons
-      // are ever dropped, the loop's `candidate != '.'` would still be re-stating a rule the worker no
-      // longer holds, and the equivalence it reports would be about this test rather than about the worker.
-      final predicate = RegExp(r'function isSafePathSegment\(segment\) \{(.+?)\n\}', dotAll: true).firstMatch(source);
-      expect(predicate, isNotNull, reason: 'web/worker.js no longer states the rule in one predicate');
-      final body = predicate?.group(1) ?? '';
-      expect(body, contains("segment !== '.'"));
-      expect(body, contains("segment !== '..'"));
-      expect(body, contains('SAFE_PATH_SEGMENT_PATTERN.test(segment)'));
-    });
-
-    test('is applied to every segment the storage writer creates, and to the id the handler deletes by', () {
-      final writer = RegExp(
-        r'function writeStorageFile\(relPath, bytes\) \{(.+?)\n\}',
-        dotAll: true,
-      ).firstMatch(source)?.group(1);
-      expect(writer, isNotNull, reason: 'web/worker.js no longer has a single storage writer');
-      expect(
-        writer,
-        contains('isSafePathSegment(name)'),
-        reason: 'the file name is written unchecked; a `..` name is the traversal on its own',
-      );
-      expect(
-        writer,
-        contains('isSafePathSegment(p)'),
-        reason: 'the parent segments are mkdir-ed unchecked, which is where `..` walks out of the root',
-      );
-      expect(
-        source,
-        contains('if (!isSafePathSegment(recordId)) {'),
-        reason: 'the sibling guard no longer shares the rule, so the delete and the write can disagree again',
-      );
+    test('refuses every segment the table refuses', () {
+      for (final segment in cases.refused) {
+        expect(isSafeRecordId(segment), isFalse, reason: 'the store accepts "$segment", which the worker refuses');
+      }
     });
   });
 }

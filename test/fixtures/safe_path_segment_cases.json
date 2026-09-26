@@ -1,0 +1,25 @@
+{
+  "accepted": [
+    "3f2b0c9a-1d4e-4a77-9d13-2b6a5c0e77aa",
+    "record.json",
+    "record_1700000000.json",
+    "trainee.jpg",
+    "chara_detail",
+    "active",
+    "a-b_c.d",
+    "...",
+    ".hidden"
+  ],
+  "refused": [
+    "",
+    ".",
+    "..",
+    "../..",
+    "a/b",
+    "a\\b",
+    "a\u0008b",
+    "a b",
+    "ら",
+    "C:"
+  ]
+}

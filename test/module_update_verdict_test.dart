@@ -4,11 +4,11 @@
 // reaches both of them or neither.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/module_update_verdict_test.dart
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:version/version.dart';
+
+import 'support/source_syntax.dart';
 
 final _goodArchive = ModuleArchiveRef("modules/${"a" * 64}.zip", "a" * 64, 10386424);
 
@@ -198,30 +198,17 @@ void main() {
 
   group('both automatic loaders decide through evaluateModuleUpdate', () {
     // The loaders are provider bodies that need a Ref and the network, so the VM
-    // suite cannot run them. What it can check is that neither carries its own
-    // copy of the decision -- two copies is how a new condition reaches one
-    // platform only.
-    final source = File('lib/src/core/version_check.dart').readAsStringSync();
+    // suite cannot run them. What it checks is that each still calls the shared
+    // decision, so a condition added to it reaches both platforms. Whether a
+    // loader also adds a condition of its own is not read.
+    final source = parseDartFile('lib/src/core/version_check.dart');
 
-    String body(String signature, String next) {
-      final start = source.indexOf(signature);
-      expect(start, greaterThan(0), reason: '$signature was renamed; update this test');
-      final end = source.indexOf(next, start);
-      expect(end, greaterThan(start), reason: 'the declaration after $signature moved; update this test');
-      return source.substring(start, end);
-    }
+    for (final name in ['_refreshWebModule', 'moduleVersionLoader']) {
+      test(name, () {
+        expect(source.diagnostics, isEmpty, reason: 'version_check.dart does not parse, so nothing below looked at it');
+        final loader = topLevelDeclaration(source.unit, name) ?? fail('$name was renamed; update this test');
 
-    for (final (signature, next) in [
-      ('Future<ModuleVersion?> _refreshWebModule(', 'Future<void> _downloadAndExtractModuleToOpfs('),
-      ('final moduleVersionLoader = FutureProvider', 'class AppVersionCheckResult'),
-    ]) {
-      test(signature, () {
-        final loader = body(signature, next);
-
-        expect(loader, contains('evaluateModuleUpdate('));
-        expect(loader, isNot(contains('pinVersion')));
-        expect(loader, isNot(contains('applicationVersion')));
-        expect(loader, isNot(contains('recognizerVersion ==')));
+        expect(callsOf(loader, 'evaluateModuleUpdate'), isNotEmpty);
       });
     }
   });

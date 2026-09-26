@@ -30,6 +30,10 @@
 import 'dart:async';
 import 'dart:io';
 
+// `analyzer` reaches this package transitively; see `support/source_syntax.dart` for why it is not a
+// direct dependency.
+// ignore: depend_on_referenced_packages
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
@@ -43,6 +47,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
+import 'support/source_syntax.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -114,306 +119,71 @@ LongReadKind? _holderNamedBy(String sentence) {
   return best;
 }
 
-/// Matches an extension declared directly on `RecordMutationLock` anywhere in
-/// its header, up to the brace that opens the extension body.
+/// Every Dart file under `lib/`, parsed once for all the cases that read it.
 ///
-/// This is the one shape that can call an acquisition method with an implicit
-/// `this` — no leading dot for `\.$method(` to find — and can wrap that call
-/// under a name of its own choosing, which is invisible to a search for the
-/// acquisition method names themselves. See the test that uses this for the
-/// falsifying example and why the fix is refusing the shape rather than
-/// parsing what is inside it.
-final RegExp _extensionOnRecordMutationLock = RegExp(r'\bextension\b[^{]*?\bon\s+RecordMutationLock\b\s*\{');
+/// A top-level `final` is initialised on first read, so the cases that never look at `lib/` do not pay
+/// for the parse.
+final List<ParsedSource> _lib = parseDartTree('lib');
 
-/// What a surface has to be reading to have asked the other half of the same
-/// question.
-const String _registryRead = 'longReadRegistryProvider';
-
-/// Where each top-level declaration in [source] begins.
+/// [_lib], once it is established that the parser read every file of it.
 ///
-/// Dart puts top-level declarations, and only those, at column 0 — a member, a
-/// statement and an indented doc comment are all indented, and a `}` at column 0
-/// is the end of the declaration above rather than the start of a new one. So the
-/// line starts that begin with any other non-space character are exactly the
-/// boundaries, which is enough to slice a declaration without parsing one. (This
-/// would be wrong inside a multi-line string whose content starts at column 0;
-/// `lib/` contains no `'''` or `"""` at all, and a scan that started splitting
-/// one would show up as the compliant probe failing rather than as a silent
-/// pass.)
-List<int> _topLevelBoundaries(String source) => [
-  0,
-  ...RegExp(r'^[^\s}]', multiLine: true).allMatches(source).map((match) => match.start),
-];
-
-/// Whether the match at [matchStart] is the declaration of the name it matched
-/// rather than a call of it.
-///
-/// A declaration's own name sits on the first line of the top-level declaration
-/// that contains it — `Future<bool> installModuleFromZip(` — while every call of
-/// it is inside some body and therefore on a later line of whichever declaration
-/// encloses it. Deciding this by position rather than by file name is what keeps
-/// a defining file in scope for a real violation written *into* it later, which a
-/// sanction on the file name would cover forever.
-bool _isOwnDeclaration(String source, List<int> boundaries, int matchStart) {
-  final start = boundaries.lastWhere((boundary) => boundary <= matchStart);
-  return source.lastIndexOf('\n', matchStart) + 1 == start;
+/// The scan below reports an absence — no unsanctioned claim — and a file the parser had to recover
+/// from is a tree with statements missing, which can produce it by having dropped the statement that held
+/// the finding. `lib/` compiles, so
+/// this fails only if the parser and the compiler have come to disagree about the language.
+List<ParsedSource> _libParsed() {
+  expect(_lib, isNotEmpty, reason: 'no Dart file under lib/; the scans are not running from the package root');
+  expect(
+    [
+      for (final source in _lib)
+        if (source.diagnostics.isNotEmpty) '${source.path}: ${source.diagnostics.first.message}',
+    ],
+    isEmpty,
+    reason: 'the parser could not read these files, so a finding in them would be missing rather than reported',
+  );
+  return _lib;
 }
 
 /// [content] parsed as the file at [path], for an instrument control.
 ///
-/// **Each entry is spelled as far as the notifier it belongs to, not as a
-/// verb.** A bare `.start(` matches five unrelated files (`action_runner.dart`,
-/// `execution_controller.dart`, `external_program_runner.dart`, `spec/script.dart`,
-/// `sentry_util.dart`), none of which touches a record store; qualifying it with
-/// the provider it is reached through leaves only the re-recognition surfaces.
-/// `.archive(` is qualified for the same reason. A new entry is worth adding
-/// only after its file count in `lib/` has been looked at — the census below
-/// asserts that count, so an entry that suddenly matches half the tree fails
-/// loudly rather than quietly widening the rule.
-///
-/// **A claim wrapper is not an entry point.** `runModuleInstall` was listed here
-/// and is not: it *is* the registration — it takes the `moduleInstall` claim
-/// around whatever it is handed — so every one of its call sites has announced
-/// by construction, and anchoring on it asked the registrar to also subscribe.
-/// The four module-install routes are still anchored where a surface reaches
-/// them, through `installModuleFromZip` / `installModuleFromZipBytes`; what drops
-/// out is `version_check.dart`, which declares those two and calls the wrapper.
-/// That file is the claim's issuer and not a surface: it has no control of its
-/// own, and the thing it would subscribe to is the claim it just took. The
-/// exclusion is derived, not listed — the file is out because [_isOwnDeclaration]
-/// says its only matches are its own declarations, so a destructive *call* added
-/// to it later puts it straight back in.
-const List<String> _destructiveEntries = [
-  'runStorageDelete(',
-  '.deleteAsync(',
-  'charaArchiveControllerProvider.notifier).archive(',
-  'RecordZipService.import(',
-  'installModuleFromZip(',
-  'installModuleFromZipBytes(',
-  'charaDetailRecordRegenerationControllerProvider.notifier).start(',
-  '.migrate(',
-  // **The video import is deliberately not an entry here, and the reason is that
-  // it has a stronger obligation than this census can express.** Every spelling
-  // of its entry point matches the five files that *declare* a
-  // `startVideoImport(` — the three front ends, the method channel and the wasm
-  // client — rather than the one that calls it, and a spelling narrow enough to
-  // pick out the call depends on where the formatter puts a line break. What
-  // replaces it is a required argument: `startVideoImport` takes a
-  // `LongReadDeclaration`, so a session cannot be opened without somebody having
-  // written down whether it announces one, which the compiler checks and this
-  // scan could only have noticed after the fact.
-];
-
-/// Every spelling by which a file subscribes to the registry — reads the answer,
-/// rather than putting an answer into it.
-///
-/// The two refusal helpers are here because they *are* a registry read —
-/// `storageDeleteRefusalOf` and `storageExtractRefusalOf` both resolve
-/// [longReadRegistryProvider] themselves and order the answer against the
-/// capture blocker, which is exactly what a surface is being asked to do. The
-/// folds they call (`storageDeleteBlockedBy`, `storageExtractBlockedBy`) are
-/// deliberately *not* here: those are pure over a claim list handed to them, so
-/// a file could call one with an empty list and never have asked anybody.
-const List<String> _registryReads = [_registryRead, 'storageDeleteRefusalOf', 'storageExtractRefusalOf'];
-
-/// The claim side of the same provider, which [_subscribesToRegistry] refuses to
-/// count as a subscription.
-///
-/// `.notifier` is how a file *registers* a hold; the state the surfaces watch is
-/// reached without it. Counting the handle as a read is what let a file pass this
-/// census by announcing itself — `version_check.dart`'s only code mention of the
-/// provider is this spelling, taking the `moduleInstall` claim, and it was being
-/// read as "that file asked whether anybody else was holding the modules". The
-/// bounded false negative is deliberate and stated: a surface that only ever
-/// point-queries through the handle (`.notifier).holdsKind(…)`) and never watches
-/// is not counted as subscribing, because a query at the moment of acting is not
-/// the subscription that keeps a control from being *offered*. The one anchored
-/// file that spells it that way (`storage_tree.dart`) also watches, so the
-/// exclusion costs the census nothing today.
-const String _claimHandle = '$_registryRead.notifier';
-
-/// Whether [code] reads the registry's answer anywhere.
-///
-/// [code] must already have been through [_codeOnly] when it comes from a real
-/// file, which [_roundOver] does before it asks.
-bool _subscribesToRegistry(String code) {
-  for (final read in _registryReads) {
-    for (final match in read.allMatches(code)) {
-      if (read == _registryRead && code.startsWith(_claimHandle, match.start)) {
-        continue;
-      }
-      return true;
-    }
-  }
-  return false;
+/// Parsed cleanly or not at all: a probe the parser had to recover would be testing the recovery
+/// rather than the rule it was written to exercise.
+ParsedSource _probe(String path, String content) {
+  final source = ParsedSource.parse(content, path: path);
+  expect(source.diagnostics, isEmpty, reason: 'the probe $path does not parse, so it controls nothing');
+  return source;
 }
 
-/// [source] with its comments and string literals replaced by nothing.
-///
-/// **Without this the scan reports what a file says about itself.**
-/// `storage_delete_action.dart` has a doc line reading "Watches
-/// `longReadRegistryProvider` as well as …" and no such identifier anywhere in
-/// its code — the subscription is really `storageDeleteRefusalOf`. A census that
-/// counted raw text would pass that file *on the strength of its own comment*,
-/// and would keep passing it after the subscription was deleted. String
-/// literals go for the same reason: a name in a log message or a test-only
-/// string is not a call.
-///
-/// Newlines inside comments are kept so offsets stay roughly readable; nothing
-/// here depends on line numbers. Interpolation inside a string is dropped with
-/// the string, so an anchor written only inside `'${…}'` is invisible — a
-/// deliberate false negative rather than an oversight, and the anchored count
-/// below would fall by one if it ever mattered.
-String _codeOnly(String source) {
-  final buffer = StringBuffer();
-  var index = 0;
-  var blockDepth = 0;
-  while (index < source.length) {
-    if (blockDepth > 0) {
-      // Dart nests block comments, so the depth has to be counted rather than
-      // scanned to the first `*/`.
-      if (source.startsWith('/*', index)) {
-        blockDepth++;
-        index += 2;
-      } else if (source.startsWith('*/', index)) {
-        blockDepth--;
-        index += 2;
-      } else {
-        if (source[index] == '\n') {
-          buffer.write('\n');
-        }
-        index++;
-      }
+/// How many times each declaration in [source] refers to [name] — a call or a tear-off — keyed by
+/// [enclosingDeclarationName].
+Map<String, int> _referencesByDeclaration(ParsedSource source, String name) {
+  final counts = <String, int>{};
+  for (final reference in referencesIn(source.unit)) {
+    if (reference.name != name) {
       continue;
     }
-    if (source.startsWith('/*', index)) {
-      blockDepth = 1;
-      index += 2;
-      continue;
-    }
-    if (source.startsWith('//', index)) {
-      final end = source.indexOf('\n', index);
-      index = end < 0 ? source.length : end;
-      continue;
-    }
-    final char = source[index];
-    if (char == "'" || char == '"') {
-      index = _endOfString(source, index);
-      continue;
-    }
-    buffer.write(char);
-    index++;
-  }
-  return buffer.toString();
-}
-
-/// Where the string literal opening at [start] ends, one past its closing quote.
-///
-/// A raw string is skipped by the same walk: the only shape it would get wrong
-/// is one ending in a backslash, which Dart cannot express at all.
-int _endOfString(String source, int start) {
-  final quote = source[start];
-  final closing = source.startsWith(quote * 3, start) ? quote * 3 : quote;
-  var index = start + closing.length;
-  while (index < source.length) {
-    if (source[index] == r'\') {
-      index += 2;
-      continue;
-    }
-    if (source.startsWith(closing, index)) {
-      return index + closing.length;
-    }
-    if (closing.length == 1 && source[index] == '\n') {
-      // Unterminated on its line: bail rather than swallow the rest of the file.
-      return index;
-    }
-    index++;
-  }
-  return source.length;
-}
-
-/// The round of the surfaces, counted: which files declared themselves
-/// destructive, which of them never subscribe to the registry, and how many
-/// files each anchor is still finding.
-///
-/// A file that only *declares* an entry point has not called it, so its
-/// declaration alone does not anchor it ([_isOwnDeclaration]); and a file that
-/// only *registers* a claim has not asked anybody, so the claim handle alone does
-/// not pair it ([_subscribesToRegistry]).
-({List<String> anchored, Set<String> unpaired, Map<String, int> filesPerEntry}) _roundOver(
-  Map<String, String> sources,
-) {
-  final anchored = <String>[];
-  final unpaired = <String>{};
-  final filesPerEntry = {for (final entry in _destructiveEntries) entry: 0};
-  for (final path in sources.keys.toList()..sort()) {
-    final code = _codeOnly(sources[path]!);
-    final boundaries = _topLevelBoundaries(code);
-    final hits = _destructiveEntries
-        .where((entry) => entry.allMatches(code).any((match) => !_isOwnDeclaration(code, boundaries, match.start)))
-        .toList();
-    if (hits.isEmpty) {
-      continue;
-    }
-    anchored.add(path);
-    for (final hit in hits) {
-      filesPerEntry[hit] = filesPerEntry[hit]! + 1;
-    }
-    if (!_subscribesToRegistry(code)) {
-      unpaired.add(path);
-    }
-  }
-  return (anchored: anchored, unpaired: unpaired, filesPerEntry: filesPerEntry);
-}
-
-/// Every Dart file under `lib/`, keyed by its slash-separated path.
-Map<String, String> _libSources() {
-  final sources = <String, String>{};
-  for (final entity in Directory('lib').listSync(recursive: true)) {
-    if (entity is! File || !entity.path.endsWith('.dart')) {
-      continue;
-    }
-    sources[entity.path.replaceAll(r'\', '/')] = entity.readAsStringSync();
-  }
-  return sources;
-}
-
-/// The members of `enum LongReadKind`, read out of the source rather than
-/// written down here.
-///
-/// Listing them in the test would be the enumeration the enum exists to remove:
-/// a member added without a claim site would be added to this list too, by the
-/// same hand, in the same commit.
-List<String> _kindMembersIn(String registrySource) {
-  final body = RegExp(r'\benum\s+LongReadKind\s*\{([^}]*)\}').firstMatch(_codeOnly(registrySource));
-  if (body == null) {
-    return const [];
-  }
-  return body
-      .group(1)!
-      .split(',')
-      .map((member) => member.trim())
-      .where((member) => member.isNotEmpty)
-      .toList(growable: false);
-}
-
-/// How many times each member of [members] is named as the kind of a claim.
-///
-/// `long_read_registry.dart` is excluded because the enum's own declaration and
-/// its doc are not claim sites; every other file in `lib/` is in scope, so a
-/// claim site moving between files does not need this counted again.
-Map<String, int> _claimSiteCounts(Map<String, String> sources, List<String> members) {
-  final counts = {for (final member in members) member: 0};
-  for (final path in sources.keys) {
-    if (path.endsWith('lib/src/core/storage/long_read_registry.dart')) {
-      continue;
-    }
-    final code = _codeOnly(sources[path]!);
-    for (final member in members) {
-      counts[member] = counts[member]! + RegExp('kind: LongReadKind\\.$member\\b').allMatches(code).length;
-    }
+    final at = enclosingDeclarationName(reference.node) ?? '<outside any declaration>';
+    counts[at] = (counts[at] ?? 0) + 1;
   }
   return counts;
+}
+
+/// The ways to take a claim that somebody has to release by hand, read off `LongReadRegistry`'s
+/// declaration rather than listed here: every public instance method that answers a `LongReadToken`.
+///
+/// The token is the release handle, so a method that hands one back is a claim whose release is the
+/// caller's to remember. A list would miss the next such method, and a scan counting only the names on
+/// it would answer "nothing found" about a hand-written claim spelt with the new name.
+Set<String> _handReleasedClaimsOf(ParsedSource registrySource) {
+  final registry = topLevelDeclaration<ClassDeclaration>(registrySource.unit, 'LongReadRegistry');
+  if (registry == null) {
+    return const {};
+  }
+  return {
+    for (final method in registry.members.whereType<MethodDeclaration>())
+      if (!method.isStatic && !method.name.lexeme.startsWith('_') && method.returnType?.toSource() == 'LongReadToken')
+        method.name.lexeme,
+  };
 }
 
 void main() {
@@ -569,35 +339,39 @@ void main() {
       await expectLater(held, completes, reason: 'the release ran against a disposed element and threw');
     });
 
-    test('is the only way lib holds paths, apart from counted exceptions', () {
+    test('is the only way lib holds paths, apart from sanctioned members', () {
       // A claim nobody releases blocks its paths for the rest of the session with
       // nothing to notice it, so the unscoped half of the protocol is not left to
-      // a reading of the doc: a file in `lib/` reaching for it uninvited turns
+      // a reading of the doc: a member in `lib/` reaching for it uninvited turns
       // this red.
       //
-      // **The permission is a number and not a name, and the difference is the
-      // whole reason this reads `allMatches` rather than `contains`.** A
-      // sanctioned *file* says "this file is an exception", which is not what any
-      // of these three files earned: what they earned is "this file has exactly
-      // this many". Spelt as a name, the third entry below would have been a real
-      // loss of discrimination -- `storage.dart` is the largest file in `lib/`,
-      // and a fourth hand-written claim appearing in it would have been invisible
-      // here. Spelt as a count, adding an entry costs nothing, because the
-      // sanction stops covering the file the moment the file stops matching it.
+      // **The permission is a member, not a file.** Spelt as a file, `storage.dart`
+      // — the largest file in `lib/` — would be a licence for a second hand-written
+      // claim anywhere in it. Spelt per member and per method, a claim written into
+      // any other member of a sanctioned file is a finding.
       //
       // **Every hand-released claim method is looked for, not one name.** The
       // methods are read off `LongReadRegistry` (every public one answering a
       // `LongReadToken`), so a claim written with whatever method comes next is
       // found exactly as a `claimUntilReleased` is.
       //
-      // The counts are asserted in both directions from one comparison, so
-      // renaming the method cannot quietly turn the scan into a search for a
-      // string that no longer occurs anywhere: every expected count is positive,
-      // so a scan that found nothing fails as loudly as one that found too much.
+      // What is looked for is every reference to the name in code — a call, and a
+      // tear-off, which is the same claim with the call moved somewhere this scan
+      // cannot follow — read off the syntax tree, so a doc line naming it is not
+      // one and a call the formatter wrapped still is.
+      //
+      // Only one direction is asserted: a sanctioned member that stops claiming is
+      // a legitimate edit and not a finding, so it does not turn this red.
       const sanctioned = {
-        // The definition itself, plus the one call inside `hold` -- the `finally`
-        // every other long reader borrows instead of writing its own release.
-        'lib/src/core/storage/long_read_registry.dart': 2,
+        // The one call inside `hold` -- the `finally` every other long reader
+        // borrows instead of writing its own release -- and the one inside
+        // `claimUntilReleasedWhenFree`, which asks and then registers exactly
+        // as `claimUntilReleased` does. (A definition declares its name and
+        // does not refer to it.)
+        'lib/src/core/storage/long_read_registry.dart': {
+          'LongReadRegistry.hold: claimUntilReleased',
+          'LongReadRegistry.claimUntilReleasedWhenFree: claimUntilReleased',
+        },
         // `StorageZipProgress.begin`, and `StorageZipProgress.reclaimAfterDialog`
         // which retakes the same claim after `releaseForDialog` gave the folder
         // back for the length of a save dialog. One claim whose lifetime is the
@@ -605,294 +379,107 @@ void main() {
         // screen furniture, and reopened once in the middle of that run — which
         // is why it is two hand-written claims and not a `hold`: neither end of
         // either stretch is on the starter's stack.
-        'lib/src/core/storage/zip_export.dart': 2,
-        // `CharaDetailRecordRegenerationController._claimBatch`: a batch whose end
-        // is a state transition reached from a native callback and from a timer,
-        // neither of them on the starter's stack.
-        'lib/src/chara_detail/storage.dart': 1,
+        // The retake asks first, in the same call, because somebody may have
+        // claimed the folder while the dialog stood open.
+        'lib/src/core/storage/zip_export.dart': {
+          'StorageZipProgress.begin: claimUntilReleased',
+          'StorageZipProgress.reclaimAfterDialog: claimUntilReleasedWhenFree',
+        },
+        // `CharaDetailRecordRegenerationController.start`: a batch whose end is a
+        // state transition reached from a native callback and from a timer,
+        // neither of them on the starter's stack. It asks in the same call,
+        // which is also what refuses a start while a batch is running.
+        'lib/src/chara_detail/storage.dart': {
+          'CharaDetailRecordRegenerationController.start: claimUntilReleasedWhenFree',
+        },
         // `listenLiveCaptureLongRead`: a live capture session, whose two edges are
         // both the core's. A session begins and ends with a `captureTriggered`
         // event and nothing in Dart is on the stack in between, so there is no
         // block to put a `hold` around -- the same situation the two above are in.
-        'lib/src/gui/capture.dart': 1,
+        'lib/src/gui/capture.dart': {'listenLiveCaptureLongRead: claimUntilReleased'},
       };
 
-      final found = <String, int>{};
-      for (final entity in Directory('lib').listSync(recursive: true)) {
-        if (entity is! File || !entity.path.endsWith('.dart')) {
-          continue;
-        }
-        final count = 'claimUntilReleased('.allMatches(entity.readAsStringSync()).length;
-        if (count == 0) {
-          continue;
-        }
-        found[entity.path.replaceAll(r'\', '/')] = count;
-      }
-
+      // The instrument's control, on a synthetic source: a doc reference and a
+      // string are not claims, a call the formatter broke before the dot and a
+      // tear-off are, and each is charged to the member it is written in.
       expect(
-        found.keys.where((path) => !sanctioned.keys.any(path.endsWith)),
-        isEmpty,
+        _referencesByDeclaration(
+          _probe(
+            'probe/claims.dart',
+            'class Probe {\n'
+                '  /// Takes a [LongReadRegistry.claimUntilReleased] claim.\n'
+                '  void wrapped(LongReadRegistry registry) {\n'
+                '    logger.i("claimUntilReleased(");\n'
+                '    registry\n'
+                '        .claimUntilReleased(kind: LongReadKind.zip, paths: const []);\n'
+                '  }\n'
+                '\n'
+                '  Object torn(LongReadRegistry registry) => registry.claimUntilReleased;\n'
+                '}\n',
+          ),
+          'claimUntilReleased',
+        ),
+        {'Probe.wrapped': 1, 'Probe.torn': 1},
         reason:
-            'a long reader whose work is one Future must use LongReadRegistry.hold; '
-            'claiming by hand is only for a claim whose lifetime is an object\'s, as StorageZipProgress\'s is',
+            'the scan counts a comment or a string as a claim, misses a wrapped call or a tear-off, or charges '
+            'a claim to the wrong member — so what it reads out of lib/ is not the set of claims either',
       );
+
+      // The method list's control: a method answering the token is read, one answering anything else is
+      // not, and a private one is the registry's own business.
       expect(
-        {
-          for (final entry in sanctioned.entries)
-            entry.key: found.entries
-                .firstWhere((seen) => seen.key.endsWith(entry.key), orElse: () => const MapEntry('', 0))
-                .value,
-        },
-        sanctioned,
+        _handReleasedClaimsOf(
+          _probe(
+            'probe/registry.dart',
+            'class LongReadRegistry {\n'
+                '  LongReadToken first() => LongReadToken();\n'
+                '  LongReadToken second({required int x}) => first();\n'
+                '  LongReadKind? heldBy() => null;\n'
+                '  LongReadToken _private() => first();\n'
+                '}\n',
+          ),
+        ),
+        {'first', 'second'},
         reason:
-            'a sanctioned file is allowed a stated number of hand-written claims, not a licence to hold paths: '
-            'a count of 0 means the scan is searching for a string that no longer occurs, and a count above the '
-            'sanctioned one means a claim was added where the release is nobody\'s to forget by construction',
+            'the method reader cannot tell a token-answering method from another, so the names it reads '
+            'out of the registry are not the set of hand-released claims either',
       );
-    });
 
-    test('the gate is the only way lib takes the record lock, apart from one recovery path', () {
-      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *somewhere in
-      // `lib/`, the record mutation lock is acquired without the
-      // `LongReadDeclaration` the gate makes mandatory.*
-      //
-      // The axis is the claim rather than the value. A scan that asks whether a
-      // call's receiver is *named* like a lock answers a question about a
-      // variable name, which is the author's to choose and carries no meaning:
-      // `final mutex = platformRecordMutationLock; await mutex.runForRoot(…);`
-      // compiles, runs, holds the whole store open, leaves every delete button
-      // live, and is green to it. What actually separates a gate call from a
-      // direct acquisition is not who the receiver is but what is passed:
-      // `RecordRecoveryGate`'s four methods take a *required* `declaration:`,
-      // and `RecordMutationLock`'s take no such parameter, so an acquisition that
-      // skips the declaration cannot be spelled with one and a call that carries
-      // one cannot be reaching the lock. Every use of an acquisition method is
-      // therefore examined, whatever its receiver looks like — a variable, a
-      // chain the formatter broke across lines, a cascade, an implicit `this` —
-      // and judged on its own argument list.
-      //
-      // WHAT THIS STILL CANNOT SEE — the list is short but it is not empty, and
-      // "nothing found" from this case means "none of these":
-      //  * A tear-off: `final run = lock.runForRoot; await run(…);` has no
-      //    argument list at the mention, so there is nothing to inspect.
-      //  * An acquisition that does not go through `RecordMutationLock` at all —
-      //    a caller building its own `ExclusiveLockRunner`, using
-      //    `InProcessNamedLocks` directly, or reaching `navigator.locks`.
-      //  * Dart outside `lib/` (the Windows runner and the wasm side take no
-      //    Dart lock, but nothing here would notice if they started to).
-      //  * A future acquisition method on `RecordMutationLock` that does not
-      //    return `Future<T>` — the derivation below reads that shape.
-      //  * A call whose argument list this file cannot parse is reported as a
-      //    finding rather than passed over, so that hole fails closed.
-      //
-      // Not on this list any more: an extension declared on
-      // `RecordMutationLock` used to hide both halves of a bypass from this
-      // case at once — the wrapper call, because it is defined outside the
-      // class body the acquisition-method names are read from below, and the
-      // acquisition inside the wrapper, because an extension body's implicit
-      // `this` leaves no leading dot for `\.$method(` to match. The companion
-      // case right after this one closes that by refusing the shape itself —
-      // an extension on `RecordMutationLock` anywhere in `lib/` — rather than
-      // by parsing what is inside it.
-      //
-      // WHY THE ONE NON-GATE MEMBER IS SANCTIONED. `JournalRootStorageMaintenance`
-      // is the locked wrapper around the startup sweep whose unlocked half is
-      // what the gate's own `ensureRootReadyUnlocked` hook runs, so routing it
-      // through the gate would call it from inside itself. Not as a deadlock —
-      // the hook acquires nothing, so the lock is still taken once — but as a
-      // relocation: the hook's pass would perform the sweep, `run`'s own
-      // `runUnlocked` would then find the root already marked swept and do
-      // nothing, and the execution site would be decided by a memo table rather
-      // than by the call. It says so at the call.
-      //
-      // There used to be a second: a locked wrapper around the same archive
-      // recovery, in `archive_executor_shared.dart`. Nothing in `lib/` ever
-      // called it, and it was deleted rather than kept as an entry point for a
-      // caller that had not appeared; the sweep still runs the unlocked half.
-      //
-      // Being sanctioned here is about the *acquisition* and nothing else, and
-      // the member is not unannounced: the sweep is claimed at the
-      // `runPathInfoStartupMaintenance` boundary above it. This case would stay
-      // green if it lost that claim again — what it can see is the argument
-      // list of the acquisition, and the acquisition is the half it is excused
-      // from.
-      const sanctioned = {
-        // The gate's own implementation: the one place the acquisition lives.
-        'lib/src/core/fs/record_recovery_gate_shared.dart',
-        'lib/src/core/fs/root_storage_maintenance_shared.dart',
-      };
-
-      // The acquisition methods are read out of the lock's own source instead of
-      // being listed here. A list would be an enumeration to keep in step by
-      // hand, and the failure it invites is exactly the one above: a fourth
-      // method arrives, nobody adds it, and the scan answers "nothing found"
-      // about a method it was never looking for.
-      final lockSource = File('lib/src/core/fs/record_mutation_lock_shared.dart').readAsStringSync();
-      final lockBody = RegExp(r'final class RecordMutationLock \{(.*?)\n\}', dotAll: true).firstMatch(lockSource);
-      expect(lockBody, isNotNull, reason: 'RecordMutationLock was renamed or moved; the scan derived nothing');
-      final acquisitionMethods = RegExp(
-        r'Future<[A-Za-z?]+>\s+([A-Za-z][A-Za-z0-9_]*)\s*<',
-      ).allMatches(lockBody?.group(1) ?? '').map((match) => match.group(1)).whereType<String>().toSet();
+      final lib = _libParsed();
+      final registry = lib.where((source) => source.path == 'lib/src/core/storage/long_read_registry.dart').first;
+      final names = _handReleasedClaimsOf(registry);
       expect(
-        acquisitionMethods,
+        names,
         isNotEmpty,
-        reason: 'the scan found no public acquisition method on RecordMutationLock, so it is searching for nothing',
+        reason: 'the registry no longer declares a method answering a LongReadToken, or the reader lost them',
       );
 
-      final undeclared = <String>{};
-      final declared = <String>[];
-      final declaredAcrossLines = <String>[];
-      for (final entity in Directory('lib').listSync(recursive: true)) {
-        if (entity is! File || !entity.path.endsWith('.dart')) {
-          continue;
-        }
-        final source = entity.readAsStringSync();
-        final path = entity.path.replaceAll(r'\', '/');
-        for (final method in acquisitionMethods) {
-          // A leading `.` and an optional explicit type argument, and nothing
-          // about the receiver: `lock.runForRoot(`, `mutex.runForRoot(`,
-          // `ref.read(gate).runForRoot(`, `..runForRoot(` and
-          // `x.runForRoot<void>(` all match, while the declaration in the gate
-          // and in the lock — which has no leading dot — does not.
-          for (final match in RegExp('\\.$method\\s*(?:<[^<>()]*>)?\\s*\\(').allMatches(source)) {
-            final arguments = _argumentListAt(source, match.end - 1);
-            if (arguments == null || !arguments.contains('declaration:')) {
-              undeclared.add(path);
-              continue;
-            }
-            declared.add(path);
-            if (arguments.contains('\n')) {
-              declaredAcrossLines.add(path);
+      final found = <String>[];
+      final unsanctioned = <String>[];
+      for (final source in lib) {
+        for (final name in names) {
+          for (final member in _referencesByDeclaration(source, name).keys) {
+            final site = '$member: $name';
+            found.add('${source.path}: $site');
+            if (!(sanctioned[source.path]?.contains(site) ?? false)) {
+              unsanctioned.add('${source.path}: $site');
             }
           }
         }
       }
 
       expect(
-        undeclared.where((path) => !sanctioned.any(path.endsWith)),
+        found,
+        isNotEmpty,
+        reason: 'the scan found no hand-written claim anywhere in lib, so it is reading nothing',
+      );
+      expect(
+        unsanctioned,
         isEmpty,
         reason:
-            'a caller taking RecordMutationLock directly skips the declaration the gate requires; '
-            'either go through RecordRecoveryGate, or say at the call why the gate cannot be used',
+            'a long reader whose work is one Future must use LongReadRegistry.hold; '
+            'claiming by hand is only for a claim whose lifetime is an object\'s, as StorageZipProgress\'s is',
       );
-      expect(
-        sanctioned.map((path) => undeclared.any((seen) => seen.endsWith(path))),
-        everyElement(isTrue),
-        reason: 'the scan no longer finds the calls it was written to bound, so it is checking nothing',
-      );
-      // Two controls on the instrument rather than on `lib/`. Without the first,
-      // a scan that recognised no `declaration:` anywhere would call every gate
-      // call a bypass — which is loud — but a scan whose regex matched nothing
-      // at all would be silent, and both are answered by requiring that declared
-      // calls were actually seen. The second is the one the old scan could not
-      // have had: the argument list is found by walking parentheses, so a walk
-      // that stopped at the first newline would still pass every single-line
-      // call and quietly misjudge the wrapped ones.
-      expect(
-        declared,
-        isNotEmpty,
-        reason: 'no call anywhere in lib passes declaration:, so the scan is not recognising a gate call',
-      );
-      expect(
-        declaredAcrossLines,
-        isNotEmpty,
-        reason: 'the argument-list walk never crossed a newline, so it is not reading wrapped call sites',
-      );
-    });
-
-    test('no extension on RecordMutationLock reaches lib, because that is the one shape the case above cannot see '
-        'through', () {
-      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *somewhere in
-      // `lib/`, an extension is declared directly on `RecordMutationLock`.*
-      //
-      // The case above judges every acquisition call by whether its argument
-      // list carries `declaration:`, but that judgement depends on the call
-      // being spelled with a leading dot and on the wrapper that makes the call
-      // living inside the class body the acquisition-method names are read
-      // from. An extension breaks both assumptions with nothing exotic — no
-      // reflection, no `dynamic`, just ordinary Dart:
-      //
-      //   extension _Sneaky on RecordMutationLock {
-      //     Future<T> sneaky<T>(Future<T> Function() action) => runForRoot(action);
-      //   }
-      //   // ... await lock.sneaky(() async { ... });
-      //
-      // `sneaky` is defined outside `final class RecordMutationLock { ... }`,
-      // so the class-body slice the case above reads never sees it, and inside
-      // `sneaky`, `runForRoot(action)` calls through Dart's implicit `this` —
-      // legal without a leading dot inside an extension body — so
-      // `\.runForRoot\(` never matches it either. Both the wrapper and the real
-      // acquisition are invisible to that regex at once, and this was found
-      // and demonstrated by an earlier independent verification pass, not
-      // predicted in advance.
-      //
-      // Parsing every extension body for an implicit-`this` call was rejected
-      // in favour of a simpler axis: `RecordMutationLock` has no legitimate
-      // extension anywhere in `lib/` today, and an extension is the only shape
-      // that can hide an acquisition from the case above, so refusing the
-      // shape itself is fail-closed without having to understand what is
-      // inside it. A real need can still be met by adding the file below with
-      // a reason, the same way the recovery path above is sanctioned.
-      const sanctioned = <String>{};
-
-      // The instrument's control: prove the regex actually recognises the
-      // falsifying shape above, so a pattern that matched nothing, ever, could
-      // not pass this case by finding nothing in `lib/` for the wrong reason.
-      const probe =
-          'extension _Sneaky on RecordMutationLock {\n'
-          '  Future<T> sneaky<T>(Future<T> Function() action) => runForRoot(action);\n'
-          '}\n';
-      expect(
-        _extensionOnRecordMutationLock.hasMatch(probe),
-        isTrue,
-        reason: 'the regex does not recognise its own falsifying example, so it is not checking anything',
-      );
-      // A second control: an ordinary extension on some other type must not
-      // trip the same regex, or this case would be banning extensions in
-      // general rather than the one shape that matters.
-      expect(
-        _extensionOnRecordMutationLock.hasMatch('extension _Other on SomeOtherType {\n  void f() {}\n}\n'),
-        isFalse,
-        reason: 'the regex matched a type it was not looking for, so it is not judging the shape it claims to',
-      );
-
-      final found = <String>{};
-      for (final entity in Directory('lib').listSync(recursive: true)) {
-        if (entity is! File || !entity.path.endsWith('.dart')) {
-          continue;
-        }
-        if (_extensionOnRecordMutationLock.hasMatch(entity.readAsStringSync())) {
-          found.add(entity.path.replaceAll(r'\', '/'));
-        }
-      }
-
-      expect(
-        found.where((path) => !sanctioned.any(path.endsWith)),
-        isEmpty,
-        reason:
-            'an extension on RecordMutationLock can call its acquisition methods through an implicit `this`, which '
-            'has no leading dot for the case above to find, under a name of its own choosing, which the case above '
-            'never looks for either; go through RecordMutationLock directly and RecordRecoveryGate on top of it, or '
-            'add the file here with a reason if an extension is genuinely needed',
-      );
-
-      // WHAT THIS STILL CANNOT SEE — refusing the shape closes the hole the
-      // case above had, but this case is its own narrow text search and has
-      // blind spots of its own, stated so "nothing found" is not read as
-      // "nothing like this exists":
-      //  * An extension on a type alias or a supertype of `RecordMutationLock`
-      //    rather than on the name itself — there is none in this codebase
-      //    today, but the regex looks for the literal identifier, not the type.
-      //  * An extension whose `on` clause and opening `{` are separated by a
-      //    `{` from an unrelated nested construct in between (a collection
-      //    literal or a function-typed parameter in the `on` clause) — Dart's
-      //    `on` clause cannot actually contain one, so this is not reachable
-      //    from valid syntax, but it is why the regex stops at the first `{`
-      //    rather than trusting a wider search.
-      //  * Everything the case above already could not see stays unseen here
-      //    too where it does not route through an extension: a tear-off, a
-      //    caller building its own `ExclusiveLockRunner`, Dart outside `lib/`,
-      //    and a future acquisition method that does not return `Future<T>`.
     });
   });
 
@@ -1041,317 +628,6 @@ void main() {
         expect(container.read(longReadRegistryProvider), isEmpty, reason: 'a throwing action left its claim behind');
       },
     );
-  });
-
-  group('the round of the surfaces', () {
-    test('a file that calls a destructive entry point reaches the registry somewhere in the same file, because four '
-        'rounds of this were done by hand and two files were still missed', () {
-      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *somewhere in
-      // `lib/`, a file calls one of the app's named destructive or long-writing
-      // entry points without anything in that file ever asking the registry
-      // whether a long reader is already holding what it is about to write.*
-      //
-      // WHY THE ANCHOR IS THE DESTRUCTIVE CALL. The capture blocker cannot be
-      // asked without the registry at all — `storage_action_blocker.dart` keeps
-      // that reading private to the two refusal helpers, which read both — but a
-      // surface that asks *neither* is untouched by that. A file that calls one
-      // of the anchored entry points (`RecordZipService.import`,
-      // `installModuleFromZip`, `installModuleFromZipBytes`, …) and reads the
-      // registry nowhere is invisible to every other check. This case anchors on
-      // the destructive calls themselves so that finding such a file does not
-      // depend on a person reading the tree.
-      //
-      // THE UNIT IS THE FILE, NOT THE DECLARATION, and that is deliberate.
-      // `archive_record_dialog.dart` calls `.archive(` from inside two `State`
-      // classes and reads the registry from a top-level helper above them;
-      // sliced per declaration it is a violation, and it is not one. A
-      // `ConsumerStatefulWidget` is two top-level declarations by construction,
-      // so the declaration slice cannot express a widget that decides in its
-      // `State` what its file resolved at the top. The price is stated below.
-      //
-      // WHAT THIS CANNOT SEE.
-      //  * **A file with no anchor.** Still the big one, and it has only moved:
-      //    a screen calling `PathEntity.delete` or `writeAsBytes` straight is
-      //    outside the closed set. Widening the set stays a human judgement;
-      //    what stops decaying is the inventory, not the making of it.
-      //  * **The wrong subject.** The scan sees that the registry was read, not
-      //    that the paths asked about are the paths written. That is what
-      //    `recordImportLongReadPaths` and `archiveRecordLongReadPaths` are for
-      //    — one definition both the claim and the check read — and no census
-      //    can substitute for it.
-      //  * **A read whose answer goes nowhere**, and **a file holding two
-      //    operations where only one subscribes**: the file slice's price.
-      //  * **`read` versus `watch`.** Both count. Four of the anchored files
-      //    resolve once on purpose, so requiring `watch` would open with four
-      //    sanctions, and a table of exceptions is not an assertion.
-      //  * **THE CAPTURE BLOCKER, WHICH THIS CASE NEVER REQUIRES.** The one
-      //    thing an anchored file has to reach is the registry: `_registryReads`
-      //    lists `longReadRegistryProvider`, `storageDeleteRefusalOf` and
-      //    `storageExtractRefusalOf`, and the capture blocker is not in that
-      //    vocabulary. So a file that asks the registry and never asks what the
-      //    capture card is doing is green here, and until
-      //    [LongReadKind.liveCapture] existed that was seven of the nine anchored
-      //    files -- only `storage_delete_action.dart` reached both, and
-      //    `storage_settings.dart` reads the capture flag to *stop* a capture
-      //    rather than to refuse for one. That is why a running capture was
-      //    invisible to every record-page and settings-page control for four
-      //    rounds. It is a property of what this case requires, not of the files
-      //    it scans, and what removed the exposure was making the capture
-      //    answerable through the question it does require rather than adding a
-      //    second census.
-      const sanctioned = <String>{};
-
-      // The instrument's controls, on synthetic sources. The first is the shape
-      // this case exists for; the second is the `StatefulWidget` shape that the
-      // declaration slice gets wrong, and it is the one that says a green result
-      // below comes from files that subscribe rather than from a scan that has
-      // stopped recognising the anchor.
-      const violatingFixture =
-          'class _Probe extends ConsumerWidget {\n'
-          '  Future<void> _go(WidgetRef ref) async {\n'
-          '    await RecordZipService.import(bytes, dir);\n'
-          '  }\n'
-          '}\n';
-      const compliantFixture =
-          'LongReadKind? _blocking(WidgetRef ref) => storageDeleteRefusalOf(ref, group: g, request: r)?.kind;\n'
-          '\n'
-          'class _ProbeState extends ConsumerState<_Probe> {\n'
-          '  Future<void> _go() async {\n'
-          '    await RecordZipService.import(bytes, dir);\n'
-          '  }\n'
-          '}\n';
-      // The instrument's own defect, held as a control: a file whose only
-      // mention of the registry is in a doc comment or a log string has not
-      // subscribed to anything, and a census over raw text would pass it. This
-      // is not hypothetical — `storage_delete_action.dart` has that exact doc
-      // line today, and is compliant for an entirely different reason.
-      const talkingFixture =
-          '/// Watches longReadRegistryProvider as well as the capture blocker.\n'
-          'class _Probe extends ConsumerWidget {\n'
-          '  Future<void> _go(WidgetRef ref) async {\n'
-          '    logger.i("longReadRegistryProvider says nothing here");\n'
-          '    await RecordZipService.import(bytes, dir);\n'
-          '  }\n'
-          '}\n';
-      // The instrument's second known defect, held as a control: a file that
-      // takes a claim of its own has put an answer *into* the registry and has
-      // not asked it anything, so the claim handle must not pair it. Until the
-      // fifth pass it did, and `version_check.dart` was passing this census on
-      // the strength of the `moduleInstall` claim it takes itself.
-      const registeringFixture =
-          'class _Probe extends ConsumerWidget {\n'
-          '  Future<void> _go(WidgetRef ref) async {\n'
-          '    await ref\n'
-          '        .read(longReadRegistryProvider.notifier)\n'
-          '        .hold(kind: LongReadKind.import, paths: p, action: (_) => RecordZipService.import(bytes, dir));\n'
-          '  }\n'
-          '}\n';
-      // And the declaring file: the name is here because this is where it is
-      // defined, which is not a surface calling it.
-      const declaringFixture =
-          'Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {\n'
-          '  return _extract(ref, zipPath);\n'
-          '}\n';
-      final probes = _roundOver({
-        'probe/violating.dart': violatingFixture,
-        'probe/compliant.dart': compliantFixture,
-        'probe/talking.dart': talkingFixture,
-        'probe/registering.dart': registeringFixture,
-        'probe/declaring.dart': declaringFixture,
-        'probe/silent.dart': 'class _Probe extends StatelessWidget {}\n',
-      });
-      expect(
-        probes.anchored,
-        ['probe/compliant.dart', 'probe/registering.dart', 'probe/talking.dart', 'probe/violating.dart'],
-        reason:
-            'the scan does not anchor on its own examples, or it anchored on the declaring probe — either the entry '
-            'points below were renamed, or the anchoring is matching something other than a call',
-      );
-      expect(
-        probes.unpaired,
-        {'probe/violating.dart', 'probe/talking.dart', 'probe/registering.dart'},
-        reason:
-            'the scan either called a subscribing file a violation (so the file slice is not what it claims and every '
-            'green result below is green for the wrong reason), or it let a file pass on the strength of a comment, '
-            'a log string, or a claim of its own — the three failures this instrument was built knowing about',
-      );
-
-      // The two lists the census is made of, pinned. Widening either is the edit
-      // that has to be looked at, and neither can be widened by accident while
-      // these numbers stand.
-      expect(
-        _destructiveEntries.length,
-        8,
-        reason:
-            'the closed set of destructive entry points changed size; an entry was added without its file count in '
-            'lib being looked at, or one was dropped without saying what now covers the calls it was finding',
-      );
-      expect(
-        _registryReads.length,
-        3,
-        reason:
-            'the set of spellings that count as subscribing to the registry changed size, which is the edit that '
-            'decides what this census will accept as having asked — widening it silently is how a surface that '
-            'never asks starts passing',
-      );
-
-      // The old form, taken verbatim from the two files as they stood at
-      // `47de8295`, before the fourth pass reached them. Slices rather than the
-      // whole files: what is reproduced is the shape — a destructive call with
-      // no registry read beside it — and the whole-file measurement at that
-      // revision was two unpaired files out of ten anchored.
-      const oldImportButton =
-          '      for (final file in result.files) {\n'
-          '        try {\n'
-          '          final bytes = await file.readAsBytes();\n'
-          '          final importResult = await RecordZipService.import(bytes, pathInfo.storageDir);\n'
-          '          committed = true;\n'
-          '          // Union, because the same record may appear in more than one of the\n'
-          '          // pieces a single export was split into, and it is imported once.\n'
-          '          importedIds.addAll(importResult.recordIds);\n';
-      const oldModuleUpdateDialog =
-          '/// [installModuleFromZip] where the archive has a filesystem path and via\n'
-          '/// [installModuleFromZipBytes] in a browser, where it does not.\n'
-          '  Future<bool> _runInstall(RefBase base, String? path, Future<Uint8List> Function() readBytes) async {\n'
-          '    if (path != null) {\n'
-          '      return installModuleFromZip(base, FilePath(path));\n'
-          '    }\n'
-          '    try {\n'
-          '      return await installModuleFromZipBytes(base, await readBytes());\n'
-          '    } catch (exception, stackTrace) {\n';
-      final oldForm = _roundOver({
-        'lib/src/gui/chara_detail/import_button.dart': oldImportButton,
-        'lib/src/gui/module_update_dialog.dart': oldModuleUpdateDialog,
-      });
-      expect(
-        oldForm.unpaired,
-        {'lib/src/gui/chara_detail/import_button.dart', 'lib/src/gui/module_update_dialog.dart'},
-        reason:
-            'the two files this case was written for do not fail it, so it would not have caught the defect it '
-            'exists to catch and the green result below means nothing',
-      );
-
-      final round = _roundOver(_libSources());
-
-      expect(
-        round.unpaired.where((path) => !sanctioned.any(path.endsWith)),
-        isEmpty,
-        reason:
-            'this file calls one of the app\'s destructive entry points and nothing in it asks the registry whether a '
-            'long reader is already holding what it is about to write; go through storageDeleteRefusalOf / '
-            'storageExtractRefusalOf, or watch longReadRegistryProvider and fold it, or say here why this one cannot',
-      );
-      // The count, not the emptiness. A file that starts calling one of these
-      // has to move this number, which is the edit that makes somebody look at
-      // whether it subscribes.
-      expect(
-        round.anchored.length,
-        9,
-        reason:
-            'the set of files that call a destructive entry point changed. If one was added, check that it reads the '
-            'registry and raise this number; if one was removed or an entry point was renamed, lower it — a scan '
-            'that quietly finds fewer files every release is the failure mode this number exists to refuse',
-      );
-      // Per entry, because `anchored.length` alone stays right while seven of
-      // the eight entries have been renamed out from under it.
-      expect(
-        round.filesPerEntry.entries.where((entry) => entry.value == 0).map((entry) => entry.key),
-        isEmpty,
-        reason:
-            'this destructive entry point is no longer called anywhere in lib, so it was renamed or removed and '
-            'the scan is now searching for a string that does not occur',
-      );
-    });
-  });
-
-  group('the kinds and their claim sites', () {
-    test('every member of LongReadKind is claimed somewhere in lib, because a member with no claim site is the '
-        'enumeration of long readers this file exists to remove', () {
-      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *`LongReadKind`
-      // carries a member that no operation ever passes to `LongReadClaim`, so
-      // the enum has gone back to being a list of jobs somebody thought were
-      // long.*
-      //
-      // The enum's own doc states this rule in the present tense — "a member
-      // arrives with its claim site and not before" — and until this case
-      // nothing checked it. That is the ordinary way a doc becomes false: not
-      // by being wrong when written, but by nobody being able to tell.
-      //
-      // WHAT THIS DOES NOT DO, and it is worth being blunt about it: **it finds
-      // no missing claim.** The import claim was missing for the whole of this
-      // branch and this case would have been green throughout, because a member
-      // that was never added has no row to be missing from. Catching *that*
-      // needs "this operation is long" to exist as data somewhere other than
-      // this enum, and it does not — the enum is where that fact lives, so the
-      // check is circular by construction. What this case holds is the other
-      // direction, which is the direction a future edit takes: the member
-      // arrives first, and its claim site never does.
-      final registry = File('lib/src/core/storage/long_read_registry.dart').readAsStringSync();
-      final members = _kindMembersIn(registry);
-
-      // Controls first: the extractor has to be able to return the wrong answer.
-      expect(
-        _kindMembersIn(
-          'enum LongReadKind {\n'
-          '  /// Doc with a comma, which is not a separator.\n'
-          '  alpha,\n'
-          '\n'
-          '  beta,\n'
-          '}\n',
-        ),
-        ['alpha', 'beta'],
-        reason:
-            'the member extractor cannot read a two-member enum, so what it reads out of the real file is not '
-            'the member list either',
-      );
-      expect(
-        _kindMembersIn('enum SomethingElse { alpha, beta }\n'),
-        isEmpty,
-        reason: 'the member extractor matches an enum that is not LongReadKind, so it is not reading the kind at all',
-      );
-
-      expect(
-        members.length,
-        14,
-        reason:
-            'the number of long-reader kinds changed. Raise or lower this number in the same edit that adds or '
-            'removes the member, so that adding one is a change somebody has to look at rather than a line nobody '
-            'reviews',
-      );
-
-      final sources = _libSources();
-      final counts = _claimSiteCounts(sources, members);
-      expect(
-        counts.entries.where((entry) => entry.value == 0).map((entry) => entry.key),
-        isEmpty,
-        reason:
-            'this kind is declared and nothing claims it, which is the enumeration of long readers the registry was '
-            'built to replace; wire the operation that motivated it, or take the member out until it is wired',
-      );
-      expect(
-        counts.values.fold(0, (sum, count) => sum + count),
-        15,
-        reason:
-            'the number of claim sites changed. One kind, one claim site is not a law — a second surface may '
-            'legitimately claim an existing kind — but it is a fact somebody should have to write down, so move '
-            'this number in the same edit',
-      );
-
-      // The falsifying example, on the real corpus with the one line that
-      // announces the import claim taken out: this is what a member arriving
-      // without its claim site looks like from here.
-      final withoutImportClaim = _claimSiteCounts(
-        sources.map((path, source) => MapEntry(path, source.replaceAll('kind: LongReadKind.import', 'kind: null'))),
-        members,
-      );
-      expect(
-        withoutImportClaim['import'],
-        0,
-        reason:
-            'removing the only claim site of a kind left this case green, so the count is not being read off the '
-            'corpus and every number above is decoration',
-      );
-    });
   });
 
   group('a declaration that announces nothing', () {
@@ -1732,85 +1008,4 @@ void main() {
       expect(recordBlocked(zipCovers), LongReadKind.zip);
     });
   });
-}
-
-/// The text between the parenthesis at [open] in [source] and the one that
-/// closes it, or `null` when [source] runs out first.
-///
-/// **Returning `null` rather than a best guess is the point.** The caller treats
-/// an unparsable call site as a finding, so the one thing this walk must never
-/// do is answer confidently about a call it did not actually delimit.
-///
-/// String literals and comments are stepped over instead of being counted: a
-/// `(` inside a log message or a `//` line would otherwise move the closing
-/// parenthesis and change which arguments a call is judged on. Interpolation
-/// that itself contains the quote character (`'${map['k']}'`) is the known limit
-/// — the walk ends the literal early there — and it fails towards `null`, which
-/// is the safe direction.
-String? _argumentListAt(String source, int open) {
-  var depth = 0;
-  var index = open;
-  while (index < source.length) {
-    final character = source[index];
-    if (character == '(') {
-      depth++;
-      index++;
-      continue;
-    }
-    if (character == ')') {
-      depth--;
-      if (depth == 0) {
-        return source.substring(open + 1, index);
-      }
-      index++;
-      continue;
-    }
-    if (source.startsWith('//', index)) {
-      final newline = source.indexOf('\n', index);
-      index = newline == -1 ? source.length : newline;
-      continue;
-    }
-    if (source.startsWith('/*', index)) {
-      final end = source.indexOf('*/', index + 2);
-      if (end == -1) {
-        return null;
-      }
-      index = end + 2;
-      continue;
-    }
-    if (character == "'" || character == '"') {
-      final end = _stringLiteralEnd(source, index);
-      if (end == null) {
-        return null;
-      }
-      index = end;
-      continue;
-    }
-    index++;
-  }
-  return null;
-}
-
-/// The index just past the string literal that starts at [start], or `null` when
-/// it is not terminated on this line (or at all, for a triple-quoted one).
-int? _stringLiteralEnd(String source, int start) {
-  final quote = source[start];
-  final triple = source.startsWith(quote * 3, start);
-  final delimiter = triple ? quote * 3 : quote;
-  final raw = start > 0 && source[start - 1] == 'r';
-  var index = start + delimiter.length;
-  while (index < source.length) {
-    if (!raw && source[index] == r'\') {
-      index += 2;
-      continue;
-    }
-    if (source.startsWith(delimiter, index)) {
-      return index + delimiter.length;
-    }
-    if (!triple && source[index] == '\n') {
-      return null;
-    }
-    index++;
-  }
-  return null;
 }

@@ -463,7 +463,7 @@ void main() {
           StorageDeleteFailure(
             subject: StorageDeletePathSubject('a/two.json'),
             reason: StorageDeleteFailureReason.refused,
-            detail: _refusalDetail,
+            detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
           ),
         ],
         retained: [
@@ -497,7 +497,7 @@ void main() {
         StorageDeleteReport.wholeRequest(
           subject: StorageDeletePathSubject('a'),
           reason: StorageDeleteFailureReason.lockBusy,
-          detail: 'busy',
+          detail: StorageDeletePlatformDetail(FileSystemException('busy')),
         ),
       );
       expect(refused.type, ToastType.error);
@@ -574,7 +574,7 @@ void main() {
           StorageDeleteFailure(
             subject: StorageDeletePathSubject('a/two.json'),
             reason: StorageDeleteFailureReason.refused,
-            detail: _refusalDetail,
+            detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
           ),
         ],
         retained: [
@@ -641,7 +641,11 @@ void main() {
         deleted: subjects.take(deleted).toList(),
         failed: [
           for (final subject in subjects.skip(deleted))
-            StorageDeleteFailure(subject: subject, reason: StorageDeleteFailureReason.refused, detail: _refusalDetail),
+            StorageDeleteFailure(
+              subject: subject,
+              reason: StorageDeleteFailureReason.refused,
+              detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
+            ),
         ],
       );
     }

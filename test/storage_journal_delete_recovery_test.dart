@@ -39,6 +39,7 @@ import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
 import 'support/storage_delete_claim.dart';
+import 'support/storage_recovery_clause.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -437,7 +438,11 @@ void main() {
       contains(_slotPath().path),
       reason: 'the delete has to say which slot it would not remove',
     );
-    expect(report.failed.single.detail, isNotEmpty, reason: 'a refusal the user cannot describe is not a report');
+    expectRecoveryIncompleteFailure(
+      report.failed.single,
+      recordId: _recordId,
+      reason: RecordRecoveryIncompleteReason.supersededCopyNotSaved,
+    );
   });
 
   group('the slot of a replacing publication that recovery cannot finish', () {
@@ -482,7 +487,7 @@ void main() {
           cleanup: (_) async {},
         );
 
-    Future<void> expectSurvives(StorageDeleteReport report) async {
+    Future<void> expectSurvives(StorageDeleteReport report, RecordRecoveryIncompleteReason reason) async {
       expect(_slotDir().existsSync(), isTrue, reason: 'the slot went with the journal');
       expect(
         report.failed
@@ -491,7 +496,7 @@ void main() {
         contains(_slotPath().path),
         reason: 'the delete has to say which slot it would not remove',
       );
-      expect(report.failed.single.detail, isNotEmpty);
+      expectRecoveryIncompleteFailure(report.failed.single, recordId: _recordId, reason: reason);
     }
 
     test('stuck in parked, it is reported undrained and survives deleting the retired group', () async {
@@ -503,7 +508,7 @@ void main() {
 
       final report = await _deleteRetiredGroup(_container(maintenanceWith(stuck)));
 
-      await expectSurvives(report);
+      await expectSurvives(report, RecordRecoveryIncompleteReason.publishedCopyFailed);
       expect(
         Directory('${_layout.charaDetailDir.path}/active/$_recordId').existsSync(),
         isFalse,
@@ -522,7 +527,7 @@ void main() {
 
       final report = await _deleteRetiredGroup(_container(maintenanceWith(WebRecordWriteTransaction())));
 
-      await expectSurvives(report);
+      await expectSurvives(report, RecordRecoveryIncompleteReason.displacedTreeGone);
       expect(_bytesNamed('"v":"survivor"'), [contains('desired')]);
     });
   });

@@ -32,7 +32,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
 import 'package:umacapture/src/core/storage/settings_boxes.dart';
-import 'package:umacapture/src/core/storage/storage_delete_report.dart';
+import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
@@ -69,7 +69,11 @@ void main() {
     for (final failure in report.failed) {
       // The failure panel shows this text to the user, and it is the only thing that
       // distinguishes one refusal from another.
-      expect(failure.detail, isNotEmpty, reason: '${failure.subject} was refused with nothing to say about it');
+      expect(
+        storageDeleteFailureDetailText(failure.detail),
+        isNotEmpty,
+        reason: '${failure.subject} was refused with nothing to say about it',
+      );
     }
   });
 

@@ -20,6 +20,7 @@
 // a real Blob. Neither reaches the browser's VideoDecoder or VideoFrame.copyTo -- those are browser-only.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 // web/worker.js is a module worker: it reads `self` at load time. Stand one up before the import.
@@ -2545,4 +2546,81 @@ test('an import is refused on a core that predates the end-of-clip signal and th
   assert.match(refusal.msg, /endOfInput and Module\.videoImportVerdict/);
   assert.equal(refusal.expected, true, 'a stale local artifact is an app state, not a crash report');
   assert.deepEqual(postedOfType('videoImportDone'), [], 'no import started, so it has no ending to report');
+});
+
+// --- the storage-path rule, executed ------------------------------------------------------------------------
+
+// THE SAME TABLE `test/worker_refusal_scope_path_guard_test.dart` feeds Dart's `isSafeRecordId`, so the two
+// sides of the rule are held to one list of verdicts instead of to each other's source text. Dart asserts the
+// store's verdict for every entry; this file asserts the worker's, by delivering an `updateRecord` and watching
+// what the handler does with it.
+const pathSegmentCases = JSON.parse(
+  readFileSync(new URL('../test/fixtures/safe_path_segment_cases.json', import.meta.url), 'utf8'));
+
+/// One `updateRecord` into a fresh core and filesystem. Answers what was posted, what reached the core, and
+/// every MEMFS path the handler left behind that was not there before it ran.
+async function regenerate(recordId, filePath) {
+  const memfs = memfsWithLeftover();
+  const core = makeCore({ memfs });
+  await arrange(core, { samples: ticks(1) });
+  const before = new Set(memfs.paths());
+  const staged = [];
+  // The handler removes the record's directory when it ends, so what it staged is read at the moment the core
+  // is asked to recognize it -- which is also the moment a refused write would already have landed.
+  core.updateRecord = (id) => {
+    core.updates.push(id);
+    staged.push(...memfs.paths().filter((p) => !before.has(p)));
+    core.queued.push(JSON.stringify({ type: 'onCharaDetailUpdated', id }));
+  };
+  await within(3000, deliver({
+    type: 'updateRecord',
+    recordId,
+    files: [{ path: filePath, buffer: new Uint8Array([1]).buffer }],
+  }), 'the regeneration of ' + JSON.stringify(recordId) + ' never answered');
+  const leftover = memfs.paths().filter((p) => !before.has(p) && !p.startsWith('/work/storage/chara_detail'));
+  return { core, staged, leftover, errors: postedOfType('error'), updated: postedOfType('updated') };
+}
+
+test('the worker stages every record id and path segment the store accepts', async () => {
+  assert.notEqual(pathSegmentCases.accepted.length, 0, 'the shared table lists no accepted segment');
+  for (const segment of pathSegmentCases.accepted) {
+    const path = 'chara_detail/active/' + segment + '/' + segment;
+    const run = await regenerate(segment, path);
+    assert.deepEqual(run.errors, [], 'the worker refused ' + JSON.stringify(segment) + ', which the store accepts');
+    assert.deepEqual(run.core.updates, [segment]);
+    assert.equal(run.staged.includes('/work/storage/' + path), true,
+      JSON.stringify(segment) + ' was not staged where the recognizer reads it');
+    assert.equal(run.updated.length, 1);
+    assert.equal(run.updated[0].error, undefined);
+  }
+});
+
+test('the worker refuses, as a record id, every segment the store refuses, before touching anything', async () => {
+  assert.notEqual(pathSegmentCases.refused.length, 0, 'the shared table lists no refused segment');
+  for (const segment of pathSegmentCases.refused) {
+    const run = await regenerate(segment, 'chara_detail/active/record/record.json');
+    assert.equal(run.errors.length, 1, JSON.stringify(segment) + ' was not refused as a record id');
+    assert.match(run.errors[0].msg, /missing or malformed recordId/);
+    assert.deepEqual(run.core.updates, [], 'a refused id must not reach the recognizer');
+    assert.deepEqual(run.staged, []);
+    assert.deepEqual(run.leftover, [], 'a refused id must not write anything');
+  }
+});
+
+test('the worker refuses to stage a file whose path carries a segment the store refuses', async () => {
+  // A segment with a `/` in it is not one segment of a path, so only the others can be placed here; the id
+  // test above covers the rest.
+  const segments = pathSegmentCases.refused.filter((segment) => !segment.includes('/'));
+  assert.notEqual(segments.length, 0);
+  for (const segment of segments) {
+    const record = 'chara_detail/active/record/';
+    for (const path of [record + segment + '/record.json', record + segment]) {
+      const run = await regenerate('record', path);
+      assert.equal(run.updated.length, 1, JSON.stringify(path) + ' did not get exactly one answer');
+      assert.match(run.updated[0].error ?? '', /could not stage the inputs/,
+        JSON.stringify(path) + ' was staged although the store refuses ' + JSON.stringify(segment));
+      assert.deepEqual(run.core.updates, [], 'a refused path must not reach the recognizer');
+      assert.deepEqual(run.leftover, [], JSON.stringify(path) + ' wrote outside the record directory');
+    }
+  }
 });

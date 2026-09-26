@@ -24,9 +24,8 @@
 //  * The desktop auto-updater's install. It sits inside `moduleVersionLoader`
 //    behind a network download; nothing here can drive it.
 //  * The web bootstrap and refresh. `_downloadAndExtractModuleToOpfs` is private
-//    and reached only from a provider body that needs a browser and the network.
-//    `web_module_refresh_test.dart` covers the shape of its call by reading the
-//    source, which is where that decision already lived.
+//    and reached only from a provider body that needs a browser and the network,
+//    and no test here or elsewhere asserts the shape of its call.
 //  * A browser. The web leg's claim is asserted over the VM's path arithmetic.
 import 'dart:convert';
 import 'dart:io';

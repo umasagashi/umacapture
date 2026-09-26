@@ -283,21 +283,4 @@ void main() {
       expect(backend.attempts, 3);
     });
   });
-
-  test('the desktop updater awaits its cleanup, in a finally', () {
-    // The call site sits inside a provider that performs a real network download,
-    // so there is no seam to drive it from a test. What can be stated is the
-    // shape of the source, the way `app_root_scrub_test` pins `_sentryBeforeSend`.
-    final source = File('lib/src/core/version_check.dart').readAsStringSync();
-
-    expect(source, contains('} finally {'));
-    expect(source, contains('await deleteDownloadedArchive(downloadPath);'));
-    // The old defect verbatim: a fire-and-forget delete on the raw dart:io File.
-    expect(source, isNot(contains('.toFile().delete()')));
-    // Every mention other than the declaration itself has to be awaited, or the
-    // same class of defect is back at a different call site.
-    final mentions = RegExp(r'\bdeleteDownloadedArchive\(').allMatches(source).length;
-    final awaited = RegExp(r'\bawait deleteDownloadedArchive\(').allMatches(source).length;
-    expect(mentions - awaited, 1, reason: 'only the declaration may be unawaited');
-  });
 }

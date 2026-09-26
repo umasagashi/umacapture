@@ -14,11 +14,16 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/dashboard.dart';
+import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/source_syntax.dart';
 
 late Directory _tempDir;
 
@@ -166,32 +171,47 @@ void main() {
       expect(shown, contains(appSentenceAt('pages.dashboard.app_updater.invalid_payload.zip')));
     });
 
-    test('the failure toast shows exactly what describeFailure composed', () {
-      // WHY THIS READS THE SOURCE. The three tests above pin `describeFailure`, which is only the
-      // string the user sees if the toast shows it UNWRAPPED -- and the defect being fixed was
-      // precisely a second wrapper at the call site. Driving `downloadAndOpen` end to end would say
-      // it directly, but its failure arm cannot be reached from a test: `ref.read(provider.future)`
-      // on a container never completes (measured -- the arm runs only when the container is
-      // disposed, and by then the progress notifier is gone). Until that is reachable, this locks
-      // the shape instead: the toast passes `describeFailure(error)` and nothing else, and the
-      // download-failure template is named in exactly one place, inside `describeFailure`.
-      final source = File('lib/src/gui/dashboard.dart').readAsStringSync();
+    for (final error in <Object>[
+      const AppUpdatePayloadException(AppUpdatePayloadKind.installer, 'not an MZ header'),
+      const SocketException('connection reset'),
+    ]) {
+      test('the failure toast shows exactly what describeFailure composed, for ${error.runtimeType}', () async {
+        // `downloadAndOpen` hands its failure arm to `reportDownloadFailure`; driving that function
+        // shows the toast the user sees. Red if the toast re-wraps the composed sentence (the
+        // rejection would then read as a failed download, or a failed download twice over).
+        // That `downloadAndOpen` names this function is read off its source by the next case: its
+        // failure arm cannot be driven from a test, as `ref.read(provider.future)` on
+        // a container never completes before the container is disposed.
+        final toasts = <ToastData>[];
+        final container = ProviderContainer(retry: (_, _) => null);
+        addTearDown(container.dispose);
+        container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
+        final progressProvider = settableNotifierProvider<Progress?>(Progress(count: 3, total: 10));
+        container.read(progressProvider);
+
+        AppUpdaterGroup.reportDownloadFailure(container.read(progressProvider.notifier), error, StackTrace.empty);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(toasts.map((t) => (t.type, t.description)), [(ToastType.error, AppUpdaterGroup.describeFailure(error))]);
+        expect(container.read(progressProvider), isNull, reason: 'the card must stop spinning after a failure');
+      });
+    }
+
+    test('downloadAndOpen hands its failures to reportDownloadFailure', () {
+      // The cases above drive `reportDownloadFailure` itself; this reads only that `downloadAndOpen`
+      // still names it, so a failure arm rewritten to log and return is red. Where in the chain the
+      // handler sits is not read.
+      final source = parseDartFile('lib/src/gui/dashboard.dart');
+      expect(source.diagnostics, isEmpty, reason: 'dashboard.dart does not parse, so the wiring was not read');
+      final method = methodDeclaration(source.unit, 'AppUpdaterGroup', 'downloadAndOpen');
+      if (method == null) {
+        fail('AppUpdaterGroup declares no downloadAndOpen, so the wiring was not read');
+      }
       expect(
-        source,
-        contains('Toaster.show(ToastData.error(description: describeFailure(error)))'),
-        reason: 'the toast must show the composed sentence, not re-wrap it',
+        referencesIn(method.body).map((reference) => reference.name),
+        contains('reportDownloadFailure'),
+        reason: 'downloadAndOpen no longer hands its failures to reportDownloadFailure',
       );
-      const failedTemplate = 'app_updater.download_failed.template';
-      expect(
-        failedTemplate.allMatches(source).length,
-        1,
-        reason: 'a second mention of the download-failure template is a second wrapper',
-      );
-      final composition = source.substring(
-        source.indexOf('static String describeFailure'),
-        source.indexOf('static String describeError'),
-      );
-      expect(composition, contains(failedTemplate), reason: 'the one mention must be the choice, not a wrapper');
     });
   });
 }

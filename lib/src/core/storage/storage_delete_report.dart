@@ -10,12 +10,14 @@
 /// happened, which rules out the first. The report
 /// carries both sides so the caller can say which is which.
 ///
-/// **Pure Dart, deliberately.** No imports at all — not `dart:io`, not
-/// `package:flutter` — so the aggregation is compilable by both suites, and so
-/// nothing in here can reach a filesystem. It is a record of what happened, and
-/// the layer that performs the deletes (`storage_delete.dart`) is the only one
-/// that touches anything.
+/// **Pure Dart, deliberately.** The one import is the recovery-reason enum,
+/// itself import-free — not `dart:io`, not `package:flutter` — so the
+/// aggregation is compilable by both suites, and so nothing in here can reach a
+/// filesystem. It is a record of what happened, and the layer that performs the
+/// deletes (`storage_delete.dart`) is the only one that touches anything.
 library;
+
+import '/src/core/fs/record_recovery_reason.dart';
 
 /// Why one entry survived a delete that was asked to remove it.
 ///
@@ -59,14 +61,11 @@ enum StorageDeleteFailureReason {
   /// Nothing was attempted, which is what it has in common with
   /// [lockUnavailable] — and it is a separate value for the same reason that one
   /// is: who refused is a different fact from what happened, and a slot the app
-  /// is protecting is not a platform saying no. The sentence the user reads
-  /// still comes from [StorageDeleteFailure.detail] — but for this one value
-  /// alone that field does not hold the platform's words, because no platform
-  /// refused. It holds a sentence this app composes, through
-  /// `storageRecoveryIncompleteDetail`, out of the shipped keys the rest of the
-  /// screen goes through and the value recovery answered with. Recovery's own
-  /// account is English written at the point of failure and belongs in the log;
-  /// it used to reach this field, and the panel, unchanged.
+  /// is protecting is not a platform saying no. Its [StorageDeleteFailure.detail]
+  /// is therefore not the platform's words, because no platform refused: it is a
+  /// [StorageDeleteRecoveryIncompleteDetail], which the survivor row renders out
+  /// of the shipped keys the rest of the screen goes through. Recovery's own
+  /// account is English written at the point of failure and belongs in the log.
   recoveryIncomplete,
 }
 
@@ -211,6 +210,45 @@ class StorageDeleteRetention {
   String toString() => 'StorageDeleteRetention($subject, ${reason.name})';
 }
 
+/// What a survivor row says about the entry, as data rather than as a sentence.
+///
+/// **Two kinds and no way to hand over a sentence.** The row is rendered
+/// verbatim, so a `String` here reached the user with no key, no translation and
+/// nothing for the walk over `pages.storage.*` to see. Each kind carries the
+/// facts, and `storageDeleteFailureDetailText` in `storage_delete.dart` is the
+/// one place that turns them into what the user reads.
+sealed class StorageDeleteFailureDetail {
+  const StorageDeleteFailureDetail();
+}
+
+/// The platform's own account of a refusal: the object it threw.
+///
+/// Shown through its `toString`, in whatever language it comes in — an OS or
+/// browser message is better than this app paraphrasing it. A `String` is not a
+/// thrown platform error, so it is refused (in debug builds, which every test
+/// runs): a sentence the app wrote does not become the platform's by being passed here.
+final class StorageDeletePlatformDetail extends StorageDeleteFailureDetail {
+  const StorageDeletePlatformDetail(this.error) : assert(error is! String, 'a platform detail is a thrown error');
+
+  final Object error;
+
+  @override
+  String toString() => error.toString();
+}
+
+/// A transaction slot whole-store recovery could not empty, which this app
+/// declined to delete: the record it holds, when recovery could tell, and why
+/// recovery stopped.
+final class StorageDeleteRecoveryIncompleteDetail extends StorageDeleteFailureDetail {
+  const StorageDeleteRecoveryIncompleteDetail({required this.recordId, required this.reason});
+
+  final String? recordId;
+  final RecordRecoveryIncompleteReason reason;
+
+  @override
+  String toString() => 'recovery incomplete (${recordId ?? 'unidentified'}, ${reason.name})';
+}
+
 /// One entry that is still there after a delete that meant to remove it.
 class StorageDeleteFailure {
   const StorageDeleteFailure({required this.subject, required this.reason, required this.detail});
@@ -220,11 +258,12 @@ class StorageDeleteFailure {
 
   final StorageDeleteFailureReason reason;
 
-  /// What the platform said, for the user to read and for a bug report to carry.
+  /// What the survivor row says about it, for the user to read and for a bug
+  /// report to carry.
   ///
-  /// Never empty: a failure the app cannot explain is still a failure the user
-  /// has to be able to describe to someone.
-  final String detail;
+  /// Always present: a failure the app cannot explain is still a failure the
+  /// user has to be able to describe to someone.
+  final StorageDeleteFailureDetail detail;
 
   @override
   String toString() => 'StorageDeleteFailure($subject, ${reason.name}, $detail)';
@@ -257,7 +296,7 @@ class StorageDeleteReport {
   StorageDeleteReport.wholeRequest({
     required StorageDeleteSubject subject,
     required StorageDeleteFailureReason reason,
-    required String detail,
+    required StorageDeleteFailureDetail detail,
   }) : this(
          failed: [StorageDeleteFailure(subject: subject, reason: reason, detail: detail)],
        );

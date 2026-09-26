@@ -56,8 +56,8 @@ typedef AdapterVisitor = void Function<T>(JsonAdapter<T> adapter);
 /// the end with the next unused id — and note that adding one here is what
 /// extends the second tier of the storage view's settings-value rendering
 /// (`settings_value_render.dart`), which is why
-/// `hive_adapter_roster_test.dart` turns red until the addition has been looked
-/// at.
+/// `hive_adapter_roster_test.dart` turns red until the new type has a sample
+/// shown to encode.
 void visitHiveAdapters(AdapterVisitor visit) {
   visit(const JsonAdapter<Size>(0));
   visit(const JsonAdapter<Offset>(1));

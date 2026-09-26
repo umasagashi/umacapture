@@ -561,7 +561,7 @@ void main() {
               StorageDeleteFailure(
                 subject: StorageDeletePathSubject('a.png'),
                 reason: StorageDeleteFailureReason.refused,
-                detail: 'refused',
+                detail: StorageDeletePlatformDetail(FileSystemException('refused')),
               ),
             ],
           ),

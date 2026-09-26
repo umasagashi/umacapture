@@ -3,7 +3,7 @@
 // registry while the sweep runs, and gives it back however the sweep ends.
 //
 // **Why this is a runtime observation rather than a scan.** The scans in
-// `long_read_registry_test.dart` read source text: they can tell that a
+// `long_read_registry_test.dart` read the source: they can tell that a
 // declaration was written, and nothing more. Whether the declaration a boundary
 // carries actually reaches `LongReadRegistry` — and whether it is released when
 // the boundary throws — is only visible by watching the registry while the

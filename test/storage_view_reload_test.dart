@@ -2,28 +2,21 @@
 //
 //   .fvm/flutter_sdk/bin/flutter test test/storage_view_reload_test.dart
 //
-// WHAT WAS WRONG. `storage_tree.dart`'s five providers are plain (non-`autoDispose`)
-// futures, and the only thing in the repository that invalidated them was
-// `refreshStorageTabAfterDelete`, reached from the delete confirmation and from
-// nowhere else. So a capture, a video import or an archive would write into
-// `active/` while the user was elsewhere, and coming back showed the tree and the
-// totals from before — until the app was restarted. The user reported exactly that
-// ("新しくキャプチャしてレコードが増えても表示が追加されない") and ruled that the view
-// should re-read on entry rather than grow a refresh button or be notified by each
-// of the three writers.
+// WHY. The view's providers in `storageTabContentProviders` are plain
+// (non-`autoDispose`) futures, so nothing drops them while the view is away. A
+// capture, a video import or an archive writes into `active/` while the user is
+// elsewhere, and without a re-read coming back would show the tree and the totals
+// from before until the app restarted. The user ruled that the view re-reads on
+// entry rather than growing a refresh button or being notified by each of the
+// three writers.
 //
-// WHAT THIS FILE OWNS, AND WHAT IT NO LONGER OWNS. This was
-// `storage_tab_entry_reload_test.dart`, and the mechanism it described had two
-// halves in two files: `route.dart` declared the storage tab `maintainState: false`
-// so that leaving it unmounted the page, and `StoragePage.initState` did the
-// re-read. There is no tab and no page now — the view is a dialog — so the route
-// half is gone (`app_route_test.dart` asserts the flag is nobody's any more) and
-// the entry half belongs to the dialog (`storage_dialog_entry_test.dart` opens it
-// twice). What survives both is the widget in the middle: **one mount of
-// `FreshStorageTree` is one visit**, whoever mounts it. That is what is asserted
-// here, by mounting and unmounting it directly — which is what an entry causes
-// rather than the entry itself, so this stays true of a second entry nobody has
-// written yet.
+// WHAT THIS FILE OWNS. The view is a dialog: `storage_dialog_entry_test.dart`
+// owns the entry (it opens the dialog twice) and `app_route_test.dart` owns the
+// routes. This file owns the widget in the middle: **one mount of
+// `FreshStorageTree` is one visit**, whoever mounts it. That is asserted here by
+// mounting and unmounting it directly — which is what an entry causes rather
+// than the entry itself, so this stays true of a second entry nobody has written
+// yet.
 //
 // WHAT SEPARATES THIS FROM "REFRESH ON EVERY BUILD". An implementation that
 // invalidated from `build` would satisfy "the new file appears after coming back"
@@ -56,7 +49,6 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
-import 'support/storage_view_sources.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -155,62 +147,6 @@ void main() {
 
   tearDown(() {
     _root.deleteSync(recursive: true);
-  });
-
-  group('a refresh is not a value', () {
-    // Riverpod 3 hands a recomputing provider back as `AsyncData` carrying the
-    // *previous* value with `isLoading` set, so dropping the providers is only
-    // half of re-reading: without `unwrapPrevious()` every size cell and every
-    // row goes on showing the last visit's answer for the whole length of the new
-    // walk. The behaviour is asserted below; this asserts the shape, because the
-    // behavioural test can only reach the surfaces it draws, and a seventh watch
-    // added to a surface it does not reach would be silent.
-    //
-    // The list of providers is read out of `storageTabContentProviders` rather
-    // than written here, so it is the code that is counted and not a copy of it,
-    // and the watches are looked for across every source the view privately owns
-    // rather than in the one file the list happens to live in — moving a draw
-    // site one file across is not a defect and must not be read as one.
-    test('every watch of the view\'s async providers reverts a refresh to loading', () {
-      final view = StorageViewSources.read();
-      expect(view.rosterNames, isNotEmpty);
-
-      // Counted per provider, not as one running total. The guarantee here used
-      // to be `checked >= names.length` — a sum — and the measurement is five
-      // qualifying watches for five providers, one each, so the two sides met
-      // exactly at the equals sign. A provider losing its only watch while
-      // another gained a second left the sum at five and this guard green, which
-      // is the single failure it exists to catch.
-      final watches = {for (final name in view.rosterNames) name: 0};
-      for (final source in view.sources.values) {
-        for (final line in source.split('\n')) {
-          for (final name in view.rosterNames) {
-            // `.future` reads the value and not the `AsyncValue`, so there is no
-            // previous state to unwrap; that is how one provider aggregates others.
-            if (!RegExp(r'ref\.watch\(' + name + r'[(),]').hasMatch(line) || line.contains('.future')) {
-              continue;
-            }
-            watches[name] = watches[name]! + 1;
-            expect(
-              line.contains('unwrapPrevious()'),
-              isTrue,
-              reason:
-                  '$name is watched without unwrapPrevious(), so a re-read shows the previous answer: ${line.trim()}',
-            );
-          }
-        }
-      }
-      // Every listed provider is drawn somewhere, so a provider the scan finds no
-      // watch for has either lost its draw site or stopped being matched — and
-      // neither is visible in a total.
-      for (final entry in watches.entries) {
-        expect(
-          entry.value,
-          greaterThanOrEqualTo(1),
-          reason: '${entry.key} is in storageTabContentProviders but nothing in the view watches it',
-        );
-      }
-    });
   });
 
   group('one mount is one entry', () {

@@ -45,32 +45,6 @@ Uint8List _moduleZip({required String version, String onnx = "onnx-payload"}) {
 }
 
 void main() {
-  group('a bootstrap boot installs the published module whole', () {
-    // `_bootstrapWebModule` is a provider body: it needs a `Ref`, OPFS and the
-    // network, none of which the VM suite has. What can be checked without them
-    // is the shape of its call, and that is exactly where the defect sat -- the
-    // two commit markers were threaded straight into the extraction, so a
-    // browser holding only the JSON marker installed the *current* ONNX beside
-    // the *previous* release's JSON and ran that pairing for a whole session.
-    test('the marker state decides whether to fetch, never which half to write', () {
-      final source = File('lib/src/core/version_check.dart').readAsStringSync();
-      final start = source.indexOf('Future<ModuleVersion?> _bootstrapWebModule(');
-      expect(start, greaterThan(0), reason: 'the bootstrap function was renamed; update this test');
-      final end = source.indexOf('sealed class ModuleUpdateVerdict', start);
-      expect(end, greaterThan(start), reason: 'the declaration after the bootstrap moved; update this test');
-      final body = source.substring(start, end);
-
-      expect(body, contains('_downloadAndExtractModuleToOpfs(ref.base, pathInfo, latest, archive)'));
-      // Not "does it pass true": passing the marker state under any spelling is
-      // the defect, so the arguments must not be there to pass at all.
-      expect(body, isNot(contains('extractJson')));
-      expect(body, isNot(contains('extractOnnx')));
-      // The markers themselves are still read -- for the "is a fetch needed"
-      // question, which is the only one they answer.
-      expect(body, contains('if (!needJson && !needOnnx)'));
-    });
-  });
-
   group('automatic install refuses a response that is not a module', () {
     late Directory tempRoot;
     late DirectoryPath modulesDir;

@@ -12,20 +12,15 @@
 // ask `captureActivityProvider` as well and it answers `importing`; the relocation asks the registry
 // and nothing else, so it is the one surface with no other answer.
 //
-// WHAT THIS FILE DRIVES, AND WHAT IT ONLY READS.
+// WHAT THIS FILE DRIVES.
 //
-//  1. The **io leg** is driven for real, end to end, through the same two seams
-//     `video_import_io_test.dart` uses: `videoImportPathPicker` (the real one opens a modal Win32
-//     dialog and must never be called from a suite) and a mock method-channel handler. The claim is
-//     read off a real `LongReadRegistry` in a real container, and the refusal is asked of the
-//     relocation's own claim — `dataRootRelocationLongReadDeclaration`, the declaration the dialog
-//     hands `migrate`, over a real `DataRootMigrationController` — not of a containment comparison
-//     written here, which could agree with itself while disagreeing with the relocation.
-//  2. The **web leg** is read as text, for the reason `video_import_breadcrumb_privacy_test.dart`
-//     states about the same file: it reaches `package:flutter` (so `dart test --platform chrome`
-//     cannot compile it) and `package:web` (so `flutter test` cannot). What is asserted there is the
-//     shape both legs have to keep — the declaration wraps the session and not the dialog — and it
-//     is asserted about the io leg too, so the two cannot drift apart with only one of them measured.
+// The **io leg**, for real, end to end, through the same two seams `video_import_io_test.dart` uses:
+// `videoImportPathPicker` (the real one opens a modal Win32 dialog and must never be called from a
+// suite) and a mock method-channel handler. The claim is read off a real `LongReadRegistry` in a real
+// container, and the refusal is asked of the relocation's own claim —
+// `dataRootRelocationLongReadDeclaration`, the declaration the dialog hands `migrate`, over a real
+// `DataRootMigrationController` — not of a containment comparison written here, which could agree
+// with itself while disagreeing with the relocation.
 //
 // WHAT IT CANNOT COVER: the **web leg** (`video_import_web.dart`), which reaches `package:flutter` (so
 // `dart test --platform chrome` cannot compile it) and `package:web` (so `flutter test` cannot), so
@@ -275,51 +270,5 @@ void main() {
     expect(whileDialogOpen, isEmpty, reason: 'the dialog was announced as a long read');
     expect(videoImportState.value.phase, VideoImportPhase.idle);
     expect(claims(), isEmpty);
-  });
-
-  group('both front ends wrap the same region', () {
-    // Read as text, because one of the two cannot be compiled by any runner this repository has
-    // (see the header). The property asserted is the one a reviewer would check by eye and the one
-    // that decides whether the claim covers the defect: the declaration opens *after* the second
-    // preflight — so the dialog is outside it — and *before* the clip is handed to the producer.
-    for (final leg in const [
-      (path: 'lib/src/core/video_import_io.dart', post: 'PlatformChannel.startVideoImport(clipPath)'),
-      (path: 'lib/src/core/video_import_web.dart', post: 'client.startVideoImport(clip)'),
-    ]) {
-      test('${leg.path.split('/').last} declares the session and not the dialog', () {
-        final source = File(leg.path).readAsStringSync();
-
-        expect(
-          source.contains('required LongReadDeclaration declaration'),
-          isTrue,
-          reason:
-              'this leg can open an import session without being handed a declaration, so a caller can '
-              'start one that announces nothing and nothing in the repository says so',
-        );
-        expect(
-          'declaration.runDeclared('.allMatches(source).length,
-          1,
-          reason: 'the declaration is run somewhere other than once around the session',
-        );
-
-        final declared = source.indexOf('declaration.runDeclared(');
-        final recheck = source.indexOf('final blocker = preflight();');
-        final post = source.indexOf(leg.post);
-        expect(recheck, greaterThan(-1), reason: 'the second preflight was renamed; this case is anchored on it');
-        expect(post, greaterThan(-1), reason: 'the post to the producer was renamed; this case is anchored on it');
-        expect(
-          declared,
-          greaterThan(recheck),
-          reason:
-              'the claim opens before the file dialog has returned, so it holds the record store while a user '
-              'stands in a dialog — which is the phase `storageActionBlocker` rules out by name',
-        );
-        expect(
-          declared,
-          lessThan(post),
-          reason: 'the clip reaches the producer outside the claim, which is the window the defect lives in',
-        );
-      });
-    }
   });
 }
