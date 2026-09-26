@@ -568,10 +568,10 @@ PathEntity _typed(FsEntry entry) => entry.isDirectory ? DirectoryPath(entry.path
 /// [RecordRecoveryIncompleteReason] stops this file compiling instead of
 /// reaching the screen as its own value name.
 ///
-/// **The mapping is deliberately many-to-one.** Nineteen failures, six
+/// **The mapping is deliberately many-to-one.** Twenty-three failures, eight
 /// sentences: what the user can do about a slot does not divide as finely as
 /// what the machine could not do with it, and a sentence per value would ship
-/// nineteen ways of saying "it did not finish". The two merges worth naming:
+/// twenty-three ways of saying "it did not finish". The two merges worth naming:
 ///
 ///  * The `foreign` clause covers both "another version minted this" and "this
 ///    is not a slot at all". Neither is the user's doing and neither offers
@@ -616,7 +616,17 @@ String _recoveryReasonClauseKey(RecordRecoveryIncompleteReason reason) => switch
   // it, which is what separates this from the clause below.
   RecordRecoveryIncompleteReason.stagedTreeNotPublished ||
   RecordRecoveryIncompleteReason.publishedCopyFailed ||
-  RecordRecoveryIncompleteReason.publishedTreeMismatch => 'pages.storage.delete.recovery_reason.write_failed',
+  RecordRecoveryIncompleteReason.publishedTreeMismatch ||
+  RecordRecoveryIncompleteReason.restoreCopyFailed => 'pages.storage.delete.recovery_reason.write_failed',
+
+  // The save was undone: its new data was lost, and the record went back to
+  // what it was before the save began.
+  RecordRecoveryIncompleteReason.stagedTreeGoneRestored => 'pages.storage.delete.recovery_reason.restored',
+
+  // A tree the save needs in order to continue or to undo itself is missing,
+  // so the app left the save's data exactly where it found it.
+  RecordRecoveryIncompleteReason.displacedTreeGone ||
+  RecordRecoveryIncompleteReason.supersededCopyGone => 'pages.storage.delete.recovery_reason.source_missing',
 
   // A move onto one of the shelves the app owns could not be completed.
   RecordRecoveryIncompleteReason.supersededCopyNotSaved ||

@@ -1,10 +1,10 @@
 // Deleting the write-transaction journal from the storage view must not destroy
 // a record whose only copy is a slot inside it.
 //
-// The slot this suite builds is a `ready` transaction caught mid-resume:
-// `active/<id>/` has already been carried into `<slot>/superseded/` and the
-// replacement sits in `<slot>/desired/`, so the record exists nowhere else under
-// the data root. Whole-store recovery publishes it; the delete that runs without
+// The slot this suite builds is a `parked` transaction caught mid-resume:
+// `active/<id>/` has already been copied into `<slot>/superseded/` and deleted,
+// and the replacement sits in `<slot>/desired/`, so the record exists nowhere
+// else under the data root. Whole-store recovery publishes it; the delete that runs without
 // recovery removes it.
 //
 // The two cases differ in *one* thing, and it is not the slot: whether
@@ -16,6 +16,7 @@
 // defect was invisible.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,6 +28,7 @@ import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/fs/record_recovery_reason.dart';
 import 'package:umacapture/src/core/fs/root_storage_maintenance.dart';
 import 'package:umacapture/src/core/fs/root_storage_maintenance_shared.dart';
+import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/storage_delete.dart';
@@ -61,26 +63,28 @@ Directory _activeDir() => Directory('${_layout.charaDetailDir.path}/active/$_rec
 
 Directory _quarantineDir() => Directory('${_layout.charaDetailDir.path}/quarantine');
 
-/// A `ready` slot mid-resume, written by hand.
+/// A `parked` slot mid-resume, written by hand.
 ///
-/// The state cannot be reached by driving the transaction: it is what is on disk
-/// when the process stops *between* two moves. The manifest satisfies
-/// `_WriteManifest.fromJson` and `_isRecoverableManifest`, which is what recovery
-/// reads.
-void _writeReadySlotMidResume() {
+/// What is on disk when the process stops after the resume has deleted
+/// `active/<id>/` and before it has copied `desired/` there. The manifest
+/// satisfies `_WriteManifest.fromJson` and `_isRecoverableManifest`, which is
+/// what recovery reads.
+void _writeParkedSlotMidResume() {
   final slot = _slotDir();
   File('${slot.path}/manifest.json')
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(
       jsonEncode({
-        'version': 1,
+        'version': 2,
         'owner': _owner,
         'operation': _operation,
         'transactionId': '11111111-2222-4333-8444-555555555555',
         'recordId': _recordId,
         'dataRootPath': _layout.charaDetailDir.path,
         'finalPath': '${_layout.charaDetailDir.path}/active/$_recordId',
-        'state': 'ready',
+        'state': 'parked',
+        'store': 'active',
+        'displacedStore': 'active',
       }),
     );
   File('${slot.path}/desired/record.json')
@@ -91,18 +95,23 @@ void _writeReadySlotMidResume() {
     ..writeAsStringSync('{"id":"$_recordId","v":"old"}');
 }
 
-/// The same slot with its staged tree gone: `superseded/` — the version the
-/// publication was replacing — is then the only copy of the record there is.
+/// A `ready` slot whose staged tree and displaced tree are both gone:
+/// `superseded/` — the version the publication was replacing — is then the only
+/// copy of the record there is.
 ///
-/// Recovery answers this with `_abandonSlot`, whose first step moves that copy
-/// onto the `quarantine/` shelf.
+/// Not a state the resume produces (`ready` never deletes `active/<id>/`); it is
+/// what is left when bytes are lost underneath the journal. Recovery answers it
+/// by giving the slot up: without `desired/` it calls `_abandonSlot`, whose
+/// first step moves that copy onto the `quarantine/` shelf. The `parked` slot
+/// above, in the same loss, is restored into `active/<id>/` instead and never
+/// reaches the shelf.
 void _writeReadySlotStagingLost() {
   final slot = _slotDir();
   File('${slot.path}/manifest.json')
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(
       jsonEncode({
-        'version': 1,
+        'version': 2,
         'owner': _owner,
         'operation': _operation,
         'transactionId': '11111111-2222-4333-8444-555555555555',
@@ -110,6 +119,8 @@ void _writeReadySlotStagingLost() {
         'dataRootPath': _layout.charaDetailDir.path,
         'finalPath': '${_layout.charaDetailDir.path}/active/$_recordId',
         'state': 'ready',
+        'store': 'active',
+        'displacedStore': 'active',
       }),
     );
   File('${slot.path}/superseded/record.json')
@@ -268,7 +279,7 @@ void main() {
     );
     // Only afterwards does the slot appear — another tab, or a write in this
     // session that failed after carrying `active/<id>/` aside.
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     final report = await _deleteJournal(_container(maintenance));
 
@@ -284,7 +295,7 @@ void main() {
 
   test('control: the same delete with no memo recovers the slot too', () async {
     final maintenance = _maintenance();
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     final report = await _deleteJournal(_container(maintenance));
 
@@ -304,7 +315,7 @@ void main() {
     await maintenance.runUnlocked(
       RootStorageMaintenanceRequest(recordDataRoot: _layout.charaDetailDir, reason: RootMaintenanceReason.readyToUse),
     );
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
     _quarantineDir().createSync(recursive: true);
 
     final report = await deleteStorageEntry(
@@ -425,13 +436,101 @@ void main() {
     expect(report.failed.single.detail, isNotEmpty, reason: 'a refusal the user cannot describe is not a report');
   });
 
+  group('the slot of a replacing publication that recovery cannot finish', () {
+    // A publication of `_recordId` built from another record's tree in the
+    // archive, stopped as it wrote `parked` (or earlier, below): the record's
+    // old version is parked in the slot and the survivor is staged there.
+    const newer = 'newer-record';
+
+    Future<void> leaveReplacingSlot(WebRecordWriteCheckpoint stopAt) async {
+      final dataRoot = _layout.charaDetailDir;
+      File('${dataRoot.path}/active/$_recordId/record.json')
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('{"id":"$_recordId","v":"old"}');
+      File('${dataRoot.path}/archive/$newer/image.bin')
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('"newer image"');
+      final stopped = WebRecordWriteTransaction(
+        onCheckpoint: (point) async {
+          if (point == stopAt) throw StateError('stop');
+        },
+      );
+      final survivor = Uint8List.fromList(utf8.encode('{"id":"$_recordId","v":"survivor"}'));
+      expect(
+        await stopped.publish(
+          dataRoot,
+          _recordId,
+          [
+            (relativeSegments: ['record.json'], bytes: survivor),
+          ],
+          store: 'archive',
+          baseFrom: dataRoot / 'archive' / newer,
+        ),
+        WebRecordWriteResult.incomplete,
+      );
+    }
+
+    JournalRootStorageMaintenance maintenanceWith(WebRecordWriteTransaction writes) =>
+        JournalRootStorageMaintenance.bothJournals(
+          mutationLock: RecordMutationLock(InProcessNamedLocks().run),
+          recoverWrites: writes.recoverAll,
+          recover: (_) async => [],
+          cleanup: (_) async {},
+        );
+
+    Future<void> expectSurvives(StorageDeleteReport report) async {
+      expect(_slotDir().existsSync(), isTrue, reason: 'the slot went with the journal');
+      expect(
+        report.failed
+            .where((failure) => failure.reason == StorageDeleteFailureReason.recoveryIncomplete)
+            .map((failure) => failure.subject.path),
+        contains(_slotPath().path),
+        reason: 'the delete has to say which slot it would not remove',
+      );
+      expect(report.failed.single.detail, isNotEmpty);
+    }
+
+    test('stuck in parked, it is reported undrained and survives deleting the retired group', () async {
+      await leaveReplacingSlot(WebRecordWriteCheckpoint.parkedPersisted);
+      // The copy into the record store never succeeds — a store out of quota.
+      final stuck = WebRecordWriteTransaction(
+        copyTree: (source, target) async => source.name == 'desired' ? false : source.copyTreeInto(target),
+      );
+
+      final report = await _deleteRetiredGroup(_container(maintenanceWith(stuck)));
+
+      await expectSurvives(report);
+      expect(
+        Directory('${_layout.charaDetailDir.path}/active/$_recordId').existsSync(),
+        isFalse,
+        reason: 'the fixture has to leave the parked copy as the only copy of the old version',
+      );
+      expect(_bytesNamed('"v":"old"'), [contains('superseded')]);
+      expect(_bytesNamed('"v":"survivor"'), [contains('desired')]);
+    });
+
+    test('frozen, it is reported undrained and survives deleting the retired group', () async {
+      // `ready` with the tree it displaces gone: not a state the machine
+      // produces, so recovery deletes nothing and the staged survivor is the
+      // only copy of those bytes.
+      await leaveReplacingSlot(WebRecordWriteCheckpoint.readyPersisted);
+      Directory('${_layout.charaDetailDir.path}/active/$_recordId').deleteSync(recursive: true);
+
+      final report = await _deleteRetiredGroup(_container(maintenanceWith(WebRecordWriteTransaction())));
+
+      await expectSurvives(report);
+      expect(_bytesNamed('"v":"survivor"'), [contains('desired')]);
+    });
+  });
+
   test('a slot whose republication failed is not removed with the journal', () async {
     final maintenance = _maintenance();
-    _writeReadySlotMidResume();
-    // A file where `active/<id>/` has to be created, which is the shape a store
+    _writeParkedSlotMidResume();
+    // A file where the `active/` store has to be, which is the shape a store
     // that cannot take another byte has: the resume cannot publish, and it
-    // rejects without ever attempting a quarantine.
-    File(_activeDir().path)
+    // rejects without ever attempting a quarantine. The store and not
+    // `active/<id>/`, because the resume clears `active/<id>/` before it copies.
+    File(_activeDir().parent.path)
       ..parent.createSync(recursive: true)
       ..writeAsStringSync('in the way');
 
@@ -729,7 +828,7 @@ void main() {
   // the app, one step earlier in the same call.
   test('a slot the drain published is not reported as refused', () async {
     final maintenance = _maintenance();
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     final report = await _deleteSlot(_container(maintenance));
 

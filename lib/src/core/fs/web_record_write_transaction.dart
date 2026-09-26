@@ -18,7 +18,21 @@ typedef WebRecordDirectoryDelete = Future<void> Function(DirectoryPath target);
 typedef WebRecordTreeCopy = Future<bool> Function(DirectoryPath source, DirectoryPath target);
 typedef WebRecordManifestWriter = Future<void> Function(FilePath target, String contents);
 
-enum WebRecordWriteState { building, ready, published }
+/// The durable states of a slot.
+enum WebRecordWriteState {
+  building,
+  ready,
+
+  /// The displaced tree has a verified copy in `superseded/`, and from here on
+  /// that copy is read-only until [published] or [restored] is durable.
+  parked,
+  published,
+
+  /// The staged tree was lost after [parked], and the displaced tree has been
+  /// copied back from `superseded/` and verified. Only the slot's own removal
+  /// is left.
+  restored,
+}
 
 enum WebRecordWriteCheckpoint {
   manifestCreated,
@@ -26,10 +40,16 @@ enum WebRecordWriteCheckpoint {
   overlayApplied,
   readyPersisted,
   beforeFinalSetAside,
+  supersededCopied,
+  parkedPersisted,
   finalSetAside,
   finalCopied,
   publishedPersisted,
   beforeCleanup,
+  restoreTargetCleared,
+  restoreCopied,
+  restoredPersisted,
+  supersededDropped,
 }
 
 /// What a publication did, as far as any caller has to care.
@@ -47,8 +67,10 @@ enum WebRecordWriteResult {
   cleanupPending,
   invalidInput,
 
-  /// Another record store already holds this id, so publishing into `active/`
-  /// would put one record in two stores at once.
+  /// Another record store already holds this id, so publishing into the target
+  /// store would put one record in two stores at once. Only a publication
+  /// without a `baseFrom` tree returns it; a replacing publication displaces
+  /// the tree that holds the id instead.
   ///
   /// Refused before anything is written or staged, so the copy that already
   /// exists is left byte-for-byte untouched. The archive-sourced zip is the
@@ -148,16 +170,33 @@ enum _StagedTree {
   onlyCopyPartial,
 }
 
-/// Durable active-record replacement for OPFS, where directory rename is not
+/// Durable record replacement for OPFS, where directory rename is not
 /// available.
 ///
 /// A slot contains a manifest and one complete desired tree:
 /// `<data-root>/.umacapture-write-transactions/v1/<slot>/desired/`.
-/// The existing active tree is copied there, overlays are applied, and the
-/// manifest then advances to [WebRecordWriteState.ready].
-/// Only a `ready` transaction may replace final. Recovery can therefore
-/// discard `building`, while `ready` and `published` always move forward to the
-/// same byte-exact desired tree.
+/// The base tree is copied there, overlays are applied, and the manifest then
+/// advances to [WebRecordWriteState.ready]. The base is the target's current
+/// tree, or — for a *replacing* publication — a verified copy of the tree named
+/// by `baseFrom`. Only a `ready` transaction may replace a record. Recovery can
+/// therefore discard `building`.
+///
+/// **Every slot's manifest is version 2** and names its target store and the
+/// store whose tree it displaces (`displacedStore`, null for a first
+/// publication). A manifest of any other version is one this build cannot read,
+/// and its staging goes to `quarantine/` like that of any other unreadable
+/// manifest. The resume ([_resume]) never overwrites a tree in place and never
+/// consumes the copy it parked:
+///
+/// * `ready` copies the displaced tree D into `superseded/` (S), verifies it,
+///   and only then persists [WebRecordWriteState.parked]. Neither D nor the
+///   target T is deleted before that write.
+/// * `parked` with `desired/` (Q) deletes D and T and rebuilds T from Q, then
+///   persists `published`. Without Q it deletes D and T and copies S back to D,
+///   verifies it, and persists [WebRecordWriteState.restored]. S is read-only
+///   throughout `parked`, so a restore interrupted anywhere can start again.
+/// * A state these steps cannot produce — `ready` whose D is gone, `parked`
+///   with neither Q nor S — deletes nothing and stays in the journal.
 ///
 /// The tree being replaced is carried aside before the replacement is written,
 /// so nothing this machine does can be the reason a record stops existing. It
@@ -235,10 +274,9 @@ final class WebRecordWriteTransaction {
   /// using.
   static const transactionRootName = charaDetailWriteTransactionDirName;
 
-  /// The store this transaction publishes into. A slot always targets
-  /// `active/<id>/`, which is also the segment the interchange formats hard-code
-  /// (the wasm worker's harvest paths, `parseHarvestedRecordFiles`, the record
-  /// zip).
+  /// The store a publication targets unless it names another. It is also the
+  /// segment the interchange formats hard-code (the wasm worker's harvest paths,
+  /// `parseHarvestedRecordFiles`, the record zip).
   static const activeStoreName = 'active';
 
   /// Every directory under a data root whose children are records the app lists.
@@ -273,7 +311,13 @@ final class WebRecordWriteTransaction {
   static const _supersededName = 'superseded';
   static const _owner = 'umacapture.web-record-persistence';
   static const _operation = 'publish-active-record';
-  static const _formatVersion = 1;
+
+  /// The protocol every slot this build mints follows. The slot name, owner,
+  /// operation word and `superseded/` name are the version-1 ones on purpose: a
+  /// build that reads only version 1 abandons such a slot and promotes exactly
+  /// `superseded/` into `quarantine/`, so a downgrade shelves the parked record
+  /// instead of deleting it with the slot.
+  static const _formatVersion = 2;
 
   final WebRecordWriteCheckpointHook? _onCheckpoint;
   final WebRecordStagingWriter _writeFile;
@@ -281,13 +325,27 @@ final class WebRecordWriteTransaction {
   final WebRecordTreeCopy _copyTree;
   final WebRecordManifestWriter _writeManifest;
 
+  /// Publishes [overlays] as record [recordId] in [store].
+  ///
+  /// Without [baseFrom] the staged tree is the target's current tree plus the
+  /// overlays, and an id another record store holds is refused with
+  /// [WebRecordWriteResult.blockedByOtherStore].
+  ///
+  /// With [baseFrom] this is a *replacing* publication: the staged tree is a
+  /// verified copy of [baseFrom] plus the overlays, and it displaces whatever
+  /// tree holds [recordId] — which has to be exactly one record store's, in
+  /// [store] or in another. The caller may delete [baseFrom] once this commits,
+  /// which is why the copy is verified: the staged tree may become the only
+  /// copy of those bytes.
   Future<WebRecordWriteResult> publish(
     DirectoryPath dataRoot,
     String recordId,
-    List<WebRecordWriteFile> overlays,
-  ) async {
-    if (!isSafeRecordId(recordId) || !_validOverlays(overlays)) {
-      return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'unsafe record id or overlay path');
+    List<WebRecordWriteFile> overlays, {
+    String store = activeStoreName,
+    DirectoryPath? baseFrom,
+  }) async {
+    if (!isSafeRecordId(recordId) || !_validOverlays(overlays) || !recordStoreNames.contains(store)) {
+      return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'unsafe record id, overlay path or store');
     }
 
     // Before the slot, so a refused record leaves no staging behind and the
@@ -295,13 +353,33 @@ final class WebRecordWriteTransaction {
     // this record's lock, which is the same lock the archive transaction takes,
     // so the move's window in which both stores hold the id cannot be observed
     // here.
-    final occupied = await _otherStoreHolding(dataRoot, recordId);
-    if (occupied != null) {
-      return _refusedPublish(
-        recordId,
-        WebRecordWriteResult.blockedByOtherStore,
-        'the $occupied store already holds it, and one record id belongs to one store',
-      );
+    final holding = await _storesHolding(dataRoot, recordId);
+    final String? displacedStore;
+    if (baseFrom == null) {
+      final occupied = holding.where((name) => name != store).firstOrNull;
+      if (occupied != null) {
+        return _refusedPublish(
+          recordId,
+          WebRecordWriteResult.blockedByOtherStore,
+          'the $occupied store already holds it, and one record id belongs to one store',
+        );
+      }
+      displacedStore = holding.isEmpty ? null : store;
+    } else {
+      // The displaced tree is named by the manifest from here on, so it has to
+      // be one tree: none leaves nothing to displace, two is already a record
+      // in two stores.
+      if (holding.length != 1) {
+        return _refusedPublish(
+          recordId,
+          WebRecordWriteResult.invalidInput,
+          'a replacing publication needs the id in exactly one record store, and ${holding.length} hold it',
+        );
+      }
+      if (!await baseFrom.exists()) {
+        return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'the tree to publish from is not there');
+      }
+      displacedStore = holding.single;
     }
 
     final slot = _transactionDir(dataRoot, recordId);
@@ -324,7 +402,7 @@ final class WebRecordWriteTransaction {
       }
     }
 
-    final finalDir = dataRoot / 'active' / recordId;
+    final finalDir = dataRoot / store / recordId;
     final desiredDir = slot / _desiredName;
     final manifestFile = slot.filePath(_manifestName);
     var readyIsDurable = false;
@@ -335,12 +413,20 @@ final class WebRecordWriteTransaction {
       // it first opened a crash window in which every later publish and every
       // later read of this record recovered as invalidManifest forever, with no
       // path that ever cleared the empty directory.
-      var manifest = _WriteManifest.create(dataRoot, recordId, overlays);
+      var manifest = _WriteManifest.create(dataRoot, recordId, overlays, store: store, displacedStore: displacedStore);
       await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
       await _checkpoint(WebRecordWriteCheckpoint.manifestCreated);
 
       await _deleteDirectory(desiredDir);
-      if (await finalDir.exists()) {
+      if (baseFrom != null) {
+        if (!await _copyTree(baseFrom, desiredDir) || !await sameDirectoryTree(baseFrom, desiredDir)) {
+          return _refusedPublish(
+            recordId,
+            WebRecordWriteResult.incomplete,
+            'could not copy the tree to publish from into staging',
+          );
+        }
+      } else if (await finalDir.exists()) {
         if (!await _copyTree(finalDir, desiredDir)) {
           return _refusedPublish(
             recordId,
@@ -537,7 +623,7 @@ final class WebRecordWriteTransaction {
       }
       final failure = switch (await _stagedTree(dataRoot, slot, recordId, manifest)) {
         _StagedTree.onlyCopyWhole =>
-          await _publishOnlyCopy(dataRoot, slot, recordId)
+          await _publishOnlyCopy(dataRoot, slot, recordId, manifest)
               ? null
               : RecordRecoveryIncompleteReason.stagedTreeNotPublished,
         _StagedTree.onlyCopyPartial =>
@@ -562,26 +648,25 @@ final class WebRecordWriteTransaction {
   /// The staged tree is published when it is provably the whole of the only
   /// copy left, and set aside otherwise:
   ///
-  /// * `active/<id>/` is there → quarantine the staging. If the stored tree is
-  ///   itself half-replaced, the loader quarantines that too on the next scan,
-  ///   so the store converges without anyone having to decide which of the two
-  ///   is the real record.
-  /// * `active/<id>/` is missing, no other store holds the id, and the staging
-  ///   holds every file the publication set out to write, whole → move the staging
-  ///   into `active/<id>/`. That is the step a `ready` transaction was
+  /// * a record store holds the id → quarantine the staging. If the stored
+  ///   tree is itself half-replaced, the loader quarantines that too on the
+  ///   next scan, so the store converges without anyone having to decide which
+  ///   of the two is the real record. Publishing instead would put one record
+  ///   id in two stores at once, which is the invariant [publish] refuses over
+  ///   before it stages anything.
+  /// * no record store holds the id, and the staging holds every file the
+  ///   publication set out to write, whole → move the staging into the
+  ///   manifest's target store. That is the step a `ready` transaction was
   ///   interrupted in the middle of, and publishing the only copy is strictly
   ///   better than setting it aside. Bytes that are not a record are the
   ///   loader's business, not this machine's.
-  /// * `active/<id>/` is missing and the staging cannot be shown to be whole →
-  ///   quarantine it. Every slot that arrives here does so because its manifest
-  ///   could not be read or could not be resumed, so nothing here can say what
-  ///   the publication was writing; see [_WriteManifest.overlays]. The
-  ///   shelf is the same one the case above uses, and for the same reason: it
-  ///   is the only copy, and the app is telling the user it could not finish
-  ///   with it.
-  /// * `active/<id>/` is missing but `archive/` holds the id → quarantine the
-  ///   staging. Publishing would put one record id in two stores at once, which
-  ///   is the invariant [publish] refuses over before it stages anything.
+  /// * no record store holds the id and the staging cannot be shown to be
+  ///   whole → quarantine it. Every slot that arrives here without a manifest
+  ///   does so because its manifest could not be read or could not be resumed,
+  ///   so nothing here can say what the publication was writing; see
+  ///   [_WriteManifest.overlays]. The shelf is the same one the first case
+  ///   uses, and for the same reason: it is the only copy, and the app is
+  ///   telling the user it could not finish with it.
   Future<_SlotOutcome> _abandonSlot(
     DirectoryPath dataRoot,
     DirectoryPath slot,
@@ -603,7 +688,7 @@ final class WebRecordWriteTransaction {
       }
       final failure = switch (await _stagedTree(dataRoot, slot, recordId, manifest)) {
         _StagedTree.onlyCopyWhole =>
-          await _publishOnlyCopy(dataRoot, slot, recordId)
+          await _publishOnlyCopy(dataRoot, slot, recordId, manifest)
               ? null
               : RecordRecoveryIncompleteReason.stagedTreeNotPublished,
         _StagedTree.onlyCopyPartial || _StagedTree.notTheOnlyCopy =>
@@ -634,9 +719,11 @@ final class WebRecordWriteTransaction {
   /// spelled out at one caller is how one of those stops being true while the
   /// others' wording goes on saying it does.
   ///
-  /// `archive/` counts as a copy through [_otherStoreHolding]: publishing then
-  /// would put one id in two stores at once, which is the invariant [publish]
-  /// refuses over before it stages anything.
+  /// Every record store counts as a copy through [_storesHolding], whichever
+  /// store the manifest targets: publishing then would put one id in two stores
+  /// at once, which is the invariant [publish] refuses over before it stages
+  /// anything. For a `building` replacing publication that is the displaced
+  /// tree, so its staging is retired and nothing else is touched.
   Future<_StagedTree> _stagedTree(
     DirectoryPath dataRoot,
     DirectoryPath slot,
@@ -648,8 +735,7 @@ final class WebRecordWriteTransaction {
     // sentence as the rest: shelving what is not there cannot be why a record
     // stops existing. Both shelving calls treat it as trivially done.
     if (!await staging.exists()) return _StagedTree.notTheOnlyCopy;
-    if (await (dataRoot / activeStoreName / recordId).exists()) return _StagedTree.notTheOnlyCopy;
-    if (await _otherStoreHolding(dataRoot, recordId) != null) return _StagedTree.notTheOnlyCopy;
+    if ((await _storesHolding(dataRoot, recordId)).isNotEmpty) return _StagedTree.notTheOnlyCopy;
     return await _stagingIsWhole(staging, manifest) ? _StagedTree.onlyCopyWhole : _StagedTree.onlyCopyPartial;
   }
 
@@ -705,16 +791,23 @@ final class WebRecordWriteTransaction {
     return true;
   }
 
-  /// Moves the staged tree into `active/<id>/`, reporting whether it is there.
+  /// Moves the staged tree into the manifest's target store (`active/` when
+  /// there is no manifest to name one), reporting whether it is there.
   ///
   /// Only ever called behind [_StagedTree.onlyCopyWhole], which is what makes
-  /// the move safe: the destination does not exist, so nothing is overwritten;
+  /// the move safe: no record store holds the id, so nothing is overwritten;
   /// the tree holds every file the publication meant to write, each at the
   /// length it meant to write, so what lands in the user's list is neither a
   /// fragment of a record nor a record with a truncated file in it; and the step is the one
   /// that publication was on its way to performing.
-  Future<bool> _publishOnlyCopy(DirectoryPath dataRoot, DirectoryPath slot, String recordId) async {
-    if (await (slot / _desiredName).moveAsyncSafe(dataRoot / activeStoreName / recordId) == null) {
+  Future<bool> _publishOnlyCopy(
+    DirectoryPath dataRoot,
+    DirectoryPath slot,
+    String recordId,
+    _WriteManifest? manifest,
+  ) async {
+    final store = manifest?.store ?? activeStoreName;
+    if (await (slot / _desiredName).moveAsyncSafe(dataRoot / store / recordId) == null) {
       return false;
     }
     logger.w('Published the staged tree an unfinished write left for $recordId; it was the only copy.');
@@ -862,195 +955,180 @@ final class WebRecordWriteTransaction {
     logger.e('Web record write for ${recordId ?? 'an unidentified slot'} returned ${result.name} because $clause.');
   }
 
+  /// Resumes a slot past `building`: park by verified copy, rebuild from
+  /// empty, restore by copy. See the class comment for the states and the
+  /// invariants they keep.
+  ///
+  /// D is the displaced tree (`<displacedStore>/<id>`, absent for a first
+  /// publication), T the target (`<store>/<id>`), S `superseded/`, Q
+  /// `desired/`. D and T are the same directory when the publication stays in
+  /// one store. Every copy and delete goes through [_copyTree] and
+  /// [_deleteDirectory]; nothing here moves a tree.
   Future<_SlotOutcome> _resume(DirectoryPath dataRoot, DirectoryPath slot, _WriteManifest initialManifest) async {
     var manifest = initialManifest;
-    final desiredDir = slot / _desiredName;
-    final finalDir = dataRoot / 'active' / manifest.recordId;
+    final recordId = manifest.recordId;
+    final staged = slot / _desiredName;
+    final parked = slot / _supersededName;
+    final target = dataRoot / manifest.store / recordId;
+    final displacedStore = manifest.displacedStore;
+    final displaced = displacedStore == null ? null : dataRoot / displacedStore / recordId;
+    final displacedIsTarget = displacedStore == manifest.store;
     final manifestFile = slot.filePath(_manifestName);
+
+    // T already holds the staged tree and no second store holds the id: the
+    // publication is done but for its manifest. D is gone or is T itself.
+    Future<bool> targetHoldsStaging() async =>
+        await sameDirectoryTree(staged, target) &&
+        (displaced == null || displacedIsTarget || !await displaced.exists());
+
+    Future<void> persist(WebRecordWriteState next) async {
+      manifest = manifest.withState(next);
+      await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
+    }
+
+    Future<void> deleteIfPresent(DirectoryPath? directory) async {
+      if (directory != null && await directory.exists()) await _deleteDirectory(directory);
+    }
+
     var committed = false;
-    // Where *this call* carried the tree it is replacing, if it carried one. A
-    // resume that finds `active/<id>/` already gone — or that finds a copy an
-    // earlier call parked, and so carries nothing — leaves this null and does
-    // not go looking: the parked copy is at `slot/superseded` either way, and
-    // the slot removal below takes it.
-    DirectoryPath? supersededCopy;
     try {
       if (manifest.state == WebRecordWriteState.ready) {
-        if (!await desiredDir.exists()) {
-          // `ready` names a staged tree that is no longer there — an OPFS write
-          // that never reached the device before the manifest's did, or bytes
-          // lost underneath it. Asked *before* the tree it would replace is
-          // moved, because everything below assumes there is something to put
-          // in its place: without this, a resume would carry the stored record
-          // off to `quarantine/` and then have nothing to publish, and the
-          // record would vanish from the list on the strength of an update that
-          // never arrived.
-          //
-          // This is an existence probe, not a verdict on the bytes. Whether the
-          // staged tree is a *record* is not asked at all any more: if it is
-          // not, the loader quarantines it after it is published.
-          return _abandonSlot(
-            dataRoot,
-            slot,
-            manifest.recordId,
-            manifest,
-            RecordRecoveryIncompleteReason.stagedTreeGone,
-          );
+        if (!await staged.exists()) {
+          // Nothing to publish, and D has not been touched in `ready`. An
+          // unverified S, if any, is promoted as the give-up path does for
+          // every slot.
+          return _abandonSlot(dataRoot, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
         }
-        if (!await sameDirectoryTree(desiredDir, finalDir)) {
+        if (await targetHoldsStaging()) {
+          committed = true;
+          await persist(WebRecordWriteState.published);
+          await _checkpoint(WebRecordWriteCheckpoint.publishedPersisted);
+        } else {
           await _checkpoint(WebRecordWriteCheckpoint.beforeFinalSetAside);
-          // This used to be a delete, and it was the one crash window in which
-          // this transaction could be the reason a record stopped existing:
-          // between removing `active/<id>/` and copying the new tree over it,
-          // nothing held those bytes. The tree is carried aside instead, so the
-          // window cannot lose it — and that is what makes every "which of the
-          // two trees is the real one" question upstream unnecessary: neither
-          // is ever gone.
-          //
-          // **For the window, not for keeps**, which is why it is parked inside
-          // our own slot rather than in `quarantine/`. Below, a call that
-          // reaches `published` removes the copy; a call that does not reach it
-          // leaves the copy where the *next* call will find it, because the
-          // place is derived from the slot rather than remembered. Either way
-          // the slot's own removal — here, in [_discardSlot], in [_abandonSlot]
-          // — collects it, and no interruption can add a permanent child to
-          // `quarantine/`, which the banner counts, unread, as records the app
-          // could not read.
-          //
-          // Promoting it to `quarantine/` is [_promoteSupersededCopy]'s job,
-          // and only for a slot being given up on: then the version this was
-          // replacing is the only copy of the record left.
-          // **The parking place is asked about before it is used**, the way
-          // [_publishOnlyCopy] asks about its destination. `moveAsyncSafe`
-          // copies a tree *into* whatever is already there, overwriting
-          // same-named entries, so parking onto an occupied place is a merge.
-          //
-          // Occupied is reachable, and it means this publication has already
-          // been interrupted once: the call before this one parked the version
-          // being replaced and then died part-way through copying `desired/`
-          // over `active/<id>/`. Whatever stands there now is therefore *not*
-          // that version — the version is in the slot — so parking it would
-          // merge a half-written replacement into the one copy of the record
-          // this machine is holding for the user, and the tree that came out
-          // was neither version. [_promoteSupersededCopy] then hands that to
-          // them as the record a write was replacing.
-          //
-          // Nothing is moved or removed in that case: the copy below writes
-          // `desired/` over what is there, and the comparison after it is what
-          // says the result is the staged tree and not a mixture — it is
-          // byte-exact and kind-exact in both directions, so a tree holding
-          // anything the staging does not is a refusal and not a publication.
-          // That keeps the sentence above true across the second interruption
-          // as well as the first: the version being replaced is in the slot,
-          // the version replacing it is in `desired/`, and neither is gone.
-          if (!await (slot / _supersededName).exists() && await finalDir.exists()) {
-            supersededCopy = await finalDir.moveAsyncSafe(slot / _supersededName);
-            if (supersededCopy == null) {
+          if (displaced != null) {
+            // `ready` never deletes D, so D missing here is bytes lost
+            // underneath the journal. Nothing can be parked, and guessing
+            // which tree to keep is how a record gets destroyed: stop.
+            if (!await displaced.exists()) {
               return _rejected(
-                manifest.recordId,
+                recordId,
+                WebRecordWriteResult.incomplete,
+                RecordRecoveryIncompleteReason.displacedTreeGone,
+              );
+            }
+            // An S found in `ready` was never verified — an earlier call died
+            // inside the copy below — so it is rebuilt from D rather than
+            // copied into. D was confirmed present just above.
+            await deleteIfPresent(parked);
+            if (!await _copyTree(displaced, parked) || !await sameDirectoryTree(displaced, parked)) {
+              return _rejected(
+                recordId,
                 WebRecordWriteResult.incomplete,
                 RecordRecoveryIncompleteReason.replacedRecordNotMovedAside,
               );
             }
+            await _checkpoint(WebRecordWriteCheckpoint.supersededCopied);
           }
-          await _checkpoint(WebRecordWriteCheckpoint.finalSetAside);
-          if (!await _copyTree(desiredDir, finalDir)) {
-            return _rejected(
-              manifest.recordId,
-              WebRecordWriteResult.incomplete,
-              RecordRecoveryIncompleteReason.publishedCopyFailed,
-            );
-          }
-          await _checkpoint(WebRecordWriteCheckpoint.finalCopied);
-          // Byte equality with what was staged is the whole promise; whether
-          // those bytes are a record is the loader's question, and it has its
-          // own answer for a tree it cannot read.
-          if (!await sameDirectoryTree(desiredDir, finalDir)) {
-            return _rejected(
-              manifest.recordId,
-              WebRecordWriteResult.incomplete,
-              RecordRecoveryIncompleteReason.publishedTreeMismatch,
-            );
-          }
+          await persist(WebRecordWriteState.parked);
+          await _checkpoint(WebRecordWriteCheckpoint.parkedPersisted);
         }
-        committed = true;
-        manifest = manifest.withState(WebRecordWriteState.published);
-        await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
-        // The commit is durable, so a copy this call took above has stopped
-        // being a safety net and become a duplicate of a version the caller
-        // replaced on purpose.
-        //
-        // Placed before the checkpoint rather than after it so that the span a
-        // test can observe the copy in is the span it is actually needed for.
-        // Not a crash argument: `_onCheckpoint` is a test seam — none of the
-        // three construction sites in `lib/` passes one — so in production
-        // nothing at all happens at that line and either side would behave the
-        // same. Nothing pins the *upper* end of the copy's lifetime, either:
-        // moving this removal up between `finalSetAside` and here would go
-        // unnoticed by the suite.
-        //
-        // A failure here is logged and carried past: the publication succeeded,
-        // and a leftover inside our own slot must not turn into a failed save.
-        // It is not a leak either — the slot removal below deletes the slot
-        // whole.
-        supersededCopy = await _dropSupersededCopy(supersededCopy, manifest.recordId);
-        await _checkpoint(WebRecordWriteCheckpoint.publishedPersisted);
+      }
+
+      if (manifest.state == WebRecordWriteState.parked) {
+        if (await staged.exists()) {
+          if (!await targetHoldsStaging()) {
+            // Q is confirmed present, so it can rebuild T from empty. T is
+            // rebuilt rather than copied over because Q may come from another
+            // record's tree, and a file of D that Q lacks would otherwise
+            // survive the copy and fail the comparison below for good.
+            await deleteIfPresent(displaced);
+            if (!displacedIsTarget) await deleteIfPresent(target);
+            await _checkpoint(WebRecordWriteCheckpoint.finalSetAside);
+            if (!await _copyTree(staged, target)) {
+              return _rejected(
+                recordId,
+                WebRecordWriteResult.incomplete,
+                RecordRecoveryIncompleteReason.publishedCopyFailed,
+              );
+            }
+            await _checkpoint(WebRecordWriteCheckpoint.finalCopied);
+            if (!await sameDirectoryTree(staged, target)) {
+              return _rejected(
+                recordId,
+                WebRecordWriteResult.incomplete,
+                RecordRecoveryIncompleteReason.publishedTreeMismatch,
+              );
+            }
+          }
+          committed = true;
+          await persist(WebRecordWriteState.published);
+          await _checkpoint(WebRecordWriteCheckpoint.publishedPersisted);
+        } else {
+          if (displaced == null) {
+            // A first publication displaced nothing, so there is nothing to
+            // restore; the give-up path shelves whatever is left.
+            return _abandonSlot(dataRoot, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
+          }
+          if (!await parked.exists()) {
+            // Neither tree to rebuild from. Not a state these steps produce,
+            // so nothing is deleted and the slot stays for someone to look at.
+            return _rejected(
+              recordId,
+              WebRecordWriteResult.incomplete,
+              RecordRecoveryIncompleteReason.supersededCopyGone,
+            );
+          }
+          // S is confirmed present and is never written in `parked`, so D and
+          // T can be cleared and D rebuilt from it as often as this is
+          // interrupted.
+          if (!displacedIsTarget) await deleteIfPresent(target);
+          await deleteIfPresent(displaced);
+          await _checkpoint(WebRecordWriteCheckpoint.restoreTargetCleared);
+          if (!await _copyTree(parked, displaced) || !await sameDirectoryTree(parked, displaced)) {
+            return _rejected(
+              recordId,
+              WebRecordWriteResult.incomplete,
+              RecordRecoveryIncompleteReason.restoreCopyFailed,
+            );
+          }
+          await _checkpoint(WebRecordWriteCheckpoint.restoreCopied);
+          await persist(WebRecordWriteState.restored);
+          await _checkpoint(WebRecordWriteCheckpoint.restoredPersisted);
+        }
       }
 
       if (manifest.state == WebRecordWriteState.published) {
-        // A durable `published` manifest *is* the proof of the commit: it is
-        // written only after the desired tree was copied into `active/<id>/`
-        // and `sameDirectoryTree` confirmed the published bytes. Nothing is
-        // left but removing our own slot, and that
-        // step needs neither tree to still be there:
-        //
-        // * cleanup deletes `desired/` and the manifest that names it in one
-        //   non-atomic recursive delete, so an interrupted cleanup legitimately
-        //   leaves a `published` slot with no staging;
-        // * `active/<id>/` is, after the commit, an ordinary record, and
-        //   deleting or archiving it is an ordinary user action that
-        //   legitimately leaves a `published` slot with no final tree.
-        //
-        // Re-deriving the decision from those leftovers rolled the manifest
-        // back to `ready` and republished — which resurrected a record the user
-        // had just deleted — or refused the record for good. Unlike `ready`,
-        // `published` has no hazard that outlives the
-        // commit: this transaction never had a second copy of the record to
-        // leave behind, because `publish` refuses a record another store holds
-        // before it stages anything, and it replaces `active/<id>/` in place.
+        // T was verified against Q before `published` was written, so neither
+        // tree is needed any more. S and Q go before the slot so that an
+        // interrupted slot delete cannot leave a manifest-less slot holding
+        // half of S, which the give-up path would shelve as a record.
         committed = true;
+        await deleteIfPresent(parked);
+        await deleteIfPresent(staged);
         await _checkpoint(WebRecordWriteCheckpoint.beforeCleanup);
         await _deleteDirectory(slot);
         return _slotCarried;
       }
-      return _rejected(
-        manifest.recordId,
-        WebRecordWriteResult.incomplete,
-        RecordRecoveryIncompleteReason.unresumableState,
-      );
+
+      if (manifest.state == WebRecordWriteState.restored) {
+        // D was verified against S before `restored` was written, and this
+        // state never reads S, so a half-deleted S is simply deleted again.
+        await deleteIfPresent(parked);
+        await _checkpoint(WebRecordWriteCheckpoint.supersededDropped);
+        await _deleteDirectory(slot);
+        return _rejected(
+          recordId,
+          WebRecordWriteResult.incomplete,
+          RecordRecoveryIncompleteReason.stagedTreeGoneRestored,
+        );
+      }
+
+      return _rejected(recordId, WebRecordWriteResult.incomplete, RecordRecoveryIncompleteReason.unresumableState);
     } catch (error, stackTrace) {
-      logger.e('Failed to publish/recover web record ${manifest.recordId}.', error, stackTrace);
+      logger.e('Failed to publish/recover web record $recordId.', error, stackTrace);
       return committed
           ? (result: WebRecordWriteResult.cleanupPending, reason: null)
           : (result: WebRecordWriteResult.incomplete, reason: RecordRecoveryIncompleteReason.resumeThrew);
-    }
-  }
-
-  /// Removes the copy of the tree a committed publication replaced, returning
-  /// what is left to remove (`null` on success, and on nothing to do).
-  Future<DirectoryPath?> _dropSupersededCopy(DirectoryPath? copy, String recordId) async {
-    if (copy == null) return null;
-    try {
-      await _deleteDirectory(copy);
-      return null;
-    } catch (error, stackTrace) {
-      logger.e(
-        'Published record $recordId but could not remove the copy of the version it replaced at ${copy.path}; '
-        'it goes with the slot.',
-        error,
-        stackTrace,
-      );
-      return copy;
     }
   }
 
@@ -1091,20 +1169,18 @@ final class WebRecordWriteTransaction {
     }
   }
 
-  /// The record store other than `active/` that already holds [recordId], or
-  /// `null` when none does.
+  /// Every record store that holds [recordId], in [recordStoreNames] order.
   ///
-  /// Both ways into `active/<id>/` — [publish] and the resume of a slot recovery
-  /// gave up on ([_abandonSlot]) — ask this one question, so the rule reads the
-  /// same at both and cannot drift apart. It is derived from [recordStoreNames]
-  /// rather than comparing against a store by name, so it keeps holding when the
-  /// set grows.
-  static Future<String?> _otherStoreHolding(DirectoryPath dataRoot, String recordId) async {
-    for (final store in recordStoreNames) {
-      if (store == activeStoreName) continue;
-      if (await (dataRoot / store / recordId).exists()) return store;
-    }
-    return null;
+  /// Both ways into a record store — [publish] and the give-up paths
+  /// ([_stagedTree]) — ask this one question, so the rule reads the same at
+  /// both and cannot drift apart. It is derived from [recordStoreNames] rather
+  /// than comparing against a store by name, so it keeps holding when the set
+  /// grows.
+  static Future<List<String>> _storesHolding(DirectoryPath dataRoot, String recordId) async {
+    return [
+      for (final store in recordStoreNames)
+        if (await (dataRoot / store / recordId).exists()) store,
+    ];
   }
 
   static bool _isRecoverableManifest(DirectoryPath dataRoot, DirectoryPath slot, _WriteManifest manifest) {
@@ -1112,7 +1188,9 @@ final class WebRecordWriteTransaction {
         manifest.operation != _operation ||
         !isSafeRecordId(manifest.recordId) ||
         !_samePath(DirectoryPath(manifest.dataRootPath), dataRoot) ||
-        !_samePath(DirectoryPath(manifest.finalPath), dataRoot / 'active' / manifest.recordId) ||
+        !recordStoreNames.contains(manifest.store) ||
+        (manifest.displacedStore != null && !recordStoreNames.contains(manifest.displacedStore)) ||
+        !_samePath(DirectoryPath(manifest.finalPath), dataRoot / manifest.store / manifest.recordId) ||
         !_samePath(slot, _transactionDir(dataRoot, manifest.recordId))) {
       return false;
     }
@@ -1180,7 +1258,6 @@ typedef _PlannedOverlay = ({String path, int bytes});
 
 final class _WriteManifest {
   const _WriteManifest({
-    required this.version,
     required this.owner,
     required this.operation,
     required this.transactionId,
@@ -1189,18 +1266,27 @@ final class _WriteManifest {
     required this.finalPath,
     required this.state,
     required this.overlays,
+    required this.store,
+    required this.displacedStore,
   });
 
-  factory _WriteManifest.create(DirectoryPath dataRoot, String recordId, List<WebRecordWriteFile> overlays) {
+  factory _WriteManifest.create(
+    DirectoryPath dataRoot,
+    String recordId,
+    List<WebRecordWriteFile> overlays, {
+    required String store,
+    required String? displacedStore,
+  }) {
     return _WriteManifest(
-      version: WebRecordWriteTransaction._formatVersion,
       owner: WebRecordWriteTransaction._owner,
       operation: WebRecordWriteTransaction._operation,
       transactionId: const Uuid().v4(),
       recordId: recordId,
       dataRootPath: dataRoot.path,
-      finalPath: (dataRoot / 'active' / recordId).path,
+      finalPath: (dataRoot / store / recordId).path,
       state: WebRecordWriteState.building,
+      store: store,
+      displacedStore: displacedStore,
       // Written before the first overlay byte is, which is the whole of its
       // use: it is the only record of what the staged tree was *going to*
       // contain, and it has to survive the interruption it describes. The
@@ -1215,11 +1301,20 @@ final class _WriteManifest {
   }
 
   factory _WriteManifest.fromJson(Map<String, dynamic> json) {
-    const keys = {'version', 'owner', 'operation', 'transactionId', 'recordId', 'dataRootPath', 'finalPath', 'state'};
-    // Optional, and the only key that is. A manifest a build from before the
-    // field existed wrote carries the eight above and nothing else, and it is a
-    // manifest of ours: rejecting it would send a slot we can still resume down
-    // the give-up path. What its absence costs is stated at [overlays].
+    const keys = {
+      'version',
+      'owner',
+      'operation',
+      'transactionId',
+      'recordId',
+      'dataRootPath',
+      'finalPath',
+      'state',
+      'store',
+      'displacedStore',
+    };
+    // Optional, and the only key that is. A manifest without it is read, and
+    // what its absence costs is stated at [overlays].
     //
     // It was `overlayPaths`, a list of paths, back when the completeness test
     // was existence. The key is renamed with the element type on purpose: a
@@ -1233,6 +1328,8 @@ final class _WriteManifest {
     if (json.keys.toSet().difference(keys.union(optionalKeys)).isNotEmpty ||
         keys.difference(json.keys.toSet()).isNotEmpty ||
         json['version'] != WebRecordWriteTransaction._formatVersion ||
+        json['store'] is! String ||
+        (json['displacedStore'] != null && json['displacedStore'] is! String) ||
         json['owner'] is! String ||
         json['operation'] is! String ||
         json['transactionId'] is! String ||
@@ -1269,7 +1366,6 @@ final class _WriteManifest {
       overlays = parsed;
     }
     return _WriteManifest(
-      version: json['version'] as int,
       owner: json['owner'] as String,
       operation: json['operation'] as String,
       transactionId: transactionId,
@@ -1278,6 +1374,8 @@ final class _WriteManifest {
       finalPath: json['finalPath'] as String,
       state: WebRecordWriteState.values.byName(json['state'] as String),
       overlays: overlays,
+      store: json['store'] as String,
+      displacedStore: json['displacedStore'] as String?,
     );
   }
 
@@ -1289,7 +1387,6 @@ final class _WriteManifest {
   /// segment can contain this one.
   static const _pathSeparator = '/';
 
-  final int version;
   final String owner;
   final String operation;
   final String transactionId;
@@ -1321,6 +1418,15 @@ final class _WriteManifest {
   /// in their list as the real one.
   final List<_PlannedOverlay>? overlays;
 
+  /// The record store the publication writes into; `finalPath` is
+  /// `<data-root>/<store>/<id>`.
+  final String store;
+
+  /// The record store whose tree holding this id the publication replaces, or
+  /// `null` when no store held the id as the slot was minted. For a replacing
+  /// publication it may differ from [store].
+  final String? displacedStore;
+
   /// The key an entry of [overlays] is looked up by for a file found under
   /// [staging]: its path relative to `desired/`, in this manifest's own
   /// separator rather than the platform's.
@@ -1329,7 +1435,6 @@ final class _WriteManifest {
   }
 
   _WriteManifest withState(WebRecordWriteState next) => _WriteManifest(
-    version: version,
     owner: owner,
     operation: operation,
     transactionId: transactionId,
@@ -1338,10 +1443,12 @@ final class _WriteManifest {
     finalPath: finalPath,
     state: next,
     overlays: overlays,
+    store: store,
+    displacedStore: displacedStore,
   );
 
   Map<String, Object?> toJson() => {
-    'version': version,
+    'version': WebRecordWriteTransaction._formatVersion,
     'owner': owner,
     'operation': operation,
     'transactionId': transactionId,
@@ -1349,6 +1456,8 @@ final class _WriteManifest {
     'dataRootPath': dataRootPath,
     'finalPath': finalPath,
     'state': state.name,
+    'store': store,
+    'displacedStore': displacedStore,
     // Omitted rather than written as null when the manifest did not carry it,
     // so a state transition on a slot an older build staged rewrites it in the
     // shape it was read in instead of minting a claim about a publication this

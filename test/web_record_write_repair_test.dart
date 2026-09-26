@@ -58,7 +58,7 @@ void main() {
     await slot.create(recursive: true);
     // Exactly what a torn write leaves: the opening bytes of the JSON object and
     // nothing else.
-    await slot.filePath('manifest.json').writeAsString('{"version":1,"owner":"umacapture.web-r');
+    await slot.filePath('manifest.json').writeAsString('{"version":2,"owner":"umacapture.web-r');
     if (withDesired) {
       final desired = slot / 'desired';
       await desired.create(recursive: true);
@@ -79,7 +79,7 @@ void main() {
         .filePath('manifest.json')
         .writeAsString(
           jsonEncode({
-            'version': 1,
+            'version': 2,
             'owner': 'umacapture.web-record-persistence',
             'operation': 'publish-active-record',
             'transactionId': '123e4567-e89b-42d3-a456-426614174000',
@@ -87,6 +87,8 @@ void main() {
             'dataRootPath': dataRoot.path,
             'finalPath': (dataRoot / 'active' / id).path,
             'state': 'building',
+            'store': 'active',
+            'displacedStore': null,
             'overlays': [
               {'path': 'record.json', 'bytes': _recordJson(id).length},
               {'path': 'new.bin', 'bytes': 2},

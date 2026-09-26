@@ -66,28 +66,30 @@ Directory _activeDir() => Directory('${_layout.charaDetailDir.path}/active/$_rec
 
 Directory _quarantineDir() => Directory('${_layout.charaDetailDir.path}/quarantine');
 
-String _manifest() => jsonEncode({
-  'version': 1,
+String _manifest(String state) => jsonEncode({
+  'version': 2,
   'owner': _owner,
   'operation': _operation,
   'transactionId': '11111111-2222-4333-8444-555555555555',
   'recordId': _recordId,
   'dataRootPath': _layout.charaDetailDir.path,
   'finalPath': '${_layout.charaDetailDir.path}/active/$_recordId',
-  'state': 'ready',
+  'state': state,
+  'store': 'active',
+  'displacedStore': 'active',
 });
 
-/// A `ready` slot caught mid-resume, written by hand.
+/// A `parked` slot caught mid-resume, written by hand.
 ///
-/// The state cannot be reached by driving the transaction: it is what is on disk
-/// when the process stops *between* two moves. `active/<id>/` has already been
-/// carried into `<slot>/superseded/` and the replacement sits in
-/// `<slot>/desired/`, so the record exists nowhere else under the data root.
-void _writeReadySlotMidResume() {
+/// What is on disk when the process stops after the resume has deleted
+/// `active/<id>/` and before it has copied `desired/` there: the version being
+/// replaced is in `<slot>/superseded/` and the replacement in `<slot>/desired/`,
+/// so the record exists nowhere else under the data root.
+void _writeParkedSlotMidResume() {
   final slot = _slotDir();
   File('${slot.path}/manifest.json')
     ..parent.createSync(recursive: true)
-    ..writeAsStringSync(_manifest());
+    ..writeAsStringSync(_manifest('parked'));
   File('${slot.path}/desired/record.json')
     ..parent.createSync(recursive: true)
     ..writeAsStringSync('{"id":"$_recordId","v":"new"}');
@@ -96,13 +98,16 @@ void _writeReadySlotMidResume() {
     ..writeAsStringSync('{"id":"$_recordId","v":"old"}');
 }
 
-/// The same slot with its staged tree gone: `superseded/` is then the only copy
-/// of the record there is, and recovery answers with a quarantine move.
+/// A `ready` slot whose staged tree and displaced tree are both gone:
+/// `superseded/` is then the only copy of the record there is, and recovery gives
+/// the slot up with a quarantine move. Not a state the resume produces (`ready`
+/// never deletes `active/<id>/`); the `parked` slot above, in the same loss, is
+/// restored into `active/<id>/` instead and never reaches the shelf.
 void _writeReadySlotStagingLost() {
   final slot = _slotDir();
   File('${slot.path}/manifest.json')
     ..parent.createSync(recursive: true)
-    ..writeAsStringSync(_manifest());
+    ..writeAsStringSync(_manifest('ready'));
   File('${slot.path}/superseded/record.json')
     ..parent.createSync(recursive: true)
     ..writeAsStringSync('{"id":"$_recordId","v":"old"}');
@@ -171,7 +176,7 @@ void main() {
   // The defect, stated as the outcome the user gets: the record survives the
   // gesture that removes the journal it was sitting in.
   test('the desktop delete of the retired group recovers the slot before removing the journal', () async {
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     final report = await _deleteRetiredGroup(_container());
 
@@ -188,7 +193,7 @@ void main() {
   // the sweep, by a write of this very session that failed partway.
   test('a desktop slot created after this session swept is still recovered', () async {
     await platformRootStorageMaintenance.runUnlocked(_request(RootMaintenanceReason.readyToUse));
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     final report = await _deleteRetiredGroup(_container());
 
@@ -221,7 +226,7 @@ void main() {
   // The per-record seam, which no delete reaches: the gate the whole app reads
   // records through has to finish this record's slot before anything reads it.
   test('the production desktop gate finishes one record slot on its own', () async {
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
 
     await platformRecordRecoveryGate.ensureReadyUnlocked(_layout.storageDir, _recordId);
 
@@ -235,7 +240,7 @@ void main() {
   // because `archiveRecords` resolves to the atomic native rename, so a slot
   // whose name this build *does* derive is left for the leg that stages one.
   test('the production desktop maintenance replays the write journal and not the archive one', () async {
-    _writeReadySlotMidResume();
+    _writeParkedSlotMidResume();
     final archiveSlot = _layout.charaDetailArchiveTransactionDir / 'v1' / _ownArchiveSlotName();
     File('${archiveSlot.path}/payload/record.json')
       ..parent.createSync(recursive: true)
