@@ -854,16 +854,6 @@ String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch
   ResolveInheritanceBlocker.longRead => longReadBusyKey,
 };
 
-/// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
-///
-/// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a seam
-/// a test can mount without dragging in the version loaders and the license page.
-///
-/// The resolution is asynchronous and fire-and-forget, so the entry disables itself while one is
-/// in flight instead of letting a second tap start another whole-store lock acquisition — and it
-/// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced
-/// below to remove; leaving its immediate neighbour silent would have reproduced it. `disabled`
-/// and `tooltip` are decided by one expression, so "is it inert" and "why" cannot disagree.
 /// Which reason (if any) makes the inheritance-resolution entry inert **right now**, asked of a
 /// live [WidgetRef].
 ///
@@ -895,6 +885,16 @@ ResolveInheritanceBlocker? resolveInheritanceBlockerFor(WidgetRef ref, {required
   return resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
 }
 
+/// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
+///
+/// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a seam
+/// a test can mount without dragging in the version loaders and the license page.
+///
+/// The resolution is asynchronous and fire-and-forget, so the entry disables itself while one is
+/// in flight instead of letting a second tap start another whole-store lock acquisition — and it
+/// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced
+/// below to remove; leaving its immediate neighbour silent would have reproduced it. `disabled`
+/// and `tooltip` are decided by one expression, so "is it inert" and "why" cannot disagree.
 class ResolveInheritanceTile extends ConsumerWidget {
   const ResolveInheritanceTile({super.key});
 

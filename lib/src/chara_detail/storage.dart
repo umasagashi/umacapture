@@ -1373,13 +1373,6 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     return true;
   }
 
-  /// Computes the side-effect-free plan for adding [record]: duplicate check,
-  /// inheritance resolution, the active-vs-archive split of the changed records,
-  /// and the list to republish.
-  ///
-  /// Shared by the synchronous [add] (desktop capture) and the asynchronous
-  /// [addFromFileAsync] (web incremental import) so both agree on the outcome and
-  /// differ only in how they execute the resulting file I/O (sync vs. async FS).
   /// Every record a new one has to be weighed against: the active set plus the
   /// archived one.
   ///
@@ -1394,6 +1387,13 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     ...?ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value,
   ];
 
+  /// Computes the side-effect-free plan for adding [record]: duplicate check,
+  /// inheritance resolution, the active-vs-archive split of the changed records,
+  /// and the list to republish.
+  ///
+  /// Shared by the synchronous [add] (desktop capture) and the asynchronous
+  /// [addFromFileAsync] (web incremental import) so both agree on the outcome and
+  /// differ only in how they execute the resulting file I/O (sync vs. async FS).
   _AdditionPlan _resolveAddition(CharaDetailRecord record) {
     final activeRecords = _records;
     final existing = existingRecords();
@@ -1563,9 +1563,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
             declaration: _importMergeDeclaration,
             action: () async {
               // The imported record's lock was released between the read above and
-              // this wider set, so re-confirm the directory is still there: another
-              // tab may have archived or deleted it, and persisting the plan would
-              // otherwise resurrect it as a record.json-only tree.
+              // this wider set, so re-confirm the directory is still there: a delete,
+              // an archive write-back or a whole-store resolution can take it in that
+              // gap, and persisting the plan would otherwise resurrect it as a
+              // record.json-only tree.
               if (!await (rootDirectory / id).exists()) {
                 logger.w("Imported record $id disappeared before it could be merged.");
                 return;

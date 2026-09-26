@@ -21,7 +21,8 @@ EnhancementRelation relate(List<Factor> a, List<Factor> b) => compareEnhancement
 
 void main() {
   group('FactorClassifier', () {
-    test('classifier maps the three R11 tags to coloured and everything else to white', () {
+    test('classifier maps factor_status, factor_aptitude and factor_unique_skill to coloured, '
+        'and everything else to white', () {
       expect(testClassifier.colourOf(11), FactorColour.coloured);
       expect(testClassifier.colourOf(21), FactorColour.coloured);
       expect(testClassifier.colourOf(31), FactorColour.coloured);

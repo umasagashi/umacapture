@@ -81,14 +81,18 @@ dev_dependencies:
 
   auto_route_generator: 10.2.5
   build_runner: ^2.2.0
-  # Build-time only: lib/distribution_info.dart walks the asset graph with a glob. It used to
-  # resolve transitively through build_runner; declared here so a dependency bump cannot drop it.
+  # Generates the decode/encode mappers for the dart_mappable annotations; build.yaml
+  # configures which methods it emits. Pinned to the exact version of the dart_mappable
+  # runtime it generates against.
   dart_mappable_builder: 4.6.1
   # Test-only: puts the timer-driven bounds (the video import's inactivity watchdog)
   # on a controlled clock, so a suite never pays their wall time and "at the bound"
   # can be told apart from "one tick before it". Resolves transitively through
   # flutter_test; declared here so a dependency bump cannot drop it.
   fake_async: ^1.3.3
+  # Build-time only: lib/distribution_info.dart walks the asset graph with a glob. Declared
+  # directly rather than leaning on build_runner's transitive resolution, so a dependency
+  # bump cannot drop it.
   glob: ^2.1.3
   flutter_lints: ^6.0.0
   flutter_oss_licenses: ^3.2.0

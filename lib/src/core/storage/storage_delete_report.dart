@@ -50,8 +50,8 @@ enum StorageDeleteFailureReason {
   lockUnavailable,
 
   /// The delete itself was refused by the platform for this entry. The Windows
-  /// file-in-use case arrives here, as does an OPFS entry held open by another
-  /// tab's writable.
+  /// file-in-use case arrives here, as does an OPFS entry this app still holds an
+  /// open writable on.
   refused,
 
   /// This app declined to attempt it: the entry is a transaction slot that

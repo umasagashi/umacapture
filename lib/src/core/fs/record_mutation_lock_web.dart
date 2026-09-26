@@ -17,9 +17,10 @@ final RecordMutationLock platformRecordMutationLock = RecordMutationLock(_webLoc
 /// caller behind that queue waits silently and forever.
 ///
 /// The budget sits above the worker ceiling so a genuine long regeneration still
-/// completes, and below "forever" so a wedged holder (a frozen tab, a lock a
-/// crashed context never released) surfaces as a reported
-/// [RecordMutationLockBusy] instead of a UI that never finishes loading.
+/// completes, and below "forever" so a holder wedged by a defect of ours — an
+/// operation of this app that never finishes and so never releases — surfaces
+/// as a reported [RecordMutationLockBusy] instead of a UI that never finishes
+/// loading.
 const Duration recordMutationLockAcquireTimeout = Duration(seconds: 150);
 
 /// Whether this context can provide the lock the record store needs.

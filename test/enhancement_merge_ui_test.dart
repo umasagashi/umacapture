@@ -291,6 +291,7 @@ Card _card(WidgetTester tester, String id) => tester.widget<Card>(
 /// The merge dialog's title-bar cross.
 final _mergeDialogCross = find.descendant(of: find.byType(EnhancementMergeDialog), matching: find.byType(IconButton));
 
+/// The merge dialog's own Cancel, told apart from the review list's button of the same wording.
 Finder _dialogCancel() => find.descendant(
   of: find.byType(EnhancementMergeDialog),
   matching: find.widgetWithText(TextButton, appSentenceAt('$_tr.cancel')),
@@ -418,7 +419,7 @@ void main() {
       expect(find.byType(EnhancementReviewList), findsNothing);
     });
 
-    testWidgets('R44: each record of a row shows its chara icon and evaluation value, and no date', (tester) async {
+    testWidgets('each record of a row shows its chara icon and evaluation value, and no date', (tester) async {
       final pair = _pair(olderEvaluation: 12000, newerEvaluation: 13000);
       final container = _container(calls: _Calls(), candidates: [pair.candidate], records: pair.records);
       await _openReview(tester, container);
@@ -684,7 +685,7 @@ void main() {
       );
     });
 
-    testWidgets('R35: an unfinished merge selects the older card and shuts both the other card and the deselect', (
+    testWidgets('an unfinished merge selects the older card and shuts both the other card and the deselect', (
       tester,
     ) async {
       // The marker is the record that the user already said they are the same, so the
@@ -698,7 +699,11 @@ void main() {
         EnhancementMergeDialog(candidate: pair.candidate, route: EnhancementMergeRoute.settings),
       );
 
-      expect(_selectedShown(tester), 'older', reason: 'fixed to the older record, against the R32 default');
+      expect(
+        _selectedShown(tester),
+        'older',
+        reason: 'fixed to the older record, against the identical-pair default of the newer',
+      );
       expect(_toggleEnabled(tester, 'older'), isFalse, reason: '選択解除 would be the dismissal');
       expect(_toggleEnabled(tester, 'newer'), isFalse);
       expect(find.byKey(const Key('enhancement_merge_fixed_newer')), findsOneWidget, reason: 'the card says why');
@@ -730,7 +735,7 @@ void main() {
       expect(find.byKey(const Key('enhancement_merge_fixed_newer')), findsNothing);
     });
 
-    testWidgets('R35: an unfinished enhancement pair whose newer side is enhanced is still fixed to the older card', (
+    testWidgets('an unfinished enhancement pair whose newer side is enhanced is still fixed to the older card', (
       tester,
     ) async {
       final pair = _pair();
@@ -842,7 +847,7 @@ void main() {
       }
     });
 
-    testWidgets('R32/R31: an identical pair selects the newer card by default, either card can be selected, and '
+    testWidgets('an identical pair selects the newer card by default, either card can be selected, and '
         'the selection reaches the merge', (tester) async {
       final pair = _pair(enhanced: null);
       final calls = _Calls();
@@ -863,9 +868,7 @@ void main() {
       expect(calls.lastKeptContentId, 'older');
     });
 
-    testWidgets('R30: the toggle reads 選択 / 選択解除, and the card surface and shadow follow the selection', (
-      tester,
-    ) async {
+    testWidgets('the toggle reads 選択 / 選択解除, and the card surface and shadow follow the selection', (tester) async {
       final pair = _pair(enhanced: null);
       final calls = _Calls();
       await _pump(
@@ -899,10 +902,10 @@ void main() {
       expect(_card(tester, 'newer').elevation, _card(tester, 'older').elevation);
       await _holdConfirm(tester);
       await tester.pumpAndSettle();
-      expect(calls.log, ['dismiss:older/newer'], reason: 'none + confirm is the R19 dismissal');
+      expect(calls.log, ['dismiss:older/newer'], reason: 'none + confirm dismisses the pair instead of merging it');
     });
 
-    testWidgets('R31/R32: an enhancement pair selects the enhanced card, and the pre-enhancement card cannot be '
+    testWidgets('an enhancement pair selects the enhanced card, and the pre-enhancement card cannot be '
         'selected', (tester) async {
       for (final enhanced in ['newer', 'older']) {
         final pre = enhanced == 'newer' ? 'older' : 'newer';
@@ -959,7 +962,7 @@ void main() {
       expect(find.byKey(const Key('enhancement_merge_no_factor_difference')), findsNothing);
     });
 
-    testWidgets('R47: both kinds of pair carry the one title', (tester) async {
+    testWidgets('both kinds of pair carry the one title', (tester) async {
       expect(appSentenceAt('$_tr.title'), '統合対象の選択');
       for (final enhanced in [null, true]) {
         final pair = enhanced == null ? _pair(enhanced: null) : _pair();
@@ -986,7 +989,7 @@ void main() {
       expect(find.byWidgetPredicate((w) => '${w.key}'.contains('enhancement_merge_factor_')), findsNothing);
     });
 
-    testWidgets('R29: the intro is verbatim, and each card starts with the icon and evaluation and ends with its '
+    testWidgets('the intro is verbatim, and each card starts with the icon and evaluation and ends with its '
         'toggle', (tester) async {
       final pair = _pair(olderEvaluation: 12000, newerEvaluation: 12000);
       await _pump(
@@ -1019,7 +1022,7 @@ void main() {
       expect(find.byType(TraineeIcon), findsNWidgets(2), reason: 'no icon outside the cards');
     });
 
-    testWidgets('R38: no card is headed older / newer; icon, evaluation and preview are centred on lines of '
+    testWidgets('no card is headed older / newer; icon, evaluation and preview are centred on lines of '
         'their own, and the toggle spans the card', (tester) async {
       final pair = _pair(olderEvaluation: 12000, newerEvaluation: 12000);
       for (final width in [1000.0, 420.0]) {
@@ -1056,7 +1059,7 @@ void main() {
       }
     });
 
-    testWidgets('R29: the cards sit side by side when wide and stack when narrow', (tester) async {
+    testWidgets('the cards sit side by side when wide and stack when narrow', (tester) async {
       final pair = _pair();
       Future<void> at(double width) async {
         tester.view.physicalSize = Size(width, 1600);
@@ -1298,7 +1301,7 @@ void main() {
       }
     });
 
-    testWidgets('R33/R45: the bottom button reads 統合する or 統合しない with the selection, and its tooltip says '
+    testWidgets('the bottom button reads 統合する or 統合しない with the selection, and its tooltip says '
         'what it will do', (tester) async {
       final pair = _pair();
       final container = _container(calls: _Calls(), records: pair.records);
@@ -1311,7 +1314,11 @@ void main() {
 
       expect(label(), appSentenceAt('$_tr.merge'), reason: 'the enhanced card is selected by default');
       expect(_confirmTooltip(tester), appSentenceAt('$_tr.merge_tooltip'));
-      expect(appSentenceAt('$_tr.merge_tooltip'), isNot(contains('{')), reason: 'R45: no placeholder is left');
+      expect(
+        appSentenceAt('$_tr.merge_tooltip'),
+        isNot(contains('{')),
+        reason: 'the shipped sentence leaves no placeholder unfilled',
+      );
       expect(find.text(appSentenceAt('$_tr.cancel')), findsOneWidget);
 
       await _toggleCard(tester, 'newer');
@@ -1417,14 +1424,14 @@ void main() {
       );
 
       expect(_confirmAction(tester), isNull, reason: 'merge: the marker decides what the merge may do');
-      expect(_selectedShown(tester), 'older', reason: 'R35: an unread marker counts as unfinished');
+      expect(_selectedShown(tester), 'older', reason: 'an unread marker counts as unfinished');
       expect(_toggleEnabled(tester, 'older'), isFalse);
       expect(_toggleEnabled(tester, 'newer'), isFalse);
 
       markerGate.complete();
       await tester.pumpAndSettle();
       expect(_confirmAction(tester), isNotNull);
-      expect(_selectedShown(tester), 'newer', reason: 'the R32 default is derived once the marker lands');
+      expect(_selectedShown(tester), 'newer', reason: 'the enhanced card becomes the default once the marker lands');
       expect(_toggleEnabled(tester, 'newer'), isTrue);
     });
 
@@ -1512,9 +1519,7 @@ void main() {
       expect(calls.lastKeptContentId, 'newer', reason: 'the enhanced side owns the content of an enhancement pair');
     });
 
-    testWidgets('R34: the cross is shut and a barrier tap never closes the dialog, while the merge runs', (
-      tester,
-    ) async {
+    testWidgets('the cross is shut and a barrier tap never closes the dialog, while the merge runs', (tester) async {
       // A stray tap outside would drop what was typed, and mid-merge the cross would remove the only
       // surface that can report what the merge did.
       final pair = _pair();
@@ -1550,9 +1555,7 @@ void main() {
       expect(find.byKey(const Key('enhancement_merge_apply')), findsNothing, reason: 'the dialog leaves on its own');
     });
 
-    testWidgets('R34: the cross closes only the dialog and performs nothing, with a card selected or none', (
-      tester,
-    ) async {
+    testWidgets('the cross closes only the dialog and performs nothing, with a card selected or none', (tester) async {
       for (final deselect in [false, true]) {
         final pair = _pair();
         final calls = _Calls();
@@ -1704,7 +1707,7 @@ void main() {
       expect(_pickShown(tester, 'rating'), EnhancementMergePick.older);
     });
 
-    testWidgets('R36: an identical pair defaults to the side that has a value, and to the kept content when both do', (
+    testWidgets('an identical pair defaults to the side that has a value, and to the kept content when both do', (
       tester,
     ) async {
       // The newer card is the kept side by default, so a value both sides hold differently is the newer's.
@@ -2288,7 +2291,7 @@ void main() {
       ratingInvalid: ratingInvalid,
     );
 
-    test('P14: no selection never dismisses an unfinished merge, nor one whose marker is still being read', () {
+    test('no selection never dismisses an unfinished merge, nor one whose marker is still being read', () {
       // The dialog also disables the deselect toggle in both states, so no widget test can reach
       // this; the refusal here is what holds at the action if that toggle ever opens.
       expect(action(EnhancementMergeSelection.none), EnhancementMergeAction.dismiss, reason: 'the control');
