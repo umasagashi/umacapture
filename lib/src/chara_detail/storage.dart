@@ -471,6 +471,13 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     ref.read(platformControllerProvider)?.finishUpdate();
     final succeeded = _successCount;
     final failed = _failureCount;
+    // The claim is already released, so another batch may begin before this tail
+    // runs. The finished batch's own `Progress` object identifies it: every batch
+    // publishes a fresh instance ([_beginBatch], [Progress.increment]) and
+    // `Progress` has no value equality, so `identical` tells this batch from the
+    // next one. Clearing another batch's state would make [_count] discard all of
+    // its outcomes, so it never reaches [_finish] and its claim is never released.
+    final finished = state;
     Future.delayed(const Duration(milliseconds: 200), () {
       // The container may have been torn down (app shutdown) while this was pending.
       if (!ref.mounted) {
@@ -478,7 +485,9 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
       }
       ref.read(charaDetailRecordStorageLoaderProvider.notifier).forceRebuild();
       _showCompletionToast(succeeded: succeeded, failed: failed);
-      state = Progress.none;
+      if (identical(state, finished)) {
+        state = Progress.none;
+      }
     });
   }
 
