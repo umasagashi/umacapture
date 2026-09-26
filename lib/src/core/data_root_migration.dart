@@ -360,8 +360,8 @@ class DataRootMigrationController {
   /// backups deleted. On any failure the in-flight pair and every completed swap
   /// are rolled back, so the destination's old data is restored (the source is
   /// never touched either way). If a locked partial copy cannot be removed during
-  /// rollback, the original is left at the `.uma-old` sibling and the failure is
-  /// logged rather than silently lost. Returns `true` only if all pairs swapped.
+  /// rollback, the original is left at the `.uma-old` sibling and logged.
+  /// Returns `true` only if all pairs swapped.
   static Future<bool> swapDirectories(List<({DirectoryPath src, DirectoryPath dst})> pairs) async {
     final done = <({DirectoryPath dst, DirectoryPath? backup})>[];
     for (final pair in pairs) {
@@ -385,15 +385,17 @@ class DataRootMigrationController {
         }
         copying = true;
         if (!await pair.src.copyTreeInto(pair.dst)) {
-          _rollbackInFlight(pair.dst, backup);
-          _restore(done);
+          _rollbackAll(pair.dst, backup, done);
           return false;
         }
         done.add((dst: pair.dst, backup: backup));
       } catch (error, stackTrace) {
         logger.e("Migration copy failed.", error, stackTrace);
-        if (copying) _rollbackInFlight(pair.dst, backup);
-        _restore(done);
+        if (copying) {
+          _rollbackAll(pair.dst, backup, done);
+        } else {
+          _restore(done);
+        }
         return false;
       }
     }
@@ -401,6 +403,19 @@ class DataRootMigrationController {
       entry.backup?.deleteSync(recursive: true, emptyOk: true);
     }
     return true;
+  }
+
+  /// Rolls back the pair still in flight and then every completed swap.
+  ///
+  /// The in-flight destination goes first, because it is the one holding a
+  /// partial copy, then [_restore] walks the finished pairs newest first.
+  static void _rollbackAll(
+    DirectoryPath dst,
+    DirectoryPath? backup,
+    List<({DirectoryPath dst, DirectoryPath? backup})> done,
+  ) {
+    _rollbackInFlight(dst, backup);
+    _restore(done);
   }
 
   /// Reverses completed directory swaps, newest first.
@@ -414,8 +429,7 @@ class DataRootMigrationController {
   ///
   /// The deletion and the restore are attempted independently so a failure to
   /// remove a locked partial copy does not skip the backup restore. If the backup
-  /// cannot be moved back it is left at its `.uma-old` location and logged, never
-  /// silently dropped.
+  /// cannot be moved back it is left at its `.uma-old` location and logged.
   static void _rollbackInFlight(DirectoryPath dst, DirectoryPath? backup) {
     try {
       dst.deleteSync(recursive: true, emptyOk: true);

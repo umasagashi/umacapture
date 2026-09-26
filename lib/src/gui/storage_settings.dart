@@ -597,17 +597,7 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
             isError: !_succeeded!,
           );
         }
-        if (_succeeded!) {
-          return _MessageBlock(icon: Symbols.check_circle_rounded, message: "$tr_storage.dialog.success".tr());
-        }
-        // A refusal and a failure mid-copy leave the app in different states, so
-        // they cannot share a sentence: "restart to get back" is the remedy for
-        // one and a pointless demand for the other, which changed nothing.
-        return _MessageBlock(
-          icon: Symbols.error_rounded,
-          message: "$tr_storage.dialog.${_sessionUsable ? "refused" : "failure"}".tr(),
-          isError: true,
-        );
+        return MigrationResultMessage(succeeded: _succeeded!, sessionUsable: _sessionUsable);
       case _Phase.confirm:
         switch (_kind!) {
           case MigrationKind.sameLocation:
@@ -942,6 +932,41 @@ class _LocationRow extends StatelessWidget {
       label: label,
       child: _PathBox(path: path),
     );
+  }
+}
+
+/// How a finished relocation is reported: one sentence, plus -- when the
+/// rollback could not put a destination's own data back -- where that data is
+/// now.
+///
+/// Public so the mapping from an ending to a sentence can be asserted on its
+/// own. The result step is not otherwise reachable from a widget test: entering
+/// it means running the real [DataRootMigrationController.migrate], which takes
+/// the root record lock and calls `Hive.close()` on the test process, and the
+/// dialog builds its own controller with no seam to hold it at (the same
+/// obstacle `data_root_migration_dialog_exits_test.dart` records for the ×).
+@visibleForTesting
+class MigrationResultMessage extends StatelessWidget {
+  /// Whether every directory swapped and the override was persisted.
+  final bool succeeded;
+
+  /// Whether the running session survived, i.e. [MigrationOutcome.sessionUsable].
+  final bool sessionUsable;
+
+  const MigrationResultMessage({super.key, required this.succeeded, required this.sessionUsable});
+
+  @override
+  Widget build(BuildContext context) {
+    if (succeeded) {
+      return _MessageBlock(icon: Symbols.check_circle_rounded, message: "$tr_storage.dialog.success".tr());
+    }
+    // A refusal and a failure mid-copy leave the app in different states, so
+    // they cannot share a sentence: "restart to get back" is the remedy for
+    // one and a pointless demand for the other, which changed nothing.
+    if (sessionUsable) {
+      return _MessageBlock(icon: Symbols.error_rounded, message: "$tr_storage.dialog.refused".tr(), isError: true);
+    }
+    return _MessageBlock(icon: Symbols.error_rounded, message: "$tr_storage.dialog.failure".tr(), isError: true);
   }
 }
 

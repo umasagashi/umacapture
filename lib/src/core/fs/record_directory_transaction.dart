@@ -150,6 +150,11 @@ final class RecordDirectoryTransaction {
   /// disposition between "ours" and "another writer's": a slot naming a move
   /// this application has never performed is, by that name alone, foreign.
   static const _operation = 'archive';
+
+  /// The record store a slot moves a record out of, and the one it moves it
+  /// into.
+  static const _sourceStoreName = 'active';
+  static const _destinationStoreName = 'archive';
   static const _formatVersion = 1;
 
   Future<RecordTransactionResult> execute(
@@ -790,8 +795,8 @@ final class RecordDirectoryTransaction {
     }
 
     return spec.destination.name == spec.recordId &&
-        _samePath(spec.source.parent, dataRoot / 'active') &&
-        _samePath(spec.destination.parent, dataRoot / 'archive');
+        _samePath(spec.source.parent, dataRoot / _sourceStoreName) &&
+        _samePath(spec.destination.parent, dataRoot / _destinationStoreName);
   }
 
   static bool _samePath(DirectoryPath a, DirectoryPath b) {
