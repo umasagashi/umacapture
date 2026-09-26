@@ -29,6 +29,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -212,7 +213,7 @@ void main() {
     // The end of the chain this stage exists to close: the stranded record could
     // have been this trainee, dedup cannot know, and the user is told so instead
     // of the capture being admitted in silence.
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);
@@ -345,7 +346,7 @@ void main() {
 
     // The skipped record could have been this trainee: dedup cannot know, so the
     // capture is kept and the incompleteness is stated instead of hidden.
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);
@@ -366,7 +367,7 @@ void main() {
     writeRecord(pathInfoFor(root).charaDetailActiveDir / 'incoming', makeRecord(id: 'incoming', card: 2));
     toasts.clear();
 
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);

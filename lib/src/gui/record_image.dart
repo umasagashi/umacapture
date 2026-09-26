@@ -123,8 +123,12 @@ class RecordImage extends StatelessWidget {
     logger.w('RecordImage.preload failed; the widget falls back to its own error path: $error');
   }
 
+  /// Wrapped so a write that replaced this path's bytes reaches the picture already on screen
+  /// ([RecordImageInvalidations] says why a cache eviction alone cannot).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => _RecordImageRefresh(path: path, builder: _content);
+
+  Widget _content(BuildContext context) {
     if (!kIsWeb && maxDecodePixels == null) {
       // Identical to the previous call sites: FileImage decode + global cache.
       //
@@ -188,10 +192,12 @@ ResizeImage boundedRecordImageProvider(ImageProvider base, Size maxPixels) {
 
 /// Bounded, in-session LRU of record-image bytes read from OPFS, keyed by path.
 ///
-/// Record images are written once per path in a session, so the path alone is a
-/// sound key; the cap keeps a long browsing session from growing it without
-/// bound. Filled on web for every image, and on desktop for the bounded ones
-/// (see [RecordImage.build]), so [remove] is reachable from the VM suite and the
+/// A path is the whole key, so a writer that replaces a tree's pixels under paths
+/// that do not change drops the affected entries itself, through
+/// [evictRecordImagesWithin]. The cap keeps a long
+/// browsing session from growing the LRU without bound. Filled on web for every
+/// image, and on desktop for the bounded ones
+/// (see [RecordImage._content]), so [remove] is reachable from the VM suite and the
 /// eviction below needs no second implementation per platform.
 ///
 /// **It also holds the bounded providers built over each entry's bytes**, which
@@ -229,7 +235,7 @@ class RecordImageByteCache {
   /// **This bound is now desktop's as well as the browser's.** Before bounded
   /// images existed the LRU was never filled off web, so the only memory at
   /// stake was a browser tab's; a bounded [RecordImage] fills it on either
-  /// platform ([RecordImage.build] says why), which means the Windows app can
+  /// platform ([RecordImage._content] says why), which means the Windows app can
   /// hold up to this many bytes in a process-lifetime singleton. The figure is
   /// unchanged by that -- it was derived from the image corpus, not from a
   /// browser's ceiling -- but the exposure is no longer one-sided, and 64 MiB is
@@ -353,7 +359,8 @@ void _rememberFileImage(String path) {
   _fileImagePaths.add(path);
 }
 
-/// Drops every cached record image this process holds under [directory].
+/// Drops every cached record image whose path equals one of [scopes] or lies
+/// under one.
 ///
 /// **For a writer that replaces a tree's contents under paths that do not
 /// change**, where the paths whose pixels went are not the paths the writer
@@ -369,31 +376,114 @@ void _rememberFileImage(String path) {
 /// of it -- and the caller cannot tell that answer from an empty directory, so
 /// the replaced pixels would stay cached exactly when the disk is already in
 /// trouble.
-void evictRecordImagesUnder(DirectoryPath directory) {
-  evictRecordImages(_cachedRecordImagePathsUnder(directory));
+///
+/// Always reaches [evictRecordImages], even with nothing to drop, so a process
+/// with no painting binding fails here the same way whatever was cached.
+void evictRecordImagesWithin(Iterable<String> scopes) {
+  final scopeList = scopes.toList();
+  evictRecordImages(
+    <String>{
+      ...RecordImageByteCache.instance.paths,
+      ..._fileImagePaths,
+    }.where((path) => scopeList.any((scope) => isRecordPathWithin(path, scope))).toList(),
+  );
 }
 
 /// Whether [path] equals [scope] or lies under it.
 ///
 /// Compared segment by segment and not by string prefix: `.../older` and
 /// `.../older-2` are in a prefix relation as text and in none as paths, and the
-/// two caches are keyed by paths the platform joined (backslashes on Windows)
-/// while the caller passes a [DirectoryPath] built from segments.
-List<String> _cachedRecordImagePathsUnder(DirectoryPath directory) {
-  bool isUnder(String path) {
-    final segments = PathEntity.parseSegments(path);
-    if (segments.length <= directory.segments.length) {
+/// caches are keyed by paths the platform joined (backslashes on Windows) while
+/// a writer may pass a path built from segments. Case is compared as written:
+/// every record path the app builds comes from the record's own id.
+bool isRecordPathWithin(String path, String scope) {
+  final segments = PathEntity.parseSegments(path);
+  final scopeSegments = PathEntity.parseSegments(scope);
+  if (segments.length < scopeSegments.length) {
+    return false;
+  }
+  for (var index = 0; index < scopeSegments.length; index++) {
+    if (segments[index] != scopeSegments[index]) {
       return false;
     }
-    for (var index = 0; index < directory.segments.length; index++) {
-      if (segments[index] != directory.segments[index]) {
-        return false;
-      }
-    }
-    return true;
+  }
+  return true;
+}
+
+/// Tells every mounted [RecordImage] which paths a write has just replaced.
+///
+/// **The half of an invalidation a cache eviction cannot reach.** Evicting a
+/// path from [ImageCache] drops the entry, but an `Image` already on screen
+/// keeps the frame it resolved and re-resolves only when its provider changes --
+/// and a write that replaces bytes under an unchanged path changes no provider.
+/// So a picture on screen goes on showing the replaced pixels until something
+/// rebuilds it under a new element, which is what a [RecordImage] does when this
+/// names a path it shows.
+///
+/// Addressed by the write's own paths and not by the caches' keys: a picture the
+/// byte LRU already let go of is still on screen, and still stale.
+class RecordImageInvalidations extends ChangeNotifier {
+  RecordImageInvalidations._();
+
+  static final RecordImageInvalidations instance = RecordImageInvalidations._();
+
+  List<String> _changed = const [];
+
+  /// The paths of the announcement being delivered.
+  List<String> get changed => _changed;
+
+  /// Makes every mounted [RecordImage] whose path equals one of [changed], or
+  /// lies under one, read its file again.
+  void announce(Iterable<String> changed) {
+    _changed = List.unmodifiable(changed);
+    notifyListeners();
+  }
+}
+
+/// Rebuilds a [RecordImage]'s picture under a fresh element when
+/// [RecordImageInvalidations] names its path.
+class _RecordImageRefresh extends StatefulWidget {
+  const _RecordImageRefresh({required this.path, required this.builder});
+
+  final FilePath path;
+  final WidgetBuilder builder;
+
+  @override
+  State<_RecordImageRefresh> createState() => _RecordImageRefreshState();
+}
+
+class _RecordImageRefreshState extends State<_RecordImageRefresh> {
+  int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    RecordImageInvalidations.instance.addListener(_onInvalidated);
   }
 
-  return <String>{...RecordImageByteCache.instance.paths, ..._fileImagePaths}.where(isUnder).toList();
+  @override
+  void dispose() {
+    RecordImageInvalidations.instance.removeListener(_onInvalidated);
+    super.dispose();
+  }
+
+  void _onInvalidated() {
+    final path = widget.path.path;
+    if (RecordImageInvalidations.instance.changed.any((scope) => isRecordPathWithin(path, scope))) {
+      setState(() => _generation++);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A new key and not a plain rebuild: `Image` re-resolves only when its
+    // provider changes, and a `FileImage` over an unchanged path is equal to the
+    // one it already resolved. Replacing the element is what forces the read.
+    return KeyedSubtree(
+      key: ValueKey<int>(_generation),
+      child: Builder(builder: widget.builder),
+    );
+  }
 }
 
 /// Drops [paths] from every cache a [RecordImage] can answer out of.
@@ -452,7 +542,7 @@ void evictRecordImages(Iterable<String> paths) {
       // The desktop half, for the images that carry no bound and therefore still
       // resolve through `Image.file`. Not a divergence in the eviction contract:
       // a bounded image is filed under a `MemoryImage` on *both* platforms
-      // (`RecordImage.build` says why), so this line covers the unbounded
+      // (`RecordImage._content` says why), so this line covers the unbounded
       // desktop call sites and nothing else. `dart:io`'s `File` is a stub on web
       // that addresses nothing, which is why it is skipped there.
       _fileImagePaths.remove(path);

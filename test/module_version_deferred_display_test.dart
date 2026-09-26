@@ -95,7 +95,7 @@ void main() {
           await Future<void>.value();
           await runModuleInstall(
             ref.base,
-            _modulesDir,
+            _layout,
             () => installFinished.future,
             // The three surfaceless routes' answer, and the one this row is about.
             contention: LongReadContention.defer,
@@ -148,12 +148,7 @@ void main() {
       overrides: [
         moduleVersionLoader.overrideWith((ref) async {
           await Future<void>.value();
-          await runModuleInstall(
-            ref.base,
-            _modulesDir,
-            () => installFinished.future,
-            contention: LongReadContention.defer,
-          );
+          await runModuleInstall(ref.base, _layout, () => installFinished.future, contention: LongReadContention.defer);
           return _installedVersion();
         }),
       ],

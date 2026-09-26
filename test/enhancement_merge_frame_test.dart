@@ -40,6 +40,7 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 
@@ -191,7 +192,7 @@ void main() {
 
       final before = treeBytes(info.charaDetailActiveDir);
       final (:body, :entered) = probeBody();
-      final result = await frameOf(container).run(olderId: 'older', retiredId: 'retired', body: body);
+      final result = await frameOf(container).run(body: body);
 
       expect(result.outcome, EnhancementMergeOutcome.refusedStoreIncomplete);
       expect(result.needsReload, isTrue);
@@ -229,7 +230,7 @@ void main() {
 
       for (final pair in [('o1', 'r1'), ('o2', 'r2')]) {
         final (:body, :entered) = probeBody();
-        final result = await frameOf(container).run(olderId: pair.$1, retiredId: pair.$2, body: body);
+        final result = await frameOf(container).run(body: body);
         expect(result.outcome, EnhancementMergeOutcome.refusedStoreIncomplete, reason: '${pair.$1}/${pair.$2}');
         expect(entered, isEmpty, reason: '${pair.$1}/${pair.$2}');
       }
@@ -245,7 +246,7 @@ void main() {
       // on a gate would otherwise park the frame's own return.
       Future<void> expectRefused(ProviderContainer container, String because, {void Function()? release}) async {
         final (:body, :entered) = probeBody();
-        final pending = frameOf(container).run(olderId: 'older', retiredId: 'retired', body: body);
+        final pending = frameOf(container).run(body: body);
         for (var turn = 0; turn < 50; turn++) {
           await Future<void>.delayed(Duration.zero);
         }
@@ -300,14 +301,12 @@ void main() {
 
       // The control, first and with no merge running: the delete refused below is
       // a delete that does complete on its own.
-      await active.deleteAsync('control');
+      await active.deleteAsync('control', effects: recordDeleteEffects(container));
       expect(Directory((info.charaDetailActiveDir / 'control').path).existsSync(), isFalse);
 
       final events = <String>[];
       final park = Completer<void>();
       final merged = frameOf(container).run(
-        olderId: 'older',
-        retiredId: 'retired',
         body: (_) async {
           events.add('body-start');
           await park.future;
@@ -317,7 +316,9 @@ void main() {
       );
       await waitUntil(() => events.contains('body-start'), describe: 'the merge body to be entered');
 
-      final deleted = active.deleteAsync('victim').then((_) => events.add('delete-done'));
+      final deleted = active
+          .deleteAsync('victim', effects: recordDeleteEffects(container))
+          .then((_) => events.add('delete-done'));
       // Long enough for the delete to have been granted if anything were going to
       // grant it: the control above needed less.
       for (var turn = 0; turn < 200; turn++) {
@@ -364,7 +365,7 @@ void main() {
 
       gate = Completer<void>();
       final (:body, :entered) = probeBody();
-      final first = frameOf(container).run(olderId: 'older', retiredId: 'retired', body: body);
+      final first = frameOf(container).run(body: body);
       var firstDone = false;
       unawaited(first.then((_) => firstDone = true));
 
@@ -384,7 +385,7 @@ void main() {
       // The second attempt: refused by the registry, which is the only thing that
       // can answer `refusedBusy`. A call that reached the gate would have had to
       // wait for the parked scan and could not have answered at all yet.
-      final second = await frameOf(container).run(olderId: 'o2', retiredId: 'r2', body: body);
+      final second = await frameOf(container).run(body: body);
       expect(second.outcome, EnhancementMergeOutcome.refusedBusy);
       expect(second.needsReload, isFalse);
       expect(firstDone, isFalse, reason: 'the first merge finished, so the refusal above is not about a live claim');

@@ -10,6 +10,7 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
@@ -46,6 +47,54 @@ final _importingProvider = settableNotifierProvider<bool>(false);
 /// hold *or* a hold inside a target, so a claim on the record store answers a
 /// question asked about `storage/`.
 List<PathEntity> recordImportLongReadPaths(PathInfo pathInfo) => [pathInfo.charaDetailDir];
+
+/// Everything that has to be re-read once an import has written records.
+///
+/// **One function rather than the three calls it makes**, so the whole of what
+/// an import changes is stated where the import is and not spread across its
+/// completion block: an import writes records into the tree exactly as a capture
+/// does, and the two consequences of that — the stores no longer hold the right
+/// list, and the storage view no longer holds the right size — belong to the same
+/// fact.
+///
+/// The stores are rescanned rather than patched: `build()` re-lists `active/`,
+/// and the archive rescan keeps the dedup and inheritance views consistent even
+/// though the import only writes into `active/`. [effects] is handed the record
+/// root for the totals, which is what makes a size shown on an open storage tab
+/// follow an import that finishes behind it, and the directories of
+/// [writtenIds] for the pictures: an import publishes over a record id that is
+/// already stored, under the same path, so a picture of that record decoded
+/// before the import would otherwise go on being shown. [writtenIds] are the ids
+/// the imports committed and nothing else -- a record the store refused left its
+/// directory as it was.
+///
+/// Taken over the container's [containerRefProvider] rather than the toolbar's own
+/// `ref`: the import outlives the widget that started it, which is the same
+/// reason the caller reads the container before opening the picker.
+@visibleForTesting
+void applyRecordImportCompletion(
+  RefBase ref,
+  PathInfo pathInfo, {
+  required Iterable<String> writtenIds,
+  required RecordWriteEffects effects,
+}) {
+  ref.invalidate(charaDetailRecordStorageLoaderProvider);
+  ref.invalidate(charaDetailArchiveStorageLoaderProvider);
+  effects.images.apply(
+    RecordImageScope(
+      info: pathInfo,
+      changed: [for (final id in writtenIds) recordDirOfId(pathInfo, RecordSource.active, id).path],
+    ),
+  );
+  effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+}
+
+/// What a record import declares: the written records' cached pictures and previews are dropped,
+/// and the storage view's totals are re-measured.
+///
+/// [base] must live as long as the container -- the import outlives the toolbar that started it.
+RecordWriteEffects recordImportEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
 
 /// The **full** translation key for the sentence [refusal] owes the user.
 ///
@@ -154,6 +203,8 @@ class CharaDetailImportButton extends ConsumerWidget {
     // container -- and the app-scoped stores and flag it holds -- lives on. Read before the first
     // await, from a context that is certainly still mounted; nothing below touches `ref` at all.
     final container = ProviderScope.containerOf(context, listen: false);
+    // Declared here, before the picker's await, from the container the import reports through.
+    final effects = recordImportEffects(container.read(refBaseProvider));
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ["zip"],
@@ -290,11 +341,12 @@ class CharaDetailImportButton extends ConsumerWidget {
       // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
       // user navigated away from stays invisible in the table until the app is restarted.
       if (committed) {
-        // Rescan both stores so the imported records appear. The active store's
-        // build() re-lists active/; the archive rescan keeps dedup/inheritance
-        // views consistent even though the import only touches active/.
-        container.invalidate(charaDetailRecordStorageLoaderProvider);
-        container.invalidate(charaDetailArchiveStorageLoaderProvider);
+        applyRecordImportCompletion(
+          container.read(refBaseProvider),
+          pathInfo,
+          writtenIds: importedIds,
+          effects: effects,
+        );
       }
       if (failures == 0) {
         if (importedIds.isEmpty && refusals.isEmpty) {

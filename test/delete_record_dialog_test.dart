@@ -16,6 +16,7 @@ import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
@@ -52,10 +53,11 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
   }
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     final gate = Completer<void>();

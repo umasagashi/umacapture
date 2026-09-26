@@ -1128,14 +1128,20 @@ class _FreshStorageTreeState extends ConsumerState<FreshStorageTree> {
     super.initState();
     // **The storage view re-reads storage every time it is entered.**
     //
-    // Nothing else makes it: a capture, a video import and an archive all write
-    // into the directories this view lists, and none of them tells it, so before
-    // this the tree and the totals stayed as they were until the app was
-    // restarted — a record captured while the user was on another tab simply
-    // never appeared. Notifying from those three writers was considered and
-    // rejected: it wires three triggers for one fact, and a fourth writer goes
-    // quietly stale. Re-reading on entry costs exactly what opening the view for
-    // the first time costs, which is the measurement the view already ships on.
+    // A capture, a video import, a zip import and an archive all write into the
+    // directories this view lists while it is closed, and nothing about a closed
+    // view can be notified: there is no state to drop and no widget to rebuild,
+    // so what a visit inherits is whatever the last one cached. Re-reading on
+    // entry costs exactly what opening the view for the first time costs, which
+    // is the measurement the view already ships on.
+    //
+    // **A writer that finishes while the view is open is the other half, and it
+    // is not this one.** Nothing unmounts a view the user is looking at, so the
+    // record writers announce what they changed themselves
+    // (`record_write_invalidation.dart`) and a delete on the view announces its
+    // own (`storage_delete_invalidation.dart`). Neither replaces this: a writer
+    // that is added and announces nothing is stale only while the view is open,
+    // because this re-read still starts the next visit from disk.
     //
     // **`initState` and not `build`, and the difference is the whole design.** A
     // build happens whenever a group is opened, a size cell resolves or the

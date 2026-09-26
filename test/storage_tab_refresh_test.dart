@@ -55,6 +55,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/storage_view_sources.dart';
+import 'support/record_write_effects_fixture.dart';
 
 void main() {
   late Directory tempRoot;
@@ -126,13 +127,15 @@ void main() {
 
       await runStorageDelete(
         scope.read(refBaseProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
       );
 
       expect(File(file.path).existsSync(), isFalse);
-      expect(await scope.read(storageTreeChildrenProvider(node).future), isEmpty);
+      final after = await scope.read(storageTreeChildrenProvider(node).future);
+      expect(after.map((listing) => listing.entity.path), isEmpty);
     });
 
     test('the group total stops counting the deleted bytes', () async {
@@ -145,6 +148,7 @@ void main() {
 
       await runStorageDelete(
         scope.read(refBaseProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -166,6 +170,7 @@ void main() {
 
       await runStorageDelete(
         scope.read(refBaseProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -193,6 +198,7 @@ void main() {
 
       await runStorageDelete(
         scope.read(refBaseProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -203,6 +209,92 @@ void main() {
         32,
         reason: 'the quarantine total was not falsified by a delete under temp',
       );
+    });
+
+    // The one delete whose reach is wider than its request. A group holding a
+    // transaction journal takes its exclusion with a drain in front of it, and the
+    // drain can finish a publication into `active/`, an archive move, or file a
+    // slot it cannot read into `quarantine/` -- none of which the request names.
+    // The cache drops a path, its ancestors and its descendants only, so those
+    // three trees keep the size they had before the drain unless the delete says
+    // otherwise. Asserted over every shipped group that answers the predicate, so
+    // it is about the predicate and not about the group that answers it today.
+    test('a delete that drains the journals drops the totals of what the drain publishes', () async {
+      final draining = storageGroups.where((group) => group.destroysTransactionJournal(layout)).toList();
+      expect(draining, isNotEmpty, reason: 'no group holds a journal, so this claim would assert nothing');
+      for (final group in draining) {
+        seed(layout.charaDetailActiveDir, 'published.bin', 16);
+        seed(layout.charaDetailArchiveDir, 'moved.bin', 8);
+        seed(layout.charaDetailQuarantineDir, 'unreadable.bin', 32);
+        final scope = container();
+        for (final id in [StorageGroupId.activeRecords, StorageGroupId.archivedRecords, StorageGroupId.quarantine]) {
+          hold(scope, storageGroupTotalsProvider(id));
+          await scope.read(storageGroupTotalsProvider(id).future);
+        }
+        final cache = scope.read(directoryTotalsCacheProvider);
+        expect(cache.peek(layout.charaDetailActiveDir)?.knownBytes, 16);
+
+        await runStorageDelete(
+          scope.read(refBaseProvider),
+          effects: storageDeleteEffects(scope),
+          group: group,
+          request: StorageDeletePathsRequest(group.resolve(layout)),
+          silent: true,
+        );
+
+        for (final directory in [
+          layout.charaDetailActiveDir,
+          layout.charaDetailArchiveDir,
+          layout.charaDetailQuarantineDir,
+        ]) {
+          expect(
+            cache.peek(directory),
+            isNull,
+            reason: '${group.id.name} drains into ${directory.path} and its cached total survived the delete',
+          );
+        }
+      }
+    });
+
+    // The same delete asked for one entry instead of the group. The drain is
+    // decided by the group (`_rootMaintenanceReasonFor`), so it runs either way,
+    // but now the request names one directory and the places the drain emptied --
+    // both journals -- and the one it retires into are reached by nothing the
+    // request carries. The group aggregate sums its roots, so a surviving journal
+    // total counts a slot whose bytes the recovered record is also counting.
+    test('a row delete that drains the journals drops the totals it emptied', () async {
+      final draining = storageGroups.where((group) => group.destroysTransactionJournal(layout)).toList();
+      expect(draining, isNotEmpty, reason: 'no group holds a journal, so this claim would assert nothing');
+      for (final group in draining) {
+        final row = seed(layout.charaDetailRetiredDir, 'old-entry.bin', 24);
+        final emptied = [...layout.charaDetailTransactionJournalDirs, layout.charaDetailRetiredDir];
+        for (final journal in layout.charaDetailTransactionJournalDirs) {
+          seed(journal, 'slot.bin', 12);
+        }
+        final scope = container();
+        hold(scope, storageGroupTotalsProvider(StorageGroupId.retired));
+        await scope.read(storageGroupTotalsProvider(StorageGroupId.retired).future);
+        final cache = scope.read(directoryTotalsCacheProvider);
+        for (final directory in emptied) {
+          expect(cache.peek(directory), isNotNull, reason: '${directory.path} was not cached to begin with');
+        }
+
+        await runStorageDelete(
+          scope.read(refBaseProvider),
+          effects: storageDeleteEffects(scope),
+          group: group,
+          request: StorageDeletePathsRequest([row]),
+          silent: true,
+        );
+
+        for (final directory in emptied) {
+          expect(
+            cache.peek(directory),
+            isNull,
+            reason: '${group.id.name}: a row delete drained ${directory.path} and its cached total survived',
+          );
+        }
+      }
     });
   });
 
@@ -228,6 +320,7 @@ void main() {
 
       await runStorageDelete(
         scope.read(refBaseProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.settings),
         request: const StorageDeleteSettingsRequest(),
         silent: true,

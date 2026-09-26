@@ -51,7 +51,6 @@ import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 /// The lock name `RecordMutationLock` builds for a record id, spelled out so the
 /// assertion is on the name a writer would contend for rather than on the call

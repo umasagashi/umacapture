@@ -26,7 +26,6 @@ import 'package:umacapture/src/core/utils.dart';
 
 import 'support/hive.dart';
 import 'support/records.dart';
-import 'support/riverpod.dart';
 
 /// A controllable [ActionRunner] for execution-controller tests: it never starts
 /// real work; the test drives its progress and completion explicitly.

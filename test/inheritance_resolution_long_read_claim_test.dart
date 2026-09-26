@@ -33,6 +33,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 
@@ -93,7 +94,7 @@ void main() {
     final seen = <Map<LongReadToken, LongReadClaim>>[];
     container.listen(longReadRegistryProvider, (_, next) => seen.add(next));
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
 
     // Read synchronously, before any turn of the event loop the resolution could
     // have finished in: `hold` registers before its first `await`, so the claim
@@ -145,7 +146,7 @@ void main() {
     container.listen(longReadRegistryProvider, (_, next) => seen.add(next), fireImmediately: true);
 
     writeRecord(info.charaDetailActiveDir, makeRecord(id: 'fresh', card: 2));
-    await active.addFromFileAsync('fresh');
+    await active.addFromFileAsync('fresh', effects: arrivalEffects(container));
 
     // The instrument's control first: a merge that never happened would report
     // an empty registry for the most uninteresting reason there is.

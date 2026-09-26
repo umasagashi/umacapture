@@ -22,8 +22,6 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-import 'support/riverpod.dart';
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializeMappers);

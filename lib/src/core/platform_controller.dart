@@ -15,6 +15,7 @@ import '/src/core/platform_channel.dart';
 import '/src/core/providers.dart';
 import '/src/core/raw_frame_probe.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
@@ -37,6 +38,13 @@ final capturingStateProvider = Provider<bool>((ref) {
         },
       );
 });
+
+/// What a successful re-recognition (`onCharaDetailUpdated`) declares: the record's directory has new
+/// bytes, so its cached reads are dropped and the record root is re-measured.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects recordRegenerationEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
 
 /// The import state every gate outside the capture card reads, as a substitutable value.
 ///
@@ -2244,7 +2252,10 @@ class PlatformController {
           if (id is! String) {
             throw ArgumentError.value(id, 'id', 'onCharaDetailUpdated expects a String id');
           }
-          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(id);
+          final container = _ref.read(containerRefProvider);
+          _ref
+              .read(charaDetailRecordRegenerationControllerProvider.notifier)
+              .updated(id, effects: recordRegenerationEffects(container));
           break;
         case 'onFrameRateReported':
           {
@@ -2357,9 +2368,11 @@ class PlatformController {
     try {
       await _ref.read(charaDetailRecordStorageLoaderProvider.future);
       final storage = _ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+      final container = _ref.read(containerRefProvider);
+      final effects = recordArrivalEffects(container);
       for (final id in ids) {
         try {
-          await storage.addFromFileAsync(id, notifyDuplicate: !fromVideoImport);
+          await storage.addFromFileAsync(id, notifyDuplicate: !fromVideoImport, effects: effects);
         } catch (error, stackTrace) {
           logger.w('Failed to add harvested live record $id', error, stackTrace);
         }

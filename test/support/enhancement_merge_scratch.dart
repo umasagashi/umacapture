@@ -24,6 +24,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
 import 'factor_classifier.dart';
+import 'record_write_effects_fixture.dart';
 import 'records.dart';
 
 /// A [PathInfo] whose every root is [root], so one scratch directory holds the
@@ -132,5 +133,5 @@ Future<EnhancementMergeResult> mergeOne(
   expect(candidates, hasLength(1), reason: 'the fixture is meant to offer exactly one pair');
   return container
       .read(enhancementMergeProvider)
-      .merge(candidates.single, keptContentId: keptContentId, choices: choices);
+      .merge(candidates.single, keptContentId: keptContentId, choices: choices, effects: mergeEffects(container));
 }

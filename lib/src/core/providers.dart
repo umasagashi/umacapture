@@ -439,6 +439,16 @@ final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (
 ///
 /// A failure is logged and startup continues: scratch the app could not reclaim
 /// is wasted space, not a reason to refuse the record store.
+///
+/// **It tells the storage view nothing, unlike the other writers into the tree
+/// that view measures** (`record_write_invalidation.dart`,
+/// `storage_delete_invalidation.dart`). Being a step of resolving the layout is
+/// what excuses it: [pathInfoLoader] awaits this before publishing, so on the
+/// first resolution nothing has been able to measure [PathInfo.tempDir] yet, and
+/// the one later re-resolution that reaches here — a data-root change — drops
+/// every cached total anyway (`DirectoryTotalsCache.clear`). The remainder is a
+/// retry of a failed [pathInfoLoader] from the startup-outage banner, which is a
+/// control on the page underneath the storage view's dialog.
 Future<void> prepareScratchDir(PathInfo info) async {
   try {
     await info.tempDir.clear();

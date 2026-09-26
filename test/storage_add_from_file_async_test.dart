@@ -20,6 +20,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -67,7 +68,7 @@ void main() {
 
     // A distinct chara (different card) written to disk as the harvest would.
     writeRecord(activeDir, makeRecord(id: 'fresh', card: 2));
-    await active.addFromFileAsync('fresh');
+    await active.addFromFileAsync('fresh', effects: arrivalEffects(container));
 
     expect(active.getBy(id: 'existing'), isNotNull);
     expect(active.getBy(id: 'fresh'), isNotNull);
@@ -94,7 +95,7 @@ void main() {
       ..writeAsStringSync('{}');
     File('${brokenDir.path}/trainee.jpg').writeAsStringSync('img');
 
-    await active.addFromFileAsync('broken');
+    await active.addFromFileAsync('broken', effects: arrivalEffects(container));
 
     // (a) The already-loaded record is untouched; the broken one is not added.
     expect(active.getBy(id: 'valid'), isNotNull);

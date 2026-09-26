@@ -48,7 +48,6 @@ import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;

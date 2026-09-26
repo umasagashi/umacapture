@@ -42,6 +42,7 @@ import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/hive.dart';
+import 'support/record_write_effects_fixture.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -157,6 +158,7 @@ void main() {
     await runArchiveGeometryMigrationIfNeeded(
       _layout,
       declaration: _declaration(container),
+      effects: geometryRepairEffects(container),
       recoveryGate: _observingGate(container, (claims) => inside = claims),
     );
 
@@ -180,6 +182,7 @@ void main() {
     await runArchiveGeometryMigrationIfNeeded(
       _layout,
       declaration: _declaration(container),
+      effects: geometryRepairEffects(container),
       recoveryGate: _observingGate(container, (claims) => inside = claims),
     );
 
@@ -232,6 +235,7 @@ void main() {
     final pass = runArchiveGeometryMigrationIfNeeded(
       _layout,
       declaration: _declaration(container),
+      effects: geometryRepairEffects(container),
       recoveryGate: busyGate,
     );
     await reached.future;

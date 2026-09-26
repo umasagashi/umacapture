@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderOrFamily;
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -236,6 +237,19 @@ final predictionAvailableProvider = FutureProvider.autoDispose.family<bool, Stri
 final previewImagePathsProvider = FutureProvider.autoDispose.family<PreviewImagePaths, String>((ref, path) {
   return PreviewImagePaths.load(DirectoryPath(path));
 });
+
+/// Every provider above that reads a record's files, keyed by the record directory's path.
+///
+/// **The list a write drops when it replaces a record's files** (`record_write_effects.dart`): each
+/// of them memoizes what it read for as long as something watches it, so a preview left open across
+/// a write keeps the old geometry, overlay and image paths unless the write names it here. [family]
+/// drops every record at once; [at] addresses one record by the same key its readers build.
+final List<({ProviderOrFamily family, ProviderOrFamily Function(String recordDir) at})> recordPreviewReaders = [
+  (family: imageSizeContainerProvider, at: imageSizeContainerProvider.call),
+  (family: predictionContainerProvider, at: predictionContainerProvider.call),
+  (family: predictionAvailableProvider, at: predictionAvailableProvider.call),
+  (family: previewImagePathsProvider, at: previewImagePathsProvider.call),
+];
 
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;

@@ -47,6 +47,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'support/enhancement_merge_scratch.dart';
 import 'support/factor_classifier.dart';
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 /// A bare carrier of the metadata write chain, so the chain's own contract can
@@ -486,8 +487,9 @@ void main() {
 
   /// The manual whole-store resolution, awaited — what fills the links a merge's
   /// own (not-yet-written) republication would have filled.
-  Future<void> resolve(ProviderContainer container) =>
-      container.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
+  Future<void> resolve(ProviderContainer container) => container
+      .read(charaDetailRecordStorageLoaderProvider.notifier)
+      .resolveAllInheritance(effects: inheritanceResolutionEffects(container));
 
   // =========================================================================
   group('synthesizeSurvivor', () {
@@ -1216,7 +1218,9 @@ void main() {
       final candidate = candidatesIn(restarted).single;
       expect(candidate.identical, isTrue, reason: 'after the applied merge both sides carry the same factors');
 
-      final refused = await restarted.read(enhancementMergeProvider).merge(candidate, keptContentId: candidate.newerId);
+      final refused = await restarted
+          .read(enhancementMergeProvider)
+          .merge(candidate, keptContentId: candidate.newerId, effects: mergeEffects(restarted));
 
       expect(refused.outcome, EnhancementMergeOutcome.refusedRetiredContent);
       expect(reached, isEmpty);
@@ -1399,6 +1403,7 @@ void main() {
             .merge(
               candidate,
               choices: EnhancementMergeChoices(route: expectation.route, memo: expectation.memo),
+              effects: mergeEffects(container),
             );
 
         expect(result.outcome, EnhancementMergeOutcome.merged, reason: '${expectation.route}');
@@ -1423,6 +1428,7 @@ void main() {
           .merge(
             candidatesIn(container).single,
             choices: const EnhancementMergeChoices(route: EnhancementMergeRoute.captureCard),
+            effects: mergeEffects(container),
           );
 
       expect(result.outcome, EnhancementMergeOutcome.merged);
@@ -1465,7 +1471,11 @@ void main() {
 
       final result = await container
           .read(enhancementMergeProvider)
-          .merge(pair, choices: const EnhancementMergeChoices(route: EnhancementMergeRoute.captureCard));
+          .merge(
+            pair,
+            choices: const EnhancementMergeChoices(route: EnhancementMergeRoute.captureCard),
+            effects: mergeEffects(container),
+          );
 
       expect(result.outcome, EnhancementMergeOutcome.merged);
       expect(keyFileData(info.charaDetailMemoDir, 'main'), {'older': 'old note', 'newest': 'newest note'});
@@ -1629,7 +1639,7 @@ void main() {
         final container = await loadedContainer();
         final result = await container
             .read(enhancementMergeProvider)
-            .merge(candidatesIn(container).single, keptContentId: kept);
+            .merge(candidatesIn(container).single, keptContentId: kept, effects: mergeEffects(container));
 
         expect(result.outcome, EnhancementMergeOutcome.merged, reason: kept);
         expect(keyFileData(info.charaDetailMemoDir, 'both')['older'], 'from $kept', reason: kept);
@@ -1943,7 +1953,10 @@ void main() {
       final candidate = container
           .read(pendingEnhancementCandidatesProvider)
           .firstWhere((c) => c.pair == RecordIdPair('older', 'retired'));
-      expect((await container.read(enhancementMergeProvider).merge(candidate)).outcome, EnhancementMergeOutcome.merged);
+      expect(
+        (await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container))).outcome,
+        EnhancementMergeOutcome.merged,
+      );
 
       expect(await readDismissedPairs(info.charaDetailEnhancementDismissedFile), {RecordIdPair('older', 'x')});
       await container.read(enhancementDismissedPairsProvider.future);
@@ -2061,7 +2074,9 @@ void main() {
         RecordIdPair('older', 'retired'),
       ]);
 
-      await container.read(charaDetailRecordStorageLoaderProvider.notifier).deleteAsync('retired');
+      await container
+          .read(charaDetailRecordStorageLoaderProvider.notifier)
+          .deleteAsync('retired', effects: recordDeleteEffects(container));
       expect(container.read(pendingEnhancementCandidatesProvider), isEmpty, reason: 'the deletion is watched');
     });
 

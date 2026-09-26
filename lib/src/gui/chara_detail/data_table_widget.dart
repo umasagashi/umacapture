@@ -16,6 +16,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
@@ -42,6 +43,16 @@ import '/src/preference/storage_box.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
+/// The declaration the one-time archive geometry repair makes.
+///
+/// It rewrites the geometry json the preview sizes its box from and deletes the
+/// `prediction.json` its overlay reads, so both are dropped, and the bytes it
+/// deletes change the archive store's measured size. It runs before the stores
+/// load, so normally nothing has read them yet; the declaration does not rest on
+/// that ordering.
+RecordWriteEffects archiveGeometryRepairEffects(RefBase ref) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(ref), totals: RecordTotalsEffect.remeasure(ref));
+
 // Same retry policy as the stores it awaits: this loader inherits their
 // rejection, and riverpod would otherwise keep re-running it (staying *loading*
 // with the error attached) long after the store below it has given up.
@@ -54,6 +65,7 @@ final charaDetailInitialDataLoader = FutureProvider(retry: retryUnlessStoreOutag
   await runArchiveGeometryMigrationIfNeeded(
     pathInfo,
     declaration: archiveGeometryRepairLongReadDeclaration(ref.base, pathInfo),
+    effects: archiveGeometryRepairEffects(ref.read(containerRefProvider)),
   );
   return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
 });

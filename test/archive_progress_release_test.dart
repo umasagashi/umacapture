@@ -37,6 +37,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -112,7 +113,7 @@ void main() {
     final controller = await controllerFor(container, gate);
     final toasts = listenToasts(container);
 
-    await controller.archive(['busy-a'], ArchiveImageOption.none);
+    await controller.archive(['busy-a'], ArchiveImageOption.none, effects: archiveEffects(container));
     await Future<void>.delayed(Duration.zero);
 
     expect(
@@ -152,7 +153,7 @@ void main() {
     final controller = await controllerFor(container, gate);
     final toasts = listenToasts(container);
 
-    await controller.archive(['stuck-a', 'stuck-b'], ArchiveImageOption.none);
+    await controller.archive(['stuck-a', 'stuck-b'], ArchiveImageOption.none, effects: archiveEffects(container));
     await Future<void>.delayed(Duration.zero);
 
     // The throw really came from inside the lock, not from the acquisition.
@@ -179,7 +180,7 @@ void main() {
     final controller = await controllerFor(container, gate);
     final toasts = listenToasts(container);
 
-    await controller.archive(['ok-a'], ArchiveImageOption.none);
+    await controller.archive(['ok-a'], ArchiveImageOption.none, effects: archiveEffects(container));
     await Future<void>.delayed(Duration.zero);
 
     expect(container.read(charaArchiveControllerProvider).isEmpty, isTrue);
@@ -196,7 +197,7 @@ void main() {
     final controller = await controllerFor(container, null);
     final toasts = listenToasts(container);
 
-    await controller.archive(const [], ArchiveImageOption.none);
+    await controller.archive(const [], ArchiveImageOption.none, effects: archiveEffects(container));
     await Future<void>.delayed(Duration.zero);
 
     expect(container.read(charaArchiveControllerProvider).isEmpty, isTrue);

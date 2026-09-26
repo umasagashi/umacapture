@@ -15,6 +15,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
@@ -77,7 +78,7 @@ void main() {
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
-    final bulk = await active.deleteAllAsync(['b', 'a', 'a']);
+    final bulk = await active.deleteAllAsync(['b', 'a', 'a'], effects: recordDeleteEffects(container));
     expect(bulk.succeeded, {'a'});
     expect(bulk.failed, {'b'});
     expect(active.getBy(id: 'a'), isNull);
@@ -87,7 +88,7 @@ void main() {
     expect(Directory((activeDir / 'b').path).existsSync(), isTrue);
 
     fsBackend = WebLikeFsBackend(originalBackend);
-    final single = await active.deleteAsync('c');
+    final single = await active.deleteAsync('c', effects: recordDeleteEffects(container));
     expect(single.succeeded, {'c'});
     expect(single.failed, isEmpty);
     expect(active.getBy(id: 'c'), isNull);
@@ -114,7 +115,7 @@ void main() {
     // Out of band, as Explorer or another tool would.
     Directory((activeDir / 'ghost').path).deleteSync(recursive: true);
 
-    final bulk = await active.deleteAllAsync(['ghost', 'kept']);
+    final bulk = await active.deleteAllAsync(['ghost', 'kept'], effects: recordDeleteEffects(container));
 
     expect(bulk.succeeded, {'ghost', 'kept'});
     expect(bulk.failed, isEmpty);
@@ -135,7 +136,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     Directory((activeDir / 'solo-ghost').path).deleteSync(recursive: true);
 
-    final single = await active.deleteAsync('solo-ghost');
+    final single = await active.deleteAsync('solo-ghost', effects: recordDeleteEffects(container));
 
     expect(single.succeeded, {'solo-ghost'});
     expect(single.failed, isEmpty);
@@ -168,7 +169,7 @@ void main() {
     // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
     container.read(charaDetailCaptureStateProvider.notifier).started('incoming');
 
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await Future<void>.delayed(Duration.zero);
 
     expect(active.getBy(id: 'existing'), isNotNull);
@@ -242,12 +243,12 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     fsBackend = _FailRecordDeleteBackend(originalBackend, 'native-b');
 
-    final single = await active.deleteAsync('native-b');
+    final single = await active.deleteAsync('native-b', effects: recordDeleteEffects(container));
     expect(single.succeeded, isEmpty);
     expect(single.failed, {'native-b'});
     expect(active.getBy(id: 'native-b'), isNotNull);
 
-    final bulk = await active.deleteAllAsync(['native-b', 'native-a']);
+    final bulk = await active.deleteAllAsync(['native-b', 'native-a'], effects: recordDeleteEffects(container));
     expect(bulk.succeeded, {'native-a'});
     expect(bulk.failed, {'native-b'});
     expect(active.getBy(id: 'native-a'), isNull);
@@ -275,7 +276,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     fsBackend = _FailSyncRecordDeleteBackend(originalBackend, 'legacy-b');
 
-    final result = await active.deleteAllAsync(['legacy-b', 'legacy-a']);
+    final result = await active.deleteAllAsync(['legacy-b', 'legacy-a'], effects: recordDeleteEffects(container));
 
     expect(result.succeeded, {'legacy-a', 'legacy-b'});
     expect(result.failed, isEmpty);
@@ -303,7 +304,7 @@ void main() {
     final archive = container.read(charaDetailArchiveStorageLoaderProvider.notifier);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
-    final result = await archive.deleteAllAsync(['arch-b', 'arch-a']);
+    final result = await archive.deleteAllAsync(['arch-b', 'arch-a'], effects: recordDeleteEffects(container));
     expect(result.succeeded, {'arch-a'});
     expect(result.failed, {'arch-b'});
     expect(archive.getBy(id: 'arch-a'), isNull);
@@ -320,7 +321,10 @@ void main() {
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
-    await expectLater(active.deleteAsync('keep'), throwsA(isA<RecordMutationLockUnavailable>()));
+    await expectLater(
+      active.deleteAsync('keep', effects: recordDeleteEffects(container)),
+      throwsA(isA<RecordMutationLockUnavailable>()),
+    );
     expect(active.getBy(id: 'keep'), isNotNull);
     expect(Directory((activeDir / 'keep').path).existsSync(), isTrue);
   });
@@ -351,7 +355,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     writeRecord(activeDir / 'incoming', makeRecord(id: 'incoming', card: 2));
 
-    final pending = active.addFromFileAsync('incoming');
+    final pending = active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await mergeExclusive.future;
     // Its parent-1 slot matches `incoming`'s self key, so the resolution links it
     // to `incoming` and the import must write it too - the plan grows, and with it
@@ -392,7 +396,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     writeRecord(activeDir / 'incoming', makeRecord(id: 'incoming', card: 2));
 
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
 
     expect(active.getBy(id: 'incoming'), isNotNull);
     // Only `incoming`'s own lock is ever taken (once to read it, once to merge it).
@@ -420,10 +424,10 @@ void main() {
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await pumpMicrotasks();
     expect(container.read(inheritanceResolutionRunningProvider), isTrue);
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await pumpMicrotasks();
 
     expect(rootAcquisitions, 1, reason: 'the second tap must not start another whole-store acquisition');
@@ -469,7 +473,7 @@ void main() {
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await pumpMicrotasks();
     expect(container.read(inheritanceResolutionRunningProvider), isTrue);
 
@@ -501,7 +505,7 @@ void main() {
     final toastSubscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
     addTearDown(toastSubscription.close);
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await waitUntil(
       () => !container.read(inheritanceResolutionRunningProvider),
       describe: 'the refused inheritance resolution to clear its in-flight flag',

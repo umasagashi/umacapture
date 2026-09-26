@@ -24,6 +24,8 @@ import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
+import '/src/core/storage/record_write_invalidation.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
@@ -201,6 +203,16 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   // where the container went away first.
   LongReadRegistry? _claimant;
 
+  // The totals halves of the declarations [updated] received during the batch in
+  // flight, applied once by [_finish] rather than once per record. A set, so the
+  // production declarations (all holding the container's one ref) fold into one.
+  // Emptied by [_finish] alone. No batch begins over another's pending totals:
+  // [start] refuses while a batch holds its claim.
+  final Set<RecordTotalsEffect> _pendingTotals = {};
+
+  // The layout [_pendingTotals] is applied over, from the latest [updated].
+  PathInfo? _pendingTotalsInfo;
+
   /// How long the batch may make no progress before the watchdog force-closes it.
   ///
   /// Reset on every counted record, so a healthy long batch is never cut off; it
@@ -355,7 +367,22 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     _claimant = claimant;
   }
 
-  Future<void> updated(String id) async {
+  /// Announces that regeneration of [id] rewrote its directory under `active/`.
+  ///
+  /// [effects] is applied in two halves. The image half runs here, per record and
+  /// before the reload, over `active/<id>` -- a regeneration only ever rewrites
+  /// the active store. The totals half is collected while a batch is in flight
+  /// and applied once when it finishes ([_finish]); an announcement that arrives
+  /// outside a batch applies it at once, since no batch end will come for it.
+  Future<void> updated(String id, {required RecordWriteEffects effects}) async {
+    PathInfo? pathInfo;
+    try {
+      final info = await ref.read(pathInfoLoader.future);
+      pathInfo = info;
+      effects.images.apply(RecordImageScope(info: info, changed: [recordDirOfId(info, RecordSource.active, id).path]));
+    } catch (e, s) {
+      logger.w("Failed to resolve the layout for regenerated record $id: $e\n$s");
+    }
     // Always reload, even outside a batch: the native side can emit this for any
     // record regeneration, and a failed reload must not abort the refresh.
     // Completion is gated on the count reaching the total, so a single failed
@@ -373,6 +400,17 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     if (!ref.mounted) {
       return;
     }
+    if (pathInfo != null) {
+      // Read before [_count], which can complete the batch: the record that
+      // completes it belongs to it. `isCompleted` is also what [_count] reads to
+      // tell a batch from none.
+      if (state.isCompleted) {
+        effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+      } else {
+        _pendingTotals.add(effects.totals);
+        _pendingTotalsInfo = pathInfo;
+      }
+    }
     _count(id, failed: false);
   }
 
@@ -380,8 +418,12 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   ///
   /// A failed `updateRecord` emits an `onError` instead of the `onCharaDetailUpdated`
   /// that [updated] consumes, so without this the batch would wedge on the missing
-  /// callback. Counted as a processed (failed) record so the batch still completes;
-  /// no reload runs, since the record's files were not rewritten.
+  /// callback. Counted as a processed (failed) record so the batch still completes.
+  ///
+  /// A failure is not announced as a write: no reload runs and no [RecordWriteEffects]
+  /// is applied. Native can fail after it has already rewritten some of the record's
+  /// files (`record.json` is written last), and what the app shows of those files
+  /// stays as it was until they are next read.
   void fail(String id) {
     logger.w("Regeneration failed for record $id.");
     _count(id, failed: true);
@@ -423,6 +465,7 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
 
   void _finish() {
     _closeBatch();
+    _applyPendingTotals();
     // The batch is done. Release the native event loop that updateRecord spun up; the native guard leaves it
     // running if a live capture is sharing it, so this is safe to call unconditionally.
     ref.read(platformControllerProvider)?.finishUpdate();
@@ -437,6 +480,19 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
       _showCompletionToast(succeeded: succeeded, failed: failed);
       state = Progress.none;
     });
+  }
+
+  void _applyPendingTotals() {
+    final info = _pendingTotalsInfo;
+    final pending = _pendingTotals.toList();
+    _pendingTotals.clear();
+    _pendingTotalsInfo = null;
+    if (info == null) {
+      return;
+    }
+    for (final totals in pending) {
+      totals.apply(TotalsScope.recordRoot(info));
+    }
   }
 
   void _showCompletionToast({required int succeeded, required int failed}) {
@@ -835,9 +891,30 @@ Future<void> _discardRejectedDuplicateAsync(DirectoryPath directory) async {
 abstract interface class CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id});
 
-  Future<RecordDeleteResult> deleteAsync(String id);
+  /// Deletes the record [id]. Once the delete reports, [effects] is applied: the images to its
+  /// directory if it is gone and to nothing if it is not, the totals to the record root either way.
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects});
 
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids);
+  /// Deletes every id in [ids]. Once the batch reports, [effects] is applied: the images to the
+  /// directories of the ids in [RecordDeleteResult.succeeded] and to no other, the totals to the
+  /// record root.
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects});
+}
+
+/// Hands [effects] what a finished delete in the store rooted at [store] erased, and returns [result].
+///
+/// The scope is the directories of [RecordDeleteResult.succeeded] only: a failed id's directory can
+/// still be on disk with the pictures it had, so dropping its cached reads would throw away pixels
+/// that are still correct.
+RecordDeleteResult _declareDeleted(
+  RecordDeleteResult result, {
+  required PathInfo info,
+  required DirectoryPath store,
+  required RecordWriteEffects effects,
+}) {
+  effects.images.apply(RecordImageScope(info: info, changed: [for (final id in result.succeeded) (store / id).path]));
+  effects.totals.apply(TotalsScope.recordRoot(info));
+  return result;
 }
 
 /// What a record merge asks of a store while it already holds the exclusive root
@@ -1037,11 +1114,19 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     implements CharaDetailRecordMutator, CharaDetailRecordMergeSurface {
   @override
   late DirectoryPath rootDirectory;
+
+  /// The layout this build resolved, kept because [addFromFile] is synchronous
+  /// and cannot await `pathInfoLoader` again at the moment a record arrives.
+  /// [rootDirectory] is taken from the same value, so the two cannot describe
+  /// different trees.
+  late PathInfo _pathInfo;
+
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
   @override
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
+    _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailActiveDir;
     // Kick off the archive build so capture-time dedup and inheritance
     // resolution can consider archived records; its bulk scan waits for this
@@ -1090,7 +1175,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
         // The origin rides the event rather than being read back from the import's state here: the
         // two agree only while this callback is synchronous, and pinning the decision to the record
         // means it stays right if it ever is not. See [CharaDetailRecordCapturedEvent].
-        next.whenData((e) => addFromFile(e.id, notifyDuplicate: !e.fromVideoImport));
+        next.whenData((e) => addFromFile(e.id, notifyDuplicate: !e.fromVideoImport, effects: _captureArrivalEffects()));
       });
       _scheduleRetainedCaptureDrain();
     }
@@ -1132,7 +1217,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
         // gap the marker exists to survive.
         for (final (:id, :fromVideoImport) in capturedRecordRetention.pendingEvents) {
           try {
-            addFromFile(id, notifyDuplicate: !fromVideoImport);
+            addFromFile(id, notifyDuplicate: !fromVideoImport, effects: _captureArrivalEffects());
           } catch (error, stackTrace) {
             logger.e("Failed to ingest the retained captured record $id.", error, stackTrace);
           }
@@ -1431,7 +1516,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// whatever else is running at the time. Only the sound is dropped -- the capture-state
   /// failure below still fires, so the visible status output is unchanged (for the attempt the
   /// record belongs to; see [_reportRejectedDuplicate]).
-  Future<void> addFromFileAsync(String id, {bool notifyDuplicate = true}) async {
+  ///
+  /// [effects] is applied to `<id>`'s directory on every exit, a throw included. [addFromFile]
+  /// applies its own only once the id is handled, and leaves an id that threw to the next build.
+  Future<void> addFromFileAsync(String id, {bool notifyDuplicate = true, required RecordWriteEffects effects}) async {
     final storageRoot = rootDirectory.parent.parent;
     try {
       final result = await recordRecoveryGate.runForRecord(
@@ -1479,6 +1567,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       // Rethrown, not swallowed: the callers decide whether one record's failure
       // ends the batch, and a test that awaits this must still see the failure.
       rethrow;
+    } finally {
+      // Every exit from here leaves the record on disk -- merged, quarantined,
+      // discarded as a duplicate, or stranded by the failure above -- so the tree
+      // differs from the one the view's totals were taken from in all of them.
+      _applyArrivalEffects(id, effects);
     }
   }
 
@@ -1595,7 +1688,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// returned future is already complete: it says "this call started nothing",
   /// not "the run in flight has finished". `inheritanceResolutionRunningProvider`
   /// is the only signal that tracks the run itself.
-  Future<void> resolveAllInheritance() {
+  ///
+  /// [effects] is applied to the record root once the run ends, whatever its outcome: the run
+  /// rewrites `record.json` files in both stores and reports no list of them.
+  Future<void> resolveAllInheritance({required RecordWriteEffects effects}) {
     // The in-flight flag is the only thing standing between a second tap and a
     // second whole-store lock acquisition.
     if (ref.read(inheritanceResolutionRunningProvider)) {
@@ -1603,6 +1699,20 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     }
     ref.read(inheritanceResolutionRunningProvider.notifier).set(true);
     return _resolveAllInheritanceAsync().whenComplete(() {
+      // The resolution rewrites each changed record back into whichever store
+      // owns it, and the settings tile that starts it puts nothing in front of
+      // itself -- no dialog replaces the storage card, so the user can open the
+      // storage manager from the same page while the run is still writing.
+      //
+      // In `whenComplete` rather than after a successful run, for the reason the
+      // archive batch gives: a resolution that threw partway can already have
+      // persisted part of its changed set, so the outcome is not the question.
+      // The tap the double-tap guard refuses returns above and never arrives
+      // here, which is the one case that really wrote nothing. Ahead of the
+      // mounted check below, which guards this store's own `ref`: the
+      // declaration carries the container's ref and checks that one itself.
+      effects.images.apply(RecordImageScope(info: _pathInfo, changed: [_pathInfo.charaDetailDir.path]));
+      effects.totals.apply(TotalsScope.recordRoot(_pathInfo));
       // A whole-store resolution can outlive its container (the app closing,
       // or a test tearing the container down mid-flight). `ref.read` on a
       // disposed element throws, and most callers discard the returned future,
@@ -1777,7 +1887,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// [addFromFileAsync]'s parameter of the same name; the reasoning is written out there. It is
   /// threaded from the capture event's origin rather than read off the import state at merge time so
   /// that the two paths decide the same fact the same way, out of the same data, on both platforms.
-  void addFromFile(String id, {bool notifyDuplicate = true}) {
+  ///
+  /// [effects] is applied to `<id>`'s directory once the id is handled: a known id's arrival
+  /// replaces that record's files in place (see [duplicateCharaIdIn]), so the pictures cached by its
+  /// paths are as stale as the storage view's totals.
+  void addFromFile(String id, {bool notifyDuplicate = true, required RecordWriteEffects effects}) {
     final result = CharaDetailRecord.load(rootDirectory / id);
     switch (result) {
       case RecordLoaded(:final record):
@@ -1790,7 +1904,29 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     // retained, so the next build retries it rather than dropping the capture --
     // the same "retain until committed" rule the web harvest follows.
     capturedRecordRetention.acknowledge(id);
+    // After the acknowledgement rather than in a `finally`, because a throw above
+    // leaves this id for the next build to handle, and that attempt refreshes.
+    // [addFromFileAsync] has no such retry and so refreshes either way.
+    _applyArrivalEffects(id, effects);
   }
+
+  /// Applies an arrival's [effects] to `<id>`'s directory and to the record root.
+  ///
+  /// Both arrival paths end here, and neither knows whether the storage view is
+  /// open or which pictures are cached: the refresh is what a closed view costs
+  /// nothing for ([refreshStorageTabAfterRecordWrite]), and the drop is a scan of
+  /// the cache keys. The directory is the same one whether the record was merged,
+  /// quarantined or discarded as a duplicate.
+  void _applyArrivalEffects(String id, RecordWriteEffects effects) {
+    effects.images.apply(RecordImageScope(info: _pathInfo, changed: [(rootDirectory / id).path]));
+    effects.totals.apply(TotalsScope.recordRoot(_pathInfo));
+  }
+
+  /// What a capture's arrival declares, for the two callers inside this store.
+  ///
+  /// Through the container's ref rather than this notifier's, read before the
+  /// merge: the store can be invalidated while an arrival is still being handled.
+  RecordWriteEffects _captureArrivalEffects() => recordArrivalEffects(ref.read(containerRefProvider));
 
   @override
   CharaDetailRecord? getBy({required String id}) {
@@ -1906,13 +2042,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   }
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) async {
-    return recordRecoveryGate.runForRecord(
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
+    final result = await recordRecoveryGate.runForRecord(
       rootDirectory.parent.parent,
       id,
       () => deleteAllUnlocked({id}),
       declaration: _recordDeleteDeclaration,
     );
+    return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
   }
 
   /// Deletes every id in [ids], accounting for each one separately.
@@ -1930,7 +2067,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   ///
   /// The map's values are unused: a delete's whole per-record payload is the id.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final succeeded = <String>{};
     final failed = <String>{};
     await recordRecoveryGate.runPerRecord(
@@ -1943,7 +2080,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
         logger.e("Cannot delete active record $id: its recovery did not finish.", error, stackTrace);
       },
     );
-    return _reportDeleted(succeeded: succeeded, failed: failed);
+    return _declareDeleted(
+      _reportDeleted(succeeded: succeeded, failed: failed),
+      info: _pathInfo,
+      store: rootDirectory,
+      effects: effects,
+    );
   }
 
   @override
@@ -2208,6 +2350,10 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   @override
   late DirectoryPath rootDirectory;
 
+  /// The layout this build resolved, kept so a delete can name the preview providers of what it
+  /// erased without awaiting `pathInfoLoader` again. [rootDirectory] is taken from the same value.
+  late PathInfo _pathInfo;
+
   @visibleForTesting
   RecordMutationLock get recordMutationLock => platformRecordMutationLock;
 
@@ -2217,6 +2363,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   @override
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
+    _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailArchiveDir;
     // Sequence the bulk scan after the active store's, so the two scans do not
     // fan out worker isolates at the same time (each spawns up to
@@ -2362,20 +2509,21 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   /// Permanently deletes an archived record's directory and republishes.
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) async {
-    return recordRecoveryGate.runForRecord(
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
+    final result = await recordRecoveryGate.runForRecord(
       rootDirectory.parent.parent,
       id,
       () => deleteAllUnlocked({id}),
       declaration: _recordDeleteDeclaration,
     );
+    return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
   }
 
   /// The archive's counterpart of [CharaDetailRecordStorage.deleteAllAsync], and
   /// per-record for the same reason: see that method for why one record's
   /// recovery failure must not be a precondition of the whole batch.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final succeeded = <String>{};
     final failed = <String>{};
     await recordRecoveryGate.runPerRecord(
@@ -2388,7 +2536,12 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
         logger.e("Cannot delete archived record $id: its recovery did not finish.", error, stackTrace);
       },
     );
-    return _reportDeleted(succeeded: succeeded, failed: failed);
+    return _declareDeleted(
+      _reportDeleted(succeeded: succeeded, failed: failed),
+      info: _pathInfo,
+      store: rootDirectory,
+      effects: effects,
+    );
   }
 
   @override
@@ -2608,7 +2761,16 @@ class CharaArchiveController extends Notifier<Progress> {
   @override
   Progress build() => Progress.none;
 
-  Future<void> archive(List<String> ids, archive_executor.ArchiveImageOption option) async {
+  /// Moves [ids] from `active/` into `archive/` in one batch.
+  ///
+  /// [effects] is applied once the batch ends, to the ids the executor reports as moved: both
+  /// directories of each, the one it left and the one it now occupies. An id that failed is still
+  /// where it was, so nothing cached under it is dropped.
+  Future<void> archive(
+    List<String> ids,
+    archive_executor.ArchiveImageOption option, {
+    required RecordWriteEffects effects,
+  }) async {
     if (ids.isEmpty) {
       return;
     }
@@ -2720,6 +2882,29 @@ class CharaArchiveController extends Notifier<Progress> {
             }
           },
         );
+    // The batch moved record directories out of `active/` and into `archive/`,
+    // both of which the storage view measures, and the dialog that started it
+    // dismissed without awaiting -- so unlike every other record mutation driven
+    // from a dialog, this one can still be running while the user opens the
+    // storage manager over the settings page. The pictures under a moved record
+    // are cached by path, and `active/<id>` no longer holds them. `archive/<id>`
+    // is dropped as well: it is normally a directory nothing had cached, but the
+    // declaration does not rest on that.
+    //
+    // Guarded like the progress release above, and for the same reason: the
+    // container can go away mid-archive, and reading a provider off a disposed
+    // element throws.
+    if (ref.mounted) {
+      effects.images.apply(
+        RecordImageScope(
+          info: pathInfo,
+          changed: [
+            for (final id in archived) ...[(activeRoot / id).path, (archiveRoot / id).path],
+          ],
+        ),
+      );
+      effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+    }
     if (archived.isNotEmpty) {
       Toaster.show(
         ToastData.success(
@@ -2829,6 +3014,13 @@ LongReadDeclaration archiveGeometryRepairLongReadDeclaration(RefBase ref, PathIn
   );
 }
 
+/// What a record's arrival declares: the store's capture listener and the web harvest both drop the
+/// arriving directory's cached reads and re-measure the record root.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects recordArrivalEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
+
 /// Runs the one-time [migrateArchivedRecordsInIsolate] cleanup the first time
 /// only, recording completion so later launches skip the archive scan.
 ///
@@ -2843,9 +3035,16 @@ LongReadDeclaration archiveGeometryRepairLongReadDeclaration(RefBase ref, PathIn
 /// root scope in `record_loader_io.dart` and whose worker isolates can move an
 /// entire `archive/<id>` directory aside (quarantine) while this pass is
 /// deleting files out of it and rewriting files into it.
+///
+/// [effects] is applied once the pass has run, over the whole archive store: the
+/// worker rewrites geometry json and deletes `prediction.json` under any
+/// `archive/<id>` and reports no ids, so the archive root is the only complete
+/// account of what changed. A pass refused the root scope wrote nothing and
+/// applies nothing.
 Future<void> runArchiveGeometryMigrationIfNeeded(
   PathInfo pathInfo, {
   required LongReadDeclaration declaration,
+  required RecordWriteEffects effects,
   RecordRecoveryGate? recoveryGate,
 }) async {
   // Desktop-only one-time cleanup: it runs inside a `compute` isolate over sync
@@ -2894,6 +3093,8 @@ Future<void> runArchiveGeometryMigrationIfNeeded(
     logger.e("Archive geometry migration could not take the root record lock; skipped.", error, stackTrace);
     return;
   }
+  effects.images.apply(RecordImageScope(info: pathInfo, changed: [pathInfo.charaDetailArchiveDir.path]));
+  effects.totals.apply(TotalsScope.recordRoot(pathInfo));
   logger.i("Archive geometry migration visited $count archived record(s).");
   entry.push(true);
 }

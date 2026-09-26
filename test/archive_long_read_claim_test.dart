@@ -45,6 +45,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -54,6 +55,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
@@ -80,10 +82,11 @@ mixin _FakeRecordStore on CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id}) => _held.contains(id) ? makeRecord(id: id, card: 1) : null;
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     _held.removeAll(idSet);
@@ -177,7 +180,11 @@ _PinnedArchive _startPinnedArchive(ProviderContainer container, List<String> ids
       return action();
     }),
   );
-  return (reached: reachedLock.future, archiving: controller.archive(ids, ArchiveImageOption.none), release: release);
+  return (
+    reached: reachedLock.future,
+    archiving: controller.archive(ids, ArchiveImageOption.none, effects: archiveEffects(container)),
+    release: release,
+  );
 }
 
 Finder get _confirm => find.widgetWithIcon(FilledButton, Symbols.delete_rounded);
@@ -422,7 +429,7 @@ void main() {
       );
       storage.readLockHeld = () => lockHeld;
 
-      await controller.archive(['a'], ArchiveImageOption.none);
+      await controller.archive(['a'], ArchiveImageOption.none, effects: archiveEffects(container));
 
       expect(lockWasTaken, isTrue, reason: 'the control: an executor that took no lock proves nothing about order');
       expect(
@@ -521,7 +528,10 @@ void main() {
 
       archive.release.complete();
       await archive.archiving;
-      await tester.pump();
+      // Settled rather than pumped: the end of a batch also announces the record
+      // tree to the storage view (`record_write_invalidation.dart`), so the rows
+      // are being walked again and a single frame finds none of them.
+      await _settle(tester);
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
 
       // What the returned control leads to is still the delete: the claim above

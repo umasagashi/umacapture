@@ -23,6 +23,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 
@@ -108,7 +109,7 @@ void main() {
 
     expect(parentOnDisk(activeDir, 'child-active', 1), isNull, reason: 'precondition: starts unlinked');
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await settleInheritanceResolution(container);
 
     // Active child now points at the ARCHIVED parent, on disk and in memory.
@@ -154,7 +155,9 @@ void main() {
 
     // The returned future is the completion signal: no waitUntil, no pump.
     var completed = false;
-    final resolution = active.resolveAllInheritance().then((_) => completed = true);
+    final resolution = active
+        .resolveAllInheritance(effects: inheritanceResolutionEffects(container))
+        .then((_) => completed = true);
 
     await waitUntil(() => gate.held, describe: "the archive's record.json write to be reached");
     // The active side is already on disk; only the archive write is outstanding. A run that
@@ -239,7 +242,7 @@ void main() {
 
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive', reason: 'precondition: starts linked');
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await settleInheritanceResolution(container);
 
     // Link preserved on disk and in memory; not cleared against the missing archive.

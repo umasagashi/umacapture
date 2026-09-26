@@ -24,7 +24,6 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/hive.dart';
-import 'support/riverpod.dart';
 import 'support/settling.dart';
 
 void main() {

@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-/// Exposes a [RefBase] from a container so functions and runners that take a
-/// [RefBase] (rather than a [ProviderContainer]) can be exercised in tests:
-/// `container.read(refBaseProvider)`.
-final refBaseProvider = Provider<RefBase>((ref) => ref.base);
+/// The app's own [containerRefProvider], re-exported so a test that only needs a
+/// [RefBase] from its container keeps reaching for one import.
+///
+/// It is the app's and not a copy of it, so a test exercising a runner over this
+/// [RefBase] exercises the one the app hands that runner.
+export 'package:umacapture/src/core/utils.dart' show refBaseProvider;
 
 /// Pumps [child] with [container] in scope, tying the container's lifetime to
 /// the widget tree.

@@ -30,7 +30,6 @@ import 'package:umacapture/src/gui/record_store_banner.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 /// The one sentence a failed metadata write is announced with, as shipped.
 String get _writeFailureSentence => appSentenceAt('pages.chara_detail.storage_write_failure');

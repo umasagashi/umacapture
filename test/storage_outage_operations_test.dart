@@ -186,9 +186,10 @@ void main() {
       // the same whether the function answers `void` or a future: what is under
       // test is that it does not throw, not which of the two it returns.
       await Future<void>.sync(
-        () => invalidateAfterStorageDelete(
+        () async => invalidateAfterStorageDelete(
           container.read(refBaseProvider),
           group: _groupOf(StorageGroupId.metadata),
+          info: await container.read(pathLayoutLoader.future),
           targets: [target],
         ),
       );

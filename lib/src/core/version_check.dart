@@ -20,6 +20,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/module_install_invalidation.dart';
 import '/src/core/utils.dart';
 // For [statedReportContext] / [reportValueNotStated]. The sweep lives beside the video-import
 // report because that is where the device measurement that produced it was taken, and it is a
@@ -520,8 +521,9 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
   }
 }
 
-/// Runs the region of a module install that rewrites [modulesDir], with that
-/// directory announced to [longReadRegistryProvider] for its whole length.
+/// Runs the region of a module install that rewrites [PathInfo.modulesDir],
+/// with that directory announced to [longReadRegistryProvider] for its whole
+/// length.
 ///
 /// **Every route that replaces the installed module goes through here**, which
 /// is the whole of what this function is for: the four of them (the desktop
@@ -539,9 +541,9 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
 ///
 /// **What it does about a reader that is already running is [contention], and
 /// the caller says which.** [LongReadRegistry.holdWhenFree] either parks this
-/// call until nothing is holding [modulesDir] and then claims it, or refuses
-/// outright, so in neither case can an install begin underneath a reader that
-/// has the module open.
+/// call until nothing is holding [PathInfo.modulesDir] and then claims it, or
+/// refuses outright, so in neither case can an install begin underneath a reader
+/// that has the module open.
 ///
 /// Three of the four routes pass [LongReadContention.defer]: the desktop
 /// auto-updater and the web bootstrap/refresh are started by a version check
@@ -572,21 +574,21 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
 /// reader is not *offered* while this is running.
 ///
 /// **Which readers this waits for is not a list here.** It is whatever the
-/// registry holds over [modulesDir] — today a record export (which streams
-/// `modules/labels.json` into the user's zip), the storage view's zip of the
-/// `modules` row, a data-root relocation, a re-recognition batch and a video
+/// registry holds over [PathInfo.modulesDir] — today a record export (which
+/// streams `modules/labels.json` into the user's zip), the storage view's zip of
+/// the `modules` row, a data-root relocation, a re-recognition batch and a video
 /// import (both of which recognise out of the module, per record, on Windows).
 /// A reader added tomorrow defers this without this function being edited, which
 /// is the property the registry exists for and the reason the question is asked
 /// of the paths rather than of a set of kinds.
 ///
 /// The download that precedes an automatic install is deliberately outside: it
-/// writes into `temp/`, touches nothing under [modulesDir], and holding the
-/// modules row for the length of a network transfer would refuse a zip for a
-/// window in which nothing is being rewritten.
+/// writes into `temp/`, touches nothing under [PathInfo.modulesDir], and
+/// holding the modules row for the length of a network transfer would refuse a
+/// zip for a window in which nothing is being rewritten.
 Future<T> runModuleInstall<T>(
   RefBase ref,
-  DirectoryPath modulesDir,
+  PathInfo pathInfo,
   Future<T> Function() install, {
   required LongReadContention contention,
 }) {
@@ -594,8 +596,25 @@ Future<T> runModuleInstall<T>(
       .read(longReadRegistryProvider.notifier)
       .holdWhenFree(
         kind: LongReadKind.moduleInstall,
-        paths: [modulesDir],
-        action: (_) => install(),
+        paths: [pathInfo.modulesDir],
+        action: (_) async {
+          try {
+            return await install();
+          } finally {
+            // Announced from the one seam every route replaces the module
+            // through, for the reason the claim above is taken here:
+            // `installModuleArchiveFile` runs in a worker and
+            // `installModuleArchiveBytes` is a pure function of its bytes, so
+            // neither can say anything to the container the view watches.
+            //
+            // In a `finally` because the numbers on screen describe the tree and
+            // not the outcome: an extraction that threw part-way through has
+            // still written some of the module, and the archive it was refused
+            // for was still staged into the scratch tree by the download.
+            // `module_install_invalidation.dart` names what may have changed.
+            refreshStorageTabAfterModuleInstall(ref, pathInfo);
+          }
+        },
         contention: contention,
       );
 }
@@ -638,8 +657,10 @@ bool _reportManualInstallNotStarted(LongReadNotStartedException exception) {
 ///
 /// On success the caller must invalidate [moduleVersionLoader] (guarded by its
 /// own widget lifecycle) so the freshly extracted module takes effect without an
-/// app restart. This function never touches [ref] after the extraction await, so
-/// it is safe even if the originating widget is disposed mid-install.
+/// app restart. After the extraction await the only thing this reaches [ref] for
+/// is the storage view's re-measure, which asks whether the ref is still usable
+/// before it reads anything, so it is safe even if the originating widget is
+/// disposed mid-install.
 ///
 /// Returns true on success.
 Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
@@ -647,7 +668,7 @@ Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
     final pathInfo = await ref.read(pathInfoLoader.future);
     await runModuleInstall(
       ref,
-      pathInfo.modulesDir,
+      pathInfo,
       () => compute(installModuleArchiveFile, (zipPath, pathInfo.modulesDir.parent)),
       contention: LongReadContention.refuse,
     );
@@ -678,9 +699,9 @@ Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
 /// manual install lands exactly where the automatic one does.
 ///
 /// Reports the outcome with the same toasts as [installModuleFromZip] — both
-/// success and failure — so the manual update is never silent. Like it, this
-/// function never touches [ref] after the extraction await, and the caller owns
-/// invalidating [moduleVersionLoader].
+/// success and failure — so the manual update is never silent. Like it, the only
+/// thing it reaches [ref] for after the extraction await is the storage view's
+/// re-measure, and the caller owns invalidating [moduleVersionLoader].
 ///
 /// Returns true on success.
 Future<bool> installModuleFromZipBytes(RefBase ref, List<int> bytes) async {
@@ -688,7 +709,7 @@ Future<bool> installModuleFromZipBytes(RefBase ref, List<int> bytes) async {
     final pathInfo = await ref.read(pathInfoLoader.future);
     await runModuleInstall(
       ref,
-      pathInfo.modulesDir,
+      pathInfo,
       () => extractModuleZipBytes(bytes, pathInfo.modulesDir),
       contention: LongReadContention.refuse,
     );
@@ -1083,7 +1104,7 @@ Future<ModuleVersion?> _bootstrapWebModule(Ref ref) async {
   final needJson = !await versionFile.exists();
   final needOnnx = !await onnxSentinel.exists();
   if (!needJson && !needOnnx) {
-    return _refreshWebModule(ref, modulesDir, versionFile);
+    return _refreshWebModule(ref, pathInfo, versionFile);
   }
   // Safe to write providers here: we are past the awaits above, so the
   // synchronous build frame that the modify-during-build guard checks is done.
@@ -1098,7 +1119,7 @@ Future<ModuleVersion?> _bootstrapWebModule(Ref ref) async {
     return null;
   }
   try {
-    await _downloadAndExtractModuleToOpfs(ref.base, modulesDir, latest, archive);
+    await _downloadAndExtractModuleToOpfs(ref.base, pathInfo, latest, archive);
   } on LongReadNotStartedException {
     // The container went away while the extraction was deferred (this route never
     // refuses). Nothing was written and nothing failed; raising the banner below
@@ -1234,7 +1255,7 @@ Future<ModuleVersionRawData?> _downloadLatestModuleVersion() async {
 /// recognizer while nothing on screen said so. Recognition quality degrading
 /// silently is worse than a visible failure, so the check runs on every boot and
 /// a check that cannot be completed is reported rather than ignored.
-Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, FilePath versionFile) async {
+Future<ModuleVersion?> _refreshWebModule(Ref ref, PathInfo pathInfo, FilePath versionFile) async {
   final local = await ModuleVersionRawData.load(versionFile);
   final appVersion = await ref.watch(localAppVersionLoader.future);
   final latest = await _downloadLatestModuleVersion();
@@ -1260,7 +1281,7 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
       return local?.toModuleVersion();
     case ModuleUpdateAvailable(:final latest, :final archive):
       try {
-        await _downloadAndExtractModuleToOpfs(ref.base, modulesDir, latest, archive);
+        await _downloadAndExtractModuleToOpfs(ref.base, pathInfo, latest, archive);
       } on LongReadNotStartedException {
         // As in the bootstrap above: the element went away while this was
         // deferred, which is neither an install nor a failure to report.
@@ -1306,7 +1327,7 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
 /// pointer did not name.
 Future<void> _downloadAndExtractModuleToOpfs(
   RefBase ref,
-  DirectoryPath modulesDir,
+  PathInfo pathInfo,
   ModuleVersionRawData latest,
   ModuleArchiveRef archive,
 ) async {
@@ -1321,8 +1342,8 @@ Future<void> _downloadAndExtractModuleToOpfs(
       // module is one rule, whoever fetched the bytes. See [installModuleArchiveBytes].
       (bytes) => runModuleInstall(
         ref,
-        modulesDir,
-        () => installModuleArchiveBytes(bytes, modulesDir, extractJson: true, extractOnnx: true),
+        pathInfo,
+        () => installModuleArchiveBytes(bytes, pathInfo.modulesDir, extractJson: true, extractOnnx: true),
         // Nobody pressed anything to get here — both callers are a boot-time version
         // check — so there is no surface to refuse on and nothing that could be told
         // to come back later. See [runModuleInstall].
@@ -1477,7 +1498,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
         // reaches the catch below instead of the success toast underneath it.
         () => runModuleInstall(
           ref.base,
-          pathInfo.modulesDir,
+          pathInfo,
           () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
           // Started by this version check and not by a press, so it waits rather
           // than refusing. See [runModuleInstall].
@@ -1516,6 +1537,12 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
     // and was then refused (not a module) or failed to extract leaves the same
     // temp file behind, and the refusal added above makes that outcome routine.
     await deleteDownloadedArchive(downloadPath);
+    // Announced a second time, because the scratch tree changes once more after
+    // the install has finished: the archive this route stages is multi-megabyte
+    // and its removal is the last thing the update does, so the announcement
+    // [runModuleInstall] makes describes a scratch tree that still holds it.
+    // Both are true where they stand; this is the one that is final.
+    refreshStorageTabAfterModuleInstall(ref.base, pathInfo);
   }
 
   setUpdateFailed(false);

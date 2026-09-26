@@ -41,6 +41,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 
@@ -109,6 +110,23 @@ void main() {
       return (container, notifier);
     }
 
+    // This suite runs without a widgets binding, so the declaration's pixel
+    // half cannot reach `imageCache` and throws inside. The record is still
+    // counted: a failed eviction must not wedge the batch.
+    test('a regeneration whose pixel eviction fails is still counted', () async {
+      final (container, notifier) = await setUpContainer();
+      writeRecord(pathInfoFor(DirectoryPath(tempRoot.path)).charaDetailActiveDir, 'r1');
+
+      notifier.beginBatch(1);
+      await expectLater(notifier.updated('r1', effects: regenerationEffects(container)), completes);
+
+      expect(notifier.successCount, 1);
+      await waitUntil(
+        () => container.read(charaDetailRecordRegenerationControllerProvider).isEmpty,
+        describe: 'the delayed tail to publish the store',
+      );
+    });
+
     test('(a) a fully successful batch completes and reports zero failures', () async {
       final (container, notifier) = await setUpContainer();
       final activeDir = pathInfoFor(DirectoryPath(tempRoot.path)).charaDetailActiveDir;
@@ -116,8 +134,8 @@ void main() {
       writeRecord(activeDir, 'r2');
 
       notifier.beginBatch(2);
-      await notifier.updated('r1');
-      await notifier.updated('r2');
+      await notifier.updated('r1', effects: regenerationEffects(container));
+      await notifier.updated('r2', effects: regenerationEffects(container));
 
       expect(container.read(charaDetailRecordRegenerationControllerProvider).isCompleted, isTrue);
       expect(notifier.successCount, 2);
@@ -137,7 +155,7 @@ void main() {
       writeRecord(activeDir, 'ok');
 
       notifier.beginBatch(2);
-      await notifier.updated('ok');
+      await notifier.updated('ok', effects: regenerationEffects(container));
       notifier.fail('bad'); // onError arrived instead of onCharaDetailUpdated.
 
       expect(container.read(charaDetailRecordRegenerationControllerProvider).isCompleted, isTrue);
@@ -151,8 +169,8 @@ void main() {
       writeRecord(activeDir, 'dup');
 
       notifier.beginBatch(2);
-      await notifier.updated('dup');
-      await notifier.updated('dup'); // Re-emit for the same record.
+      await notifier.updated('dup', effects: regenerationEffects(container));
+      await notifier.updated('dup', effects: regenerationEffects(container)); // Re-emit for the same record.
 
       final progress = container.read(charaDetailRecordRegenerationControllerProvider);
       expect(progress.count, 1);
@@ -172,7 +190,7 @@ void main() {
       // `fail` counts synchronously and re-arms the watchdog with whatever window is
       // set at that moment, so from here the window measures only the deliberate stall.
       notifier.beginBatch(3);
-      await notifier.updated('first');
+      await notifier.updated('first', effects: regenerationEffects(container));
       notifier.watchdogInactivityTimeout = const Duration(milliseconds: 50);
       notifier.fail('second'); // Two records report; the third never does.
 

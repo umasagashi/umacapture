@@ -18,8 +18,6 @@ import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/addon.dart' show formatHistoryTimestamp;
 import 'package:umacapture/src/gui/addon/task_dialog.dart';
 
-import 'support/riverpod.dart';
-
 void main() {
   group('WebhookRunner.start', () {
     late HttpServer server;

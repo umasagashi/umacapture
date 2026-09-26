@@ -19,6 +19,15 @@
 /// Every group that invalidates nothing is listed with its reason rather than
 /// falling into a default.
 ///
+/// **A delete can also change a store it is not deleting.** The group holding
+/// the transaction journals takes its exclusion with a drain in front of it, and
+/// the drain publishes into `active/`, `archive/` and `quarantine/` — none of
+/// which is the target. That is [_drainTouched], answered from the
+/// same predicate that puts the drain there, and read twice: its providers are
+/// added to whatever the table answers for the group's own contents, and its
+/// directories are added to what the view's totals cache is told to forget
+/// ([storageDeleteTotalsTargets]).
+///
 /// **What is deliberately not here.** The image-cache eviction is applied
 /// from the same seam but lives with the caches it drops (`record_image.dart`),
 /// because what it needs is not a group but the list of files the delete actually
@@ -72,6 +81,122 @@ List<ProviderOrFamily> storageDeleteInvalidationTargets({
   required PathInfo info,
   required List<PathEntity> targets,
 }) {
+  return [
+    ..._drainDestinationTargets(group, info),
+    ..._groupContentTargets(group: group, info: info, targets: targets),
+  ];
+}
+
+/// What whole-store recovery empties a transaction slot **into**, for a delete
+/// that forces the drain to run.
+///
+/// A group that holds one of the transaction journals takes its exclusion with
+/// `RootMaintenanceReason.beforeDestroyingJournals` (`storage_exclusion.dart`),
+/// and that reason is the one the sweep memo never answers
+/// (`root_storage_maintenance_shared.dart`), so the drain runs *during this
+/// delete*, in the middle of a session, and can:
+///
+///  * finish an interrupted publication into `active/<id>/`, which is a record
+///    the in-memory store has never seen;
+///  * finish an archive move, which takes a record out of one store and puts it
+///    in the other;
+///  * file a slot this build cannot read into `quarantine/`, which the banner
+///    counts.
+///
+/// None of those is the group being deleted, so the table below cannot answer
+/// for them: what the group holds and what its drain publishes are different
+/// sets, and only the first is a question about the target.
+///
+/// **Read off [StorageGroup.destroysTransactionJournal], not off a group id.**
+/// That predicate is what puts the drain in front of this delete, so asking it
+/// here is the same fact answered once — a group that comes to hold a journal
+/// gets this the day it does, and a list of ids here would go on agreeing with
+/// the old shape.
+///
+/// **Not conditioned on what the drain found**, for the reason given on
+/// [storageDeleteInvalidationTargets] and one more: the sweep reports the slots
+/// it could *not* empty (`RootMaintenanceOutcome.undrained`) and does not name
+/// what it published, so "did it publish anything" is not a question anything
+/// downstream can ask.
+List<_DrainTouched> _drainTouched(StorageGroup group, PathInfo info) {
+  if (!group.destroysTransactionJournal(info)) {
+    return const [];
+  }
+  return [
+    // Where a slot ends up.
+    (directory: info.charaDetailActiveDir, providers: [charaDetailRecordStorageLoaderProvider]),
+    (directory: info.charaDetailArchiveDir, providers: [charaDetailArchiveStorageLoaderProvider]),
+    (directory: info.charaDetailQuarantineDir, providers: [charaDetailQuarantineCountProvider]),
+    // Where it came from. A drained slot leaves the journal it was in, and
+    // `WebRecordWriteTransaction._retire` carries a staging that never reached
+    // `ready` — and a stray file found in a journal root — into `retired/`. Both
+    // are directories the tree sizes, so both are measured wrong afterwards, and
+    // neither is answered by the destinations above.
+    //
+    // **No provider, and that is the answer rather than an omission.** Nothing in
+    // memory holds either: `retired/` is read by the startup maintenance pass and
+    // by nothing after it (the table's own `retired` row says so), and a journal's
+    // slots are read by recovery off the disk each time. So these rows reach the
+    // totals cache and stop there.
+    //
+    // **Counted, not spelled.** The journals come from
+    // [PathInfo.charaDetailTransactionJournalDirs], which is the same list
+    // [StorageGroup.destroysTransactionJournal] asks to decide that the drain
+    // runs at all, so a third journal is covered here on the day it exists.
+    for (final journal in info.charaDetailTransactionJournalDirs)
+      (directory: journal, providers: const <ProviderOrFamily>[]),
+    (directory: info.charaDetailRetiredDir, providers: const <ProviderOrFamily>[]),
+  ];
+}
+
+/// One directory a forced drain changes, and what holds that directory's
+/// contents in memory — empty for a directory nothing holds.
+///
+/// The two travel together because they are one fact asked twice. The providers
+/// are what [storageDeleteInvalidationTargets] hands `ref.invalidate`; the
+/// directory is what [storageDeleteTotalsTargets] hands the storage tab's totals
+/// cache. A place named in one projection and not the other is a tree the app
+/// re-reads while the screen keeps the old size beside it, so the row carries
+/// both and neither side is a list anyone can extend alone.
+typedef _DrainTouched = ({DirectoryPath directory, List<ProviderOrFamily> providers});
+
+/// The providers of [_drainTouched].
+List<ProviderOrFamily> _drainDestinationTargets(StorageGroup group, PathInfo info) {
+  return [for (final touched in _drainTouched(group, info)) ...touched.providers];
+}
+
+/// The paths whose cached directory totals a delete of [targets] in [group] can
+/// have changed.
+///
+/// [targets] is what the request named. The rest is every directory the drain
+/// this delete forces changes, and none of them is implied by the request:
+/// `DirectoryTotalsCache.invalidate` drops the path it is given, its ancestors
+/// and its descendants, so a record the drain finishes into `active/` — or the
+/// journal it emptied to do it — keeps the bytes and the file count of the tree
+/// before the drain, beside a row that has already re-read the record itself.
+///
+/// **Independent of what the request named, and that is what a row delete needs.**
+/// Deleting the whole group names its roots, so the journals and `retired/` come
+/// in with [targets] and the gap does not show; deleting one entry under
+/// `retired/` names one directory and drains just the same, because
+/// `_rootMaintenanceReasonFor` reads the *group*. The same delete then leaves both
+/// journal totals and the `retired/` total counting a slot that is gone, which the
+/// group aggregate sums root by root (`storage_tree.dart`) — so its bytes are
+/// counted twice, once there and once in the `active/` the drain published into.
+List<PathEntity> storageDeleteTotalsTargets({
+  required StorageGroup group,
+  required PathInfo info,
+  required List<PathEntity> targets,
+}) {
+  return [...targets, for (final touched in _drainTouched(group, info)) touched.directory];
+}
+
+/// Which store remembers [group]'s own contents, entry by entry.
+List<ProviderOrFamily> _groupContentTargets({
+  required StorageGroup group,
+  required PathInfo info,
+  required List<PathEntity> targets,
+}) {
   switch (group.id) {
     case StorageGroupId.activeRecords:
       // The whole loader and not `removeRecords(ids)`: the in-memory list can
@@ -90,6 +215,9 @@ List<ProviderOrFamily> storageDeleteInvalidationTargets({
       // Nothing reads `retired/` after startup: the maintenance pass that fills
       // it has already run, and no provider holds its contents (`providers.dart`
       // on `retired/`: "there is nothing for the user to recover from them").
+      // What this delete changes in memory is what its drain publishes, and that
+      // is [_drainDestinationTargets]' answer rather than this row's — this group
+      // holds the journals, so it is the group that gets the drain.
       return const [];
     case StorageGroupId.metadata:
       // Both halves of the owner: the store's key list, which is one entry
@@ -128,20 +256,19 @@ List<ProviderOrFamily> storageDeleteInvalidationTargets({
 
 /// Applies [storageDeleteInvalidationTargets] for a finished delete.
 ///
-/// Asynchronous because it reads the layout rather than `pathInfoProvider` —
+/// [info] is passed in rather than read here because the caller resolves the same
+/// layout for [storageDeleteTotalsTargets]: the two answers describe one set of
+/// drain destinations, and resolving them against two reads would let them
+/// describe two different trees. It is the layout and not `pathInfoProvider` —
 /// see `runUnderStorageExclusion` for why the storage view may never read the
-/// latter. The delete this follows has already completed, so the layout is
-/// resolved and the await is a turn of the event loop, not a wait.
-Future<void> invalidateAfterStorageDelete(
+/// latter.
+void invalidateAfterStorageDelete(
   RefBase ref, {
   required StorageGroup group,
+  required PathInfo info,
   required List<PathEntity> targets,
-}) async {
-  for (final provider in storageDeleteInvalidationTargets(
-    group: group,
-    info: await ref.read(pathLayoutLoader.future),
-    targets: targets,
-  )) {
+}) {
+  for (final provider in storageDeleteInvalidationTargets(group: group, info: info, targets: targets)) {
     ref.invalidate(provider);
   }
 }

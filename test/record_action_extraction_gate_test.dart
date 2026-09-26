@@ -158,7 +158,7 @@ void _holdModules(ProviderContainer container) {
   // can be in flight without anybody having pressed anything.
   runModuleInstall(
     container.read(_refProvider),
-    _layout.modulesDir,
+    _layout,
     () => completer.future,
     contention: LongReadContention.defer,
   ).ignore();

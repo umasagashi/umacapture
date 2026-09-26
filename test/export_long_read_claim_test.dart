@@ -48,6 +48,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -82,10 +83,11 @@ mixin _FakeRecordStore on CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id}) => _held.contains(id) ? makeRecord(id: id, card: 1) : null;
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     _held.removeAll(idSet);

@@ -20,8 +20,6 @@ import 'package:umacapture/src/chara_detail/spec/ranged_label.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-import 'support/riverpod.dart';
-
 // A synthetic rank ladder: evaluation < 300 -> index 0, < 1000 -> 1, < 5000 -> 2,
 // otherwise the top index 3.
 const _rankBorder = [300, 1000, 5000];

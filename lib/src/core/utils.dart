@@ -387,6 +387,23 @@ extension RefExtension on Ref {
   RefBase get base => RefBase._(this);
 }
 
+/// A [RefBase] over the container, for work that outlives the widget or the
+/// provider that started it.
+///
+/// The record import is that work: it is driven from a toolbar the user can
+/// navigate away from while the picker is open, so it takes the container up
+/// front and applies every consequence of the import through it
+/// (`import_button.dart`). A `WidgetRef` throws the moment that toolbar is
+/// disposed, which is the case the import exists to survive.
+///
+/// **A provider and not an extension on [ProviderContainer].** The ref handed
+/// out here is a real `Ref`, so [RefBase.mounted] keeps answering; a [RefBase]
+/// built on the container itself could not answer it at all, because
+/// riverpod marks `ProviderContainer.disposed` internal. This provider is never
+/// auto-disposed, so the ref stays usable for as long as the container it came
+/// from.
+final refBaseProvider = Provider<RefBase>((ref) => ref.base);
+
 class RefBase {
   final dynamic _ref;
 

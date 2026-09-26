@@ -108,12 +108,18 @@ Future<DirectoryTotals> aggregateDirectoryTotals(DirectoryPath directory) async 
 /// Exactly two things, and the cache can only see one of them:
 ///
 /// 1. **This app changed the tree.** Deleting a group, importing records,
-///    capturing, clearing temp. Every one of those is a call site inside this
-///    app, and each must call [invalidate] with the path it touched;
+///    capturing. Every one of those is a call site inside this app, and each
+///    calls [invalidate] with the path it touched;
 ///    [invalidate] also drops the touched path's ancestors, whose totals include
-///    it, and its descendants, which a directory delete removes. Stage 6 owns
-///    wiring the deletes; the entry point exists now so that wiring is a call and
-///    not a redesign.
+///    it, and its descendants, which a directory delete removes. A delete goes
+///    through `storage_delete_invalidation.dart`, and a record write — an
+///    import, a live capture, a video import — through
+///    `record_write_invalidation.dart`.
+///
+///    The one writer that does not is the startup scratch sweep
+///    (`prepareScratchDir`), and its own doc says why: it is a step of resolving
+///    the layout, so it runs before that layout reaches anything that could have
+///    measured the tree it empties.
 /// 2. **Something outside this app changed the tree** — Explorer, the native
 ///    capture process, any other tool pointed at the data root. Neither
 ///    backend offers change notification and this app runs no watcher, so the

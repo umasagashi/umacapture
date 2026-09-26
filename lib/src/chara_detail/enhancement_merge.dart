@@ -20,7 +20,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
-import '/src/gui/record_image.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/gui/toast.dart';
 
 /// How a merge attempt ended.
@@ -124,8 +124,6 @@ final class EnhancementMergeFrame {
   /// result is returned unchanged. It is handed what the sweep left behind, the
   /// same value `runForRoot` hands its action.
   Future<EnhancementMergeResult> run({
-    required String olderId,
-    required String retiredId,
     required Future<EnhancementMergeResult> Function(RootMaintenanceOutcome outcome) body,
   }) async {
     final pathInfo = await _ref.read(pathInfoLoader.future);
@@ -148,13 +146,7 @@ final class EnhancementMergeFrame {
                   .read(enhancementRecoveryGateProvider)
                   .runForRoot(
                     pathInfo.storageDir,
-                    (outcome) => _rootAction(
-                      outcome,
-                      olderId: olderId,
-                      retiredId: retiredId,
-                      slotsBefore: () => slotsBefore,
-                      body: body,
-                    ),
+                    (outcome) => _rootAction(outcome, slotsBefore: () => slotsBefore, body: body),
                     declaration: _declaredByTheMergeFrame,
                     // Never answered from the sweep memo: the slot this has to find is
                     // one this session's own half-finished write left behind.
@@ -190,8 +182,6 @@ final class EnhancementMergeFrame {
   /// [body] may rewrite anything.
   Future<EnhancementMergeResult> _rootAction(
     RootMaintenanceOutcome outcome, {
-    required String olderId,
-    required String retiredId,
     required int Function() slotsBefore,
     required Future<EnhancementMergeResult> Function(RootMaintenanceOutcome outcome) body,
   }) async {
@@ -878,24 +868,26 @@ final class EnhancementMerge {
   /// taken from the candidate, so a caller cannot choose to keep the
   /// pre-enhancement content by passing the other id. Null means the default,
   /// which is the older record.
+  ///
+  /// [effects] is applied twice, each time to the trees the step before it
+  /// replaced: after the publication is attempted, to the published tree and the
+  /// older record's own directory (a cross-store merge publishes into the other
+  /// store and removes that one); and after the retired tree is stripped, to the
+  /// retired record's directory.
   Future<EnhancementMergeResult> merge(
     EnhancementCandidate candidate, {
     String? keptContentId,
     EnhancementMergeChoices choices = const EnhancementMergeChoices(),
+    required RecordWriteEffects effects,
   }) {
-    return _ref
-        .read(enhancementMergeFrameProvider)
-        .run(
-          olderId: candidate.olderId,
-          retiredId: candidate.newerId,
-          body: (_) => _run(candidate, keptContentId, choices),
-        );
+    return _ref.read(enhancementMergeFrameProvider).run(body: (_) => _run(candidate, keptContentId, choices, effects));
   }
 
   Future<EnhancementMergeResult> _run(
     EnhancementCandidate candidate,
     String? keptContentId,
     EnhancementMergeChoices choices,
+    RecordWriteEffects effects,
   ) async {
     final pathInfo = await _ref.read(pathInfoLoader.future);
     final seams = _ref.read(enhancementMergeSeamsProvider);
@@ -1066,7 +1058,7 @@ final class EnhancementMerge {
     // By directory, so the paths come from the caches rather than from a listing
     // of the tree that was just written -- `evictRecordImagesWithin` says what
     // that buys and why the disk is the wrong thing to ask.
-    evictRecordImagesUnder(pathInfo.charaDetailDir / storeName / olderId);
+    _applyEffects(effects, pathInfo, [pathInfo.charaDetailDir / storeName / olderId, older.directory]);
     if (!await published()) {
       logger.e('A merge of $olderId and $retiredId did not publish its survivor; nothing was retired.');
       return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.failedPublish, needsReload: true);
@@ -1123,7 +1115,13 @@ final class EnhancementMerge {
     }
 
     // ---- Step 5: retire the other copy -------------------------------------
-    if (!await _stripRetiredTree(retired.directory, seams.deleteEntry)) {
+    final stripped = await _stripRetiredTree(retired.directory, seams.deleteEntry);
+    // After the strip and not with the publication: a picture of the retired
+    // record read again between the two would be cached anew from the files the
+    // strip is about to delete. Whatever the strip reports, since it may have
+    // deleted some entries before failing on another.
+    _applyEffects(effects, pathInfo, [retired.directory]);
+    if (!stripped) {
       return const EnhancementMergeResult(outcome: EnhancementMergeOutcome.failedDelete, needsReload: true);
     }
     if (!(await retired.store.deleteAllUnlocked({retiredId})).isSuccess) {
@@ -1316,6 +1314,13 @@ final class EnhancementMerge {
         store.adoptRecordInMemory(record);
       }
     }
+  }
+
+  /// Applies [effects] to [changed], trees whose contents this merge replaced or
+  /// removed.
+  static void _applyEffects(RecordWriteEffects effects, PathInfo info, List<DirectoryPath> changed) {
+    effects.images.apply(RecordImageScope(info: info, changed: [for (final directory in changed) directory.path]));
+    effects.totals.apply(TotalsScope.recordRoot(info));
   }
 
   /// Deletes every entry of [directory] **except** `record.json`, answering

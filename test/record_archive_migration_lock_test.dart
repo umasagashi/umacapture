@@ -25,6 +25,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
@@ -34,13 +35,22 @@ import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 
 import 'support/hive.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/long_read_declarations.dart';
 
 /// One observation of a lock acquisition boundary, with the world state at it.
 typedef _Event = ({String tag, String phase, String lockName, RecordMutationLockMode mode, bool migrated, bool moved});
+
+/// The repair's own declaration, over a container this suite otherwise has no use for.
+RecordWriteEffects _effects() {
+  final container = ProviderContainer.test();
+  addTearDown(container.dispose);
+  return geometryRepairEffects(container);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -145,6 +155,7 @@ void main() {
       runArchiveGeometryMigrationIfNeeded(
         pathInfo,
         declaration: undeclaredInTest,
+        effects: _effects(),
         recoveryGate: recordingGate(locks, 'migration', events),
       ),
       loadRecordsUnder(archiveDir, declaration: undeclaredInTest, recoveryGate: recordingGate(locks, 'scan', events)),
@@ -215,6 +226,7 @@ void main() {
     final migration = runArchiveGeometryMigrationIfNeeded(
       pathInfo,
       declaration: undeclaredInTest,
+      effects: _effects(),
       recoveryGate: holdingGate,
     );
     await migrationDone.future;

@@ -65,6 +65,7 @@ import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
 import 'support/web_like_fs_backend.dart';
+import 'support/record_write_effects_fixture.dart';
 
 /// Delegates to the io backend but refuses to delete the paths [refuse] selects.
 ///
@@ -517,6 +518,7 @@ void main() {
 
       final report = await runStorageDelete(
         container.read(refBaseProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([_layout.tempDir / 'session']),
       );
@@ -556,6 +558,7 @@ void main() {
 
       final report = await runStorageDelete(
         container.read(refBaseProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
       );
@@ -649,6 +652,7 @@ void main() {
       addTearDown(subscription.close);
       await runStorageDelete(
         container.read(refBaseProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.settings),
         request: const StorageDeleteSettingsRequest(),
       );

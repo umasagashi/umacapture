@@ -20,6 +20,7 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
@@ -33,6 +34,41 @@ import '/src/gui/toast.dart';
 // ignore: constant_identifier_names
 const tr_merge = "pages.chara_detail.enhancement_merge";
 
+/// What a merge declares.
+///
+/// The replaced and removed trees' cached pictures and previews are dropped. The storage view's
+/// totals are not re-measured: a merge runs under a dialog, and opening a dialog replaces the
+/// storage card and unmounts the storage tree, so its next open re-reads everything.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects enhancementMergeEffects(RefBase base) => RecordWriteEffects(
+  images: RecordImageEffect.drop(base),
+  totals: const RecordTotalsEffect.none(
+    reason:
+        'runs under a dialog, and opening one replaces the storage card and unmounts the tree, so its next open re-reads everything',
+  ),
+);
+
+/// What the whole-store inheritance resolution declares.
+///
+/// It rewrites `record.json` only, and no cached image, geometry or prediction reader reads that file, so
+/// the image cache is left alone; the record root is re-measured because the rewrite changes sizes.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects inheritanceResolutionDeclaration(RefBase base) => RecordWriteEffects(
+  images: const RecordImageEffect.none(
+    reason: 'rewrites record.json only, and no cached image, geometry or prediction reader reads it',
+  ),
+  totals: RecordTotalsEffect.remeasure(base),
+);
+
+/// Everything the merge surfaces do to the store, behind one seam.
+///
+/// The operations live in three different objects (`EnhancementMerge`, the dismissal store and the
+/// record storage), none of which a test can substitute: they are `final` classes read out of
+/// `Provider`s. One record of closures is what lets a widget test drive the flow and assert the
+/// order the calls came in - which is the whole content of "the merges first, the inheritance
+/// resolution second".
 typedef EnhancementMergeActions = ({
   Future<EnhancementMergeResult> Function(
     EnhancementCandidate candidate, {
@@ -47,10 +83,18 @@ typedef EnhancementMergeActions = ({
 
 final enhancementMergeActionsProvider = Provider<EnhancementMergeActions>((ref) {
   return (
-    merge: (candidate, {keptContentId, choices = const EnhancementMergeChoices()}) =>
-        ref.read(enhancementMergeProvider).merge(candidate, keptContentId: keptContentId, choices: choices),
+    merge: (candidate, {keptContentId, choices = const EnhancementMergeChoices()}) => ref
+        .read(enhancementMergeProvider)
+        .merge(
+          candidate,
+          keptContentId: keptContentId,
+          choices: choices,
+          effects: enhancementMergeEffects(ref.read(containerRefProvider)),
+        ),
     dismiss: (candidate) => ref.read(enhancementDismissalStoreProvider).dismiss(candidate),
-    resolveInheritance: () => ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance(),
+    resolveInheritance: () => ref
+        .read(charaDetailRecordStorageLoaderProvider.notifier)
+        .resolveAllInheritance(effects: inheritanceResolutionDeclaration(ref.read(containerRefProvider))),
     readMerged: (recordId) async {
       final directory = recordDirectoryOf(ref, recordId);
       return directory == null ? (ids: const <String>[], metadataDefaults: null) : await readMergedIds(directory);

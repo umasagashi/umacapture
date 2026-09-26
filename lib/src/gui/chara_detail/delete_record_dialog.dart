@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/storage/zip_export.dart';
 import '/src/core/utils.dart';
@@ -16,6 +17,21 @@ import '/src/gui/common.dart';
 import '/src/gui/record_image.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
+
+/// What an ordinary record delete declares, read before the delete's first `await`.
+///
+/// The erased directories' cached pictures and previews are dropped. The storage view's totals are
+/// not re-measured: this delete runs under a dialog, and opening a dialog replaces the storage card
+/// and unmounts the storage tree, so its next open re-reads everything.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects recordDeleteDialogEffects(RefBase base) => RecordWriteEffects(
+  images: RecordImageEffect.drop(base),
+  totals: const RecordTotalsEffect.none(
+    reason:
+        'runs under a dialog, and opening one replaces the storage card and unmounts the tree, so its next open re-reads everything',
+  ),
+);
 
 // ignore: constant_identifier_names
 const tr_delete_record = "pages.chara_detail.delete_record";
@@ -136,6 +152,7 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   /// through [BulkConfirmDialog.leaveEnabled] where the dialog is built.
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
+    final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
@@ -145,7 +162,7 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     // or the dialog is closed before it finishes.
     exitSelection(ref);
     try {
-      await storage.deleteAllAsync(widget.recordIds);
+      await storage.deleteAllAsync(widget.recordIds, effects: effects);
     } catch (error, stackTrace) {
       // deleteAllAsync reports its own per-record failures; this covers the whole
       // batch failing (e.g. the record lock could not be acquired), which would
@@ -253,12 +270,13 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
   /// rather than served — and why all three exits are shut while it runs.
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
+    final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     try {
-      await storage.deleteAsync(widget.recordId);
+      await storage.deleteAsync(widget.recordId, effects: effects);
     } catch (error, stackTrace) {
       logger.e("Failed to delete record ${widget.recordId}.", error, stackTrace);
       Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));

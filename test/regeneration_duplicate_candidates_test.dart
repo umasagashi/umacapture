@@ -26,6 +26,7 @@ import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/enhancement_merge_scratch.dart';
 import 'support/factor_classifier.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
@@ -92,7 +93,7 @@ void main() {
     writeRecord(activeDir, _record('b', _self(whiteCount), _newerDate));
     final notifier = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
     notifier.beginBatch(1);
-    await notifier.updated('b');
+    await notifier.updated('b', effects: regenerationEffects(container));
     await waitUntil(
       () => container.read(charaDetailRecordRegenerationControllerProvider).isEmpty,
       describe: 'the delayed tail to publish the store',
@@ -224,6 +225,7 @@ void main() {
       expect(storageGroupOf(StorageGroupId.metadata).resolve(info).map((e) => e.path), contains(file.path));
       await runStorageDelete(
         container.read(refBaseProvider),
+        effects: storageDeleteEffects(container),
         group: storageGroupOf(StorageGroupId.metadata),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -242,7 +244,7 @@ void main() {
       final container = await loadedMergeContainer(info: info);
       final candidate = container.read(pendingEnhancementCandidatesProvider).single;
 
-      final result = await container.read(enhancementMergeProvider).merge(candidate);
+      final result = await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container));
       expect(result.outcome, EnhancementMergeOutcome.merged);
       expect(Directory((info.charaDetailActiveDir / 'b').path).existsSync(), isFalse);
       expect(Directory((info.charaDetailActiveDir / 'a').path).existsSync(), isTrue);
@@ -259,7 +261,7 @@ void main() {
       await container.read(charaDetailRecordStorageLoaderProvider.future);
       expect(byId(container, 'a').isSameChara(byId(container, 'b')), isFalse, reason: 'the store saw the change');
 
-      final result = await container.read(enhancementMergeProvider).merge(candidate);
+      final result = await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container));
       expect(result.outcome, EnhancementMergeOutcome.refusedMissing);
       expect(Directory((info.charaDetailActiveDir / 'b').path).existsSync(), isTrue);
     });
@@ -282,7 +284,7 @@ void main() {
         reason: 'positive control: nothing in memory changed, so the pair is still that candidate',
       );
 
-      final result = await container.read(enhancementMergeProvider).merge(candidate);
+      final result = await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container));
       expect(result.outcome, EnhancementMergeOutcome.refusedMissing);
       expect(Directory((info.charaDetailActiveDir / 'a').path).existsSync(), isTrue);
       expect(
@@ -345,7 +347,7 @@ void main() {
       final container = await load(() => Completer<List<FactorInfo>>().future);
       final candidate = container.read(pendingEnhancementCandidatesProvider).single;
 
-      final result = await container.read(enhancementMergeProvider).merge(candidate);
+      final result = await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container));
       expect(result.outcome, EnhancementMergeOutcome.merged);
       expect(Directory((info.charaDetailActiveDir / 'b').path).existsSync(), isFalse);
     });
@@ -357,7 +359,7 @@ void main() {
       await container.read(factorInfoLoader.future).then((_) {}, onError: (_) {});
       final candidate = container.read(pendingEnhancementCandidatesProvider).single;
 
-      final result = await container.read(enhancementMergeProvider).merge(candidate);
+      final result = await container.read(enhancementMergeProvider).merge(candidate, effects: mergeEffects(container));
       expect(result.outcome, EnhancementMergeOutcome.merged);
       expect(Directory((info.charaDetailActiveDir / 'b').path).existsSync(), isFalse);
     });

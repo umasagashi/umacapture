@@ -18,9 +18,9 @@
 /// bypass it: the tree's row menus open [StorageDeleteConfirmDialog], and that
 /// dialog is the only caller of the runner. The table itself lives in
 /// `storage_delete_invalidation.dart` — this file decides *when*, that one decides
-/// *what*. The image-cache eviction is applied at the same point and for
-/// the same reason, and what it drops lives with the caches themselves, in
-/// `record_image.dart`.
+/// *what*. The caller's [RecordWriteEffects] are applied at the same point and
+/// for the same reason, and what they drop and re-measure is decided in
+/// `record_write_effects.dart`.
 ///
 /// **The settings group finishes here too, through the same runner.** Its
 /// stores are not paths, so the removal itself belongs to
@@ -39,6 +39,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '/src/core/app_restart.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/settings_store_delete.dart';
 import '/src/core/storage/storage_delete.dart';
 import '/src/core/storage/storage_delete_invalidation.dart';
@@ -47,7 +48,6 @@ import '/src/core/storage/storage_group.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
-import '/src/gui/record_image.dart';
 import '/src/gui/storage_status.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
@@ -496,7 +496,13 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     try {
-      await runStorageDelete(base, group: widget.group, request: widget.request, confirmationToken: token);
+      await runStorageDelete(
+        base,
+        group: widget.group,
+        request: widget.request,
+        effects: storageViewDeleteEffects(base),
+        confirmationToken: token,
+      );
     } on ArgumentError {
       // Deliberately outside the guard below. `deleteStorageEntry` states that
       // this one propagates: it means a caller paired a path with a group the
@@ -533,7 +539,7 @@ typedef StorageDeleteMessage = ({ToastType type, String description});
 /// Performs the confirmed delete and announces the outcome.
 ///
 /// **The single completion point of a storage-view delete.** The provider-invalidate
-/// table and the image-cache eviction both run here, after the report arrives and
+/// table and the [effects] the caller declared both run here, after the report arrives and
 /// before anything is said to the user: a toast announcing a deletion while the
 /// table it came from still lists the entry — or while the picture it removed is
 /// still on screen — is the exact state those two exist to remove.
@@ -545,67 +551,80 @@ typedef StorageDeleteMessage = ({ToastType type, String description});
 /// close cannot be left to it: a token dismiss drops everything above the entry
 /// too, and a caller closing itself afterwards would close the panel with it.
 ///
+/// [effects] is applied on both branches: the images to what the report says went,
+/// the totals to the paths the delete touched or, for the settings stores, to
+/// everything.
+///
 /// [silent] suppresses both surfaces, as in `exportDirectoryAsZip`. It suppresses
-/// neither the eviction nor the invalidate — those are not surfaces, and a caller
+/// neither the effects nor the invalidate — those are not surfaces, and a caller
 /// that wanted the app to keep showing what it deleted is not a caller this
 /// function has.
 Future<StorageDeleteReport> runStorageDelete(
   RefBase ref, {
   required StorageGroup group,
   required StorageDeleteRequest request,
+  required RecordWriteEffects effects,
   bool silent = false,
   int? confirmationToken,
 }) async {
-  final StorageDeleteReport report;
+  final StorageDeleteReport report = switch (request) {
+    StorageDeletePathsRequest(:final targets) => await deleteStorageEntries(ref, group: group, targets: targets),
+    StorageDeleteSettingsRequest() => await ref.read(settingsStoreDeleteProvider)(),
+  };
   switch (request) {
     case StorageDeletePathsRequest(:final targets):
-      report = await deleteStorageEntries(ref, group: group, targets: targets);
-      // The image-cache eviction, and **before** the invalidate rather than
-      // after it: the invalidate
-      // is what makes the view redraw, and a redraw that reached a still-cached
-      // image would resolve the deleted path out of the cache this line is about
-      // to drop.
+      // Resolved once and handed to every derivation below. They are projections
+      // of one set of drain destinations, and a layout read twice could answer
+      // them about two different trees.
+      final info = await ref.read(pathLayoutLoader.future);
+      // The images, and **before** the invalidate rather than after it: the
+      // invalidate is what makes the view redraw, and a redraw that reached a
+      // still-cached image would resolve the deleted path out of the cache this
+      // line is about to drop.
       //
-      // `report.deleted` and not `targets`: a target is usually a directory,
-      // neither cache can be enumerated by prefix, and the report is the only
-      // list of the individual files that actually went. It is also the only
-      // list that stops at the ones that *went* — an entry the platform refused
-      // is still on disk, and dropping its decoded pixels would cost the user a
-      // re-decode of a picture that never changed.
-      evictRecordImages(report.deletedPaths);
-      await invalidateAfterStorageDelete(ref, group: group, targets: targets);
+      // `report.deletedPaths` and not `targets`: a target is usually a directory,
+      // and the report is the only list of the individual files that actually
+      // went. Dropping a whole directory would also drop the images the platform
+      // refused to delete, which are still on disk, and cost the user a re-decode
+      // of a picture that never changed.
+      effects.images.apply(RecordImageScope(info: info, changed: report.deletedPaths));
+      invalidateAfterStorageDelete(ref, group: group, info: info, targets: targets);
       // The view itself, which that table does not cover: its rows and its sizes
       // are read from the tree this delete just changed, so without this the
-      // screen the user is looking at keeps showing what was deleted. Applied
-      // from both branches, because both change it.
-      refreshStorageTabAfterDelete(ref, touched: targets);
-    case StorageDeleteSettingsRequest():
-      report = await ref.read(settingsStoreDeleteProvider)();
-      // Neither the eviction nor the invalidate table applies here, and both
-      // absences are decided by what
-      // a settings store *is* rather than by what this branch happens to reach:
+      // screen the user is looking at keeps showing what was deleted.
       //
-      //  * the eviction takes file paths, and this report carries store subjects,
-      //    which have none. It is not skipped by this branch's say-so:
-      //    `deletedPaths` answers empty for a report of stores, so calling it here
-      //    would evict nothing — as it should, since no picture the app draws
-      //    comes out of a settings store.
-      //  * the invalidate table answers this group with "invalidating is not
-      //    enough". Every
-      //    reader of a setting is now reading through a `StorageBox` that answers
-      //    null (`markHiveClosed`), so rebuilding them would show the app's
-      //    defaults with the user's own values still on screen elsewhere. The
-      //    restart demanded below is what makes the app consistent again, and it
-      //    is why this is the one delete that ends in a dialog the user cannot
-      //    dismiss.
+      // What it is told to forget is not `targets`: a delete that drains the
+      // journals also changes the trees the drain publishes into, and the totals
+      // cache drops a path, its ancestors and its descendants only.
+      effects.totals.apply(TotalsScope.paths(storageDeleteTotalsTargets(group: group, info: info, targets: targets)));
+    case StorageDeleteSettingsRequest():
+      // The images are applied to the same expression as above, which is empty
+      // here: a report of settings stores carries no path, and no picture the app
+      // draws comes out of a settings store. The layout the scope needs is read
+      // only for that, so failing to read it is logged and does not turn a
+      // delete that has already happened into a reported failure.
+      try {
+        final info = await ref.read(pathLayoutLoader.future);
+        effects.images.apply(RecordImageScope(info: info, changed: report.deletedPaths));
+      } catch (error, stackTrace) {
+        logger.w('Storage delete: the layout was unavailable, so no image was dropped.', error, stackTrace);
+      }
+      // The invalidate table does not apply here: it answers this group with
+      // "invalidating is not enough". Every reader of a setting is now reading
+      // through a `StorageBox` that answers null (`markHiveClosed`), so rebuilding
+      // them would show the app's defaults with the user's own values still on
+      // screen elsewhere. The restart demanded below is what makes the app
+      // consistent again, and it is why this is the one delete that ends in a
+      // dialog the user cannot dismiss.
       //
       // The view's own rows *are* refreshed, and this is the one case where that is
       // not the same statement. The stores are gone and their rows must say so,
       // and on Windows the group is sized by a directory whose files went with
       // them; the restart is about the rest of the app still holding settings in
-      // memory, not about this screen. The request names no path, so the totals
-      // cache is cleared rather than invalidated per path.
-      refreshStorageTabAfterDelete(ref, touched: const []);
+      // memory, not about this screen. The request names no file it removes --
+      // only the directory the stores live in, for the claim, and none on web --
+      // so every total is re-measured.
+      effects.totals.apply(const TotalsScope.everything());
   }
   // The confirmation this delete was asked from, closed here and nowhere else.
   //
@@ -615,7 +634,7 @@ Future<StorageDeleteReport> runStorageDelete(
   // an answered confirmation would stack on it, and closing it afterwards would
   // take the panel with it (`DialogController.dismiss` with a token drops that
   // entry and everything above). This is the same seam the invalidate and the
-  // eviction are applied at, for the same reason: the ordering is the
+  // declared effects are applied at, for the same reason: the ordering is the
   // thing being decided, and it is decided once.
   //
   // Null for every caller that has no confirmation open — the tests, and anything
@@ -960,3 +979,10 @@ class StorageDeleteResultDialog extends ConsumerWidget {
     );
   }
 }
+
+/// What the storage view's delete (`StorageDeleteConfirmDialog`) declares: the erased trees' cached reads are
+/// dropped and the view's totals are re-measured.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects storageViewDeleteEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
