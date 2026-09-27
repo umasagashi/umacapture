@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "c1_hopstep_pre_then_post",
+  "description": "Enhancement detected on the live path, standard record. The same trained character is captured before and after a factor enhancement (three stars raised, two white factors added) in one app session. The first capture has nothing to pair with; the second must be offered as an enhancement candidate against the first, with the second as the enhanced side, and the capture tile must show it. Both records are kept, so the record set is the two single-clip replay goldens side by side.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": {
+          "with": 0,
+          "enhanced": 1
+        }
+      }
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c1_hopstep_pre_then_post.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "falsify_c5_expects_succeeded",
+  "description": "FALSIFICATION of the status and early-check judgements. Identical to c5_same_clip_twice except that clip 1 expects succeeded and duplicate=false. The run is the normal one and the two checks are judged independently, so it must exit 1 with BOTH [status_mismatch, probe_mismatch] on clip 1. Either code alone means the other check did not act on the live observation; each check failing on its own is shown by the pure-function tests.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/player_standard_5.mkv",
+      "stops": "testdata/clips/golden/player_standard_5.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null,
+        "probe_duplicate": false
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/player_standard_5.mkv",
+      "stops": "testdata/clips/golden/player_standard_5.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "probe_duplicate": false
+      }
+    }
+  ],
+  "golden": "native/test/integration/golden/player_standard_5.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

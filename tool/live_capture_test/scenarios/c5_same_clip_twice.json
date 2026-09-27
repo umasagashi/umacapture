@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "c5_same_clip_twice",
+  "description": "Duplicate recapture. The same clip is played twice in one app session. Against the empty store the early duplicate check says duplicate=false and the capture succeeds; the second time the check says duplicate=true and the completed capture is refused as already captured, its directory removed. The record set stays the one record of the single-clip golden.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/player_standard_5.mkv",
+      "stops": "testdata/clips/golden/player_standard_5.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null,
+        "probe_duplicate": false
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/player_standard_5.mkv",
+      "stops": "testdata/clips/golden/player_standard_5.stops.json",
+      "expect": {
+        "status": "already_captured",
+        "probe_duplicate": true
+      }
+    }
+  ],
+  "golden": "native/test/integration/golden/player_standard_5.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

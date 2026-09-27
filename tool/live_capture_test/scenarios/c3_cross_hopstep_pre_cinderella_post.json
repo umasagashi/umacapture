@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "c3_cross_hopstep_pre_cinderella_post",
+  "description": "Negative control for the candidate. The second clip is a different character whose own factors are an enhanced form of the first record's parent1 factors, so the two are related by inheritance and not by enhancement: no candidate may be offered, while the resolver links the existing child's parent1 to the new record across the enhancement. The link is read from the child's raw record.json; the child also gains relation_bonus 0 (one linked parent, no grandparent), which is why its golden record carries it.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_post_starup.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_post_starup.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    }
+  ],
+  "expect_links": [
+    {
+      "child": 0,
+      "slot": "parent1",
+      "parent": 1
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c3_cross_hopstep_pre_cinderella_post.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

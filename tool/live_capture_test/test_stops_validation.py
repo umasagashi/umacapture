@@ -418,6 +418,12 @@ class TheScratchModulesTrackTheRealOnes(unittest.TestCase):
 SCENARIOS = Path(__file__).resolve().parent / "scenarios"
 
 
+def single_clip_scenarios() -> list[Path]:
+    """The committed scenarios written in the single-clip form (`clip`), whose meaning the single-clip
+    command line defined before `clips` existed."""
+    return [p for p in sorted(SCENARIOS.glob("*.json")) if "clip" in json.loads(p.read_text(encoding="utf-8"))]
+
+
 def write_scenario(test: unittest.TestCase, doc: dict) -> Path:
     import tempfile
     handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
@@ -451,15 +457,37 @@ class TheSingleClipFormIsAOneElementClipsList(unittest.TestCase):
             command += ["--range", str(raw["range_seconds"][0]), str(raw["range_seconds"][1])]
         return command
 
-    def test_every_committed_scenario_keeps_its_meaning(self):
-        paths = sorted(SCENARIOS.glob("*.json"))
-        self.assertTrue(paths, "no scenarios found; this control would be vacuous")
+    def test_every_committed_single_clip_scenario_keeps_its_meaning(self):
+        paths = single_clip_scenarios()
+        self.assertTrue(paths, "no single-clip scenarios found; this control would be vacuous")
         for path in paths:
             scenario = scenario_run.load_scenario(path)
             self.assertEqual(len(scenario["clips"]), 1, path.name)
             self.assertNotIn("clip", scenario, path.name)
             self.assertEqual(scenario["expect_links"], [], path.name)
             self.assertTrue(set(scenario["clips"][0]) <= set(scenario_run.PER_CLIP_FIELDS), path.name)
+
+    def test_every_committed_scenario_loads_and_names_inputs_that_exist(self):
+        """Every committed scenario, in either form, passes what `main()` checks before launching
+        anything: `load_scenario`, the plan's validation, `preflight` and each clip's sidecar check.
+        The app bundle is not built here, so its path is pointed at an existing file. Red if a
+        scenario names a golden, clip or sidecar that does not exist, or an expectation the loader
+        refuses. Clips and sidecars are gitignored test material: a scenario whose clips are not on
+        this machine is skipped by name, never passed."""
+        paths = sorted(SCENARIOS.glob("*.json"))
+        self.assertTrue(paths, "no scenarios found; this control would be vacuous")
+        for path in paths:
+            with self.subTest(scenario=path.name):
+                scenario = scenario_run.load_scenario(path)
+                plan = app_drive_run.validate_plan(scenario_run.build_plan(scenario), path.name)
+                self.assertTrue(scenario_run.resolve(scenario["golden"]).is_file(), scenario["golden"])
+                absent = [e["clip"] for e in scenario["clips"] if not scenario_run.resolve(e["clip"]).is_file()]
+                if absent:
+                    self.skipTest(f"clip(s) not on this machine: {absent}")
+                with mock.patch.dict(app_drive_run.APP_EXE_BY_CONFIG, {scenario["config"]: path}):
+                    scenario_run.preflight(scenario)
+                for clip in plan["clips"]:
+                    app_drive_run.clip_stops(clip, plan)
 
     def test_clip_and_clips_are_exclusive(self):
         """Red if either form were allowed to shadow the other."""
@@ -816,9 +844,9 @@ class APlanMeansWhatTheOldCommandLineMeant(unittest.TestCase):
     def legacy_argv(self, raw: dict) -> list[str]:
         return TheSingleClipFormIsAOneElementClipsList.expected_command(None, raw)[3:]
 
-    def test_every_committed_scenario_plans_what_its_command_line_meant(self):
-        paths = sorted(SCENARIOS.glob("*.json"))
-        self.assertTrue(paths, "no scenarios found; this control would be vacuous")
+    def test_every_committed_single_clip_scenario_plans_what_its_command_line_meant(self):
+        paths = single_clip_scenarios()
+        self.assertTrue(paths, "no single-clip scenarios found; this control would be vacuous")
         for path in paths:
             raw = json.loads(path.read_text(encoding="utf-8"))
             args = app_drive_run.build_parser().parse_args(self.legacy_argv(raw))

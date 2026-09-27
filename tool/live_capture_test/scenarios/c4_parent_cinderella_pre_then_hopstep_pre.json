@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "c4_parent_cinderella_pre_then_hopstep_pre",
+  "description": "Exact parent link, new record as the child. The parent is captured first; the second record's parent1 names the first one's card and lists exactly its factors, so the new record's parent1 is linked to it and it gains relation_bonus 0. Neither capture is an enhancement candidate.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    }
+  ],
+  "expect_links": [
+    {
+      "child": 1,
+      "slot": "parent1",
+      "parent": 0
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c4_parent_cinderella_pre_then_hopstep_pre.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

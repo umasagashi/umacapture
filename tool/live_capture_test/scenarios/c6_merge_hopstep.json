@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "c6_merge_hopstep",
+  "description": "C1 followed by the merge. After the second capture is observed and the capture stopped, the harness opens the candidate and holds the apply button; the older record survives, the enhanced one is retired from disk and named in the survivor's merged_ids.json, and the pair is no longer a candidate. The survivor keeps the older id and date but the enhanced content, and normalisation drops both, so the record set equals the enhanced clip's single-clip golden.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": {
+          "with": 0,
+          "enhanced": 1
+        }
+      },
+      "merge": {
+        "survivor": 0,
+        "retired": 1
+      }
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c6_merge_hopstep.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}
