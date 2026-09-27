@@ -17,7 +17,7 @@ Every wait is a condition, never a fixed sleep:
   * driver `waitFor(capture_stop_label)`           -> the app confirmed the capture request
   * the app's own log lines                        -> the recorder is up and a frame reached Dart
   * mimic player `ok`/`event eos` reply lines      -> the clip actually reached the screen
-  * `record.json` appearing under the scratch root -> recognition produced a record
+  * the capture event in `harness_state`           -> the clip's attempt recorded its outcome
 
 The app's data root is redirected to a scratch tree via the `UMACAPTURE_DATA_ROOT` environment
 variable (see `readDataRootOverride()` in lib/src/core/bootstrap.dart), set only in the launched
@@ -28,9 +28,17 @@ reported as `data_isolation.leaked_record_dirs` and fails the run (`status: data
 
     uv run tool/live_capture_test/app_drive_run.py --tag app1
     uv run tool/live_capture_test/app_drive_run.py --tag falsify --falsify no-wait
+    uv run tool/live_capture_test/app_drive_run.py --tag multi --plan <plan.json>
 
-This is the driving half only; its success condition is "a record.json appeared". For a verdict on
-what the record CONTAINS, run a scenario through scenario_run.py. See docs/live-capture-harness.md.
+A run plays a PLAN: one or more clips in order, in one app session and one scratch storage. The
+single-clip flags (--clip, --sync, --stops, ...) build a one-element plan; scenario_run.py writes a
+plan file and passes --plan. Per clip the capture is started, the clip played, the app's own state
+read until the capture attempt's outcome has been recorded and the store and disk agree, and the
+capture stopped; the next clip gets a fresh player process and a fresh set of log signals.
+
+This is the driving half only: it writes what it OBSERVED per clip (`clips` in the summary) and
+judges nothing. For a verdict, run a scenario through scenario_run.py. See
+docs/live-capture-harness.md.
 """
 
 from __future__ import annotations
@@ -388,7 +396,7 @@ class Player:
                 time.sleep(remaining)
         raise RuntimeError("stepped playback never reached the end of the clip")
 
-    def play_synchronised(self, stops: list[dict], app: DriverApp, timeout: float,
+    def play_synchronised(self, stops: list[dict], signals: ClipSignals, timeout: float,
                           wait_for_marker: bool = True, scroll_rate: float = 1.0) -> dict:
         """Plays the clip at REAL TIME, holding it on each annotated stop frame until the app has
         reported scroll-ready for that tab.
@@ -401,10 +409,13 @@ class Player:
         screen that genuinely is not changing, exactly like a game sitting still after its animation
         finished, and everything in between still runs at the clip's own cadence.
 
-        Ordering is handled by making the marker a level, not an edge: DriverApp sets a per-tab
+        Ordering is handled by making the marker a level, not an edge: [signals] sets a per-tab
         Event the moment the marker appears in the app's stdout, so a marker that arrives BEFORE the
         breakpoint fires leaves the Event already set and the wait returns immediately. There is no
-        window in which an early marker can be missed and no ordering that deadlocks.
+        window in which an early marker can be missed and no ordering that deadlocks. The level
+        belongs to ONE clip: [signals] is armed for this clip, so a marker the previous clip set
+        cannot release this one, and `marker_after_arm` records that the marker was seen after the
+        arming.
 
         [scroll_rate] < 1 additionally plays the SCROLLING PHASE of each tab in slow motion, and
         only that phase. The two halves are both necessary and neither is sufficient: the hold alone
@@ -431,21 +442,21 @@ class Player:
             tab = stop["tab"]
             # Sampled BEFORE waiting, so it records the ordering rather than the wait's outcome
             # (which would read as "early" whenever the wait is disabled).
-            already_ready = app.scroll_ready[tab].is_set()
+            already_ready = signals.scroll_ready[tab].is_set()
             waited = 0.0
             timed_out = False
             if wait_for_marker:
                 started = time.monotonic()
-                if not app.scroll_ready[tab].wait(timeout):
+                if not signals.scroll_ready[tab].wait(timeout):
                     timed_out = True
                 waited = round(time.monotonic() - started, 3)
-            marker_wall = app.scroll_ready_wall.get(tab)
             held.append({
                 "tab": tab,
                 "stop_frame": stop["stop_frame"],
                 "breakpoint_event": event,
                 "breakpoint_wall": datetime.datetime.fromtimestamp(hit_wall).strftime("%H:%M:%S.%f"),
-                "marker_wall": marker_wall,
+                "marker_wall": signals.scroll_ready_wall.get(tab),
+                "marker_after_arm": signals.marker_after_arm(tab),
                 # The interesting ordering fact: with sync on, the marker is usually EARLIER than
                 # the breakpoint for the tabs the app keeps up with, and later for the ones it does
                 # not -- which is exactly the case the hold exists for.
@@ -518,6 +529,73 @@ def build_app(config: str, log: Path) -> Path:
     return APP_EXE_BY_CONFIG[config]
 
 
+class ClipSignals:
+    """The app-log signals of ONE clip: the recorder start, the first frame, each tab's
+    scroll-ready marker and the early duplicate check's result lines.
+
+    Latched Events, not callbacks, so the synchronised playback cannot lose a marker that lands
+    before it starts waiting -- and armed per clip, because a latch that outlived its clip would
+    release every hold of the next one at once: its tabs would play unsynchronised with no timeout
+    and every hold counted. `armed_at` and `scroll_ready_at` carry that as data (`marker_after_arm`).
+    """
+
+    def __init__(self) -> None:
+        self.armed_at = time.monotonic()
+        self.recorder_started = threading.Event()
+        self.first_frame = threading.Event()
+        self.scroll_ready = {tab: threading.Event() for tab in SCROLL_READY_MARKERS}
+        self.scroll_ready_wall: dict[int, str] = {}
+        self.scroll_ready_at: dict[int, float] = {}
+        self.probe_lines: list[str] = []
+
+    def arm(self) -> None:
+        """Starts this clip's time base. Kept apart from creating the Events so the base moves on every
+        clip whatever happens to them: a set carried into a later clip then reports its stale markers
+        as `marker_after_arm: False` rather than passing them off as this clip's."""
+        self.armed_at = time.monotonic()
+
+    def feed(self, line: str) -> None:
+        """Takes one line of the app's stdout."""
+        for tab, marker in SCROLL_READY_MARKERS.items():
+            if marker in line and not self.scroll_ready[tab].is_set():
+                self.scroll_ready_wall[tab] = datetime.datetime.now().strftime("%H:%M:%S.%f")
+                self.scroll_ready_at[tab] = time.monotonic()
+                self.scroll_ready[tab].set()
+        if FACTOR_PROBE_LINE in line:
+            self.probe_lines.append(line.rstrip("\r\n"))
+        if "RecordingThread::run" in line and "started" in line:
+            self.recorder_started.set()
+        elif "emitPreviewFrame" in line:
+            # One captured frame has completed the whole trip: WinRT -> pipeline -> Dart. The
+            # capture button flips ~1.1 s before this (it only reports that the request was
+            # accepted), so resuming the clip on the button would drop the head of the clip.
+            self.first_frame.set()
+
+    def marker_after_arm(self, tab: int) -> bool:
+        seen = self.scroll_ready_at.get(tab)
+        return seen is not None and seen >= self.armed_at
+
+    def wait_capturing(self, timeout: float = 120.0, frame_timeout: float = 20.0) -> dict:
+        if not self.recorder_started.wait(timeout):
+            raise RuntimeError("the capture thread never started")
+        # The preview is the only per-frame signal the app prints; a user who turned it off would
+        # not produce one, so its absence is reported rather than fatal.
+        return {"recorder_started": True, "first_frame": self.first_frame.wait(frame_timeout)}
+
+
+def probe_duplicates(lines: list[str]) -> list[bool]:
+    """The `duplicate=` value of each early-duplicate-check line (`Factor probe: ... duplicate=<bool>`,
+    logged by the record storage). A line that carries no such value is not a result and is skipped,
+    so it cannot read as either answer."""
+    values: list[bool] = []
+    for line in lines:
+        _, found, rest = line.partition("duplicate=")
+        word = rest.split()[0] if found and rest.split() else ""
+        if word in ("true", "false"):
+            values.append(word == "true")
+    return values
+
+
 class DriverApp:
     """The app, launched directly from its debug bundle with the VM Service pinned.
 
@@ -552,37 +630,21 @@ class DriverApp:
             [str(exe)], cwd=str(exe.parent), env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
             encoding="utf-8", errors="replace")
-        self.recorder_started = threading.Event()
-        self.first_frame = threading.Event()
-        # One latched Event per tab. Latched, not a callback, precisely so the synchronised playback
-        # loop cannot lose a marker that lands before it starts waiting.
-        self.scroll_ready = {tab: threading.Event() for tab in SCROLL_READY_MARKERS}
-        self.scroll_ready_wall: dict[int, str] = {}
+        self.signals = ClipSignals()
         self.reader = threading.Thread(target=self._pump, daemon=True)
         self.reader.start()
+
+    def arm_clip(self) -> ClipSignals:
+        """Starts a fresh set of signals for the next clip; the reader feeds only the current set."""
+        self.signals = ClipSignals()
+        self.signals.arm()
+        return self.signals
 
     def _pump(self) -> None:
         for line in self.process.stdout:
             self.log.write(line)
             self.log.flush()
-            for tab, marker in SCROLL_READY_MARKERS.items():
-                if marker in line and not self.scroll_ready[tab].is_set():
-                    self.scroll_ready_wall[tab] = datetime.datetime.now().strftime("%H:%M:%S.%f")
-                    self.scroll_ready[tab].set()
-            if "RecordingThread::run" in line and "started" in line:
-                self.recorder_started.set()
-            elif "emitPreviewFrame" in line:
-                # One captured frame has completed the whole trip: WinRT -> pipeline -> Dart. The
-                # capture button flips ~1.1 s before this (it only reports that the request was
-                # accepted), so resuming the clip on the button would drop the head of the clip.
-                self.first_frame.set()
-
-    def wait_capturing(self, timeout: float = 120.0, frame_timeout: float = 20.0) -> dict:
-        if not self.recorder_started.wait(timeout):
-            raise RuntimeError("the capture thread never started")
-        # The preview is the only per-frame signal the app prints; a user who turned it off would
-        # not produce one, so its absence is reported rather than fatal.
-        return {"recorder_started": True, "first_frame": self.first_frame.wait(frame_timeout)}
+            self.signals.feed(line)
 
     @property
     def ws_uri(self) -> str:
@@ -628,6 +690,12 @@ class DriverApp:
 
 
 # ------------------------------------------------------------------------------ VM Service driver
+
+
+class DriverTimeout(RuntimeError):
+    """The app answered that a driver command ran out of its own `timeout` (flutter_driver's
+    "Timeout while executing ..."). Only this failure says something about the widget tree; a VM
+    Service error or a reply that never came says nothing, and stays a plain RuntimeError."""
 
 
 class Driver:
@@ -709,12 +777,30 @@ class Driver:
         params.update({k: str(v) for k, v in kwargs.items()})
         result = self.rpc("ext.flutter.driver", params, timeout=rpc_timeout)
         if result.get("isError"):
-            raise RuntimeError(f"driver {name} {kwargs} failed: {result.get('response')}")
+            response = result.get("response")
+            error = DriverTimeout if str(response).startswith("Timeout while executing") else RuntimeError
+            raise error(f"driver {name} {kwargs} failed: {response}")
         return result.get("response")
 
     def by_key(self, name: str, key: str, timeout_ms: int = 60000) -> dict:
         return self.command(name, rpc_timeout=timeout_ms / 1000.0 + 15, finderType="ByValueKey",
                             keyValueString=key, keyValueType="String", timeout=timeout_ms)
+
+    def harness_state(self) -> dict:
+        """The app's state as data, from the `request_data` handler in test_driver/app.dart."""
+        response = self.command("request_data", rpc_timeout=30.0, message="harness_state")
+        state = json.loads(response["message"])
+        if not isinstance(state, dict) or "error" in state:
+            raise RuntimeError(f"harness_state answered {state!r}")
+        return state
+
+    def hold(self, key: str, seconds: float) -> dict:
+        """Presses the widget and keeps it pressed for [seconds]. `tap` releases at once, which a
+        hold-to-confirm button ignores; the driver's `scroll` presses, moves by (dx, dy) over
+        `duration` and releases, so a zero move is a long press."""
+        return self.command("scroll", rpc_timeout=seconds + 30, finderType="ByValueKey",
+                            keyValueString=key, keyValueType="String", dx="0", dy="0",
+                            duration=str(int(seconds * 1_000_000)), frequency="60")
 
     def close(self) -> None:
         try:
@@ -724,10 +810,362 @@ class Driver:
         self.log.close()
 
 
+# ------------------------------------------------------------------------------------------ plan
+
+# The early duplicate check's result line (`logger.i` in the record storage); its `duplicate=` value
+# is the observation. Logged rather than polled, because the check's answer is a transient capture
+# state that the attempt's final status overwrites.
+FACTOR_PROBE_LINE = "Factor probe:"
+TILE_KEY = "capture_enhancement_candidate"
+MERGE_APPLY_KEY = "enhancement_merge_apply"
+TERMINAL_STATUSES = ("succeeded", "alreadyCaptured", "failed")
+STATE_POLL_SECONDS = 0.2
+CONTAINER_WAIT_SECONDS = 60.0
+# Upper bound on the wait for the store and disk to agree once a clip's outcome has been recorded.
+# The store imports a succeeded record before the next event-loop task, so this is a ceiling for a
+# failure, not a delay the normal path pays.
+SETTLE_SECONDS = 30.0
+TILE_WAIT_MS = 10000
+TILE_RECHECK_MS = 3000
+MERGE_TAPS = 3
+MERGE_HOLDS = 3
+MERGE_HOLD_SECONDS = 1.5
+MERGE_WAIT_SECONDS = 60.0
+
+PLAN_FIELDS = {"config": str, "settings": str, "sync": bool, "sync_timeout": float, "scroll_rate": float,
+               "pace": float, "record_wait": float, "clips": list}
+PLAN_CLIP_FIELDS = {"clip", "stops", "range", "wait_factor_info", "merge"}
+SINGLE_CLIP_FLAGS = ("clip", "config", "settings", "pace", "sync", "stops", "sync_timeout", "scroll_rate",
+                     "record_wait", "range")
+
+
+def plan_from_args(args: argparse.Namespace) -> dict:
+    """The one-element plan the single-clip flags describe. Defaults are applied here so that an
+    unset flag and the plan a scenario writes for it mean the same thing."""
+    sync = bool(args.sync)
+    scroll_rate = 1.0 if args.scroll_rate is None else float(args.scroll_rate)
+    if not sync and scroll_rate != 1.0:
+        raise SystemExit("--scroll-rate only means anything with --sync")
+    return {
+        "config": args.config or "debug",
+        "settings": args.settings or "fresh",
+        "sync": sync,
+        "sync_timeout": 30.0 if args.sync_timeout is None else float(args.sync_timeout),
+        "scroll_rate": scroll_rate,
+        # Synchronised playback is real time by definition; --pace only paces an unsynchronised run.
+        "pace": 0.0 if sync else (80.0 if args.pace is None else float(args.pace)),
+        "record_wait": 120.0 if args.record_wait is None else float(args.record_wait),
+        "clips": [{"clip": str(Path(args.clip) if args.clip else CLIP),
+                   "stops": args.stops if sync else None,
+                   "range": None if args.range is None else [float(v) for v in args.range],
+                   "wait_factor_info": False, "merge": None}],
+    }
+
+
+def validate_plan(plan, where: str) -> dict:
+    """Refuses a plan that is not the shape `plan_from_args` builds, naming the field."""
+    if not isinstance(plan, dict) or set(plan) != set(PLAN_FIELDS):
+        raise SystemExit(f"{where}: a plan is an object with exactly the fields {sorted(PLAN_FIELDS)}")
+    for field, kind in PLAN_FIELDS.items():
+        value = plan[field]
+        ok = isinstance(value, bool) if kind is bool else (
+            isinstance(value, (int, float)) and not isinstance(value, bool) if kind is float
+            else isinstance(value, kind))
+        if not ok:
+            raise SystemExit(f"{where}: {field} must be {kind.__name__}, got {value!r}")
+    if plan["config"] not in APP_EXE_BY_CONFIG or plan["settings"] not in ("fresh", "copy"):
+        raise SystemExit(f"{where}: config {plan['config']!r} / settings {plan['settings']!r} unknown")
+    if not plan["sync"] and plan["scroll_rate"] != 1.0:
+        raise SystemExit(f"{where}: scroll_rate only means anything with sync")
+    if not plan["clips"]:
+        raise SystemExit(f"{where}: the plan plays no clip")
+    for i, clip in enumerate(plan["clips"]):
+        if not isinstance(clip, dict) or set(clip) != PLAN_CLIP_FIELDS or not isinstance(clip["clip"], str):
+            raise SystemExit(f"{where}: clips[{i}] must carry exactly {sorted(PLAN_CLIP_FIELDS)}")
+        rng = clip["range"]
+        if rng is not None and (not isinstance(rng, list) or len(rng) != 2
+                                or not all(isinstance(v, (int, float)) for v in rng)):
+            raise SystemExit(f"{where}: clips[{i}].range must be [A, B] or null")
+        merge = clip["merge"]
+        if merge is not None and (not isinstance(merge, dict) or set(merge) != {"survivor", "retired"}
+                                  or not all(isinstance(merge[k], int) and 0 <= merge[k] <= i for k in merge)
+                                  or merge["survivor"] == merge["retired"]):
+            raise SystemExit(f"{where}: clips[{i}].merge must name two different clips played up to it")
+    return plan
+
+
+def load_plan(args: argparse.Namespace) -> dict:
+    if args.plan is None:
+        return validate_plan(plan_from_args(args), "the command line")
+    given = [f"--{flag.replace('_', '-')}" for flag in SINGLE_CLIP_FLAGS if getattr(args, flag) not in (None, False)]
+    if given:
+        raise SystemExit(f"--plan carries every per-run setting; drop {given}")
+    return validate_plan(json.loads(Path(args.plan).read_text(encoding="utf-8")), args.plan)
+
+
+def clip_stops(clip: dict, plan: dict) -> tuple[Path | None, list[dict]]:
+    """The clip's sidecar and its stops, validated before anything is launched."""
+    if not plan["sync"]:
+        return None, []
+    path = Path(clip["clip"])
+    sidecar_path = Path(clip["stops"]) if clip["stops"] else path.with_suffix(".stops.json")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    # The annotation is only about THIS clip; a sidecar for a different one would park the
+    # player on frames that mean nothing. Cheap check, and the alternative failure is silent.
+    if sidecar["clip"] != path.name:
+        raise SystemExit(f"{sidecar_path} annotates {sidecar['clip']}, not {path.name}")
+    # Every frame number this run is about to arm is checked here, before anything is launched.
+    # A null scroll_end_frame would otherwise become `rate-at None 1.0`, which the player
+    # rejects and the harness then fails on while parsing the reply; a negative or out-of-clip
+    # stop_frame is worse, because the player clamps it into range and the run looks fine.
+    validate_stops(sidecar, sidecar_path, require_scroll_end=plan["scroll_rate"] != 1.0)
+    return sidecar_path, sidecar["stops"]
+
+
+# ----------------------------------------------------------------------------------- observation
+
+
+def attempt_outcome(state: dict, before_attempt) -> dict | None:
+    """The outcome of the capture attempt that began after [before_attempt], as
+    {"attempt_id", "status", "record_id"}, or None while no outcome of it has been recorded.
+
+    Read from the capture EVENT (`captureEventProvider` in lib/src/core/platform_controller.dart),
+    not from the capture status. The status is a level that does not outlive the detail screen:
+    `onCharaDetailClosed` resets the capture state, which drops the link `succeeded` is derived from
+    and the error `alreadyCaptured` is, and returns the status to `waitingForDetail`. A clip that
+    closes the detail screen after its record is written therefore shows a terminal status only
+    while the screen is still open, and a read after playback finds `waitingForDetail`. The event is
+    recorded on the transition into an outcome and kept until the next attempt begins, which is the
+    lifetime this read needs.
+
+    The event carries no attempt id, so it is tied to one by the capture state in the same answer:
+    the app clears the event whenever the attempt id changes, so an event beside an attempt id was
+    recorded during that attempt. The attempt id survives the close (the reset keeps it), and
+    comparing it with [before_attempt] is what tells this clip's outcome from the previous clip's:
+    the capture state names the previous attempt until this clip's attempt is announced.
+
+    `record_id` is the event's: the captured record on `succeeded`, the existing record it
+    duplicates on `alreadyCaptured`. `duplicateHint` is an event as well, but it is the early
+    check's hint and not an outcome: the attempt still ends in one of TERMINAL_STATUSES, whose event
+    replaces it."""
+    capture = state.get("capture")
+    event = state.get("event")
+    attempt = capture.get("attempt_id") if isinstance(capture, dict) else None
+    if attempt in (None, before_attempt):
+        return None
+    if not isinstance(event, dict) or event.get("status") not in TERMINAL_STATUSES:
+        return None
+    return {"attempt_id": attempt, "status": event["status"], "record_id": event.get("record_id")}
+
+
+def record_ids_on_disk(root: Path = SCRATCH_ROOT) -> set[str]:
+    return {p.name for p in records_under(root)}
+
+
+def settle_failures(state: dict, outcome: dict, disk_ids: set[str], wait_factor_info: bool) -> list[str]:
+    """The settle conditions still unmet for [outcome], by name; empty once the store and disk agree.
+
+    Disk equals the store's active ids in both directions: a succeeded record has been imported, and
+    a rejected duplicate -- whose directory the store removes before it reports `alreadyCaptured` --
+    has been cleaned up."""
+    store = state.get("store")
+    if not isinstance(store, dict) or store.get("active_loaded") is not True:
+        return ["store_loaded"]
+    active = set(store.get("active_ids") or [])
+    unmet = []
+    if outcome.get("status") == "succeeded" and outcome.get("record_id") not in active:
+        unmet.append("store_has_record")
+    if active != disk_ids:
+        unmet.append("disk_matches_store")
+    if wait_factor_info and state.get("factor_info_loaded") is not True:
+        unmet.append("factor_info_loaded")
+    return unmet
+
+
+def pairs_with(candidates, record_id) -> list[dict]:
+    return [c for c in candidates or [] if isinstance(c, dict) and record_id in (c.get("older"), c.get("newer"))]
+
+
+def strip_settle_evidence(observation: dict) -> dict:
+    """`--falsify no-settle`: the observation with the evidence of settling removed, as a harness that
+    never checked would report it. Removing the evidence rather than skipping the wait makes the
+    falsification deterministic: skipping the wait proves nothing about the state, because the store
+    may well have settled by the time the next request lands."""
+    return {k: v for k, v in observation.items() if k not in ("settled", "unsettled")}
+
+
+def playback_summary(clips: list[dict]) -> dict:
+    """The run-level playback fields `scenario_run.run_validity_failures` reads, over every clip.
+
+    One clip: its own fields, unchanged. Several: stop frames and holds concatenated and timeouts
+    summed, so a hold lost in any clip is lost for the run. A clip that never reached playback leaves
+    `synchronised` out altogether, which the verdict reads as "never synchronised"."""
+    if len(clips) == 1:
+        return {k: clips[0][k] for k in ("stop_frames", "synchronised", "playback_seconds") if k in clips[0]}
+    out: dict = {}
+    if all("stop_frames" in c for c in clips):
+        out["stop_frames"] = [f for c in clips for f in c["stop_frames"]]
+    if all(isinstance(c.get("synchronised"), dict) for c in clips):
+        held = [h for c in clips for h in c["synchronised"].get("held", [])]
+        out["synchronised"] = {"held": held, "timeouts": sum(c["synchronised"].get("timeouts", 0) for c in clips)}
+    if all("playback_seconds" in c for c in clips):
+        out["playback_seconds"] = round(sum(c["playback_seconds"] for c in clips), 2)
+    return out
+
+
+class StateReader:
+    """Polls `harness_state`, keeping what the verdict needs to know about the polling itself:
+    whether the app's container was ever found."""
+
+    def __init__(self, driver: Driver) -> None:
+        self.driver = driver
+        self.container_seen = False
+
+    def read(self) -> dict | None:
+        state = self.driver.harness_state()
+        if state.get("container") is not True:
+            return None
+        self.container_seen = True
+        return state
+
+    def poll(self, until, timeout: float) -> tuple[dict | None, object]:
+        """Reads until `until(state)` is truthy or [timeout] passes; returns the last state read and
+        the last value of `until`. A driver failure propagates: it is not "not yet"."""
+        deadline = time.monotonic() + timeout
+        state, value = None, None
+        while True:
+            state = self.read()
+            value = until(state) if state is not None else None
+            if value or time.monotonic() >= deadline:
+                return state, value
+            time.sleep(STATE_POLL_SECONDS)
+
+
+def observe_tile(driver: Driver, present: bool) -> object:
+    """Whether the candidate tile is shown, as "present" / "absent", or {"error": ...}.
+
+    Which state to wait for is decided by the DATA, not by the expectation. A wait that fails is not
+    the other answer -- the driver cannot tell a missing widget from frames that stopped -- so the
+    opposite state is then waited for too, and only a wait that SUCCEEDS is an observation."""
+    first, second = ("waitFor", "waitForAbsent") if present else ("waitForAbsent", "waitFor")
+    try:
+        driver.by_key(first, TILE_KEY, timeout_ms=TILE_WAIT_MS)
+        return "present" if present else "absent"
+    except RuntimeError as error:
+        failed = f"{first}: {error}"
+    try:
+        driver.by_key(second, TILE_KEY, timeout_ms=TILE_RECHECK_MS)
+        return "absent" if present else "present"
+    except RuntimeError as error:
+        return {"error": f"{failed}; {second}: {error}"}
+
+
+def observe_clip(reader: StateReader, driver: Driver, signals: ClipSignals, before_attempt,
+                 clip: dict, record_wait: float, falsify: str | None,
+                 disk_ids=record_ids_on_disk) -> dict:
+    """Waits for the outcome of the clip's attempt and for the store and disk to settle, then reads
+    what the verdict judges. Every field is an observation or absent; nothing is defaulted.
+
+    `capture` is the attempt's outcome (`attempt_outcome`), or null when none was recorded within
+    [record_wait]. A null is written down beside what WAS read -- the capture state and the event of
+    the last answer -- and is not an answer about the attempt: the verdict treats it as nothing
+    observed."""
+    obs: dict = {}
+    t_wait = time.monotonic()
+    state, outcome = reader.poll(lambda s: attempt_outcome(s, before_attempt), record_wait)
+    obs["outcome_wait_seconds"] = round(time.monotonic() - t_wait, 2)
+    obs["capture"] = outcome
+    if outcome is None:
+        obs["last_capture_state"] = (state or {}).get("capture")
+        obs["last_event"] = (state or {}).get("event")
+    else:
+        # Settled against the outcome each answer carries, not the first one seen: a refused recapture
+        # is recorded as `succeeded` and then as `alreadyCaptured` once the store refuses the record,
+        # and settling reads which one the app ended on rather than relying on the store's verdict
+        # landing before the next read.
+        def unmet(s: dict) -> list[str]:
+            current = attempt_outcome(s, before_attempt) or outcome
+            return settle_failures(s, current, disk_ids(), clip["wait_factor_info"])
+
+        t_settle = time.monotonic()
+        state, _ = reader.poll(lambda s: not unmet(s), SETTLE_SECONDS)
+        unsettled = ["container"] if state is None else unmet(state)
+        obs["settle_seconds"] = round(time.monotonic() - t_settle, 2)
+        obs["settled"] = not unsettled
+        obs["unsettled"] = unsettled
+        state = state or {}
+        outcome = attempt_outcome(state, before_attempt) or outcome
+        obs["capture"] = outcome
+        record_id = outcome.get("record_id") if outcome.get("status") == "succeeded" else None
+        obs["record_id"] = record_id
+        obs["event"] = state.get("event")
+        obs["store"] = state.get("store")
+        obs["factor_info_loaded"] = state.get("factor_info_loaded")
+        obs["candidates"] = state.get("candidates")
+        if record_id is not None and isinstance(obs["candidates"], list):
+            obs["tile"] = observe_tile(driver, bool(pairs_with(obs["candidates"], record_id)))
+    obs["probe_lines"] = list(signals.probe_lines)
+    obs["probe_duplicates"] = probe_duplicates(signals.probe_lines)
+    return strip_settle_evidence(obs) if falsify == "no-settle" else obs
+
+
+def merge_done(state: dict, survivor: str, retired: str) -> bool:
+    store = state.get("store") or {}
+    pair = {survivor, retired}
+    return retired not in (store.get("active_ids") or []) and not any(
+        isinstance(c, dict) and {c.get("older"), c.get("newer")} == pair for c in state.get("candidates") or [])
+
+
+def perform_merge(reader: StateReader, driver: Driver, survivor: str, retired: str) -> dict:
+    """Opens the candidate's merge dialog from the capture page and confirms it by holding the
+    button. Runs with the capture stopped: the tile cannot be tapped while a capture claims the
+    record store. A driver failure is reported as {"error": ...}, never as an incomplete merge."""
+    merge: dict = {"survivor": survivor, "retired": retired, "taps": 0, "dialog_opened": False, "holds": 0}
+    try:
+        last = None
+        # The tile may still be disabled on the frame the capture stops; a tap on a disabled tile
+        # does nothing, so tapping again is safe. Once the dialog is open nothing taps again.
+        for _ in range(MERGE_TAPS):
+            driver.by_key("tap", TILE_KEY, timeout_ms=TILE_WAIT_MS)
+            merge["taps"] += 1
+            try:
+                driver.by_key("waitFor", MERGE_APPLY_KEY, timeout_ms=TILE_WAIT_MS)
+                merge["dialog_opened"] = True
+                break
+            except RuntimeError as error:
+                last = error
+        if not merge["dialog_opened"]:
+            return {**merge, "error": f"the merge dialog never opened after {merge['taps']} tap(s): {last}"}
+        # The apply button is disabled for the first frames of the dialog, and a press that lands
+        # there is ignored for good. The dialog closes on every outcome of the merge, merged or
+        # refused, so the button leaving the tree is the hold being accepted; while it stays, the hold
+        # was not, and holding again cannot run a second merge. Only the wait running out means the
+        # button stayed: any other driver failure propagates as an error.
+        for _ in range(MERGE_HOLDS):
+            driver.hold(MERGE_APPLY_KEY, MERGE_HOLD_SECONDS)
+            merge["holds"] += 1
+            try:
+                driver.by_key("waitForAbsent", MERGE_APPLY_KEY, timeout_ms=TILE_RECHECK_MS)
+                break
+            except DriverTimeout:
+                continue
+        merge["confirmed_wall"] = datetime.datetime.now().strftime("%H:%M:%S.%f")
+        state, done = reader.poll(lambda s: merge_done(s, survivor, retired), MERGE_WAIT_SECONDS)
+        if state is None:
+            return {**merge, "error": "harness_state never found the app's container after the merge"}
+        merge["completed"] = bool(done)
+        merge["active_ids_after"] = (state.get("store") or {}).get("active_ids")
+        merge["candidates_after"] = state.get("candidates")
+        merge["tile_after"] = observe_tile(driver, bool(pairs_with(state.get("candidates"), survivor)))
+        return merge
+    except RuntimeError as error:
+        return {**merge, "error": f"{type(error).__name__}: {error}"}
+
+
 # ------------------------------------------------------------------------------------------- run
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", required=True)
     parser.add_argument("--run-id", default=None,
@@ -735,72 +1173,66 @@ def main() -> int:
                              "runner that reads the summary back passes one so it can tell this "
                              "run's summary from an earlier run's under the same tag; a hand-run "
                              "harness needs none.")
+    parser.add_argument("--plan", default=None,
+                        help="JSON plan of the clips to play in one app session (scenario_run.py "
+                             "writes one). Carries every per-run setting, so it excludes the "
+                             "single-clip flags below.")
     parser.add_argument("--fresh", action="store_true", help="force a re-copy of the scratch modules tree")
     parser.add_argument("--build", action="store_true", help="rebuild the bundle first")
-    parser.add_argument("--config", choices=["debug", "profile"], default="debug",
-                        help="which driver-enabled bundle to run")
     parser.add_argument("--port", type=int, default=57391, help="pinned VM Service port")
-    parser.add_argument("--settings", choices=["fresh", "copy"], default="fresh")
-    parser.add_argument("--pace", type=float, default=80.0,
-                        help="ms to hold each source frame (0 plays the clip in real time)")
+    parser.add_argument("--config", choices=["debug", "profile"], default=None,
+                        help="which driver-enabled bundle to run (default debug)")
+    parser.add_argument("--settings", choices=["fresh", "copy"], default=None, help="default fresh")
+    parser.add_argument("--pace", type=float, default=None,
+                        help="ms to hold each source frame (0 plays the clip in real time; default 80)")
     parser.add_argument("--sync", action="store_true",
                         help="synchronised playback: real time, but hold on each annotated stop "
                              "frame until the app reports scroll-ready for that tab. Implies "
                              "--pace 0 and requires the clip's sidecar annotation.")
     parser.add_argument("--stops", default=None,
                         help="sidecar written by annotate_stops.py (default <clip>.stops.json)")
-    parser.add_argument("--sync-timeout", type=float, default=30.0,
-                        help="seconds to hold a stop frame waiting for its scroll-ready marker")
-    parser.add_argument("--scroll-rate", type=float, default=1.0,
+    parser.add_argument("--sync-timeout", type=float, default=None,
+                        help="seconds to hold a stop frame waiting for its scroll-ready marker (default 30)")
+    parser.add_argument("--scroll-rate", type=float, default=None,
                         help="speed multiplier applied to each tab's SCROLLING PHASE only "
-                             "(1.0 = real time, 0.5 = half speed). Everything outside "
+                             "(1.0 = real time, the default; 0.5 = half speed). Everything outside "
                              "[stop_frame, scroll_end_frame] still plays at real time. Requires "
                              "--sync and a sidecar carrying scroll_end_frame.")
-    parser.add_argument("--record-wait", type=float, default=120.0)
+    parser.add_argument("--record-wait", type=float, default=None,
+                        help="seconds to wait, per clip, for the capture attempt's outcome (default 120)")
     parser.add_argument("--clip", default=None,
                         help="clip to play (default the S2b/S6c one, "
-                             "testdata/clips/golden/player_standard_5.mkv). "
-                             "A scenario runner names it; nothing else does.")
+                             "testdata/clips/golden/player_standard_5.mkv).")
     parser.add_argument("--range", nargs=2, type=float, metavar=("A", "B"), default=None,
                         help="restrict playback to [A, B] clip seconds (sent as the player's "
                              "`range` before resume). The player emits `event eos` at the range "
                              "end and holds there, so a range that stops mid-scene is how a run "
                              "is perturbed into producing no record.")
-    parser.add_argument("--falsify", choices=["no-wait", "no-runapp", "no-marker-wait"], default=None,
+    parser.add_argument("--falsify", choices=["no-wait", "no-runapp", "no-marker-wait", "no-settle"],
+                        default=None,
                         help="no-wait: skip every readiness gate and drive as soon as the VM "
                              "Service socket opens, to show the harness is not passing on luck. "
                              "no-marker-wait: arm the breakpoints and resume the instant each one "
-                             "fires, without waiting for the tab's scroll-ready marker.")
-    args = parser.parse_args()
+                             "fires, without waiting for the tab's scroll-ready marker. "
+                             "no-settle: drop the evidence of settling (`settled`, `unsettled`) "
+                             "from every clip's observation, which the verdict must refuse to judge "
+                             "a candidate or merge expectation on.")
+    return parser
 
-    clip = Path(args.clip) if args.clip else CLIP
-    summary: dict = {"tag": args.tag, "run_id": args.run_id, "falsify": args.falsify, "clip": str(clip),
-                     "settings": args.settings, "pace_ms": args.pace, "config": args.config,
-                     "sync": args.sync, "range": args.range}
-    stops: list[dict] = []
-    if args.sync:
-        sidecar_path = Path(args.stops) if args.stops else clip.with_suffix(".stops.json")
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        # The annotation is only about THIS clip; a sidecar for a different one would park the
-        # player on frames that mean nothing. Cheap check, and the alternative failure is silent.
-        if sidecar["clip"] != clip.name:
-            raise SystemExit(f"{sidecar_path} annotates {sidecar['clip']}, not {clip.name}")
-        # Every frame number this run is about to arm is checked here, before anything is launched.
-        # A null scroll_end_frame would otherwise become `rate-at None 1.0`, which the player
-        # rejects and the harness then fails on while parsing the reply; a negative or out-of-clip
-        # stop_frame is worse, because the player clamps it into range and the run looks fine.
-        validate_stops(sidecar, sidecar_path, require_scroll_end=args.scroll_rate != 1.0)
-        stops = sidecar["stops"]
-        summary["stops_sidecar"] = str(sidecar_path)
-        summary["stop_frames"] = [s["stop_frame"] for s in stops]
-        args.pace = 0.0
-        summary["pace_ms"] = 0.0
-        summary["scroll_rate"] = args.scroll_rate
-        if args.scroll_rate != 1.0:
-            summary["scroll_end_frames"] = [s["scroll_end_frame"] for s in stops]
-    elif args.scroll_rate != 1.0:
-        raise SystemExit("--scroll-rate only means anything with --sync")
-    app_exe = APP_EXE_BY_CONFIG[args.config]
+
+def main() -> int:
+    args = build_parser().parse_args()
+    plan = load_plan(args)
+    clips = plan["clips"]
+    summary: dict = {"tag": args.tag, "run_id": args.run_id, "falsify": args.falsify, "plan": args.plan,
+                     "clip": clips[0]["clip"] if len(clips) == 1 else [c["clip"] for c in clips],
+                     "settings": plan["settings"], "pace_ms": plan["pace"], "config": plan["config"],
+                     "sync": plan["sync"], "range": clips[0]["range"] if len(clips) == 1 else None}
+    if plan["sync"]:
+        summary["scroll_rate"] = plan["scroll_rate"]
+    # Every sidecar of every clip is checked here, before anything is launched.
+    stops_by_clip = [clip_stops(clip, plan) for clip in clips]
+    app_exe = APP_EXE_BY_CONFIG[plan["config"]]
     # Every log and the run summary below are opened under RUNS, on a clone that may have clips but
     # no analysis directory yet. Created here rather than at import time so importing this module
     # (scenario_run.py does) writes nothing. Never removed or emptied: RUNS holds earlier runs'
@@ -809,7 +1241,7 @@ def main() -> int:
     wall_start = time.monotonic()
     if args.build:
         t_build = time.monotonic()
-        build_app(args.config, RUNS / f"app_build_{args.tag}.log")
+        build_app(plan["config"], RUNS / f"app_build_{args.tag}.log")
         summary["build_seconds"] = round(time.monotonic() - t_build, 2)
     if not app_exe.exists():
         print(f"{app_exe} is missing; run once with --build", file=sys.stderr)
@@ -817,7 +1249,7 @@ def main() -> int:
     summary["exe"] = str(app_exe)
     summary["exe_mtime"] = time.strftime("%Y-%m-%d %H:%M:%S",
                                          time.localtime(app_exe.stat().st_mtime))
-    prepare_scratch(args.fresh, args.settings)
+    prepare_scratch(args.fresh, plan["settings"])
     # Taken before anything is launched, so anything that appears under a real root afterwards is
     # this run's doing. Outside the try, so the post-run scan below always has a baseline.
     real_before = snapshot_real_records()
@@ -825,9 +1257,11 @@ def main() -> int:
     player: Player | None = None
     app: DriverApp | None = None
     driver: Driver | None = None
+    observed: list[dict] = []
+    summary["clips"] = observed
     status = "error"
     try:
-        player = Player(clip, RUNS / f"app_mimic_{args.tag}.log")
+        player = Player(Path(clips[0]["clip"]), RUNS / f"app_mimic_{args.tag}.log")
         summary["player_ready"] = player.wait_ready()
 
         t_launch = time.monotonic()
@@ -854,61 +1288,90 @@ def main() -> int:
             summary["root_widget_wait_seconds"] = driver.wait_root_widget()
             driver.by_key("waitFor", NAV_CAPTURE)
         summary["ready_seconds"] = round(time.monotonic() - t_launch, 2)
+        reader = StateReader(driver)
 
         driver.by_key("tap", NAV_CAPTURE)
         if args.falsify is None:
             driver.by_key("waitFor", START_LABEL)
-        t_capture = time.monotonic()
-        driver.by_key("tap", CAPTURE_BUTTON)
-        # Confirms the native side actually entered the capturing state: the label only flips when
-        # capturingStateProvider reports it, which on the first capture includes the model load.
-        driver.by_key("waitFor", STOP_LABEL, timeout_ms=120000)
-        summary["capture_start_seconds"] = round(time.monotonic() - t_capture, 2)
-        if args.falsify is None:
-            summary["capturing"] = app.wait_capturing()
+        for index, clip in enumerate(clips):
+            obs: dict = {"index": index, "clip": clip["clip"]}
+            observed.append(obs)
+            if index > 0:
+                player = Player(Path(clip["clip"]), RUNS / f"app_mimic_{args.tag}_{index}.log")
+                obs["player_ready"] = player.wait_ready()
+            sidecar_path, stops = stops_by_clip[index]
+            if sidecar_path is not None:
+                obs["stops_sidecar"] = str(sidecar_path)
+                obs["stop_frames"] = [s["stop_frame"] for s in stops]
+                if plan["scroll_rate"] != 1.0:
+                    obs["scroll_end_frames"] = [s["scroll_end_frame"] for s in stops]
+            signals = app.arm_clip()
+            try:
+                before_state, _ = reader.poll(lambda s: True, CONTAINER_WAIT_SECONDS)
+            except RuntimeError as error:
+                obs["state_error"] = f"{type(error).__name__}: {error}"
+                before_state = None
+            before_attempt = ((before_state or {}).get("capture") or {}).get("attempt_id")
+            obs["attempt_before"] = before_attempt
 
-        before = records()
-        # Sent while the player is still paused on frame 0, so the restriction is in force before
-        # anything is presented. `range` repositions only when the playhead is outside [A, B].
-        if args.range is not None:
-            summary["range_reply"] = player.send(f"range {args.range[0]} {args.range[1]}")
-        t_play = time.monotonic()
-        # Wall clock of the instant playback is released, so a marker in the app's log (which is
-        # wall-stamped) can be converted to a clip timestamp: clip_ms = (marker - resume_wall) * 1000
-        # plus the ts the `resume` reply reports. Needed to state how far ahead of a scroll a
-        # scroll-ready marker lands.
-        summary["play_started_wall"] = datetime.datetime.now().strftime("%H:%M:%S.%f")
-        if args.sync:
-            summary["synchronised"] = player.play_synchronised(
-                stops, app, args.sync_timeout,
-                wait_for_marker=args.falsify != "no-marker-wait",
-                scroll_rate=args.scroll_rate)
-            summary["eos"] = player.wait_eos(180.0)
-            # Re-collected after eos: the last tab's `event rate-at` arrives while wait_eos is
-            # reading, i.e. after play_synchronised has already returned.
-            summary["synchronised"]["rate_events"] = [e for e in player.events
+            t_capture = time.monotonic()
+            driver.by_key("tap", CAPTURE_BUTTON)
+            # Confirms the native side actually entered the capturing state: the label only flips when
+            # capturingStateProvider reports it, which on the first capture includes the model load.
+            driver.by_key("waitFor", STOP_LABEL, timeout_ms=120000)
+            obs["capture_start_seconds"] = round(time.monotonic() - t_capture, 2)
+            if args.falsify is None:
+                obs["capturing"] = signals.wait_capturing()
+
+            # Sent while the player is still paused on frame 0, so the restriction is in force before
+            # anything is presented. `range` repositions only when the playhead is outside [A, B].
+            if clip["range"] is not None:
+                obs["range_reply"] = player.send(f"range {clip['range'][0]} {clip['range'][1]}")
+            t_play = time.monotonic()
+            # Wall clock of the instant playback is released, so a marker in the app's log (which is
+            # wall-stamped) can be converted to a clip timestamp: clip_ms = (marker - resume_wall) *
+            # 1000 plus the ts the `resume` reply reports. Needed to state how far ahead of a scroll a
+            # scroll-ready marker lands.
+            obs["play_started_wall"] = datetime.datetime.now().strftime("%H:%M:%S.%f")
+            if plan["sync"]:
+                obs["synchronised"] = player.play_synchronised(
+                    stops, signals, plan["sync_timeout"],
+                    wait_for_marker=args.falsify != "no-marker-wait",
+                    scroll_rate=plan["scroll_rate"])
+                obs["eos"] = player.wait_eos(180.0)
+                # Re-collected after eos: the last tab's `event rate-at` arrives while wait_eos is
+                # reading, i.e. after play_synchronised has already returned.
+                obs["synchronised"]["rate_events"] = [e for e in player.events
                                                       if e.startswith("event rate-at")]
-        elif args.pace > 0:
-            summary["stepped"] = player.play_stepped(args.pace)
-        else:
-            summary["resume"] = player.send("resume")
-            summary["eos"] = player.wait_eos(180.0)
-        summary["play_ended_wall"] = datetime.datetime.now().strftime("%H:%M:%S.%f")
-        summary["playback_seconds"] = round(time.monotonic() - t_play, 2)
+            elif plan["pace"] > 0:
+                obs["stepped"] = player.play_stepped(plan["pace"])
+            else:
+                obs["resume"] = player.send("resume")
+                obs["eos"] = player.wait_eos(180.0)
+            obs["play_ended_wall"] = datetime.datetime.now().strftime("%H:%M:%S.%f")
+            obs["playback_seconds"] = round(time.monotonic() - t_play, 2)
 
-        t_record = time.monotonic()
-        produced: set[Path] = set()
-        deadline = t_record + args.record_wait
-        while time.monotonic() < deadline:
-            produced = records() - before
-            if produced:
-                break
-            time.sleep(0.5)
-        summary["record_wait_seconds"] = round(time.monotonic() - t_record, 2)
+            if "state_error" not in obs:
+                try:
+                    obs.update(observe_clip(reader, driver, signals, before_attempt, clip,
+                                            plan["record_wait"], args.falsify))
+                except RuntimeError as error:
+                    obs["state_error"] = f"{type(error).__name__}: {error}"
+            obs["container_seen"] = reader.container_seen
+
+            driver.by_key("tap", CAPTURE_BUTTON)
+            driver.by_key("waitFor", START_LABEL, timeout_ms=60000)
+            obs["capture_stopped"] = True
+            if clip["merge"] is not None:
+                ids = [observed[clip["merge"][k]].get("record_id") for k in ("survivor", "retired")]
+                obs["merge"] = perform_merge(reader, driver, ids[0], ids[1]) if all(ids) else \
+                    {"error": f"the clips to merge have no record id ({ids})"}
+            player.close()
+            player = None
+
+        summary.update(playback_summary(observed))
+        produced = records()
         summary["record_dirs"] = sorted(str(p) for p in produced)
-
-        driver.by_key("tap", CAPTURE_BUTTON)
-        driver.by_key("waitFor", START_LABEL, timeout_ms=60000)
         summary["capture_stopped"] = True
         status = "ok" if produced else "no-record"
     except Exception as error:  # noqa: BLE001

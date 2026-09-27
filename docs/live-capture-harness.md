@@ -29,9 +29,11 @@ golden it is compared against is the same file `integration_golden.player_standa
 | path | role |
 | --- | --- |
 | `native/tool/mimic_player/mimic_player.cpp` | the mimic window: Win32 class `UnityWndClass`, title `umamusume`, the game's exact style/exstyle/chrome metrics, presenting clip frames through a DXGI flip-model swap chain (atomic — a GDI blit tears under DWM). `--control` turns it into a stdin/stdout request-response fixture (`pause`, `resume`, `step`, `seek`, `range`, `pause-at`, `rate`, `rate-at`, `status`, `quit`), every reply written only after the effect is on screen. Target `umacapture_mimic_player`. |
-| `tool/live_capture_test/app_drive_run.py` | drives one run: mimic player + the driver-enabled app over the VM Service, navigates the UI, starts capture, plays the clip, waits for the record. Success = "a `record.json` appeared". |
-| `tool/live_capture_test/scenario_run.py` | runs one **scenario** and gives the verdict on record *contents*. |
+| `tool/live_capture_test/app_drive_run.py` | drives one run: mimic player + the driver-enabled app over the VM Service, navigates the UI, then per clip of the plan starts capture, plays the clip, reads the app's state until the attempt ends and the store has settled, and stops capture. It judges nothing: it writes what it observed. Standalone, success = "a `record.json` appeared". |
+| `tool/live_capture_test/scenario_run.py` | runs one **scenario** and gives the verdict on record *contents* and on the per-clip expectations. |
 | `tool/live_capture_test/scenarios/*.json` | the declared cases; one case per file. |
+| `tool/live_capture_test/goldens/*.json` | the record sets of the multi-clip scenarios, composed from single-clip replay goldens (see *Multi-clip scenarios*). `native/test/integration/golden/` holds only the golden suite's own case goldens. |
+| `test_driver/app.dart` | the driver-enabled entry point. Its `request_data` handler answers `harness_state` with the running app's state as data (see *Multi-clip scenarios*). |
 | `tool/live_capture_test/annotate_stops.py` | offline clip annotation (the `*.stops.json` sidecar). |
 | `tool/live_capture_test/stops_schema.py` | what a stop frame *is*, imported by both the sidecar's writer and its reader so the two cannot drift. No dependencies — the two scripts' own dependency sets are disjoint, which is why it is its own module. |
 | `tool/live_capture_test/test_stops_validation.py` | unit tests for the refusals: the sidecar's frame numbers and tab coverage (`validate_stops`), and the verdict's own preconditions (`expectation_failure`, `attribution_failure`, `run_validity_failures`). Pure functions over parsed JSON, so `uv run` it directly — no clip, player or app involved. |
@@ -52,11 +54,13 @@ golden it is compared against is the same file `integration_golden.player_standa
   the real modules are no longer the ones it was made from — their content hashes are recorded
   beside it — so replacing a model takes effect on the next run and no run recognises with a model
   the copy froze at some earlier date.
-* **A clip and its sidecar under `testdata/clips/golden/`** — `player_standard_5.mkv` plus
-  `player_standard_5.stops.json`. Clips are large and machine-local, so they are gitignored —
+* **Every clip the scenario plays, with its sidecar, under `testdata/clips/golden/`** — e.g.
+  `player_standard_5.mkv` plus `player_standard_5.stops.json`; the multi-clip scenarios also play
+  the four `factor_enhance_*.mkv`. Clips are large and machine-local, so they are gitignored —
   they are literally the same files `native/test/integration/cases.json` references, in the same
   directory (`run.py`'s `--data-dir` defaults to it).
-* **The golden** the scenario names, e.g. `native/test/integration/golden/player_standard_5.json`.
+* **The golden** the scenario names, e.g. `native/test/integration/golden/player_standard_5.json`
+  or `tool/live_capture_test/goldens/c1_hopstep_pre_then_post.json`.
 
 ## Building
 
@@ -109,9 +113,19 @@ edit to the real case.
 
 | exit | meaning |
 | --- | --- |
-| **0** | the app's records match the golden exactly |
-| **1** | they do not — including "the app produced none". The unified diff is printed. |
-| **2** | the scenario could not be run at all, or it ran and cannot support a verdict: bad or absent scenario, missing clip/golden/sidecar, **a golden that states no records** (see below), missing app bundle, no harness summary, harness timeout, **a summary that is not this run's** (see below), a record found **outside** the isolated data root, a **missing isolation scan**, or a `sync` scenario that **lost a scroll-ready wait** (`synchronised.timeouts != 0`) or **never took one** (`synchronised.held` shorter than the stops it armed) and therefore played a tab unsynchronised |
+| **0** | the app's records match the golden exactly, every clip's capture outcome was observed, and every per-clip expectation holds |
+| **1** | they do not — including "the app produced none" once the clip's outcome was observed — or a valid observation contradicts a per-clip expectation. The unified diff is printed, and each contradiction as a `FAIL` line with its reason code (see *Multi-clip scenarios*). |
+| **2** | the scenario could not be run at all, or it ran and cannot support a verdict: bad or absent scenario, missing clip/golden/sidecar, **a golden that states no records** (see below), missing app bundle, no harness summary, harness timeout, **a summary that is not this run's** (see below), **a harness summary whose `status` is `error`** or missing (the harness stopped on an exception; the records and observations it wrote before that do not make it a pass, however well they match), a record found **outside** the isolated data root, a **missing isolation scan**, a `sync` scenario that **lost a scroll-ready wait** (`synchronised.timeouts != 0`), **never took one** (`synchronised.held` shorter than the stops it armed) or took one **released by a marker seen before the clip armed its signals** (`marker_after_arm` false), and therefore played a tab unsynchronised — checked for the run as a whole and again for each clip that carries an expectation — or a per-clip expectation whose observation is missing, ill-typed or a driver failure, or **a clip whose capture outcome was never observed** (`outcome_unobserved`; every clip, a single-clip scenario's included) |
+
+**Exit 2 is not a verdict; re-run it once.** Re-run the whole scenario one time. Every run starts
+from an empty scratch storage and a fresh settings box (`prepare_scratch` removes both before
+anything is launched), so the re-run starts from the same state the first run did. If it exits 2
+again, report the scenario as **unverified** — neither passed nor failed — with the reasons both
+runs printed. A harness status of `no-record` is not exit 2 by itself: it is a run that completed
+and whose app wrote nothing, and it is judged — first on whether each clip's outcome was observed,
+then by the record verdict. So "the app produced none" is exit 1 only when the clip's attempt
+recorded an outcome (a `failed` one, say). `falsify_truncated_input` stops its clip inside the
+scene, so its attempt records no outcome and the run ends `outcome_unobserved`, exit 2.
 
 **A golden must state an expectation the run can fail to meet.** The verdict is a text comparison,
 and equality is symmetric about emptiness: a golden holding `[]` is what a run that recognised
@@ -147,15 +161,206 @@ tree, so the four volatile keys (`record_id`, `trainer_id`, `captured_date`, `re
 the record ordering and the byte-exact serialisation are the golden suite's by construction.
 
 Artefacts go to `testdata/harness/runs/` and never into the repository:
-`scenario_result_<tag>.json` (the verdict), `app_result_<tag>.json` (the harness summary, including
-`playback_seconds`, `exe_mtime`, `synchronised.held[*]`, `synchronised.rate_events` and
-`synchronised.timeouts`), plus the harness, app-stdout, player and driver logs.
+`scenario_result_<tag>.json` (the verdict, with each reason code under `clip_findings`),
+`plan_<tag>.json` (the plan the runner handed the harness), `app_result_<tag>.json` (the harness
+summary), plus the harness, app-stdout, player and driver logs — one player log per clip.
+
+**Per-clip observations are under `clips[i]` in the summary, for a single-clip scenario too**
+(`clips[0]`): `eos`, `stop_frames`, `synchronised` (`held[*]`, `rate_events`, `timeouts`),
+`playback_seconds`, `capture` (the attempt's outcome; when null, beside it `last_capture_state`
+and `last_event`, the last ones read), `settled` / `unsettled`, `record_id`, `candidates`, `tile`,
+`probe_duplicates`, `merge`. `eos` exists only there. The top-level `stop_frames`,
+`synchronised` and `playback_seconds` are the run-level aggregate the validity check reads: for
+one clip they are that clip's own; for several, stop frames and holds are concatenated and
+timeouts and playback seconds summed, and the top-level `synchronised` then carries only `held`
+and `timeouts` — read `rate_events` under each `clips[i]`. `exe_mtime` and `status` stay at the
+top level.
 
 The player's own check is separate and does not involve the app:
 
 ```
 bash tool/live_capture_test/fidelity_run.sh <tag> [source.mkv]
 ```
+
+## Multi-clip scenarios
+
+A scenario that names `clips` instead of `clip` plays several clips in order in **one app
+session and one scratch storage**. `load_scenario` turns a single-clip file into a one-element
+`clips` list carrying no expectation, so both forms reach the harness as the same kind of plan
+(`build_plan`, passed as `--plan`) and are judged by the same code. Naming both `clip` and
+`clips`, or neither, is exit 2.
+
+```jsonc
+{
+  "version": 1,
+  "name": "c1_hopstep_pre_then_post",
+  "clips": [
+    { "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": { "status": "succeeded", "candidate": null } },
+    { "clip": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.stops.json",
+      "expect": { "status": "succeeded", "candidate": { "with": 0, "enhanced": 1 } } }
+  ],
+  "golden": "tool/live_capture_test/goldens/c1_hopstep_pre_then_post.json",
+  "config": "debug", "settings": "fresh", "sync": true, "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30, "record_wait_seconds": 120, "run_timeout_seconds": 900
+}
+```
+
+`stops` and `range_seconds` go inside each `clips` entry and mean what they mean at the top level
+of a single-clip file; putting them at the top level next to `clips` is exit 2. Everything else
+is per run. `record_wait_seconds` bounds each clip's wait for its capture attempt's outcome, and
+`run_timeout_seconds` the whole harness process.
+
+### What the harness does per clip
+
+Once per run it wipes the scratch storage, launches the first clip's player and the app, and
+opens the capture page. Then, for each clip in order:
+
+1. from the second clip on, it launches a new player process on that clip — the player plays
+   one clip per process;
+2. it arms a fresh set of log signals for the clip (`arm_clip`): the recorder-started and
+   first-frame latches, one scroll-ready latch per tab, and the `Factor probe:` lines. A latch the
+   previous clip had set would release every hold of this clip at once, with no timeout and
+   every stop held, so each hold also records `marker_after_arm` and the verdict refuses one
+   that is false (`sync_invalid`, exit 2). Arming also moves the clip's time base (`armed_at`) as a
+   step of its own, apart from creating the latches, so a set of latches carried into a later clip
+   still reads its earlier markers as `marker_after_arm: false`;
+3. it reads `harness_state` and keeps the capture's `attempt_id`;
+4. it starts the capture, plays the clip — synchronised on that clip's own sidecar — to `eos`,
+   and observes (below);
+5. it stops the capture, performs the entry's `merge` if it has one, and quits the player.
+
+The storage is never wiped between clips, so a clip meets every record the earlier ones left.
+Stopping and restarting the capture per clip is what makes a clip boundary a state of the app
+rather than a moment in time.
+
+### Reading the app's state
+
+The UI cannot say *why* the candidate tile is absent: the store may not have imported the new
+record yet, or the factor table may not have loaded (without it only exact duplicates are
+found), and both look exactly like "no candidate". So the harness reads the state as data. The
+driver entry point `test_driver/app.dart` answers `request_data` with message `harness_state` by
+reading the running app's own providers: the capture's `attempt_id`, `status`, `link_id` and
+`duplicate_record_id`, the last capture event, the active and archive store ids, whether the
+factor table has loaded, and the pending enhancement candidates (`older`, `newer`, `enhanced`).
+Until the `ProviderScope` is mounted it answers `container: false` and the harness reads again.
+
+Per clip, polling every 200 ms:
+
+* **outcome** — the capture's `attempt_id` differs from the one read before the capture and the
+  last capture event is terminal (`succeeded`, `alreadyCaptured`, `failed`), within
+  `record_wait_seconds`. It is written as `capture` (`attempt_id`, `status`, `record_id`: the
+  captured record, or the existing one on `alreadyCaptured`). **The event, not the capture
+  status.** Closing the detail screen (`onCharaDetailClosed`) resets the capture state: its status
+  returns to `waitingForDetail` and the link `succeeded` is derived from is dropped, so a status
+  read after playback misses an outcome the app did reach. The event is recorded on the transition
+  into the outcome and kept until the next attempt begins; the app clears it whenever the attempt
+  id changes, so an event beside an attempt id was recorded during that attempt. The attempt id
+  survives the close and is what makes this per clip: the capture state names the previous clip's
+  attempt until this clip's is announced. `duplicateHint` is an event too, but the early check's
+  hint rather than an outcome. No outcome within the wait is `capture: null`, reported as
+  `outcome_unobserved` (exit 2) for every clip: a wait that ran out says nothing about whether the
+  attempt ended.
+* **settling** — within 30 s, against the outcome each read carries: the store has loaded; a
+  `succeeded` record is among its active ids;
+  the record directories on the scratch disk are exactly the store's active ids, in both
+  directions (the store removes a refused duplicate's directory before it reports
+  `alreadyCaptured`, so this covers that cleanup); and the factor table has loaded when the clip
+  expects a `candidate` or carries a `merge`. What is still unmet is reported by name.
+* then the event, the store and the candidates are read and, for a clip that produced a record,
+  whether the candidate tile (`capture_enhancement_candidate`) is shown. Which state the harness
+  waits for comes from the candidate data, not from the expectation; if that wait fails it waits
+  for the opposite state, and only a wait that succeeds is an observation.
+
+### Expectations
+
+| field | where | judged as |
+| --- | --- | --- |
+| `expect.status` | clip | the attempt's outcome: `"succeeded"`, `"already_captured"` or `"failed"` |
+| `expect.candidate` | clip | `null`: no pending candidate names this clip's record. `{"with": j, "enhanced": k}`: exactly one does, pairing it with clip `j`'s record, with clip `k`'s record (or `null`, none) as the enhanced side. Either way the tile must agree with the data. `null` needs the event to be this record's `succeeded` — the only state in which a candidate would show a tile at all — or it is inconclusive |
+| `expect.probe_duplicate` | clip | every early-duplicate-check line the app logged during the clip (`Factor probe: … duplicate=<bool>`) carries this value; no such line is a mismatch of its own |
+| `merge` | clip | `{"survivor": i, "retired": j}`, clips played up to this one: merge them after this clip, then require the merge to complete, the survivor's directory to exist and its `merged_ids.json` to name the retired id, the retired directory to be gone, and the pair to be no candidate with no tile |
+| `expect_links` | run | `[{"child": i, "slot": "parent1" or "parent2", "parent": j}]`: after the last clip, the child's raw `record.json` has `metadata.record_id.<slot>` equal to the parent clip's record id. Read from disk because normalisation drops `metadata.record_id`, so the golden cannot see a link |
+
+A key left out is not judged. An index that names no clip of the scenario, or a pair naming the
+same clip twice, is refused by `load_scenario` (exit 2). The record set is still diffed against
+`golden` after the last clip.
+
+**Merging.** With the capture stopped — the tile cannot be tapped while a capture claims the
+record store — the harness taps the tile until the dialog's apply button
+(`enhancement_merge_apply`) appears, at most three times and never again once the dialog is
+open. The apply button is a hold-to-confirm button, which a driver `tap` (press and immediate
+release) does not confirm; the driver's `scroll` presses, moves over a duration and releases, so
+a zero move for 1.5 s is the hold. The button is disabled for the first frames after the dialog
+appears, and a press that lands there is ignored; since the dialog closes on every outcome of the
+merge, the harness takes the button leaving the tree within 3 s as the hold being accepted and
+otherwise holds again, at most three times (`holds` in the observation). A driver failure other
+than that wait running out is a driver error, not another hold. Then it waits up to 60 s for the retired id to leave the store
+and the pair to leave the candidates.
+
+### Reason codes
+
+`judge_clips` returns reason codes, not a boolean, and a clip can carry several. **An observation
+that is missing, ill-typed or a driver failure is inconclusive — never read as false, as "no
+candidate" or as "not completed"** — and one inconclusive finding makes the run exit 2 whatever
+else mismatched.
+
+| exit | codes |
+| --- | --- |
+| **1** | `status_mismatch`, `unsettled` (settling gave up on a disagreement it measured: the succeeded record missing from the store, or disk and store listing different records), `candidate_mismatch` (the pair absent, another pair beside it, or the wrong records or enhanced side), `candidate_unexpected`, `tile_disagrees`, `probe_not_run`, `probe_mismatch`, `link_mismatch`, `merge_incomplete`, `merge_survivor_missing`, `merge_retired_present`, `merge_mark_missing`, `merge_candidate_remains` |
+| **2** | `outcome_unobserved` (no outcome of the clip's capture attempt was seen within `record_wait_seconds` — judged for every clip, one that states no expectation included), `clip_count_mismatch` (the harness observed fewer or more clips than the scenario plays — it did not reach them), `observation_missing`, `driver_failed` (a `harness_state` read failed, the tile wait failed in both directions, or the merge step reported an error — including a dialog that never opened), `container_never_seen`, `sync_invalid` (that clip's playback fails the synchronisation checks above), `factor_info_not_loaded` (the factor table was not loaded — read directly, or the condition settling gave up on), `store_not_loaded` (settling gave up with the store's active list never loaded), `event_not_this_record` |
+
+`merge_incomplete` is only a merge the harness confirmed and then did not see finish within
+60 s; a dialog that never opened is `driver_failed`. A driver call that raises outside these
+observations stops the harness, which reports `status: "error"` — exit 2 as well.
+
+**A falsification passes only as a valid run with the reason code it names.** Exit 1 alone is
+not enough: another code means a different check fired, and exit 2 means nothing was judged.
+Each falsification sibling states its expected codes in its `description`.
+
+### Multi-clip goldens
+
+`tool/live_capture_test/goldens/<scenario>.json` is composed, not recorded. Each input is a
+single-clip golden in `native/test/integration/golden/`, i.e. the CLI's `replay` of the same FFV1
+clip. To compose one: load the single-record goldens of the clips whose records the run keeps,
+apply what the app does across records (below), sort with `run.py`'s `_sort_key`, and write the
+list with `run.py`'s `_dumps` — the golden suite's own functions, so the serialisation is the
+one the verdict compares. What the app does across records:
+
+* **a parent link adds `metadata.relation_bonus`** to the child. With one linked parent and no
+  linked grandparent it is `0`, so C3's and C4's child records carry `"relation_bonus": 0`.
+* **a refused duplicate adds no record**: C5 names `player_standard_5.json` unchanged.
+* **a merge leaves one record** with the enhanced content and the older record's id and date,
+  both of which normalisation drops: C6's golden equals the enhanced clip's single-clip golden.
+
+No script is committed for this. When a single-clip golden changes (a model update), re-compose
+every multi-clip golden built from it by the same steps.
+
+### The committed multi-clip scenarios
+
+X is one trained character before and after a factor enhancement (`factor_enhance_hopstep_*`:
+stars raised, white factors added); Y is another, inheritance-only, whose enhancement only raised
+stars (`factor_enhance_cinderella_*`). X's `parent1` is Y before its enhancement — the same card
+and exactly the same factors.
+
+| scenario | clips | expected |
+| --- | --- | --- |
+| `c1_hopstep_pre_then_post` | X before → X after | both succeed; the second is a candidate with the first, enhanced side the second; 2 records |
+| `c2_cinderella_pre_then_post` | Y before → Y after | as C1; 2 records |
+| `c3_cross_hopstep_pre_cinderella_post` | X before → Y after | both succeed, **no candidate** (the negative control); X's `parent1` links to Y across the enhancement |
+| `c4_parent_cinderella_pre_then_hopstep_pre` | Y before → X before | both succeed, no candidate; X's `parent1` links to Y (exact match) |
+| `c5_same_clip_twice` | `player_standard_5` twice | first succeeds with `duplicate=false`; second is `already_captured` with `duplicate=true`; 1 record |
+| `c6_merge_hopstep` | X before → X after, merged | as C1, then the merge completes; 1 record with X-after content |
+| `falsify_c1_expects_no_candidate` | C1, clip 1 expects no candidate | exit 1, `candidate_unexpected` |
+| `falsify_c3_expects_candidate` | C3, clip 1 expects the pair | exit 1, `candidate_mismatch` |
+| `falsify_c4_wrong_slot` | C4, link expected in `parent2` | exit 1, `link_mismatch` |
+| `falsify_c5_expects_succeeded` | C5, clip 1 expects `succeeded` and `duplicate=false` | exit 1, both `status_mismatch` and `probe_mismatch` |
+
+The Y clips open the detail on the factor tab and never scroll the skill tab, so their sidecars
+carry `tab` 1 and 2, renumbered by hand (see trap 1 in *Where the tooling silently gives a
+plausible WRONG answer*).
 
 ## The timing model, and why it is what it is
 
@@ -344,6 +549,8 @@ a time: it is a dimensionless multiplier, `1.0` real time, `0.5` twice as long p
    `synchronised.held` to be non-empty and as long as the stops the harness armed. Step 3 is what
    this pairs with: when detection finds fewer groups than tabs, the machine check above is exactly
    as empty as the annotation is, so on its own it cannot back up a human step that failed.
+   In a multi-clip run, read these under `clips[i].synchronised`: the top-level `synchronised`
+   then carries no `rate_events`.
 
 ### 5. Manual fallback
 
@@ -438,6 +645,42 @@ there is nothing to go and find. It hardcoded `737x1310` and rows `596..1131` an
 produced garbage on anything else, which is why it was not kept. Use `annotate_stops.py --report`
 instead.
 
+### 7. A clip converted from an H.264 recording
+
+The player plays FFV1 `bgr0` in Matroska, which is what `capture --record` writes. A clip that
+exists only as an H.264 MP4 — the four `factor_enhance_*` clips were recorded that way — has to
+be converted, and two things differ from a recorded clip.
+
+**Convert with the demuxer's time base:**
+
+```
+ffmpeg -i <src>.mp4 -map 0:v:0 -an -fps_mode passthrough -enc_time_base -1 \
+    -c:v ffv1 -level 3 -pix_fmt bgr0 <dst>.mkv
+```
+
+`-fps_mode passthrough` keeps every source frame and adds none. Without `-enc_time_base -1` the
+encoder's time base on these variable-frame-rate sources was 1/60 s, and rounding that to
+Matroska's milliseconds gave neighbouring packets the same timestamp — three to eight places per
+clip. The player refuses such a clip when it loads it (`native/tool/mimic_player/clip_decoder.h`: it resolves a seek target
+by timestamp, so the timestamps must strictly increase). `-enc_time_base -1` keeps the demuxer's
+time base; check with `ffprobe` that the frame count equals the source's and that no timestamp
+repeats before annotating.
+
+**Detection misplaces the stops; set them by hand.** A frame is quiet when at most `--tol` pixels
+of its scroll area changed from the previous frame. Lossy compression changes thousands of
+scroll-area pixels by a few levels on every frame, so the area is never byte-still, and no
+`--tol` separates that noise from a real change, because it counts pixels rather than how much
+they changed. On the four `factor_enhance_*` clips detection gave `lead_frames` from 6 to 282.
+The scroll onsets, which are measured as content shifts, were still found. So use the manual
+fallback (§5): `--stop-frames` at each tab's first onset minus one (the first frame of each
+`scroll_groups` group), and where no scroll end was found, read `--report` and write
+`scroll_end_frame` by hand with `manual_override`. `lead_frames` is then 1 by construction, and
+while the player holds a stop it re-presents that one frame, so the app sees a still screen even
+though the source never was. Two steps of *Verify before trusting it* cannot hold on such a clip
+and do not signal a bad annotation: step 5's run of exact zeros, and step 4's comparison with the
+reference clip's `quiet_run_frames` (noise shortens every quiet run). The warnings this produces
+are expected; read them, then record that with `--allow-warnings`.
+
 ## Limitations
 
 * **One clip, one case, one machine, one window position, one build configuration.** Seven runs
@@ -462,5 +705,11 @@ instead.
   artefacts (`campaign`/`factor`/`skill` json+png, `trainee.jpg`).
 * **No web or browser path.** A scenario can only name the Windows app; `scenario_run.py` drives
   `app_drive_run.py` as a subprocess and does not know how to drive any other front end.
-* Only the happy path is driven: no settings UI, no dedup path (storage starts empty every run), no
-  second record, no capture restart, no error path.
+* The scenarios drive capture into an empty store, a capture restarted in the same session, a
+  second record, the duplicate refusal, the enhancement candidate, parent links and one merge.
+  Not driven: the settings UI and the error path.
+* **No multi-clip scenario has been run end to end yet.** Their expectations are declared, not
+  observed, and so is some of what they rely on: that the driver's zero-move `scroll` confirms
+  the hold-to-confirm button, that a linked child's `relation_bonus` is `0` (the app writes it
+  only if its race title table had loaded when the link was resolved), and that the hand-set stops of the four
+  H.264-derived sidecars line up with the app's scroll-ready markers (§7).
