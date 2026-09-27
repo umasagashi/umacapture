@@ -17,7 +17,7 @@ import 'package:umacapture/src/core/mapper_init.dart';
 
 import 'support/riverpod.dart';
 
-Character _chara(int card) => Character(0, 0, card, 0);
+Character _chara(int card) => Character(0, 0, card, 0, null);
 
 Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 

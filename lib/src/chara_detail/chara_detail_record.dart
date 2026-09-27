@@ -14,17 +14,22 @@ import '/src/core/version_check.dart';
 
 part 'chara_detail_record.mapper.dart';
 
-@MappableClass(caseStyle: CaseStyle.snakeCase)
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Character extends JsonEquatable with CharacterMappable {
   final int icon;
   final int character;
   final int card;
   final int rank;
 
-  const Character(this.icon, this.character, this.card, this.rank);
+  /// The record type the native recognizer reads off a family entry's icon. It is set on the six
+  /// family entries and left null on the trainee, whose type is [Metadata.recordType]; a null value
+  /// writes no key, so a record Dart writes back keeps exactly the fields native wrote.
+  final RecordType? recordType;
+
+  const Character(this.icon, this.character, this.card, this.rank, this.recordType);
 
   @override
-  List<Object?> properties() => [icon, character, card, rank];
+  List<Object?> properties() => [icon, character, card, rank, recordType];
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase)

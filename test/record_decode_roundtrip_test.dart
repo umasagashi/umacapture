@@ -9,6 +9,7 @@
 // not vanish.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_decode_roundtrip_test.dart
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +54,37 @@ void main() {
     expect(reDecoded, record);
     // The active directory is left in place (loaded, not quarantined/deleted).
     expect(Directory(dir.path).existsSync(), isTrue);
+  });
+
+  test('a native record.json writes back as the same map, family record_type included', () {
+    final dir = seedRecord('9a1e0d66-0654-4416-aa11-5613e7a9f05e', validRecordJson);
+
+    final record = (CharaDetailRecord.load(dir) as RecordLoaded).record;
+
+    // Dart rewrites record.json from toMap() (parent links, merges), so every key native wrote has
+    // to survive it: the six family record_type values, and no record_type added to the trainee.
+    expect(record.toMap(), jsonDecode(validRecordJson));
+  });
+
+  test('a record whose family entries carry no record_type loads and writes back without one', () {
+    final legacy = jsonDecode(validRecordJson) as Map<String, dynamic>;
+    var removed = 0;
+    final family = legacy['family'] as Map<String, dynamic>;
+    for (final parent in ['parent1', 'parent2']) {
+      for (final entry in ['self', 'parent1', 'parent2']) {
+        final character = (family[parent] as Map<String, dynamic>)[entry] as Map<String, dynamic>;
+        if (character.remove('record_type') != null) removed++;
+      }
+    }
+    expect(removed, 6);
+    final dir = seedRecord('9a1e0d66-0654-4416-aa11-5613e7a9f05e', jsonEncode(legacy));
+
+    final result = CharaDetailRecord.load(dir);
+
+    expect(result, isA<RecordLoaded>());
+    final record = (result as RecordLoaded).record;
+    expect(record.family.parent1.self.recordType, isNull);
+    expect(record.toMap(), legacy);
   });
 
   test('a malformed record is quarantined, not deleted', () {
