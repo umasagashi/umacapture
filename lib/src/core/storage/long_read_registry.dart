@@ -339,6 +339,24 @@ enum LongReadKind {
   ///    refusing for one — its `isCapturing`/`stopCapture` pair is that decision,
   ///    written down long before this member existed.
   liveCapture,
+
+  /// Merging two records the user says are the same uma: publishing the survivor,
+  /// rewriting every reference to the retired id, and removing it.
+  ///
+  /// **The operation is the root action *and* the store reload that follows it.**
+  /// The merge rewrites `record.json` files from what memory holds and then forces
+  /// both stores to load again, because memory no longer equals disk until they
+  /// have; a claim that ended with the root lock would go off while the app was
+  /// still holding a view it has already invalidated, and the next press would
+  /// start a second merge against records loaded from a half-rewritten store. So
+  /// the claim is taken outside the recovery gate and given back after the reload.
+  ///
+  /// Its own surface asks about it too: the merge takes
+  /// its claim through [LongReadRegistry.holdWhenFree] with
+  /// [LongReadContention.refuse], so a second press while the first is still
+  /// running is refused by the registry rather than by a flag of its own — the
+  /// same row that greys out every other Merge button for the length of it.
+  merge,
 }
 
 /// What the app says, **on every surface**, while a registered long reader is

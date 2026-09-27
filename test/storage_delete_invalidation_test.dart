@@ -26,8 +26,8 @@
 //
 //  3. **A metadata delete is serialised through the owning controller.**
 //     The controller is dropped *before* the file goes, which is the whole of
-//     the exclusion available: its writers take no lock, so there is no
-//     counterparty a lock could exclude.
+//     the exclusion available against the memo and rating controllers: they
+//     take no lock, so the root lock the scope also holds does not exclude them.
 //
 // WHAT THIS SUITE DOES NOT REACH. It does not build a record store, so
 // "invalidating the active loader makes the row leave the table" is asserted at
@@ -214,7 +214,7 @@ void main() {
     // against nothing. That is checked here rather than left to be discovered.
     test('metadata is still the only provider-serialized group', () {
       final serialized = storageGroups
-          .where((group) => group.lockScope == StorageLockScope.providerSerialized)
+          .where((group) => group.lockScope == StorageLockScope.exclusiveRootProviderSerialized)
           .map((group) => group.id);
       expect(serialized, [StorageGroupId.metadata]);
     });

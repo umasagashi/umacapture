@@ -85,6 +85,7 @@ List<String> _namesOf(LongReadKind kind) => [
     LongReadKind.import => const ['取り込み', 'インポート'],
     LongReadKind.videoImport => const ['動画', 'クリップ'],
     LongReadKind.liveCapture => const ['キャプチャ', '録画', '画面'],
+    LongReadKind.merge => const ['統合', 'マージ'],
   },
 ];
 
@@ -1410,7 +1411,7 @@ void main() {
 
       expect(
         members.length,
-        13,
+        14,
         reason:
             'the number of long-reader kinds changed. Raise or lower this number in the same edit that adds or '
             'removes the member, so that adding one is a change somebody has to look at rather than a line nobody '
@@ -1426,14 +1427,9 @@ void main() {
             'this kind is declared and nothing claims it, which is the enumeration of long readers the registry was '
             'built to replace; wire the operation that motivated it, or take the member out until it is wired',
       );
-      // Fourteen sites for thirteen kinds: `zip` is claimed twice, by
-      // `StorageZipProgress.begin` and again by `reclaimAfterDialog` when the
-      // save dialog it stood aside for closes. That is the "a second surface may
-      // legitimately claim an existing kind" the reason below allows for, and it
-      // is the first time this number and the member count have differed.
       expect(
         counts.values.fold(0, (sum, count) => sum + count),
-        14,
+        15,
         reason:
             'the number of claim sites changed. One kind, one claim site is not a law — a second surface may '
             'legitimately claim an existing kind — but it is a fact somebody should have to write down, so move '

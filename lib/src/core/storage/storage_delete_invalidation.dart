@@ -1,9 +1,9 @@
 /// Dropping the state that still remembers what a storage-view delete removed,
-/// and the serialisation metadata gets in place of a lock (stage 6c).
+/// and the controller serialisation metadata gets inside its root lock (stage 6c).
 ///
 /// **Why anything is needed here at all.** Every invalidate the app already had
 /// hangs off the *record-level* delete API: `CharaDetailRecordStorage`'s
-/// `_deleteAllAsyncUnlocked` calls `removeRecords` after erasing a directory, the
+/// `deleteAllUnlocked` calls `removeRecords` after erasing a directory, the
 /// archive store rewrites its own list in its twin, and
 /// `charaDetailQuarantineCountProvider` is invalidated where records are
 /// quarantined. Nothing on any of those paths is reached by deleting a *path*.
@@ -39,6 +39,7 @@ library;
 import 'package:flutter_riverpod/misc.dart';
 import 'package:path/path.dart' as p;
 
+import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
@@ -179,22 +180,24 @@ void refreshStorageTabAfterDelete(RefBase ref, {required List<PathEntity> touche
   reloadStorageTab(ref, touched: touched);
 }
 
-/// The exclusion metadata gets in place of a lock: take the owning controller out
-/// of the way, and only then delete.
+/// The exclusion metadata gets against its controllers, inside the root lock:
+/// take the owning controller out of the way, and only then delete.
 ///
-/// **This is not a lock and must not be read as one.** The record gate is ruled
-/// out for metadata twice over — the files are named by storage-set key rather
-/// than record id, and the writers (`spec/rating.dart`, `spec/memo.dart`) take no
-/// lock at all, so an acquisition here would exclude nobody while reading in the
-/// source as if it excluded everybody. What is left is the ownership: the
-/// controller for `<key>.json` holds that file's whole contents in memory and
-/// writes them back on the next edit, so it, and not a lock, is what can undo
-/// this delete. Dropping it first is the exclusion that exists.
+/// **This is not a lock and must not be read as one.** The root lock the scope
+/// holds around this excludes the writers that take it — the enhancement merge
+/// and the dismissal writer — and not the memo and rating controllers
+/// (`spec/rating.dart`, `spec/memo.dart`), which take no lock at all. What is
+/// left against them is the ownership: the controller for `<key>.json` holds that
+/// file's whole contents in memory and writes them back on the next edit, so it,
+/// and not a lock, is what can undo this delete. Dropping it first is the
+/// exclusion that exists.
 ///
-/// **What it does not cover, stated rather than implied.** A save already in
-/// flight when this runs still completes, and can recreate the file. No primitive
-/// in the app would prevent that; closing the hole means giving the metadata
-/// writers a lock, which is a change to those writers and not to this delete.
+/// **What it does not cover, stated rather than implied.** A controller save
+/// already in flight when this runs still completes, and can recreate the file.
+/// No primitive in the app would prevent that; closing the hole means giving the
+/// controllers a lock, which is a change to those writers and not to this delete.
+/// No other controller holds the file: the app runs as one instance, which on web
+/// is the instance lock every tab claims at startup (`app_instance.dart`).
 /// What dropping the controller does remove is the far larger window — one that
 /// keeps sitting on the data for the rest of the session and writes it out at the
 /// user's next rating drag.
@@ -224,7 +227,7 @@ Future<void> runStorageDeleteSerialized(RefBase ref, PathEntity target, Future<v
   // `runUnderStorageExclusion`.
   final owner = _metadataOwnerOf(await ref.read(pathLayoutLoader.future), target);
   if (owner == null) {
-    // A `providerSerialized` delete for a path no provider owns. Only metadata
+    // An `exclusiveRootProviderSerialized` delete for a path no provider owns. Only metadata
     // declares that scope today (`storage_delete_invalidation_test.dart` pins
     // that), so this means either a new group chose the scope without extending
     // the table here, or a target was paired with the wrong group. Said out loud,
@@ -261,6 +264,14 @@ typedef _MetadataOwner = ({
 });
 
 _MetadataOwner? _metadataOwnerOf(PathInfo info, PathEntity target) {
+  // The dismissal file first, because it is the one metadata target that is a
+  // file and not a store directory. It holds pairs of record ids rather than a
+  // record map keyed by storage set, so it has no key list separate from its
+  // contents and one provider answers for both halves — stated here rather than
+  // left to be inferred from the two fields naming the same thing.
+  if (placeStorageTarget([enhancementDismissedFile(info)], target) != null) {
+    return (storeList: enhancementDismissedPairsProvider, controller: enhancementDismissedPairsProvider);
+  }
   final rating = placeStorageTarget([info.charaDetailRatingDir], target);
   if (rating != null) {
     final key = _storeKeyOf(rating.child);

@@ -67,9 +67,9 @@ enum StorageDeleteFriction {
 /// a property of the *data*, not of the verb: zipping a record directory while a
 /// capture is merging into it produces a broken archive from a half-written
 /// record, which is the same interleaving a delete has to exclude. So the zip and
-/// the download take the exclusion named here, and the one member that is not a
-/// lock ([providerSerialized]) says at its own doc why an extraction takes
-/// nothing instead.
+/// the download take the exclusion named here, and the one member whose
+/// mutation does more than lock ([exclusiveRootProviderSerialized]) says at its
+/// own doc why an extraction takes the lock alone.
 ///
 /// **A property of the group, not of the call site.** The failure to avoid — the
 /// one worth calling "false comfort" — is a delete path that sends everything through
@@ -93,24 +93,36 @@ enum StorageLockScope {
   /// takes, so it is the only one that excludes anything.
   exclusiveRoot,
 
-  /// No lock: serialised against the providers that own the file instead.
+  /// The exclusive root lock, and for a mutation the providers that own the file
+  /// taken out of the way inside it.
   ///
-  /// Only metadata. Its writers (`spec/rating.dart`, `spec/memo.dart`) write
-  /// through `FilePath` without acquiring anything, so there is no counterparty
-  /// on the lock to exclude; taking one would be the same false comfort in a
-  /// different disguise. The real exclusion is to take the owning controller out
-  /// of the way first — see `storageDeleteSerializerProvider`.
+  /// Only metadata. Its files are named by storage-set key, or are the one
+  /// dismissal file, and not by record id, so a record lock would name nobody.
+  /// The root name is the one its lock-taking writers hold: the enhancement merge
+  /// re-keys memo, rating and the dismissal file inside the exclusive root lock,
+  /// and `EnhancementDismissalStore.dismiss` does its read-modify-write inside the
+  /// same lock. They all run inside the one app instance: on web the instance
+  /// claimed at startup (`app_instance.dart`) keeps a second tab of the origin
+  /// from running the app.
+  ///
+  /// **The memo and rating controllers (`spec/rating.dart`, `spec/memo.dart`)
+  /// write through `FilePath` without acquiring anything, so the lock does not
+  /// exclude them.** Against them the exclusion is to take the owning controller
+  /// out of the way first — see `storageDeleteSerializerProvider`. That makes the
+  /// *app* re-read the file; it does not stop a controller write already in
+  /// flight. What keeps no second copy of the controller alive elsewhere is the
+  /// single app instance (`app_instance.dart`), not a lock per edit: a stale copy
+  /// lives in memory, not inside a critical section.
   ///
   /// **This is the one scope a mutation and an extraction read differently, and
-  /// the reason is that the exclusion is itself a mutation.** Dropping the
-  /// controller makes the *app* re-read the file; it does not stop a write that
-  /// is already in flight, because there is no lock for it to wait on. That is
-  /// worth doing before a delete — the controller must not go on serving, or
-  /// re-writing, a file that is about to stop existing — and is worth nothing
-  /// before a read, which would then have perturbed the user's in-memory ratings
-  /// to copy a file out. So an extraction under this scope takes nothing, and
+  /// the reason is that dropping the controller is itself a mutation.** Both take
+  /// the root lock: a zip or a download taken while a merge re-keys these files
+  /// would copy out a half re-keyed set. Only a mutation also drops the
+  /// controller — before a delete the controller must not go on serving, or
+  /// re-writing, a file that is about to stop existing; before a read it would
+  /// perturb the user's in-memory ratings to copy a file out.
   /// [StorageExclusionIntent] is where that is decided, once.
-  providerSerialized,
+  exclusiveRootProviderSerialized,
 
   /// Nothing to exclude: the group is not a record store and no lock in this app
   /// covers it. Modules, temp, settings, the sound directory, the font cache,
@@ -567,8 +579,10 @@ final List<StorageGroup> storageGroups = [
     // typed all of it. Nothing regenerates it.
     deleteFriction: StorageDeleteFriction.doubleConfirm,
     // File names are storage-set keys, not record ids, and the writers take no
-    // lock at all, so there is no counterparty a lock could exclude.
-    lockScope: StorageLockScope.providerSerialized,
+    // so a record lock would name nobody. The merge and the dismissal writer hold
+    // the exclusive root lock while they write these files; the memo and rating
+    // controllers take no lock and are dropped instead.
+    lockScope: StorageLockScope.exclusiveRootProviderSerialized,
     // Two directories, one group: rating and memo are the same kind of thing to
     // the user and are described by one hint.
     resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir],

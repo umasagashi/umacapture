@@ -99,7 +99,9 @@ class RecordImage extends StatelessWidget {
     try {
       if (!kIsWeb) {
         // FileImage's key is the file, so the widget's own Image.file resolves out of the global
-        // ImageCache synchronously afterwards.
+        // ImageCache synchronously afterwards -- and [_fileImagePaths] says why handing it over is
+        // also the moment it has to be written down.
+        _rememberFileImage(path.path);
         await precacheImage(FileImage(path.toFile()), context, onError: _reportPreloadFailure);
         return;
       }
@@ -124,6 +126,11 @@ class RecordImage extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!kIsWeb && maxDecodePixels == null) {
       // Identical to the previous call sites: FileImage decode + global cache.
+      //
+      // Written down here, while the widget builds, for the same reason [RecordImageByteCache.registerBounded] is:
+      // the window between here and a post-frame callback is precisely a window in which an
+      // eviction could not name the entry it has to drop. [_fileImagePaths] says what it is for.
+      _rememberFileImage(path.path);
       return Image.file(path.toFile(), width: width, height: height, fit: fit, errorBuilder: errorBuilder);
     }
     // **A bounded image goes through the bytes on both platforms, and that is
@@ -238,6 +245,13 @@ class RecordImageByteCache {
   /// entries through [get], but nothing outside can add up their lengths.
   int get heldBytes => _heldBytes;
 
+  /// Every path this LRU is holding bytes for.
+  ///
+  /// **Its keys are its index.** A path is in this cache exactly while its bytes
+  /// are, so [evictRecordImagesWithin] needs no second record of what was cached
+  /// on this side -- and no record that could disagree with it.
+  Iterable<String> get paths => _entries.keys;
+
   Uint8List? get(String path) {
     final entry = _entries.remove(path);
     if (entry != null) {
@@ -310,6 +324,77 @@ class _CachedRecordImage {
   final Set<ResizeImage> bounded = <ResizeImage>{};
 }
 
+/// Every record-image path this process has handed to the global [ImageCache]
+/// under a [FileImage] key.
+///
+/// **The desktop half of "which pictures are cached", which nothing else in the
+/// process can answer.** [RecordImageByteCache] is its own index -- its keys are
+/// the paths it is holding -- but an unbounded [RecordImage] resolves through
+/// `Image.file` off web ([RecordImage._content]), and [ImageCache] offers no way to
+/// enumerate its keys or to match them against a directory. The moment the path
+/// is known is the moment it is handed over, so that is where it is written down.
+///
+/// **Paths, not pixels, and pruned by every eviction.** A path enters only by
+/// being displayed, so the set is bounded by how many distinct record images the
+/// installation has -- 834 image files, measured for [RecordImageByteCache] --
+/// rather than by how long the session runs.
+///
+/// Over-approximating is the harmless direction: [ImageCache] drops entries under
+/// its own bounds, and evicting a key no cache holds is a miss on two hash
+/// lookups, which [evictRecordImages] already relies on for the paths it is given.
+/// Under-approximating is the direction that would cost an eviction, and `build`
+/// is what closes it: an `Image` resolves its provider from
+/// `didChangeDependencies`, which a build always follows, so a path that is back
+/// in the [ImageCache] is a path that is back in here.
+final Set<String> _fileImagePaths = <String>{};
+
+void _rememberFileImage(String path) {
+  _fileImagePaths.add(path);
+}
+
+/// Drops every cached record image this process holds under [directory].
+///
+/// **For a writer that replaces a tree's contents under paths that do not
+/// change**, where the paths whose pixels went are not the paths the writer
+/// named.
+///
+/// **Which ones those are is a question about the caches, not about the disk.** A
+/// path no cache holds needs no eviction, so the complete answer is the two
+/// caches' own keys narrowed to [scopes]: [RecordImageByteCache.paths] and
+/// [_fileImagePaths]. Both are in memory, so the eviction happens whatever the
+/// filesystem is doing. Listing a directory instead would rest the eviction on a
+/// call that answers with an empty list for a directory full of files when it
+/// fails -- `DirectoryPath.list` collects the whole listing before it yields any
+/// of it -- and the caller cannot tell that answer from an empty directory, so
+/// the replaced pixels would stay cached exactly when the disk is already in
+/// trouble.
+void evictRecordImagesUnder(DirectoryPath directory) {
+  evictRecordImages(_cachedRecordImagePathsUnder(directory));
+}
+
+/// Whether [path] equals [scope] or lies under it.
+///
+/// Compared segment by segment and not by string prefix: `.../older` and
+/// `.../older-2` are in a prefix relation as text and in none as paths, and the
+/// two caches are keyed by paths the platform joined (backslashes on Windows)
+/// while the caller passes a [DirectoryPath] built from segments.
+List<String> _cachedRecordImagePathsUnder(DirectoryPath directory) {
+  bool isUnder(String path) {
+    final segments = PathEntity.parseSegments(path);
+    if (segments.length <= directory.segments.length) {
+      return false;
+    }
+    for (var index = 0; index < directory.segments.length; index++) {
+      if (segments[index] != directory.segments[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return <String>{...RecordImageByteCache.instance.paths, ..._fileImagePaths}.where(isUnder).toList();
+}
+
 /// Drops [paths] from every cache a [RecordImage] can answer out of.
 ///
 /// Without this a deleted image keeps being displayed, and the user, seeing the
@@ -369,6 +454,7 @@ void evictRecordImages(Iterable<String> paths) {
       // (`RecordImage.build` says why), so this line covers the unbounded
       // desktop call sites and nothing else. `dart:io`'s `File` is a stub on web
       // that addresses nothing, which is why it is skipped there.
+      _fileImagePaths.remove(path);
       cache.evict(FileImage(FilePath(path).toFile()), includeLive: true);
     }
   }

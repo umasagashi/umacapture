@@ -576,6 +576,26 @@ class CharaDetailCaptureState {
     );
   }
 
+  /// This state with every record id it names moved from [from] to [to].
+  ///
+  /// An enhancement merge retires one of two records and keeps the other's id,
+  /// so a capture card still offering "open the duplicate" would open an id
+  /// nothing holds. Both slots the card can reach are re-pointed: the duplicate
+  /// it reported and the link it captured, which is the pair
+  /// [CharaCaptureEvent.recordId] is derived from.
+  CharaDetailCaptureState renameRecord({required String from, required String to}) {
+    final next = clone();
+    if (next.duplicateRecordId == from) {
+      next.duplicateRecordId = to;
+    }
+    if (next.link?.id == from) {
+      // A fresh link, not a mutation: [clone] shares the object, so editing it
+      // in place would also edit the state a listener has already captured.
+      next.link = CharaDetailLink(id: to);
+    }
+    return next;
+  }
+
   CharaDetailCaptureState reset() {
     // Everything about the character is dropped; the attempt's IDENTITY is not. A reset is an
     // attempt ending (the screen closed) or a terminal outcome being built on top of one -- neither
@@ -966,6 +986,15 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   CharaDetailCaptureState build() => CharaDetailCaptureState();
 
   void reset() => state = state.reset();
+
+  /// Re-points this state at [to] wherever it named [from], and publishes only
+  /// if it did — an unrelated merge must not rebuild the capture card.
+  void renameRecord({required String from, required String to}) {
+    if (state.duplicateRecordId != from && state.link?.id != from) {
+      return;
+    }
+    state = state.renameRecord(from: from, to: to);
+  }
 
   void started(String recordId) => state = state.started(recordId);
 

@@ -218,15 +218,17 @@ void main() {
       });
     }
 
-    test('metadata takes no lock at all and goes through the serialiser', () async {
+    test('metadata takes the exclusive root and, inside it, goes through the serialiser', () async {
       seed(['documents/storage/chara_detail/metadata/rating/main.json']);
       final locks = _RecordingLocks();
       fsBackend = _ObstructedFsBackend(realBackend);
       final serialised = <String>[];
+      final acquiredBeforeSerialising = <List<_Acquisition>>[];
       final container = containerWith(
         locks,
         serializer: (target, action) async {
           serialised.add(target.path);
+          acquiredBeforeSerialising.add(List.of(locks.acquired));
           await action();
         },
       );
@@ -239,9 +241,9 @@ void main() {
       );
 
       expect(report.deletedPaths, [target.path]);
-      // Not the gate: the writers of this file take no lock, so an acquisition
-      // here would exclude nobody while looking like it excluded everyone.
-      expect(locks.acquired, isEmpty);
+      // The root name is the one the enhancement merge and the dismissal writer
+      // hold while they rewrite these files, so it is the one that excludes them.
+      expect(locks.acquired, [(name: _rootLockName, mode: RecordMutationLockMode.exclusive)]);
       expect(serialised, [target.path]);
     });
 

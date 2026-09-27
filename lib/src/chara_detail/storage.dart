@@ -54,7 +54,12 @@ part 'storage.mapper.dart';
 
 // Grade tag whose shared wins feed the inheritance relation bonus (G1 only, per
 // the current game rule). Matches the literal used by the race-grade column.
-const _gradeG1 = "grade_g1";
+/// The grade tag `race_title_info.json` marks a G1 race with.
+///
+/// Public because the enhancement merge runs the same additive resolution a
+/// capture does and has to ask for the same set of sids; a second spelling of
+/// the tag is a second thing to keep in step.
+const g1RaceGradeTag = "grade_g1";
 
 // Monotonic id so each duplicated-chara event yields a distinct StreamProvider value; the sound
 // listener uses ref.listen(), which would otherwise dedupe equal consecutive AsyncData and skip
@@ -68,10 +73,12 @@ final charaCardIconMapProvider = settableNotifierProvider<Map<int, FilePath>>({}
 
 /// True while the asynchronous manual inheritance resolution is running.
 ///
-/// The resolution is fire-and-forget (see [CharaDetailRecordStorage.resolveAllInheritance]),
-/// so without this the settings entry could be tapped again and start a second
-/// whole-store lock acquisition on top of the first. The settings tile watches it
-/// to disable itself, the notifier reads it to reject the re-entrant call.
+/// [CharaDetailRecordStorage.resolveAllInheritance] returns a future, but the
+/// settings entry that starts it discards it, so without this the entry could be
+/// tapped again and start a second whole-store lock acquisition on top of the
+/// first. The settings tile watches this to disable itself, the notifier reads it
+/// to reject the re-entrant call. It is also the only signal that tracks the run
+/// itself: the future of a call the guard refused is already complete.
 class InheritanceResolutionRunning extends Notifier<bool> {
   @override
   bool build() => false;
@@ -755,6 +762,63 @@ abstract interface class CharaDetailRecordMutator {
   Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids);
 }
 
+/// What a record merge asks of a store while it already holds the exclusive root
+/// lock.
+///
+/// Deliberately **not** members of [CharaDetailRecordMutator]. Everything there
+/// takes the lock it needs; everything here assumes the caller took it, and the
+/// locks are not re-entrant, so calling one of these from a context that has not
+/// acquired the root is a corruption and calling it from one that has is the only
+/// way through. Two surfaces say which is which; one surface with a sentence in
+/// the doc says it once and is read by whoever reads the doc.
+///
+/// The merge rewrites, publishes into and deletes from either store, so it asks
+/// for the store as this surface rather than branching on which one it has. The
+/// store's own name (`active` / `archive`) is [rootDirectory]'s leaf and is not
+/// restated here.
+abstract interface class CharaDetailRecordMergeSurface {
+  /// The directory whose children are this store's record directories.
+  DirectoryPath get rootDirectory;
+
+  /// Every record this store currently serves.
+  List<CharaDetailRecord> get recordsInMemory;
+
+  CharaDetailRecord? getBy({required String id});
+
+  /// Writes each of [records] back to its own `record.json`, and changes nothing
+  /// in memory.
+  ///
+  /// Disk only, because the merge's memory is republished once at its end (or
+  /// discarded by the reload its failure forces), never per record: a store that
+  /// published a half-rewritten set would be serving a view that exists in no
+  /// other place.
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records);
+
+  /// Erases each of [ids], accounting for every one of them separately.
+  ///
+  /// The same primitive the ordinary record delete runs, with the same failure
+  /// behaviour: a directory that could not be erased leaves its id in
+  /// [RecordDeleteResult.failed] and its row in the list.
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids);
+
+  /// Puts [record] into this store's published list, replacing an entry with the
+  /// same id or appending it when there is none, and changes nothing on disk.
+  ///
+  /// Both cases in one member because a merge cannot tell them apart without
+  /// knowing which store the survivor came from — which is the question the
+  /// merge is answering, not one it can ask. A store that has never loaded
+  /// ignores it: its next build reads the record.json the merge already wrote.
+  void adoptRecordInMemory(CharaDetailRecord record);
+
+  /// Drops [id] from this store's published list, and changes nothing on disk.
+  ///
+  /// This is the *other* half of a cross-store merge: the survivor lives in the
+  /// store of the enhanced side and is adopted there, so the older side's row is
+  /// not replaced but removed, and its directory was already taken by the
+  /// publication.
+  void forgetRecordInMemory(String id);
+}
+
 const _stableRecordSetMaxAttempts = 8;
 
 /// What one record's arrival announces: nothing.
@@ -885,7 +949,9 @@ class _AdditionPlan {
   }) : duplicatedId = null;
 }
 
-class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
+class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
+    implements CharaDetailRecordMutator, CharaDetailRecordMergeSurface {
+  @override
   late DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
@@ -1010,8 +1076,21 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   Set<String> get unavailableRecordIds => _unavailableRecordIds;
 
   /// Whether this store's view of the record set is known to be incomplete.
-  @visibleForTesting
+  ///
+  /// Read by the enhancement merge's complete-view check, which rewrites the
+  /// parent slots of the records memory holds and so refuses while a record on
+  /// disk is not among them. Not `@visibleForTesting`: production asks it.
   bool get isIncomplete => _unavailableRecordIds.isNotEmpty;
+
+  /// Whether a regeneration batch has staged records this store has not published
+  /// yet, so the read surface answers from the buffer while [state] still holds
+  /// the older list.
+  ///
+  /// Read by the enhancement merge's complete-view check
+  /// (`enhancement_merge.dart`), which rewrites whole `record.json` files from
+  /// memory and refuses to run while the two disagree. Not `@visibleForTesting`:
+  /// production asks it.
+  bool get hasPendingRecords => _pendingRecords != null;
 
   /// Seam over the bulk scan.
   ///
@@ -1535,7 +1614,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (loaded == null) {
       return const {};
     }
-    return ref.read(raceGradeSidProvider(_gradeG1));
+    return ref.read(raceGradeSidProvider(g1RaceGradeTag));
   }
 
   /// The factor colour table for enhancement-aware parent matching, read through
@@ -1575,6 +1654,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// Asynchronous, web-safe counterpart of [_persist] for [addFromFileAsync].
   Future<void> _persistAsync(CharaDetailRecord record) => _persistRecordJsonAsync(recordPathOf(record), record);
 
+  @override
+  List<CharaDetailRecord> get recordsInMemory => _records;
+
+  @override
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) async {
+    for (final record in records) {
+      await _persistAsync(record);
+    }
+  }
+
   /// Loads `<id>`'s record and merges it, synchronously — the desktop capture path's [add].
   ///
   /// [notifyDuplicate] is false for a record a **video import** produced, and is the sync twin of
@@ -1600,6 +1689,25 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   CharaDetailRecord? getBy({required String id}) {
     return _records.firstWhereOrNull((e) => e.id == id);
   }
+
+  @override
+  void adoptRecordInMemory(CharaDetailRecord record) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    final records = _pendingRecords ??= [...current];
+    final index = records.indexWhere((e) => e.id == record.id);
+    if (index == -1) {
+      records.add(record);
+    } else {
+      records[index] = record;
+    }
+    forceRebuild();
+  }
+
+  @override
+  void forgetRecordInMemory(String id) => removeRecords([id]);
 
   void replaceBy(CharaDetailRecord record, {required String id}) {
     // Accumulate into a private buffer instead of mutating the list held by the
@@ -1695,7 +1803,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     return recordRecoveryGate.runForRecord(
       rootDirectory.parent.parent,
       id,
-      () => _deleteAllAsyncUnlocked({id}),
+      () => deleteAllUnlocked({id}),
       declaration: _recordDeleteDeclaration,
     );
   }
@@ -1731,7 +1839,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
 
-  Future<RecordDeleteResult> _deleteAllAsyncUnlocked(Set<String> ids) async {
+  @override
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids) async {
     final succeeded = <String>{};
     final failed = <String>{};
     for (final id in ids) {
@@ -1739,6 +1848,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
+
+  /// Seam over the one destructive call of a record delete.
+  ///
+  /// Here and not around [deleteAllUnlocked], because what a test of an
+  /// interrupted delete has to choose is *which entry* the erasure stops at, and
+  /// only the call that erases one directory can be asked that. A merge's
+  /// retirement runs this same primitive, so a failure injected here is the one
+  /// the ordinary delete reports rather than a merge-specific invention.
+  @visibleForTesting
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => _deleteDirectoryVerifiedAsync(directory);
 
   /// Erases one record's directory, answering whether it is gone.
   ///
@@ -1758,7 +1877,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       return false;
     }
     try {
-      await _deleteDirectoryVerifiedAsync(rootDirectory / id);
+      await deleteRecordDirectory(rootDirectory / id);
       return true;
     } catch (error, stackTrace) {
       logger.e("Failed to delete active record $id.", error, stackTrace);
@@ -1977,7 +2096,9 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
 /// capture-time and manual inheritance resolution and in capture dedup: the
 /// active store reads this set as extra candidates and writes back any archived
 /// record whose parent links change via [applyInheritanceUpdates].
-class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
+class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
+    implements CharaDetailRecordMutator, CharaDetailRecordMergeSurface {
+  @override
   late DirectoryPath rootDirectory;
 
   @visibleForTesting
@@ -2022,8 +2143,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
   Set<String> get unavailableRecordIds => _unavailableRecordIds;
 
   /// Whether this store's view of the archived record set is known to be
-  /// incomplete.
-  @visibleForTesting
+  /// incomplete. See [CharaDetailRecordStorage.isIncomplete].
   bool get isIncomplete => _unavailableRecordIds.isNotEmpty;
 
   /// Seam over the bulk scan. See [CharaDetailRecordStorage.scanRecords].
@@ -2042,6 +2162,13 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   /// Asynchronous, web-safe counterpart of [_persist].
   Future<void> _persistAsync(CharaDetailRecord record) => _persistRecordJsonAsync(recordPathOf(record), record);
+
+  @override
+  List<CharaDetailRecord> get recordsInMemory => state.asData?.value ?? const [];
+
+  @override
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) =>
+      _applyInheritanceUpdatesAsyncUnlocked(records);
 
   /// Persists inheritance-updated archived [records] and swaps them into the
   /// in-memory list by id.
@@ -2076,6 +2203,31 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     }
   }
 
+  @override
+  void adoptRecordInMemory(CharaDetailRecord record) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    if (current.any((e) => e.id == record.id)) {
+      _swapInMemory([record]);
+    } else {
+      insert([record]);
+    }
+  }
+
+  @override
+  void forgetRecordInMemory(String id) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    state = AsyncData([
+      for (final e in current)
+        if (e.id != id) e,
+    ]);
+  }
+
   /// Swaps [records] into the in-memory list by id, a no-op if the archive view
   /// never loaded (the next build reads the updated json from disk).
   void _swapInMemory(List<CharaDetailRecord> records) {
@@ -2107,7 +2259,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     return recordRecoveryGate.runForRecord(
       rootDirectory.parent.parent,
       id,
-      () => _deleteAllAsyncUnlocked({id}),
+      () => deleteAllUnlocked({id}),
       declaration: _recordDeleteDeclaration,
     );
   }
@@ -2132,7 +2284,8 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
 
-  Future<RecordDeleteResult> _deleteAllAsyncUnlocked(Set<String> ids) async {
+  @override
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids) async {
     final succeeded = <String>{};
     final failed = <String>{};
     for (final id in ids) {
@@ -2140,6 +2293,11 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     }
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
+
+  /// Seam over the one destructive call of an archived record delete. See
+  /// [CharaDetailRecordStorage.deleteRecordDirectory].
+  @visibleForTesting
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => _deleteDirectoryVerifiedAsync(directory);
 
   /// Erases one archived record's directory, answering whether it is gone.
   Future<bool> _deleteOneUnlocked(String id) async {
@@ -2154,7 +2312,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
       return false;
     }
     try {
-      await _deleteDirectoryVerifiedAsync(rootDirectory / id);
+      await deleteRecordDirectory(rootDirectory / id);
       return true;
     } catch (error, stackTrace) {
       logger.e("Failed to delete archived record $id.", error, stackTrace);

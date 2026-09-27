@@ -21,10 +21,11 @@
 //     is not touching the store.
 //  3. An acquisition that times out is *reported*, not swallowed. Nothing
 //     is written and the user is told so.
-//  4. A metadata extraction takes nothing and does not drop the owning
-//     controller: that exclusion is itself a write, and a read must not perform
-//     one to protect itself. This is the control for claim 1 -- without it, a fix
-//     that serialised everything would look identical.
+//  4. A metadata extraction takes the exclusive root -- the name a merge holds
+//     while it re-keys those files -- and does not drop the owning controller:
+//     that serialisation is itself a write, and a read must not perform one to
+//     protect itself. This is the control for claim 1 -- without it, a fix that
+//     serialised everything would look identical.
 //
 // WHAT THIS SUITE DOES NOT REACH. The browser: `zip_export_web.dart` is
 // unbuildable on the VM, so the placement of its guard (around the OPFS walk and
@@ -217,6 +218,27 @@ void main() {
     expect(heldAtDialog, isFalse, reason: 'the record lock was held across the save dialog');
   });
 
+  test('a zip of a metadata folder takes the root', () async {
+    final locks = _RecordingLocks();
+    final destination = '${tempRoot.path}/out.zip';
+    final container = containerWith(
+      locks,
+      save: ({required dialogTitle, required fileName, required bytes}) async => destination,
+    );
+    write(layout.charaDetailRatingDir.filePath('rating.json'), '{}');
+
+    final outcome = await exportDirectoryAsZip(
+      refOf(container),
+      layout.charaDetailRatingDir,
+      group: storageGroupOf(StorageGroupId.metadata),
+      silent: true,
+    );
+
+    expect(outcome, StorageZipOutcome.written);
+    expect(locks.acquired, [_rootLockName]);
+    expect(File(destination).existsSync(), isTrue);
+  });
+
   test('a zip whose lock never comes free says so and writes nothing', () async {
     final locks = _RecordingLocks(refuse: (name) => name == _recordLockName('rec-1'));
     final destination = '${tempRoot.path}/out.zip';
@@ -265,7 +287,7 @@ void main() {
     expect(dialogCalls, 0, reason: 'a file that was never read was still offered to the user');
   });
 
-  test('a metadata download takes nothing and does not drop the owning controller', () async {
+  test('a metadata download takes the root and does not drop the owning controller', () async {
     final locks = _RecordingLocks();
     final serialized = <String>[];
     final container = containerWith(
@@ -287,7 +309,7 @@ void main() {
     );
 
     expect(outcome, StorageDownloadOutcome.saved);
-    expect(locks.acquired, isEmpty);
+    expect(locks.acquired, [_rootLockName]);
     expect(serialized, isEmpty, reason: "a read invalidated the user's loaded ratings to protect itself");
   });
 

@@ -28,7 +28,7 @@ import 'support/records.dart';
 /// Deletes behave the way the real store behaves once the record lock has been
 /// acquired: the ids this store still holds are erased and reported as
 /// succeeded, and an id it no longer holds is reported as *failed* — the rule in
-/// `_deleteAllAsyncUnlocked` ("not in memory means this store cannot say the
+/// `deleteAllUnlocked` ("not in memory means this store cannot say the
 /// record is gone") that turns a repeated delete of an already-deleted record
 /// into a "deletion failed" toast. Calls settle in the order they arrived,
 /// because the lock serialises them rather than refusing the second one.

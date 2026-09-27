@@ -567,19 +567,20 @@ final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(
 /// Do not read this as a copy of the lock plan; it is not one, and the two part
 /// company at both ends:
 ///  * *The lock reaches further.* `quarantine` and `retired` are the two
-///    [StorageLockScope.exclusiveRoot] groups and both offer a zip, and that scope
-///    resolves to `runForRoot`, which takes one app-wide root name **exclusively**
-///    (`record_mutation_lock_shared.dart`). Bundling a single `quarantine/<name>`
-///    therefore makes every delete in `active`, `archive`, `quarantine` and
-///    `retired` wait on it, because those take that same name — shared for a
+///    [StorageLockScope.exclusiveRoot] groups and `metadata` is the
+///    [StorageLockScope.exclusiveRootProviderSerialized] one; all three offer a
+///    zip, and both scopes resolve to `runForRoot`, which takes one app-wide root
+///    name **exclusively** (`record_mutation_lock_shared.dart`). Bundling a single
+///    `quarantine/<name>` therefore makes every delete in `active`, `archive`,
+///    `quarantine`, `retired` and `metadata` wait on it, because those take that
+///    same name — shared for a
 ///    record, exclusive for a root. Containment sees none of that and leaves the
 ///    entries live, deliberately: such a delete only *waits*, and waiting is the
 ///    half that was never broken.
 ///  * *The lock is not there at all.* The seven [StorageLockScope.unlocked] groups
-///    take no lock (`runUnderStorageExclusion` is `return action();`), and
-///    `metadata`'s [StorageLockScope.providerSerialized] scope takes none for a
-///    read either. Four of those eight offer a zip — `modules`, `temp`,
-///    `unclassified` and `metadata` — so there neither side names a lock and this
+///    take no lock (`runUnderStorageExclusion` is `return action();`). Three of
+///    them offer a zip — `modules`, `temp` and `unclassified` — so there neither
+///    side names a lock and this
 ///    still refuses. That refusal is right, but not because anything contends:
 ///    the reader is holding the handles either way.
 ///

@@ -364,6 +364,53 @@ void main() {
     });
   });
 
+  // An eviction whose caller cannot name the files it has to drop: the
+  // enhancement merge replaces a record tree's contents under paths that do not
+  // change, so the only description it has of what went stale is the directory.
+  // Asking the disk which files are in there is what this replaces -- a listing
+  // answers with an empty result when it fails, and an empty result is also what
+  // an empty directory gives, so the caller cannot tell "nothing to drop" from
+  // "could not look".
+  group('an eviction named by directory', () {
+    testWidgets('drops a rendered picture whose name the caller never knew', (tester) async {
+      final inside = _seedImage('documents/storage/chara_detail/active/rec/skill.png');
+      final sibling = _seedImage('documents/storage/chara_detail/active/rec-2/skill.png');
+      await tester.pumpWidget(_screen([_tile('inside', inside), _tile('sibling', sibling)]));
+      await _settle(tester);
+      expect(_cached(inside), isTrue, reason: 'the fixture never rendered');
+      expect(_cached(sibling), isTrue, reason: 'the fixture never rendered');
+
+      evictRecordImagesUnder(
+        DirectoryPath(_tempRoot.path) / 'documents' / 'storage' / 'chara_detail' / 'active' / 'rec',
+      );
+
+      expect(_cached(inside), isFalse);
+      // The control that makes the containment a path relation rather than a
+      // text one: `rec-2` starts with `rec` as a string and is a different
+      // record as a path.
+      expect(_cached(sibling), isTrue);
+    });
+
+    testWidgets('reaches the byte LRU and the bounded decode it was built over', (tester) async {
+      final inside = _seedImage('documents/storage/chara_detail/active/rec/skill.png');
+      final sibling = _seedImage('documents/storage/chara_detail/active/rec-2/skill.png');
+      await tester.pumpWidget(_boundedScreen({'inside': inside, 'sibling': sibling}));
+      await _settle(tester);
+      final insideKey = await _boundedKeyOf(inside);
+      final siblingKey = await _boundedKeyOf(sibling);
+      expect(_imageCache.containsKey(insideKey), isTrue, reason: 'the bounded fixture never decoded');
+
+      evictRecordImagesUnder(
+        DirectoryPath(_tempRoot.path) / 'documents' / 'storage' / 'chara_detail' / 'active' / 'rec',
+      );
+
+      expect(RecordImageByteCache.instance.get(inside.path), isNull);
+      expect(_imageCache.containsKey(insideKey), isFalse);
+      expect(RecordImageByteCache.instance.get(sibling.path), isNotNull);
+      expect(_imageCache.containsKey(siblingKey), isTrue);
+    });
+  });
+
   // A bounded decode is filed under a `ResizeImageKey`, which is equal to
   // neither `FileImage` (compares paths) nor `MemoryImage` (compares bytes by
   // identity). So the two bare evictions below cannot reach it, and on the

@@ -55,7 +55,7 @@ StorageLockPlan resolveStorageLockPlan({
     case StorageLockScope.perRecord:
       return _resolvePerRecord(group, roots, target);
     case StorageLockScope.exclusiveRoot:
-    case StorageLockScope.providerSerialized:
+    case StorageLockScope.exclusiveRootProviderSerialized:
     case StorageLockScope.unlocked:
       return (scope: group.lockScope, recordIds: const <String>[]);
   }

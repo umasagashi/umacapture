@@ -101,6 +101,18 @@ DirectoryPath charaDetailArchiveTransactionDirOf(DirectoryPath charaDetailDir) =
 DirectoryPath charaDetailWriteTransactionDirOf(DirectoryPath charaDetailDir) =>
     charaDetailDir / charaDetailWriteTransactionDirName;
 
+/// Both journal roots of one record store.
+///
+/// A free function beside the two definitions, and [PathInfo.charaDetailTransactionJournalDirs]
+/// delegates to it, for the reason that getter's doc gives: a caller holding only
+/// the record store root — the write journal's own recovery derives one, and so
+/// does the merge's slot count — must not re-list the two journals, because a
+/// second enumeration is how a third journal comes to be covered nowhere.
+List<DirectoryPath> charaDetailTransactionJournalDirsOf(DirectoryPath charaDetailDir) => [
+  charaDetailArchiveTransactionDirOf(charaDetailDir),
+  charaDetailWriteTransactionDirOf(charaDetailDir),
+];
+
 class PathInfo {
   final DirectoryPath documentDir;
   final DirectoryPath supportDir;
@@ -282,10 +294,7 @@ class PathInfo {
   /// of a *path*, and answering it by naming the two getters again at the asking
   /// site is how a third journal comes to be covered nowhere: it is enumerated
   /// here, beside the two definitions, and nowhere else.
-  List<DirectoryPath> get charaDetailTransactionJournalDirs => [
-    charaDetailArchiveTransactionDir,
-    charaDetailWriteTransactionDir,
-  ];
+  List<DirectoryPath> get charaDetailTransactionJournalDirs => charaDetailTransactionJournalDirsOf(charaDetailDir);
 
   DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";
 

@@ -353,7 +353,85 @@ class RatingData with RatingDataMappable {
   }
 }
 
-class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> {
+/// Every metadata controller that is alive in this isolate.
+///
+/// A caller that must not race a pending metadata write cannot ask the provider
+/// family for "every key": reading a key instantiates a controller and starts a
+/// load for a file nobody opened. What it can ask is which controllers exist,
+/// and that is a set the controllers keep themselves — nothing here enumerates
+/// keys, so a storage set added later is waited for without an edit.
+final Set<MetadataWriteChain> _liveMetadataWriters = {};
+
+/// Completes when every write issued so far by every live metadata controller
+/// has finished, and answers whether every one of those files now holds what
+/// its controller holds.
+///
+/// The enhancement merge re-keys `metadata/{memo,rating}/<key>.json` by reading
+/// the bytes and writing them back, so a write still in flight would land on top
+/// of the re-keyed file and put the retired record id back. A write that
+/// *failed* is the same problem read from the other end: the merge would re-key
+/// a value the controller has already replaced, and then invalidate the
+/// controller that still held the newer one. `false` is the caller's cue to
+/// refuse, exactly as an unreadable key file is.
+///
+/// Every writer is waited for before the verdict is returned; a first `false`
+/// does not skip the writes still in flight.
+Future<bool> flushMetadataWrites() async {
+  var landed = true;
+  for (final writer in [..._liveMetadataWriters]) {
+    landed = await writer.flush() && landed;
+  }
+  return landed;
+}
+
+/// Serialises one metadata controller's writes, and lets a caller wait for them.
+///
+/// Without it two edits of the same file could land in either order, and nothing
+/// could tell when the file on disk had caught up with the controller.
+mixin MetadataWriteChain {
+  Future<void> _writeChain = Future<void>.value();
+
+  /// Whether the file holds what this controller holds.
+  ///
+  /// Each write persists the controller's whole map, so a later success
+  /// supersedes an earlier failure: once any write lands, the file is current
+  /// again whatever happened before it.
+  bool _writeLanded = true;
+
+  /// Keeps this controller in the set [flushMetadataWrites] walks, for as long
+  /// as [ref] keeps it alive.
+  void keepWriteChainVisible(Ref ref) {
+    _liveMetadataWriters.add(this);
+    ref.onDispose(() => _liveMetadataWriters.remove(this));
+  }
+
+  /// Runs [write] after every write this controller already issued.
+  ///
+  /// A failure is logged and does not poison the chain: the next edit still has
+  /// to reach the file, and the controller still holds the data that failed. It
+  /// is remembered, though — swallowing it made [flush] report a file that is
+  /// current when it is not.
+  void enqueueWrite(Future<void> Function() write) {
+    _writeChain = _writeChain.then((_) async {
+      try {
+        await write();
+        _writeLanded = true;
+      } catch (error, stackTrace) {
+        _writeLanded = false;
+        logger.e("A metadata write failed.", error, stackTrace);
+      }
+    });
+  }
+
+  /// Completes when every write issued so far has finished, and answers whether
+  /// the file caught up with this controller.
+  Future<bool> flush() async {
+    await _writeChain;
+    return _writeLanded;
+  }
+}
+
+class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with MetadataWriteChain {
   CharaDetailRecordRatingController(this.key);
 
   final String key;
@@ -365,6 +443,7 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> {
     // `path` is assigned synchronously (before the first await) so [save] is safe
     // the moment the controller starts building. The read is async so web can load
     // the ratings file from OPFS; on desktop it is a fast local-disk read.
+    keepWriteChainVisible(ref);
     path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
     return (await path.exists())
         ? await _readStorageFile(
@@ -422,7 +501,7 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> {
     if (data == null) {
       return;
     }
-    _RatingDataWriter(path, data.copyWith(data: {...data.data})).run();
+    enqueueWrite(_RatingDataWriter(path, data.copyWith(data: {...data.data})).run);
   }
 }
 
@@ -513,7 +592,7 @@ class MemoData with MemoDataMappable {
   }
 }
 
-class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> {
+class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with MetadataWriteChain {
   CharaDetailRecordMemoController(this.key);
 
   final String key;
@@ -525,6 +604,7 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> {
     // `path` is assigned synchronously (before the first await) so [_save] is safe
     // the moment the controller starts building. The read is async so web can load
     // the memo file from OPFS; on desktop it is a fast local-disk read.
+    keepWriteChainVisible(ref);
     path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
     return (await path.exists())
         ? await _readStorageFile(path, "memo storage $key", MemoDataMapper.fromJson, whenAbsent: () => MemoData.empty)
@@ -572,7 +652,7 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> {
     if (data == null) {
       return;
     }
-    _MemoDataWriter(path, data.copyWith(data: {...data.data})).run();
+    enqueueWrite(_MemoDataWriter(path, data.copyWith(data: {...data.data})).run);
   }
 
   // Named `updateMemo` (not `update`) to avoid colliding with the inherited
