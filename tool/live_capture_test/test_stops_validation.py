@@ -419,8 +419,8 @@ SCENARIOS = Path(__file__).resolve().parent / "scenarios"
 
 
 def single_clip_scenarios() -> list[Path]:
-    """The committed scenarios written in the single-clip form (`clip`), whose meaning the single-clip
-    command line defined before `clips` existed."""
+    """The committed scenarios written in the single-clip form (`clip`), whose meaning is the one the
+    harness's single-clip command line (`--clip`, `--stops`, `--range`, ...) gives the same fields."""
     return [p for p in sorted(SCENARIOS.glob("*.json")) if "clip" in json.loads(p.read_text(encoding="utf-8"))]
 
 
@@ -439,7 +439,7 @@ BASE = {"version": 1, "name": "t", "golden": "g.json", "config": "debug", "setti
 class TheSingleClipFormIsAOneElementClipsList(unittest.TestCase):
     """`load_scenario` normalises `clip` into `clips`. Red if the committed scenarios changed meaning:
     the plan the harness is launched with is compared with the plan the harness builds from the
-    command line the unnormalised file used to produce (`APlanMeansWhatTheOldCommandLineMeant`), so a
+    single-clip flags that spell out the unnormalised file (`APlanMeansWhatTheOldCommandLineMeant`), so a
     dropped `stops` or `range_seconds` shows up here, not on a ten-minute run."""
 
     def expected_command(self, raw: dict) -> list[str]:
@@ -531,9 +531,9 @@ class TheSingleClipFormIsAOneElementClipsList(unittest.TestCase):
 
 
 class AnErrorSummaryIsNeverAVerdict(unittest.TestCase):
-    """R1. `app_drive_run` writes `status: "error"` from its exception path with whatever it had
-    observed; a summary like that once sat beside `match: true`. Red if the runner read the
-    records' content and never the status."""
+    """`app_drive_run` writes `status: "error"` from its exception path together with whatever it had
+    observed, so an error summary can carry records that match the golden (`match: true`). Red if the
+    runner read the records' content and never the status."""
 
     def test_an_error_status_is_refused_even_with_every_observation_present(self):
         message = scenario_run.harness_status_failure(
@@ -575,8 +575,8 @@ TWO = clips_scenario({"clip": "x", "expect": {"candidate": None}},
 
 
 class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
-    """`scenario_run.judge_clips`. R2/R3: an observation that is missing, ill-typed or marked as a
-    driver error is inconclusive (exit 2) -- never false, never "no candidate", never "not
+    """`scenario_run.judge_clips`. An observation that is missing, ill-typed or marked as a driver
+    error is inconclusive (exit 2) -- never false, never "no candidate", never "not
     completed". Each case asserts the reason CODE, so a case that goes red for another reason is
     not mistaken for the one it names."""
 
@@ -589,7 +589,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
         self.assertEqual((j.exit_code, j.codes()), (0, []))
 
     def test_each_missing_required_key_is_inconclusive(self):
-        """R3. Red if any of these keys were read with `.get(key, <falsy default>)`: the candidate
+        """Red if any of these keys were read with `.get(key, <falsy default>)`: the candidate
         check would then see no pairs and report 'no candidate' for a run that never looked."""
         for key in ("container_seen", "capture", "settled", "factor_info_loaded", "candidates", "tile",
                     "event", "record_id"):
@@ -601,21 +601,22 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
                             (key, j.codes()))
 
     def test_a_factor_table_that_was_not_loaded_is_inconclusive(self):
-        """R3 (未読込). Without the table only exact duplicates are found, so 'no candidate' says
-        nothing. Red if factor_info_loaded were not consulted."""
+        """The factor table never loaded. Without the table only exact duplicates are found, so 'no
+        candidate' says nothing. Red if factor_info_loaded were not consulted."""
         j = self.judge(clips_scenario({"clip": "x", "expect": {"candidate": None}}),
                        [seen("X", factor_info_loaded=False)])
         self.assertEqual((j.exit_code, j.codes()), (2, [scenario_run.FACTOR_INFO_NOT_LOADED]))
 
     def test_an_event_that_is_not_this_records_success_is_inconclusive(self):
-        """R3 (イベント不一致). The tile only draws on this record's success; otherwise its absence
-        proves nothing. Red if the event premise were dropped from the 'no candidate' judgement."""
+        """The app's last event is not this record's success: another status, another record, or none.
+        The tile only draws on this record's success; otherwise its absence proves nothing. Red if the
+        event premise were dropped from the 'no candidate' judgement."""
         for event in ({"status": "alreadyCaptured", "record_id": "X"}, {"status": "succeeded", "record_id": "W"}, None):
             j = self.judge(clips_scenario({"clip": "x", "expect": {"candidate": None}}), [seen("X", event=event)])
             self.assertEqual((j.exit_code, j.codes()), (2, [scenario_run.EVENT_NOT_THIS_RECORD]), event)
 
     def test_settling_without_evidence_is_inconclusive_but_a_named_failure_is_a_mismatch(self):
-        """R3. Red if a missing settle were read as settled, or if every unsettled run were exit 2
+        """Red if a missing settle were read as settled, or if every unsettled run were exit 2
         (the store/disk disagreement is a product defect and must stay exit 1)."""
         scenario = clips_scenario({"clip": "x", "expect": {"candidate": None}})
         j = self.judge(scenario, [seen("X", settled=False, unsettled=[])])
@@ -624,7 +625,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
         self.assertEqual((j.exit_code, j.codes()), (1, [scenario_run.UNSETTLED]))
 
     def test_a_driver_error_is_inconclusive_not_false(self):
-        """R2. A waitFor that timed out is not an observation of the tile. Red if the harness's
+        """A waitFor that timed out is not an observation of the tile. Red if the harness's
         {"error": ...} were compared as a tile state (it is neither present nor absent) and turned
         into tile_disagrees."""
         j = self.judge(TWO, [seen("X"), seen("Y", candidates=[PAIR], tile={"error": "TimeoutException"})])
@@ -633,7 +634,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
         self.assertEqual((j.exit_code, j.codes()), (2, [scenario_run.DRIVER_FAILED]))
 
     def test_a_failed_merge_dialog_wait_is_inconclusive_not_incomplete(self):
-        """R2. Red if a driver failure during the merge became `completed: false`."""
+        """Red if a driver failure during the merge became `completed: false`."""
         scenario = clips_scenario({"clip": "x"}, {"clip": "y", "merge": {"survivor": 0, "retired": 1}})
         j = self.judge(scenario, [seen("X"), seen("Y", merge={"error": "waitFor enhancement_merge_apply timed out"})])
         self.assertEqual((j.exit_code, j.codes()), (2, [scenario_run.DRIVER_FAILED]))
@@ -652,7 +653,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
         self.assertIn(scenario_run.CANDIDATE_UNEXPECTED, j.codes())
 
     def test_an_outcome_nobody_observed_is_inconclusive_not_a_mismatch(self):
-        """(ii) `capture: null` is a wait that ran out, not an attempt that produced nothing: the harness
+        """`capture: null` is a wait that ran out, not an attempt that produced nothing: the harness
         reads the outcome from a record the app keeps past the detail screen's close, so a null says only
         that none was seen. Red if it were the product mismatch (exit 1)."""
         j = self.judge(clips_scenario({"clip": "x", "expect": {"status": "succeeded"}}), [seen("X", capture=None)])
@@ -660,7 +661,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
         self.assertEqual(j.codes(), [scenario_run.OUTCOME_UNOBSERVED])
 
     def test_a_clip_without_expectations_still_needs_its_outcome_observed(self):
-        """(iii) A single-clip scenario states no per-clip expectation. Red if such a clip were skipped:
+        """A single-clip scenario states no per-clip expectation. Red if such a clip were skipped:
         its run would then pass on the records alone with no outcome ever seen. The control: the same
         clip with its outcome observed has nothing to report."""
         scenario = clips_scenario({"clip": "x"})
@@ -699,7 +700,7 @@ class TheClipJudgementClassifiesRatherThanDefaults(unittest.TestCase):
 
 
 class TheDuplicateRecaptureIsJudgedOnEachSignalSeparately(unittest.TestCase):
-    """R4. C5 expects the second capture to end `alreadyCaptured` AND the early probe to say
+    """C5 (`c5_same_clip_twice`) expects the second capture to end `alreadyCaptured` AND the early probe to say
     duplicate=true. Changing both at once proves neither check exists, so each is changed alone
     and must fail with ITS OWN code."""
 
@@ -837,9 +838,10 @@ def observe(driver, *, before="a0", disk=("X",), probe=(), falsify=None, record_
 
 
 class APlanMeansWhatTheOldCommandLineMeant(unittest.TestCase):
-    """U3. `scenario_run` now writes a plan and passes `--plan`. Red if a committed scenario's plan
-    differs from the plan the harness builds out of the single-clip flags the runner used to pass --
-    a dropped `stops`, `range` or `scroll_rate` would change the run without a word."""
+    """`scenario_run` hands the harness a plan file (`--plan`), not single-clip flags. Red if a committed
+    single-clip scenario's plan differs from the plan the harness builds out of the single-clip flags
+    (`--clip`, `--stops`, `--range`, ...) that spell out the same scenario -- a dropped `stops`, `range`
+    or `scroll_rate` would change the run without a word."""
 
     def legacy_argv(self, raw: dict) -> list[str]:
         return TheSingleClipFormIsAOneElementClipsList.expected_command(None, raw)[3:]
@@ -889,7 +891,7 @@ class APlanMeansWhatTheOldCommandLineMeant(unittest.TestCase):
 
 
 class EachClipIsSynchronisedByItsOwnSignals(unittest.TestCase):
-    """U3. A latched scroll-ready Event that outlived its clip releases every hold of the next clip
+    """A latched scroll-ready Event that outlived its clip releases every hold of the next clip
     at once, with no timeout and every hold counted -- invisible to the sync checks."""
 
     MARKER = app_drive_run.SCROLL_READY_MARKERS[0]
@@ -917,7 +919,7 @@ class EachClipIsSynchronisedByItsOwnSignals(unittest.TestCase):
         self.assertFalse(signals.marker_after_arm(2), "a tab never seen is not after arm")
 
     def test_arming_moves_the_time_base_even_when_the_events_are_reused(self):
-        """F2. arm_clip with its Event re-creation removed: the same set, the previous clip's marker,
+        """arm_clip with its Event re-creation removed: the same set, the previous clip's marker,
         a new armed_at. Red if the time base moved only with a new set -- the stale marker would then
         read as this clip's and the verdict would pass an unsynchronised clip."""
         app = app_drive_run.DriverApp.__new__(app_drive_run.DriverApp)
@@ -947,7 +949,7 @@ class EachClipIsSynchronisedByItsOwnSignals(unittest.TestCase):
 
 
 class ACaptureAttemptEndsOnlyOnItsOwnOutcome(unittest.TestCase):
-    """U3, the outcome and settling as pure functions over (harness_state, disk ids)."""
+    """The capture outcome and the settle conditions, as pure functions over (harness_state, disk ids)."""
 
     def test_the_previous_clips_outcome_is_not_this_clips(self):
         """Red if the attempt id were not compared: the second clip would 'finish' before it began."""
@@ -965,7 +967,7 @@ class ACaptureAttemptEndsOnlyOnItsOwnOutcome(unittest.TestCase):
             self.assertIsNone(app_drive_run.attempt_outcome(state, "a1"), event)
 
     def test_the_outcome_outlives_the_detail_screen(self):
-        """(i) The app's state once the detail screen has closed: `onCharaDetailClosed` resets the capture
+        """The app's state once the detail screen has closed: `onCharaDetailClosed` resets the capture
         state, so its status is back to `waitingForDetail` with no link, and only the attempt id and the
         event still say what happened. Red if the outcome were read from the capture status: the clip
         would wait out `record_wait` and report no outcome for a capture that succeeded."""
@@ -994,7 +996,7 @@ class ACaptureAttemptEndsOnlyOnItsOwnOutcome(unittest.TestCase):
 class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
     """The real `observe_clip` / `perform_merge` against a fake driver, judged by the real
     `judge_clips`. Red if the harness wrote a shape the verdict does not read, or collapsed a
-    driver failure into an answer (R2)."""
+    driver failure into an answer."""
 
     NONE = clips_scenario({"clip": "x", "expect": {"status": "succeeded", "candidate": None}})
 
@@ -1015,7 +1017,7 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
         self.assertEqual(driver.calls[0], ("waitFor", app_drive_run.TILE_KEY))
 
     def test_a_failed_tile_wait_is_an_error_unless_the_other_state_is_seen(self):
-        """R2. Red if a failed wait were written as the opposite state."""
+        """Red if a failed wait were written as the opposite state."""
         timeout = RuntimeError("driver waitForAbsent failed: timeout")
         both = FakeDriver([app_state()], {("waitForAbsent", app_drive_run.TILE_KEY): timeout,
                                           ("waitFor", app_drive_run.TILE_KEY): RuntimeError("timeout")})
@@ -1030,7 +1032,7 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
         self.assertEqual(scenario_run.judge_clips(self.NONE, [obs], {}).codes(), [scenario_run.TILE_DISAGREES])
 
     def test_an_outcome_recorded_before_the_close_is_read_after_it(self):
-        """(i) The answers one clip produces: the attempt in progress, then the detail screen closed and
+        """The answers one clip produces: the attempt in progress, then the detail screen closed and
         the capture state reset. Red if observe_clip read the capture status (it is never terminal
         here) or took the record id from the link the reset dropped."""
         in_progress = app_state(attempt="a1", status="capturing", link=None, active=(), event=False)
@@ -1058,7 +1060,7 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
         self.assertEqual(scenario_run.judge_clips(self.NONE, [obs], {}).codes(), [scenario_run.UNSETTLED])
 
     def test_settling_on_an_unloaded_table_or_store_is_inconclusive(self):
-        """F1. What observe_clip writes when settling times out on something never loaded:
+        """What observe_clip writes when settling times out on something never loaded:
         `settled: false` with the load named in `unsettled`. Red if that were judged a measured
         disagreement (`unsettled`, exit 1) instead of nothing measured (exit 2)."""
         unloaded_store = {**app_state(), "store": {"active_loaded": False, "active_ids": []}}
@@ -1073,7 +1075,7 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
             self.assertEqual((j.exit_code, j.codes()), (2, [code]), code)
 
     def test_no_settle_removes_the_evidence_and_the_verdict_refuses(self):
-        """R3. `--falsify no-settle` is defined as dropping the evidence, so it is deterministic.
+        """`--falsify no-settle` is defined as dropping the evidence, so it is deterministic.
         Red if it merely skipped a wait (the state may have settled anyway) or if the verdict
         accepted a clip with no settle evidence."""
         obs = observe(FakeDriver([app_state()]), falsify="no-settle")
@@ -1095,12 +1097,12 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
         self.assertEqual(scenario_run.judge_clips(scenario, [obs], {}).codes(), [])
 
     def test_a_state_read_failure_propagates_rather_than_reading_as_not_yet(self):
-        """R2. Red if a driver failure while polling were treated as 'no outcome yet'."""
+        """Red if a driver failure while polling were treated as 'no outcome yet'."""
         with self.assertRaises(RuntimeError):
             observe(FakeDriver([RuntimeError("request_data failed")]))
 
     def test_a_merge_whose_dialog_never_opens_is_a_driver_error(self):
-        """R2. Red if it were written as completed: false (a product mismatch)."""
+        """Red if a dialog that never opened were written as completed: false (a product mismatch)."""
         driver = FakeDriver([app_state()], {("waitFor", app_drive_run.MERGE_APPLY_KEY): RuntimeError("timeout")})
         merge = app_drive_run.perform_merge(app_drive_run.StateReader(driver), driver, "X", "Y")
         self.assertEqual(merge["taps"], app_drive_run.MERGE_TAPS)
@@ -1134,7 +1136,7 @@ class TheHarnessObservationIsWhatTheVerdictReads(unittest.TestCase):
         self.assertNotIn("error", merge)
 
     def test_a_driver_failure_after_a_hold_is_an_error_not_a_retry(self):
-        """R2. Red if a failure other than the wait running out were read as the button remaining."""
+        """Red if a failure other than the wait running out were read as the button remaining."""
         pair = {"older": "X", "newer": "Y", "enhanced": "Y"}
         driver = FakeDriver([app_state(active=("X", "Y"), candidates=[pair])],
                             {("waitForAbsent", app_drive_run.MERGE_APPLY_KEY): RuntimeError("VM Service call timed out")})
@@ -1201,8 +1203,9 @@ class EachHoldWaitedForItsOwnClipsMarker(unittest.TestCase):
 
 
 class MainTurnsAnErrorStatusIntoExitTwo(unittest.TestCase):
-    """R1 through `main()`: an error summary whose records match the golden exits 2. Red if `main()`
-    computed `harness_status_failure` and dropped it -- the pure-function tests cannot see that."""
+    """The error-status refusal through `main()`: a summary with `status: "error"` whose records match
+    the golden exits 2. Red if `main()` computed `harness_status_failure` and dropped it -- the
+    pure-function tests (`AnErrorSummaryIsNeverAVerdict`) cannot see that."""
 
     def run_main(self, status: str, clips: list | None = None) -> int:
         import tempfile
@@ -1242,9 +1245,10 @@ class MainTurnsAnErrorStatusIntoExitTwo(unittest.TestCase):
         self.assertEqual(self.run_main("ok"), 0)
 
     def test_a_single_clip_run_whose_outcome_was_never_seen_exits_two(self):
-        """(iii) through `main()`: a completed single-clip run whose records match and whose clip's outcome
-        was never observed. Red if `main()` judged the clips only for a scenario stating a per-clip
-        expectation -- a single-clip scenario states none, so it would pass on the records alone."""
+        """The single-clip outcome check through `main()`: a completed single-clip run whose records
+        match and whose clip's outcome was never observed. Red if `main()` judged the clips only for a
+        scenario stating a per-clip expectation -- a single-clip scenario states none, so it would pass
+        on the records alone."""
         self.assertEqual(self.run_main("ok", clips=[seen("X", capture=None)]), 2)
 
 
