@@ -192,9 +192,10 @@ change and only after approval. For the two switch cases the statement of correc
 
 ## 3. The encode / scale regression grid — eleven configurations
 
-The grid's material is in `testdata/clips/grid/`, which retains only the **pristine** rung
-(`screen-20260802-214946.mp4`); the ten re-encodes below are ffmpeg derivations of it and are not
-kept, so re-derive them before running the grid and say in the report that you did. Run each with
+The grid's material is in `testdata/clips/grid/`, which holds the **pristine** rung
+(`screen-20260802-214946.mp4`) and the ten re-encodes named below. The ten are ffmpeg derivations
+of the pristine rung, so a missing one is re-derived from the table before running the grid, and
+the report says so; the pristine rung is the one that cannot be replaced. Run each with
 `umacapture_cli video`, **passing the resize flag
 explicitly** (`--frame-resize` or `--no-frame-resize`) so the row says which configuration it is.
 Most of the numbers below no longer have to be grepped out of the log: the run's
