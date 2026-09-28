@@ -25,7 +25,9 @@ outcome falls out of timing, ordering, or a global state that happens to be set 
 The second kind works until someone makes an unrelated function async, and then it fails silently.
 
 If behaviour rests on an invariant rather than on data, the invariant needs a test that asserts it
-directly — not a test that would merely happen to fail if it broke.
+directly — not a test that would merely happen to fail if it broke. Which invariants are worth a guard
+at all is rated first, against `supported-scope.md`, by the user-level rule on proportionate defence;
+this section decides how to build a guard once one is due, not whether one is due.
 
 ## An unexplained divergence is never the cheaper option
 
