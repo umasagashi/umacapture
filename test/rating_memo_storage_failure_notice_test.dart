@@ -159,6 +159,9 @@ void main() {
     );
     expect(file.readAsStringSync(), contains('"added":4'));
     expect(file.readAsStringSync(), contains('"kept":3'));
+    // The bytes are visible before the writer isolate closes the file; tearDown deletes the temp dir,
+    // which fails on Windows while that handle is open. `flush()` completes only after the write returns.
+    expect(await ref.read(charaDetailRecordRatingProvider('storage').notifier).flush(), isTrue);
     // The warning belongs to the failure alone: a working storage must not learn to cry wolf.
     await settle();
     expect(toasts, isEmpty);
