@@ -23,6 +23,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/statistics.dart';
 import '/src/gui/theme_extensions.dart';
@@ -325,23 +326,27 @@ class AppUpdaterGroup extends ConsumerWidget {
                 Error.throwWithStackTrace(error, stackTrace);
               });
         })
-        .catchError((Object error, StackTrace stackTrace) {
-          // Reset the progress so the card stops spinning and becomes tappable again;
-          // without this a failed download leaves it stuck on the spinner forever.
-          // Report at error level and to Sentry: this was the only network
-          // operation that stayed a local warning, which left production failures
-          // with no trace at all.
-          logger.e("Failed to download the app update.", error, stackTrace);
-          if (error is DioException) {
-            logger.e(
-              "App update download detail: type=${error.type} url=${error.requestOptions.uri} "
-              "status=${error.response?.statusCode} inner=${error.error} (${error.error.runtimeType})",
-            );
-          }
-          captureException(error, stackTrace);
-          progress.set(null);
-          Toaster.show(ToastData.error(description: describeFailure(error)));
-        });
+        .catchError((Object error, StackTrace stackTrace) => reportDownloadFailure(progress, error, stackTrace));
+  }
+
+  /// The failure arm of [downloadAndOpen]: logs and reports [error], resets [progress], and shows
+  /// the user the sentence [describeFailure] composed, unwrapped.
+  ///
+  /// The progress reset is what lets the card stop spinning and become tappable again; without it
+  /// a failed download leaves it stuck on the spinner. The failure is logged at error level and sent
+  /// to Sentry so a production failure leaves a trace.
+  @visibleForTesting
+  static void reportDownloadFailure(SettableNotifier<Progress?> progress, Object error, StackTrace stackTrace) {
+    logger.e("Failed to download the app update.", error, stackTrace);
+    if (error is DioException) {
+      logger.e(
+        "App update download detail: type=${error.type} url=${error.requestOptions.uri} "
+        "status=${error.response?.statusCode} inner=${error.error} (${error.error.runtimeType})",
+      );
+    }
+    captureException(error, stackTrace);
+    progress.set(null);
+    Toaster.show(ToastData.error(description: describeFailure(error)));
   }
 
   Widget downloadProgressWidget(BuildContext context, WidgetRef ref, Progress progress) {
@@ -689,8 +694,13 @@ class DashboardPage extends ConsumerWidget {
     // hasError is a fallback for an unexpected exception inside the loader.
     final moduleAsync = ref.watch(moduleVersionLoader);
     final moduleUpdateFailed = ref.watch(moduleUpdateFailedProvider) || moduleAsync.hasError;
+    final moduleUpdating = moduleAsync.isLoading && moduleUpdateActivityDisplay(ref) != null;
     return ListTilePageRootWidget(
       children: [
+        // The statistics below wait on the same module update and show only a bare
+        // spinner per tile; the reason is stated once, here. Gated at the mount
+        // site rather than left to render nothing, so the list keeps no empty gap.
+        if (moduleUpdating) const ListCard(children: [ModuleUpdateActivityView()]),
         // Shown on every platform: the manual update dialog it opens installs
         // from the archive's bytes, so it works in a browser too, and web is the
         // build that most needs it -- its module lives in OPFS, which the

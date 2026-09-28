@@ -22,11 +22,11 @@ import 'package:umacapture/src/addon/task_definitions.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/hive.dart';
 import 'support/records.dart';
-import 'support/riverpod.dart';
 
 /// A controllable [ActionRunner] for execution-controller tests: it never starts
 /// real work; the test drives its progress and completion explicitly.
@@ -205,7 +205,7 @@ void main() {
 
     setUp(() {
       container = ProviderContainer.test();
-      ref = container.read(refBaseProvider);
+      ref = container.read(containerRefProvider);
     });
     tearDown(() => container.dispose());
 
@@ -250,7 +250,7 @@ void main() {
 
       final handle = const BuiltinRunner(
         BuiltinAction(actionKey: 'stuck_timeout'),
-      ).start(timedContainer.read(refBaseProvider), const {});
+      ).start(timedContainer.read(containerRefProvider), const {});
       final result = await handle.result;
       expect(result.status, ExecutionStatus.timeout);
     });

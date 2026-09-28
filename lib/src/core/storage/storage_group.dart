@@ -67,9 +67,9 @@ enum StorageDeleteFriction {
 /// a property of the *data*, not of the verb: zipping a record directory while a
 /// capture is merging into it produces a broken archive from a half-written
 /// record, which is the same interleaving a delete has to exclude. So the zip and
-/// the download take the exclusion named here, and the one member that is not a
-/// lock ([providerSerialized]) says at its own doc why an extraction takes
-/// nothing instead.
+/// the download take the exclusion named here, and the one member whose
+/// mutation does more than lock ([exclusiveRootProviderSerialized]) says at its
+/// own doc why an extraction takes the lock alone.
 ///
 /// **A property of the group, not of the call site.** The failure to avoid — the
 /// one worth calling "false comfort" — is a delete path that sends everything through
@@ -93,24 +93,36 @@ enum StorageLockScope {
   /// takes, so it is the only one that excludes anything.
   exclusiveRoot,
 
-  /// No lock: serialised against the providers that own the file instead.
+  /// The exclusive root lock, and for a mutation the providers that own the file
+  /// taken out of the way inside it.
   ///
-  /// Only metadata. Its writers (`spec/rating.dart`, `spec/memo.dart`) write
-  /// through `FilePath` without acquiring anything, so there is no counterparty
-  /// on the lock to exclude; taking one would be the same false comfort in a
-  /// different disguise. The real exclusion is to take the owning controller out
-  /// of the way first — see `storageDeleteSerializerProvider`.
+  /// Only metadata. Its files are named by storage-set key, or are the one
+  /// dismissal file, and not by record id, so a record lock would name nobody.
+  /// The root name is the one its lock-taking writers hold: the enhancement merge
+  /// re-keys memo, rating and the dismissal file inside the exclusive root lock,
+  /// and `EnhancementDismissalStore.dismiss` does its read-modify-write inside the
+  /// same lock. They all run inside the one app instance: on web the instance
+  /// claimed at startup (`app_instance.dart`) keeps a second tab of the origin
+  /// from running the app.
+  ///
+  /// **The memo and rating controllers (`spec/rating.dart`, `spec/memo.dart`)
+  /// write through `FilePath` without acquiring anything, so the lock does not
+  /// exclude them.** Against them the exclusion is to take the owning controller
+  /// out of the way first — see `storageDeleteSerializerProvider`. That makes the
+  /// *app* re-read the file; it does not stop a controller write already in
+  /// flight. What keeps no second copy of the controller alive elsewhere is the
+  /// single app instance (`app_instance.dart`), not a lock per edit: a stale copy
+  /// lives in memory, not inside a critical section.
   ///
   /// **This is the one scope a mutation and an extraction read differently, and
-  /// the reason is that the exclusion is itself a mutation.** Dropping the
-  /// controller makes the *app* re-read the file; it does not stop a write that
-  /// is already in flight, because there is no lock for it to wait on. That is
-  /// worth doing before a delete — the controller must not go on serving, or
-  /// re-writing, a file that is about to stop existing — and is worth nothing
-  /// before a read, which would then have perturbed the user's in-memory ratings
-  /// to copy a file out. So an extraction under this scope takes nothing, and
+  /// the reason is that dropping the controller is itself a mutation.** Both take
+  /// the root lock: a zip or a download taken while a merge re-keys these files
+  /// would copy out a half re-keyed set. Only a mutation also drops the
+  /// controller — before a delete the controller must not go on serving, or
+  /// re-writing, a file that is about to stop existing; before a read it would
+  /// perturb the user's in-memory ratings to copy a file out.
   /// [StorageExclusionIntent] is where that is decided, once.
-  providerSerialized,
+  exclusiveRootProviderSerialized,
 
   /// Nothing to exclude: the group is not a record store and no lock in this app
   /// covers it. Modules, temp, settings, the sound directory, the font cache,
@@ -144,7 +156,7 @@ enum StorageDelegatedAction {
 /// The logical groups the storage-management view shows.
 ///
 /// "Logical" because the view's rows are not the app's directory layout: several
-/// groups map to one directory each, one maps to two ([metadata]), one has no
+/// groups map to one directory each, one maps to two directories and a file ([metadata]), one has no
 /// directory at all ([settings], a Hive box list), and one is the residue of
 /// every other ([unclassified]).
 enum StorageGroupId {
@@ -380,11 +392,6 @@ class StorageGroup {
   /// platforms, and a per-platform answer would have to be given twice for every
   /// group added later — the shape this field exists to avoid.
   ///
-  /// It is also **not** the web rule that keeps another tab's scratch out of this
-  /// group: that is `liveTempSessionIds`, applied by the group resolving
-  /// `tempDir` (this tab's own session) instead of `tempRootDir`. That rule is
-  /// about *whose* scratch is listed; this one is about *when* this session's own
-  /// scratch may go.
   final bool writtenByLiveCapture;
 
   /// Whether the group is drawn from something other than the filesystem. Only
@@ -437,16 +444,14 @@ String _deleteWarningKey(String name) => '$_groupKeyPrefix.$name.delete_warning'
 /// `dart:mirrors`, so nothing can enumerate a class's members. It is instead
 /// derived by the machine at *test* time: `test/storage_group_test.dart` reads
 /// `providers.dart`, extracts every `DirectoryPath get`, and fails when one is
-/// missing from here. That is deliberately a stronger reading than
-/// `app_root_scrub_test.dart`'s, which extracts *fields* and asserts it finds no
-/// getters — every logical group below is a getter, so an extractor built like
-/// that one would stay green forever as groups were added.
+/// missing from here. It extracts *getters* rather than fields because every
+/// logical group below is a getter, so an extractor that read fields would stay
+/// green forever as groups were added.
 ///
 /// Two things read this table: [storageGroupContainerGetters] (which of these are
 /// represented by a child rather than in their own right) and the unclassified
 /// scan (which subtracts every path the app names).
 Map<String, DirectoryPath> pathInfoDirectories(PathInfo info) => {
-  'tempRootDir': info.tempRootDir,
   'tempDir': info.tempDir,
   'storageDir': info.storageDir,
   'modulesDir': info.modulesDir,
@@ -473,14 +478,11 @@ Map<String, DirectoryPath> pathInfoDirectories(PathInfo info) => {
 /// group's directory really does sit strictly below it. A container that stopped
 /// containing a group would fail that check rather than quietly hide a group.
 const storageGroupContainerGetters = <String>{
-  // The scratch tree as a whole. `tempDir` — this context's slice of it, and the
-  // whole tree on native, where there is no session — is the temp group.
-  'tempRootDir',
   // Holds `sound/` and `chara_detail/`, nothing else.
   'storageDir',
   // Holds active / archive / quarantine / retired / metadata.
   'charaDetailDir',
-  // Holds rating/ and memo/, which are one group together.
+  // Holds rating/, memo/ and the dismissal file, which are one group together.
   'charaDetailMetadataDir',
 };
 
@@ -563,15 +565,20 @@ final List<StorageGroup> storageGroups = [
       StorageOperation.zip,
       StorageOperation.delete,
     },
-    // One file is one whole rating/memo *set* across every record, and the user
-    // typed all of it. Nothing regenerates it.
+    // One file is one whole rating/memo *set* across every record, or every
+    // "not the same uma" decision the user made, and the user typed or chose all
+    // of it. Nothing regenerates it.
     deleteFriction: StorageDeleteFriction.doubleConfirm,
-    // File names are storage-set keys, not record ids, and the writers take no
-    // lock at all, so there is no counterparty a lock could exclude.
-    lockScope: StorageLockScope.providerSerialized,
-    // Two directories, one group: rating and memo are the same kind of thing to
-    // the user and are described by one hint.
-    resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir],
+    // File names are storage-set keys or the one dismissal file, not record ids,
+    // so a record lock would name nobody. The merge and the dismissal writer hold
+    // the exclusive root lock while they write these files; the memo and rating
+    // controllers take no lock and are dropped instead.
+    lockScope: StorageLockScope.exclusiveRootProviderSerialized,
+    // Two directories and a file, one group: rating, memo and the dismissed
+    // merge candidates are the same kind of thing to the user — what they
+    // attached to their records — and are described by one hint. Deleting the
+    // file offers every dismissed pair again.
+    resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir, info.charaDetailEnhancementDismissedFile],
   ),
   StorageGroup(
     id: StorageGroupId.quarantine,
@@ -878,15 +885,11 @@ final List<StorageGroup> storageGroups = [
     },
     // Swept unconditionally at startup anyway.
     deleteFriction: StorageDeleteFriction.singleConfirm,
-    // Scratch, swept at startup. Other tabs' sessions are excluded by not being
-    // in this group at all (`liveTempSessionIds`), not by a lock.
+    // Scratch, cleared at startup.
     lockScope: StorageLockScope.unlocked,
     // Blocked while a capture runs: the native core stages a scrape in here, and the line above is
     // why nothing else could stop a delete from taking it out from under one.
     writtenByLiveCapture: true,
-    // `tempDir`, not `tempRootDir`: on native there is no session and the two are
-    // the same directory, while on web `tempDir` is this tab's own slice and the
-    // rest of the root belongs to tabs that are still using it.
     resolve: (info) => [info.tempDir],
   ),
   StorageGroup(

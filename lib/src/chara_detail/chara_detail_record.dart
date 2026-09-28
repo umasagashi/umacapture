@@ -14,17 +14,22 @@ import '/src/core/version_check.dart';
 
 part 'chara_detail_record.mapper.dart';
 
-@MappableClass(caseStyle: CaseStyle.snakeCase)
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Character extends JsonEquatable with CharacterMappable {
   final int icon;
   final int character;
   final int card;
   final int rank;
 
-  const Character(this.icon, this.character, this.card, this.rank);
+  /// The record type the native recognizer reads off a family entry's icon. It is set on the six
+  /// family entries and left null on the trainee, whose type is [Metadata.recordType]; a null value
+  /// writes no key, so a record Dart writes back keeps exactly the fields native wrote.
+  final RecordType? recordType;
+
+  const Character(this.icon, this.character, this.card, this.rank, this.recordType);
 
   @override
-  List<Object?> properties() => [icon, character, card, rank];
+  List<Object?> properties() => [icon, character, card, rank, recordType];
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase)
@@ -478,7 +483,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
       final record = CharaDetailRecordMapper.fromJson(content);
-      _validateDirectoryId(directory, record);
+      validateDirectoryId(directory, record);
       return RecordLoaded(record);
     } catch (exception, stackTrace) {
       return _quarantineOnFailure(directory, exception, stackTrace);
@@ -516,14 +521,22 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     try {
       final content = await directory.filePath("record.json").readAsString();
       final record = CharaDetailRecordMapper.fromJson(content);
-      _validateDirectoryId(directory, record);
+      validateDirectoryId(directory, record);
       return RecordLoaded(record);
     } catch (exception, stackTrace) {
       return _quarantineOnFailureAsyncUnlocked(directory, exception, stackTrace);
     }
   }
 
-  static void _validateDirectoryId(DirectoryPath directory, CharaDetailRecord record) {
+  /// Throws [RecordIdMismatch] unless [record] claims the id of the [directory]
+  /// it was decoded from.
+  ///
+  /// Public because every path that reads a `record.json` off disk owes the same
+  /// check, not only the loaders in this class: mutation authority is derived
+  /// from the directory leaf, so a decode that skips it can hand a caller the
+  /// contents of a record other than the one it asked for. One predicate, called
+  /// from each reader, rather than a second spelling of it beside each one.
+  static void validateDirectoryId(DirectoryPath directory, CharaDetailRecord record) {
     if (record.id != directory.name) {
       throw RecordIdMismatch(expectedId: directory.name, actualId: record.id);
     }
@@ -667,8 +680,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// OPFS has no directory rename). Returns the destination, or `null` if the
   /// move failed.
   ///
-  /// The destination probe and the move stay in the same critical section, so a
-  /// collision cannot select the same suffix in another tab.
+  /// The destination probe and the move stay in the same critical section, so two
+  /// quarantines running concurrently cannot select the same suffix.
   ///
   /// The name is folded through [safeRecordDirectoryName] for the reason spelled
   /// out there: `WebVfs` splits the joined path on `\` as well as `/`, so a

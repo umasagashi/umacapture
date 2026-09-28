@@ -106,7 +106,7 @@ Uint8List _moduleZip({String version = '2026-09-06T00:00:00+0900'}) {
 Future<void> _deferredInstall(ProviderContainer container) {
   return runModuleInstall(
     container.read(_refProvider),
-    _modulesDir,
+    _layout,
     () => extractModuleZipBytes(_moduleZip(), _modulesDir),
     contention: LongReadContention.defer,
   );
@@ -251,7 +251,7 @@ void main() {
 
       final kindsWhileInstalling = <List<LongReadKind>>[];
       Future<void> observedInstall() {
-        return runModuleInstall(container.read(_refProvider), _modulesDir, () async {
+        return runModuleInstall(container.read(_refProvider), _layout, () async {
           kindsWhileInstalling.add(container.read(longReadRegistryProvider).values.map((c) => c.kind).toList());
           await Future<void>.delayed(Duration.zero);
         }, contention: LongReadContention.defer);

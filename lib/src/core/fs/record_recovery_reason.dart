@@ -53,6 +53,24 @@ enum RecordRecoveryIncompleteReason {
   /// A `ready` manifest names a staged tree that is no longer on disk.
   stagedTreeGone,
 
+  /// A `parked` manifest's staged tree was gone, so the record it was
+  /// replacing was copied back into its store from `superseded/` and the slot
+  /// removed. Nothing is left on disk for this value to describe; it states
+  /// why the publication did not commit.
+  stagedTreeGoneRestored,
+
+  /// A `ready` manifest names a tree it displaces, and that tree is gone. The
+  /// slot is left as it is.
+  displacedTreeGone,
+
+  /// A `parked` manifest has neither its staged tree nor the copy of the tree
+  /// it displaced. The slot is left as it is.
+  supersededCopyGone,
+
+  /// A restore could not copy `superseded/` back into the record's store, or
+  /// the copy does not match it.
+  restoreCopyFailed,
+
   /// A manifest in a state the resume has no step for.
   unresumableState,
 
@@ -123,6 +141,12 @@ extension RecordRecoveryReasonClause on RecordRecoveryIncompleteReason {
     RecordRecoveryIncompleteReason.unresumableManifest => 'its manifest names no transaction this version can resume',
     RecordRecoveryIncompleteReason.unreadableManifest => 'its manifest could not be read',
     RecordRecoveryIncompleteReason.stagedTreeGone => 'the tree its manifest stages is gone',
+    RecordRecoveryIncompleteReason.stagedTreeGoneRestored =>
+      'the tree its manifest stages is gone, so the record it was replacing was restored',
+    RecordRecoveryIncompleteReason.displacedTreeGone => 'the record it replaces is gone before it was set aside',
+    RecordRecoveryIncompleteReason.supersededCopyGone =>
+      'both its staged tree and the copy of the record it replaces are gone',
+    RecordRecoveryIncompleteReason.restoreCopyFailed => 'the record it was replacing could not be copied back',
     RecordRecoveryIncompleteReason.unresumableState => 'its manifest is in an unresumable state',
     RecordRecoveryIncompleteReason.supersededCopyNotSaved => 'the version it was replacing could not be saved',
     RecordRecoveryIncompleteReason.stagedTreeNotPublished => 'its staged tree could not be published',

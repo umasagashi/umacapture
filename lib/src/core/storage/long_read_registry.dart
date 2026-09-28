@@ -1,25 +1,40 @@
 /// Who is holding which storage paths open right now, and for how long a job.
 ///
 /// **This is not a lock, and it must never be read as one.** Nothing here grants
-/// anything, refuses anything, or makes anybody wait; `RecordMutationLock` and
-/// `RecordRecoveryGate` still do all of the excluding, unchanged. What the
-/// registry buys is the half the lock cannot do — the *user interface* knowing,
-/// synchronously and before a button is drawn, that pressing it would queue a
-/// destructive operation behind a long read that has already opened the handles.
-/// The lock answers "you have to wait"; this answers "we will not ask you to".
+/// anything, and nothing here excludes a job that does not ask it:
+/// `RecordMutationLock` and `RecordRecoveryGate` still do all of the excluding
+/// between the jobs that take them. What the registry adds is one answer to "is
+/// somebody holding this?", read at two moments. A control reads it
+/// synchronously, before it is drawn, so pressing it cannot queue a destructive
+/// operation behind a job that already has the handles open. A job reads it as
+/// it is about to start, and one that asks through
+/// [LongReadRegistry.holdWhenFree] takes its own claim in the same turn: while
+/// something holds its paths it does not start — it is refused or it parks, as
+/// it asked — and a job that asks after it has claimed finds its claim. A job
+/// that neither claims nor asks is seen by nothing here. The lock answers "you
+/// have to wait"; this answers "somebody is holding it", before anything has
+/// been queued.
 ///
 /// **It is a strictly smaller window than the lock's, on both platforms, and
 /// that is a real gap rather than an oversight:**
-///  * On the web the exclusion is the Web Locks API, which `record_mutation_lock_shared.dart`
-///    describes as reaching across tabs ("another tab is probably busy with the
-///    record store"). This registry is a Riverpod notifier living in one tab's
-///    memory, so a long read in another tab is invisible to it.
+///  * On the web the exclusion is the Web Locks API, which the page shares with
+///    its workers. This registry is a Riverpod notifier living in the Dart
+///    isolate's memory, so a long read a worker performs under that lock is
+///    invisible to it.
 ///  * On Windows the corresponding blind spot is the native capture process,
 ///    which `storage.dart` already states no in-process acquisition can exclude.
 ///
-///  In both cases the operation still cannot corrupt anything — the lock, or the
-///  filesystem's own sharing rules, still stands behind it. Only the courtesy of
-///  a pre-greyed button is lost.
+///  What a blind spot costs depends on what stands behind the operation. Where a
+///  lock does — the web worker takes the Web Lock the page takes — a job the
+///  registry cannot see is still excluded by it, and what is lost is a
+///  pre-greyed button, or a refusal in place of a wait. Where none does, nothing
+///  else is there: no in-process acquisition excludes the native capture
+///  process, and the `StorageLockScope.unlocked` groups — `modules` among them —
+///  are covered by no lock at all. There, a job that neither claims nor asks can
+///  overlap a delete, and the filesystem's sharing rules protect only the files
+///  that job already has open, not the ones it has yet to reach. The registry is
+///  the whole of the protection those paths have, and it reaches exactly the
+///  jobs that go through it.
 ///
 /// **Why one registry rather than a gate per operation.** The two delete
 /// surfaces used to read `storageZipProgressProvider` directly, which is a copy
@@ -45,6 +60,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/app_logger.dart';
 import '/src/core/path_entity.dart';
+import '/src/gui/toast.dart';
 
 import 'storage_exclusion.dart';
 import 'storage_lock_scope.dart';
@@ -91,36 +107,32 @@ bool longReadHoldCovers(StorageHold hold, PathEntity target) {
 /// claim site and not before, which is what a reader can rely on without
 /// counting what is below or asking when the rest arrive.
 ///
-/// **That rule is now counted, and the round of the surfaces is counted with
-/// it, but the two are not counted equally well.** `long_read_registry_test.dart`
-/// reads the members out of this declaration and requires each to be named at a
-/// claim site; a member added with none fails. It cannot see the opposite
-/// omission — an operation that is long and never became a member — because
-/// this enum is where "long" is written down, so there is nothing to compare
-/// against. The surface side is anchored instead on the closed set of the app's
-/// destructive entry points: a file that calls one has to reach the registry
-/// somewhere in the same file. That set is a human inventory, so a screen with
-/// no anchor is still invisible, and the header's "still owed once per surface"
-/// stands — what the count adds is that the inventory, once made, stops rotting
-/// silently.
+/// Neither that rule nor the round of the surfaces is checked by a test. A
+/// member with no claim site costs nothing a user can see, and a surface that
+/// never subscribes shows a control that should have been withheld, and
+/// pressing it is refused or made to wait by the operation it starts (asking
+/// the registry when it claims, or taking the record lock) — except a video
+/// import, which never refuses by design. The header's "still owed once per
+/// surface" stands.
 ///
-/// **The kind is load-bearing, not a label.** Two readings would give the wrong
-/// answer if it were dropped: [holdsKind] (the zip's single-flight rule must not
-/// be tripped by an archive) and `StorageZipProgress.build` (an archive's hold
-/// must not be rendered as zip progress). Each has a case of its own in
-/// `long_read_registry_test.dart`.
+/// **The kind is load-bearing, not a label.** Three readings would give the
+/// wrong answer if it were dropped: [holdsKind] (the zip's single-flight rule
+/// must not be tripped by an archive), `StorageZipProgress.build` (an archive's
+/// hold must not be rendered as zip progress) and [LongReadRegistry.heldBy]'s
+/// `disregarding` (a relocation lets a live capture through, because it stops
+/// the capture itself, and must still refuse for every other holder). Each has
+/// a case of its own in `long_read_registry_test.dart`.
 ///
-/// **A third reading was here and is gone; it is written down so that the next
-/// reader can tell a retired reason from a forgotten one.** It was the two delete
-/// folds, said to answer *which* job a withheld button is waiting for. Merging
-/// the per-surface refusals into [longReadBusyMessage] ended that: every withheld
-/// control now shows one sentence that names no holder — that doc records the
-/// reason it cannot — so no button is told the kind. The folds still return it,
-/// and the only things left reading what they return are two `logger.i` lines
-/// (`CharaDetailRecordStorage`'s regeneration refusal and
-/// `data_root_migration.dart`'s), which name the holder in a log and not on a
-/// surface. Restoring the sentence, not this paragraph, is what would bring the
-/// third reading back.
+/// **The delete folds answer the kind too, and no surface shows it.** Every
+/// withheld control shows [longReadBusyMessage], one sentence that names no
+/// holder — that doc records the reason it cannot — so no button is told which
+/// job it is waiting for. Three lines read the kind off
+/// [LongReadNotStartedException.heldBy], which [LongReadRegistry.heldBy]
+/// answers: [announceLongReadNotStarted], the regeneration refusal in
+/// `CharaDetailRecordRegenerationController.start` and the relocation refusal in
+/// `DataRootMigrationController.migrate`. All three name the holder in a log and
+/// not on a surface. A sentence that named the holder would make the folds' kind
+/// a fourth reading.
 ///
 /// **A member says what it is, and no longer says why it is not each of the
 /// others.** Every member here used to carry a paragraph ruling out the members
@@ -212,8 +224,8 @@ enum LongReadKind {
   /// in-process acquisition can cover — so there, this claim is the *whole* of
   /// what stands between a delete and a directory being rewritten. That is a
   /// difference in what backs the window, not in the window: the registry is not
-  /// a lock on either platform, and what it buys — the button not being offered
-  /// — is the same on both.
+  /// a lock on either platform, and what it buys — the button not being offered,
+  /// and a delete that asks at its start being refused — is the same on both.
   regeneration,
 
   /// Extracting a recognition module over `modules/`.
@@ -234,17 +246,18 @@ enum LongReadKind {
   /// auto-updater and the web bootstrap — acquire nothing, so an acquisition
   /// taken by a reader would exclude nobody. What the registry can do for an
   /// unlocked group is exactly what it does for a locked one: keep the button
-  /// from being offered.
+  /// from being offered, and turn away a delete that asks after the claim was
+  /// taken.
   ///
-  /// **And, for this one kind, make the writer wait.** Every install goes
-  /// through `runModuleInstall`, which now takes its claim through
-  /// [LongReadRegistry.holdWhenFree]: an install that would start while a reader
-  /// is already holding `modules/` is deferred until that reader releases,
-  /// rather than running underneath it. That is still not a lock — a reader that
-  /// starts *after* the install has begun is not excluded, exactly as before —
-  /// and it is not a refusal either: nothing fails, the work happens later. It
-  /// is here rather than at every writer because the four install routes share
-  /// that one seam and nothing else.
+  /// **And make the writer ask.** Every install goes through
+  /// `runModuleInstall`, which takes its claim through
+  /// [LongReadRegistry.holdWhenFree]: an install that would start while
+  /// something is already holding `modules/` does not run underneath it — the
+  /// automatic routes are deferred until the holder releases, and the two manual
+  /// ones are refused. That is still not a lock: a reader that starts *after*
+  /// the install has begun without asking is not excluded. It is asked at
+  /// `runModuleInstall` rather than at every route because the four install
+  /// routes share that one seam and nothing else.
   moduleInstall,
 
   /// Reading the zips the user picked and writing the records they carry into
@@ -312,15 +325,13 @@ enum LongReadKind {
   /// capture's edges arrive from the core as `captureTriggeredEventProvider`,
   /// which is what `listenLiveCaptureLongRead` listens to.
   ///
-  /// **It was the last activity that announced nothing, and that was a gap
-  /// rather than a divergence.** Both members of `CaptureActivity` that own the
-  /// pipeline write into the same trees; one of them was on the registry and the
-  /// other was on a channel of its own (`storageActionBlocker`), so every surface
-  /// that asks the registry and not that channel — the record page's deletes,
-  /// exports, archives and re-recognitions, the two module installs, the settings
-  /// page's inheritance pass — was blind to a running capture while being correct
-  /// about a running import. Registering closes those surfaces without any of
-  /// them being edited, which is the property the registry exists for.
+  /// **Both members of `CaptureActivity` that own the pipeline are on the
+  /// registry, because both write into the same trees.** `storageActionBlocker`
+  /// carries both as well, but a surface that asks the registry and not that
+  /// channel sees a running capture through this claim and through nothing
+  /// else. Leaving one of the two off would be a gap rather than a divergence,
+  /// and the claim reaches every such surface without any of them being edited,
+  /// which is the property the registry exists for.
   ///
   /// **The second channel stays, and is not a duplicate.** The storage view still
   /// asks `storageActionBlocker` first and returns early, so its rows keep the
@@ -339,6 +350,63 @@ enum LongReadKind {
   ///    refusing for one — its `isCapturing`/`stopCapture` pair is that decision,
   ///    written down long before this member existed.
   liveCapture,
+
+  /// Merging two records the user says are the same uma: publishing the survivor,
+  /// rewriting every reference to the retired id, and removing it.
+  ///
+  /// **The operation is the root action *and* the store reload that follows it.**
+  /// The merge rewrites `record.json` files from what memory holds and then forces
+  /// both stores to load again, because memory no longer equals disk until they
+  /// have; a claim that ended with the root lock would go off while the app was
+  /// still holding a view it has already invalidated, and the next press would
+  /// start a second merge against records loaded from a half-rewritten store. So
+  /// the claim is taken outside the recovery gate and given back after the reload.
+  ///
+  /// Its own surface asks about it too: the merge takes
+  /// its claim through [LongReadRegistry.holdWhenFree] with
+  /// [LongReadContention.refuse], so a second press while the first is still
+  /// running is refused by the registry rather than by a flag of its own — the
+  /// same row that greys out every other Merge button for the length of it.
+  merge,
+
+  /// Removing what the user asked to remove: an entry, a group's roots or the
+  /// settings stores from the storage view, or records from the record page.
+  ///
+  /// **A destructive operation that claims, so that asking and being asked are one
+  /// step.** Every delete takes this claim through `holdForDelete`, which is
+  /// [LongReadRegistry.holdWhenFree] with [LongReadContention.refuse]: a delete over
+  /// a path something already holds does not start — it is not queued behind the
+  /// holder's lock — and while it runs, a writer that asks the registry before it
+  /// starts finds it. A writer started by a press is turned away: the archive,
+  /// the import, the record export, the inheritance resolution and the manual
+  /// module install with [longReadBusyMessage], the merge with its own refusal,
+  /// a relocation on its own result screen. A zip taking its folder back after
+  /// its save dialog is refused too, a re-recognition batch is declined with a
+  /// log line, and the automatic module update waits and resumes when the delete
+  /// lets go. Over
+  /// `modules/`, which no lock covers, this claim is the only thing between an
+  /// extraction and the removal of the files it is writing.
+  ///
+  /// **Held until the app has forgotten what went.** The claim covers the erase
+  /// and every in-memory consequence of it: the record list a record delete
+  /// republishes, and the caches and stores a storage-view delete drops or
+  /// invalidates. The release follows the last of those, so whatever the app
+  /// still holds about those paths when the claim is gone is either updated or
+  /// invalidated — and an invalidated store says it is rebuilding to anything
+  /// that reads it. What is said is not on one side of the release: a storage-view
+  /// delete closes its confirmation and shows its result after the release, while
+  /// a record delete shows its failure toast while the claim is still held.
+  ///
+  /// **What the release does not reach is a list read before it.** A
+  /// re-recognition batch asks the registry about the records it was handed, and
+  /// nothing asks the store whether they are still there: a batch whose list was
+  /// read before a delete and that starts after the delete has let go finds no
+  /// delete holding those paths, and starts with the deleted records in it.
+  ///
+  /// The confirmations a delete is started from stop asking the registry once
+  /// their run has begun (`_deleting`): from then on the claim they would see is
+  /// this one.
+  delete,
 }
 
 /// What the app says, **on every surface**, while a registered long reader is
@@ -385,10 +453,14 @@ enum LongReadKind {
 /// **It is shown in two moments, and one sentence is enough for both.** The
 /// first is a control that was never pressed: it is inert before the first tap,
 /// or goes inert while the dialog is open, and the sentence is its tooltip. The
-/// second is a re-check *after* the user acted, which exists because a frame
-/// cannot speak for a modal file picker —
+/// second is a re-check *after* the user acted, at the moment the work would
+/// start, which exists because the frame a control was drawn in can be older
+/// than the press, and cannot speak for a modal file picker at all.
 /// `ModuleManualUpdateDialog._install` asks the registry again when an archive
-/// comes back from one, and refuses with this sentence in a toast. One sentence
+/// comes back from one, and [LongReadRegistry.holdWhenFree] refuses the deletes,
+/// the archive, the import, the record export, the inheritance resolution and the
+/// manual module install when they ask; each of
+/// them says this sentence in a toast. One sentence
 /// covers both because it states a **present condition and not an outcome**: the
 /// work another job is holding cannot run until that job finishes. That is as
 /// true of a button nobody has touched as of a pick that has just come back,
@@ -412,9 +484,9 @@ enum LongReadKind {
 /// while the rest run to completion and release themselves, with nothing to
 /// press. So `storageActionBlockedMessage`'s 「…を止めてから」 is a remedy this
 /// sentence may not borrow: it would be an instruction for two holders and a
-/// dead end for the other eleven, and the sentence is chosen before anybody knows
-/// which of the thirteen is holding the path. Waiting is the answer that is true
-/// of all of them, and the sentence gives it.
+/// dead end for every other, and the sentence is chosen before anybody knows
+/// which one is holding the path. Waiting is the answer that is true of all of
+/// them, and the sentence gives it.
 ///
 /// **Where the remedy *is* offered, the surface knows the holder.** The storage
 /// view asks `storageActionBlocker` before it asks the registry and returns on
@@ -439,16 +511,38 @@ String longReadBusyMessage() => longReadBusyKey.tr();
 /// renders an unknown key *as* the key.
 const longReadBusyKey = 'app.long_read_busy';
 
+/// Tells the user about [exception], raised by a press whose work never started.
+///
+/// A refusal ([LongReadNotStartedException.busy]) toasts [longReadBusyMessage]
+/// once: the sentence every withheld control carries, noticed here only because
+/// the registry was asked again at the moment the work would have started. An
+/// abandonment toasts nothing, because the container it would speak through is
+/// the one that went away. Both are logged with [operation] as the subject, so
+/// the log names which press it was.
+///
+/// One function for every press-started claim, so the refusal reads the same
+/// wherever it is noticed and none of them can fall through to its own failure
+/// report — the thing [LongReadNotStartedException] exists to prevent.
+void announceLongReadNotStarted(LongReadNotStartedException exception, {required String operation}) {
+  final heldBy = exception.heldBy;
+  if (heldBy == null) {
+    logger.i("$operation was dropped: the registry went away before it could start.");
+    return;
+  }
+  logger.i("$operation was refused: $heldBy is holding what it would touch.");
+  Toaster.show(ToastData.error(description: longReadBusyMessage()));
+}
+
 /// One operation's registration: one token, one kind, and every path it holds.
 ///
 /// A batch is `holds.length > 1` and still a single token, so "three records
 /// were claimed and one of them got released" is not a state that exists.
-/// **No read/mutate flag.** The claim used to carry a [StorageExclusionIntent]
-/// beside the kind, and nothing in `lib/` ever read it: the folds ignore it on
-/// purpose — `storageExtractBlockedBy`'s doc says why — and `report` only copied
-/// it back. A field every claim site had to choose and no subscriber could act
-/// on is a step that can be got wrong in silence for no answer in return, so it
-/// is gone. What decides an *exclusion* is still an intent, but that one is
+/// **No read/mutate flag.** The claim carries no [StorageExclusionIntent]
+/// beside the kind: the folds ignore intent on purpose —
+/// `storageExtractBlockedBy`'s doc says why — so a field every claim site had
+/// to choose and no subscriber could act on would be a step that can be got
+/// wrong in silence for no answer in return. What decides an *exclusion* is an
+/// intent, but that one is
 /// `runUnderStorageExclusion`'s argument and is unrelated to this registry.
 typedef LongReadClaim = ({LongReadKind kind, List<StorageHold> holds});
 
@@ -463,17 +557,22 @@ final class LongReadToken {}
 /// held: wait for the holder, or give up now.
 ///
 /// **The caller's intent, carried as data rather than implied by which function
-/// it called.** [LongReadRegistry.holdWhenFree] serves writers that reach it
-/// through one shared seam (`runModuleInstall`, whose four routes have nothing
-/// else in common), and the right answer to a live claim is not a property of
-/// that seam — it is a property of whether anybody is standing in front of the
-/// screen. A route started by a version check has no surface to refuse on and
-/// no way to say "come back later", so it waits; a route started by a press has
-/// a dialog whose exits are shut for the length of the install, and waiting
-/// there is a frozen app with no cancel. Before this the seam only knew how to
-/// wait, so the manual routes' refusal lived entirely in the dialog's own check
-/// — which is a check with a window after it, and an archive that got through
-/// the window parked with nothing on screen able to end it.
+/// it called.** Every writer that asks through [LongReadRegistry.holdWhenFree] —
+/// directly or through [LongReadDeclaration.claimWhenFree] — passes one, and the
+/// right answer to a live claim is not a property of that method, nor of
+/// `runModuleInstall`, whose four routes pass both — it is a
+/// property of whether anybody is standing in front of the screen. A route
+/// started by a version check has no surface to refuse on and no way to say
+/// "come back later", so it waits. A writer started by a press refuses; the
+/// manual module install shows why waiting is not the answer there, because its
+/// dialog's exits are shut for the length of the install and waiting would be a
+/// frozen app with no cancel. The refusal is made here, in the turn the claim
+/// would be taken, because a check made earlier by the surface alone has a
+/// window after it, and a writer that deferred after getting through that
+/// window would park with nothing on screen able to end it.
+///
+/// [LongReadRegistry.claimUntilReleasedWhenFree] takes none: it hands its token
+/// back in the call, so it has no turn to wait in and can only refuse.
 enum LongReadContention {
   /// Park until the paths are free, then take them ([LongReadRegistry.holdWhenFree]).
   defer,
@@ -483,13 +582,16 @@ enum LongReadContention {
   refuse,
 }
 
-/// The work handed to [LongReadRegistry.holdWhenFree] did not run, and that is
-/// **not a failure**.
+/// A claim that asks before it registers was not taken, so the work it guards
+/// did not run, and that is **not a failure**.
 ///
-/// The two ways to get here are the two ways a deferral can end without the
-/// action: the caller asked to [LongReadContention.refuse] and something was
-/// holding the paths ([heldBy] names it), or the element that owns the registry
-/// went away while the caller was parked ([heldBy] is null).
+/// There are two ways to get here. Something was holding the paths ([heldBy]
+/// names it) and the caller had asked not to wait: it passed
+/// [LongReadContention.refuse] to [LongReadRegistry.holdWhenFree] or to
+/// [LongReadDeclaration.claimWhenFree], or it called
+/// [LongReadRegistry.claimUntilReleasedWhenFree], which only refuses. Or the
+/// element that owns the registry went away while a deferring caller was parked
+/// ([heldBy] is null).
 ///
 /// **A distinct type because every one of these callers reports outcomes.** The
 /// module-install routes end in `setUpdateFailed(true)` / "更新に失敗しました" and
@@ -498,7 +600,7 @@ enum LongReadContention {
 /// does not name this type keeps reporting a failure it did not have, which is
 /// the one thing deferring exists to avoid.
 final class LongReadNotStartedException implements Exception {
-  /// The kind holding the paths, for [LongReadContention.refuse].
+  /// The kind holding the paths, for a caller that asked not to wait.
   const LongReadNotStartedException.busy(LongReadKind this.heldBy);
 
   /// The registry's element was disposed while the caller was parked.
@@ -557,8 +659,17 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
   /// over the same atom ([longReadHoldCovers]), asked here of the registry
   /// itself because the caller is not a widget and has no claim list in hand.
   /// Answers the kind so a caller can name the holder in a log.
-  LongReadKind? heldBy(List<PathEntity> paths) {
+  ///
+  /// A claim whose kind is in [disregarding] is not an answer: the writer has
+  /// already arranged for that kind of reader to end rather than be waited on
+  /// (a data-root relocation stops the live capture it would otherwise collide
+  /// with). The set is the caller's data, so the exception is written where the
+  /// question is asked and not subtracted from the claims beforehand.
+  LongReadKind? heldBy(List<PathEntity> paths, {Set<LongReadKind> disregarding = const {}}) {
     for (final claim in state.values) {
+      if (disregarding.contains(claim.kind)) {
+        continue;
+      }
       for (final hold in claim.holds) {
         if (paths.any((path) => longReadHoldCovers(hold, path))) {
           return claim.kind;
@@ -568,16 +679,28 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
     return null;
   }
 
-  /// [hold], but **deferred** until nothing is holding [paths] any more.
+  /// [hold], but only once nothing is holding [paths]: asked and claimed in one
+  /// turn, and **refused or deferred** while something is.
   ///
-  /// **For a writer with no surface to refuse on.** [hold] registers and starts;
-  /// a control that would collide with a live claim is simply not offered, and
-  /// the user reads [longReadBusyMessage] on it. The automatic module install
-  /// has neither — it is started by a version check and not by a press — so
-  /// "refuse" would have to become a failure banner for a state that is not a
-  /// failure. Waiting is the honest answer, and it is the same answer the
-  /// sentence on every withheld button gives: the work runs when the job holding
-  /// the folder finishes.
+  /// **The rule a writer asks and claims by, in the shape of a scoped hold.**
+  /// The same rule has two other shapes, for the two other ways a claim is
+  /// held: [claimUntilReleasedWhenFree] for a claim released by hand, and
+  /// [LongReadDeclaration.claimWhenFree] for a claim a gate or a session takes.
+  /// All three ask [heldBy] and register in the same synchronous stretch, so a
+  /// writer that asks never does it with a hand-written check followed by a
+  /// claim. [hold] registers and starts without asking; a control that would collide with a live claim is
+  /// simply not offered, but the registry the control was drawn from can be
+  /// older than the press. [contention] decides what a live claim means here. A
+  /// writer with a person in front of it — every delete, the archive, the
+  /// import, the record export, the merge, the relocation, the inheritance resolution
+  /// and the two manual module installs — refuses
+  /// ([LongReadContention.refuse]), and its caller tells the person so. The
+  /// automatic module install has no surface to refuse on — it is started by a
+  /// version check and not by a press — so "refuse" would have to become a
+  /// failure banner for a state that is not a failure, and it defers instead.
+  /// Waiting is the honest answer there, and it is the same answer the sentence
+  /// on every withheld button gives: the work runs when the job holding the
+  /// folder finishes.
   ///
   /// **The wait is over the paths and not over a kind**, so it is a caller of
   /// this that gets deferred by the *next* long reader without being edited to
@@ -618,6 +741,7 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
     required List<PathEntity> paths,
     required Future<T> Function(LongReadToken token) action,
     required LongReadContention contention,
+    Set<LongReadKind> disregarding = const {},
   }) async {
     // **The deferral is written down twice, and the two are not the same record.**
     // A parked writer holds nothing, so it is absent from this notifier's state
@@ -649,7 +773,7 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
 
     try {
       while (ref.mounted) {
-        final holder = heldBy(paths);
+        final holder = heldBy(paths, disregarding: disregarding);
         if (holder == null) {
           if (parked) {
             logger.i("Resuming a deferred $kind: nothing is holding those paths any more.");
@@ -728,16 +852,31 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
   ///    those are the desktop auto-updater and the web bootstrap/refresh, and
   ///    they are parked *silently* — `runModuleInstall` sets out why they must
   ///    not report a failure, so nothing appears on screen either;
-  ///  * every writer asking to [LongReadContention.refuse] — both manual
-  ///    module-install routes — is turned away with the app's one long-read
-  ///    sentence, every time the user tries, for as long as the app runs.
+  ///  * every writer asking to [LongReadContention.refuse] — every delete, the
+  ///    archive, the import, the record export, the merge, the relocation, the
+  ///    inheritance resolution and both manual module-install routes — is turned
+  ///    away, with the app's one long-read sentence or, for the merge and the
+  ///    relocation, their own refusal, every time the user tries, for as long as
+  ///    the app runs;
+  ///  * every claimant asking through [claimUntilReleasedWhenFree] is refused as
+  ///    well: a re-recognition batch is declined with a log line, and a zip
+  ///    taking its folder back after its save dialog is refused.
   ///
   /// It exists for a claim whose lifetime is an *object's* rather than a
-  /// *scope's*. The one such claimant is `StorageZipProgress`, whose claim is
-  /// begun and finished by separate calls from the zip's screen furniture, so
-  /// there is no Dart block to put the release in. An operation whose work is
-  /// one `Future` — which is every other long reader — uses [hold], and
-  /// `long_read_registry_test.dart` fails if a new one in `lib/` does not.
+  /// *scope's*: one begun and ended by separate calls, with no Dart block
+  /// between them to put the release in. There are three such claimants —
+  /// `StorageZipProgress`, whose claim is begun and finished from the zip's
+  /// screen furniture; `CharaDetailRecordRegenerationController`, whose batch
+  /// ends on a state transition reached from a native callback or a timer; and
+  /// `listenLiveCaptureLongRead`, whose session begins and ends with events from
+  /// the core. An operation whose work is one `Future` — which is every other
+  /// long reader — uses [hold], and `long_read_registry_test.dart` fails if a
+  /// new one in `lib/` does not.
+  ///
+  /// This registers without asking. A claimant that must not start over a
+  /// live claim calls [claimUntilReleasedWhenFree] instead, as a regeneration
+  /// batch and `StorageZipProgress.reclaimAfterDialog` do; the zip's first claim
+  /// (`StorageZipProgress.begin`) and the live capture register through this.
   ///
   /// [paths] rather than record ids, because the containment predicates the
   /// subscribers use compare paths, and `quarantine`/`retired` hold groups whose
@@ -756,6 +895,35 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
       ),
     };
     return token;
+  }
+
+  /// [claimUntilReleased], but only once nothing is holding [paths]: asked and
+  /// claimed in one synchronous call, and refused while something is.
+  ///
+  /// The shape of [holdWhenFree]'s rule for a claim released by hand, with the
+  /// same cost of a missed [release] that [claimUntilReleased] lists. The
+  /// question and the registration are one call with no `await` in it, so a
+  /// claim cannot arrive between them — which a caller writing [heldBy] and
+  /// [claimUntilReleased] itself could only get from the order of its own
+  /// statements.
+  ///
+  /// **It refuses and cannot defer.** Deferring is waiting and then claiming,
+  /// and a call that hands back its token synchronously has nothing to wait
+  /// in. The refusal is [LongReadNotStartedException.busy], the type
+  /// [holdWhenFree] refuses with, so a caller treats "it did not start" the
+  /// same way on either shape. Nothing is registered when it throws.
+  ///
+  /// [disregarding] is [heldBy]'s.
+  LongReadToken claimUntilReleasedWhenFree({
+    required LongReadKind kind,
+    required List<PathEntity> paths,
+    Set<LongReadKind> disregarding = const {},
+  }) {
+    final holder = heldBy(paths, disregarding: disregarding);
+    if (holder != null) {
+      throw LongReadNotStartedException.busy(holder);
+    }
+    return claimUntilReleased(kind: kind, paths: paths);
   }
 
   /// Moves every hold of [token] to [fraction], clamped into `[0, 1]`.
@@ -825,8 +993,10 @@ final longReadRegistryProvider = NotifierProvider<LongReadRegistry, Map<LongRead
 /// in any projection of it, and the only trace it left was two log lines. That
 /// is enough to reconstruct a wait afterwards and no use at all to a surface
 /// that has to say, while the wait is happening, why it is showing nothing: the
-/// settings page's module row reads `moduleVersionLoader`, and a deferred
-/// install and an unfinished version check are the same `loading` to it. They
+/// pages waiting on the module update (`moduleUpdateActivityDisplay` — the
+/// capture, chara-detail and dashboard pages, the settings module row and the
+/// manual-update dialog) read `moduleVersionLoader`, and a deferred install and
+/// an unfinished version check are the same `loading` to it. They
 /// are not the same thing to the user — one is seconds and one can be a
 /// whole-store re-recognition — so the difference has to exist as data before a
 /// sentence can be chosen by it.
@@ -872,11 +1042,11 @@ final longReadDeferralsProvider = NotifierProvider<LongReadDeferrals, Map<LongRe
 /// says why it does not.
 ///
 /// **The point of the type is that there is no third answer and no default.**
-/// [RecordRecoveryGate]'s three methods take one of these as a required
-/// argument, so no long reader can reach the record store without somebody
-/// writing down which of the two it is.
+/// Every method by which [RecordRecoveryGate] acquires takes one of these as a
+/// required argument, so no long reader can reach the record store without
+/// somebody writing down which of the two it is.
 ///
-/// **A second seam takes one for the same reason, and it is not a gate.**
+/// **Seams that are not a gate take one for the same reason.**
 /// `startVideoImport`'s two front ends are handed one because the window that
 /// has to be announced is a *session* — the stretch between the clip being
 /// posted and the producer's terminal message — and no Dart function is on the
@@ -884,11 +1054,11 @@ final longReadDeferralsProvider = NotifierProvider<LongReadDeferrals, Map<LongRe
 /// it off. What that seam buys is what the required argument always buys: the
 /// front end cannot open a session without somebody having written down whether
 /// it announces one. The obligation is the argument's, so it holds for the next reader
-/// whatever its number, and nothing here has to keep count. Before this the
-/// omission was
-/// silent: a delete button stayed live over a directory a job had open, and
-/// nothing in the repository could tell that anybody had forgotten anything.
-/// The forgetting is now a compile error at the call site.
+/// whatever its number, and nothing here has to keep count. Without the
+/// argument the omission would be silent: a delete button would stay live over
+/// a directory a job had open, and nothing in the repository could tell that
+/// anybody had forgotten anything. The forgetting is a compile error at the
+/// call site.
 ///
 /// **The claim's lifetime belongs to [runDeclared], not to the caller.** A
 /// [LongReadDeclaration.claim] is registered before the region it wraps — the
@@ -914,6 +1084,17 @@ sealed class LongReadDeclaration {
     required List<PathEntity> paths,
   }) = LongReadClaimDeclaration;
 
+  /// Announces [paths] as held by a [kind] job for the whole guarded region,
+  /// but only once nothing is holding them — [LongReadRegistry.holdWhenFree]'s
+  /// rule, in the shape of a declaration.
+  const factory LongReadDeclaration.claimWhenFree({
+    required LongReadRegistry registry,
+    required LongReadKind kind,
+    required List<PathEntity> paths,
+    required LongReadContention contention,
+    Set<LongReadKind> disregarding,
+  }) = LongReadClaimWhenFreeDeclaration;
+
   /// Announces nothing, and says why.
   const factory LongReadDeclaration.none({required String reason}) = LongReadNoDeclaration;
 
@@ -935,6 +1116,48 @@ final class LongReadClaimDeclaration extends LongReadDeclaration {
   @override
   Future<T> runDeclared<T>(Future<T> Function() action) {
     return registry.hold(kind: kind, paths: paths, action: (_) => action());
+  }
+}
+
+/// A declaration that asks before it registers, and whose registration this
+/// object removes.
+///
+/// [runDeclared] asks and registers in the turn it is called, before [action]
+/// runs, so the guarded region never starts over a live claim it was told to
+/// respect. When a claim is live, [contention] decides as it does for
+/// [LongReadRegistry.holdWhenFree]: the returned future waits, or completes with
+/// [LongReadNotStartedException] and [action] is never called.
+///
+/// [contention] is required because who is in front of the screen is the
+/// caller's fact, not this class's; see [LongReadContention].
+final class LongReadClaimWhenFreeDeclaration extends LongReadDeclaration {
+  const LongReadClaimWhenFreeDeclaration({
+    required this.registry,
+    required this.kind,
+    required this.paths,
+    required this.contention,
+    this.disregarding = const {},
+  });
+
+  final LongReadRegistry registry;
+  final LongReadKind kind;
+  final List<PathEntity> paths;
+  final LongReadContention contention;
+
+  /// Kinds whose claims do not stop this one; see [LongReadRegistry.heldBy].
+  final Set<LongReadKind> disregarding;
+
+  /// Delegates to [LongReadRegistry.holdWhenFree], for the reason
+  /// [LongReadClaimDeclaration.runDeclared] delegates to [LongReadRegistry.hold].
+  @override
+  Future<T> runDeclared<T>(Future<T> Function() action) {
+    return registry.holdWhenFree(
+      kind: kind,
+      paths: paths,
+      contention: contention,
+      disregarding: disregarding,
+      action: (_) => action(),
+    );
   }
 }
 

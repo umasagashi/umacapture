@@ -85,23 +85,24 @@ Future<RecordLoadResult> loadRecord(
 ///
 /// A record whose recovery gate refuses it is **skipped, not fatal**. Every
 /// cause is per-record (an archive slot stuck mid-cleanup, a slot whose manifest
-/// will not parse, a delete that keeps failing, or simply a cross-tab record lock
-/// still held by another tab), while the failure used to propagate out of this
-/// function and put the whole store provider into an error state — one
-/// unrecoverable record and the user saw no records at all. The desktop loader
-/// never behaves that way: it quarantines the bad record and carries on.
+/// will not parse, a delete that keeps failing, or simply a record lock another
+/// operation of this app still holds), so the refusal stays inside this function
+/// and the rest of the store is still listed — one unrecoverable record does not
+/// cost the user every record. The desktop loader behaves the same way: it
+/// quarantines the bad record and carries on.
 ///
 /// A skip is **returned, not just logged**: each skipped record id and the error
 /// that refused it land in [RecordScanResult.unavailable]. Logging alone made a
-/// merely *busy* lock — an intact record another tab happens to be regenerating —
+/// merely *busy* lock — an intact record a regeneration happens to be rewriting —
 /// indistinguishable from a corrupt one, because the record simply vanished from
 /// the returned list with nothing on screen. The caller decides how to present
 /// the two (see `_surfaceUnavailableRecords` in storage.dart).
 ///
 /// The **root** scope cannot be contained the same way, and does not pretend to
 /// be: the snapshot below runs under the exclusive root gate, which carries the
-/// same acquisition budget as every other lock, so a tab holding the root name —
-/// or whole-store recovery refusing — fails before any record has been listed.
+/// same acquisition budget as every other lock, so a long operation holding the
+/// root name — or whole-store recovery refusing — fails before any record has
+/// been listed.
 /// There is no partial result then, so it is raised as a [RecordStoreUnavailable]
 /// carrying the transient/blocked verdict instead of leaking the bare lock or
 /// recovery error, which the record page could only paint as a raw exception.

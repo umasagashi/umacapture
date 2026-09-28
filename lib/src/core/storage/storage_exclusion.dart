@@ -46,10 +46,10 @@ export '/src/core/fs/record_recovery_gate.dart' show BeforeRootMaintenance, Root
 
 /// Runs [action] with whatever owns [target] taken out of the way first.
 ///
-/// The seam metadata needs, because it cannot use the record lock: its
-/// files are named by storage-set key rather than by record id, **and its writers
-/// take no lock at all**, so an acquisition here would exclude nobody. Serialising
-/// through the owning providers is the only exclusion that exists for it.
+/// The half of metadata's exclusion the root lock cannot provide: the memo and
+/// rating controllers write **without taking any lock**, so the root lock the
+/// scope also holds does not exclude them. Taking the owning providers out of the
+/// way is the only exclusion that exists against those writers.
 typedef StorageDeleteSerializer = Future<void> Function(PathEntity target, Future<void> Function() action);
 
 /// The gate every storage-view delete and extraction goes through.
@@ -59,7 +59,8 @@ typedef StorageDeleteSerializer = Future<void> Function(PathEntity target, Futur
 /// record lock from one that takes a record-shaped name nobody contends for.
 final storageLockGateProvider = Provider<RecordRecoveryGate>((_) => platformRecordRecoveryGate);
 
-/// How a [StorageLockScope.providerSerialized] **mutation** is serialised.
+/// How a [StorageLockScope.exclusiveRootProviderSerialized] **mutation** is
+/// serialised against the providers that own the file, inside the root lock.
 ///
 /// The seam a metadata delete is routed through, so there is one place the
 /// exclusion exists and no second path for such a delete to leak down. Its
@@ -76,20 +77,21 @@ final storageDeleteSerializerProvider = Provider<StorageDeleteSerializer>((ref) 
 
 /// What the guarded work is going to do to [target].
 ///
-/// **Read by [StorageLockScope.providerSerialized], whose exclusion is itself a
-/// write, and by [StorageLockScope.exclusiveRoot], whose *recovery* is not
-/// symmetric.** The locks are: a reader and a writer take the identical
+/// **Read by [StorageLockScope.exclusiveRootProviderSerialized], whose provider
+/// serialisation is itself a write, and by both root scopes, whose *recovery* is
+/// not symmetric.** The locks are: a reader and a writer take the identical
 /// acquisition, so as an acquisition this value never reaches them. What the
 /// root scope also carries is whole-store recovery, and a caller that is about to
 /// remove the transaction journals needs that recovery to have run *now* rather
 /// than at some point this session — see [_rootMaintenanceReasonFor].
 ///
-/// Metadata has no lock; its "exclusion" is to
-/// invalidate the controller that owns the file, which makes the app re-read from
-/// disk. Before a delete that is required — the controller must not go on serving
-/// a file that is about to stop existing. Before a *download of the same file* it
-/// would buy nothing (no write is stopped: there is no lock for one to wait on)
-/// and cost the user their loaded ratings, so a read takes nothing at all.
+/// Metadata's exclusion is the root lock plus invalidating the controller that
+/// owns the file, which makes the app re-read from disk. Before a delete the
+/// invalidation is required — the controller must not go on serving a file that
+/// is about to stop existing. Before a *download of the same file* it would buy
+/// nothing (the controllers take no lock, so no write of theirs is stopped either
+/// way) and cost the user their loaded ratings, so a read takes the root lock
+/// alone.
 ///
 /// An enum rather than a `bool serialize` flag: the value is a fact about the
 /// caller's work, and the decision it feeds is stated once, above.
@@ -122,10 +124,10 @@ enum StorageExclusionIntent {
 /// in: it is a property of what the storage view is, so a fourth caller cannot
 /// reintroduce the outage-sensitive read by reading the wrong provider itself.
 /// **[declaration] is required here as well as on the gate, and it is applied
-/// around the whole `switch` rather than forwarded into it.** Two of the four
-/// scopes below never reach [RecordRecoveryGate] at all (`providerSerialized`
-/// and `unlocked`), so a declaration handed only to the gate calls would be
-/// silently dropped for a group whose scope happened to be one of those — the
+/// around the whole `switch` rather than forwarded into it.** One of the four
+/// scopes below never reaches [RecordRecoveryGate] at all (`unlocked`), so a
+/// declaration handed only to the gate calls would be silently dropped for a
+/// group whose scope happened to be that one — the
 /// exact failure mode this argument exists to make impossible. Applied here, a
 /// caller's claim covers its operation whichever scope the group resolves to,
 /// and the gate calls below declare nothing because this frame already has.
@@ -196,20 +198,27 @@ Future<T> _runUnderStorageExclusionDeclared<T>(
         reason: _rootMaintenanceReasonFor(group, info, intent),
         beforeMaintenance: beforeMaintenance,
       );
-    case StorageLockScope.providerSerialized:
-      switch (intent) {
-        case StorageExclusionIntent.read:
-          // See [StorageExclusionIntent]: the serialisation is a write, and a
-          // read must not perform one to protect itself. Nothing drains here
-          // either — see the note on the record scope above.
-          return action(RootMaintenanceOutcome.none);
-        case StorageExclusionIntent.mutate:
-          late T result;
-          await ref.read(storageDeleteSerializerProvider)(target, () async {
-            result = await action(RootMaintenanceOutcome.none);
-          });
-          return result;
-      }
+    case StorageLockScope.exclusiveRootProviderSerialized:
+      return gate.runForRoot(
+        storageRoot,
+        (outcome) async {
+          switch (intent) {
+            case StorageExclusionIntent.read:
+              // See [StorageExclusionIntent]: the provider serialisation is a
+              // write, and a read must not perform one to protect itself.
+              return action(outcome);
+            case StorageExclusionIntent.mutate:
+              late T result;
+              await ref.read(storageDeleteSerializerProvider)(target, () async {
+                result = await action(outcome);
+              });
+              return result;
+          }
+        },
+        declaration: _declaredByTheExclusionFrame,
+        reason: _rootMaintenanceReasonFor(group, info, intent),
+        beforeMaintenance: beforeMaintenance,
+      );
     case StorageLockScope.unlocked:
       // Nothing drains here either — see the note on the record scope above.
       return action(RootMaintenanceOutcome.none);

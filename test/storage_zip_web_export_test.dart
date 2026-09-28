@@ -57,7 +57,6 @@ import 'package:umacapture/src/core/storage/zip_export_web.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 import 'support/web_like_fs_backend.dart';
 import 'support/zip_layout_cases.dart';
 
@@ -137,7 +136,7 @@ ProviderContainer _container({int? limitBytes, StorageZipRunner? runner}) {
   return container;
 }
 
-RefBase _ref(ProviderContainer container) => container.read(refBaseProvider);
+RefBase _ref(ProviderContainer container) => container.read(containerRefProvider);
 
 /// Every file under [directory], as `<relative path with '/'> -> bytes`.
 Map<String, List<int>> _walk(Directory directory) {

@@ -12,11 +12,11 @@ remove. Unlike `.notes/`, its contents are addressed **by name** from committed 
   input from here. They are recordings of live game sessions; most cannot be produced again.
 - `testdata/clips/ladder/` — the `…_540w` / `…_404w` re-encoded ladder built for threshold
   calibration. Hours of encoding, derived from clips that themselves cannot be re-recorded.
-- `testdata/clips/grid/` — the encode / scale regression grid's material. It holds only the
-  **pristine** rung (`screen-20260802-214946.mp4`); the ten re-encoded rungs are ffmpeg
-  derivations of it and are deliberately not kept, so re-derive them from the grid table in
-  `.claude/skills/native-change-verification/SKILL.md` §3 before running the grid. Finding one
-  file here is the expected state, not missing material.
+- `testdata/clips/grid/` — the encode / scale regression grid's material. It holds the
+  **pristine** rung (`screen-20260802-214946.mp4`) and the ten re-encoded rungs named in the grid
+  table in `.claude/skills/native-change-verification/SKILL.md` §3. The ten are ffmpeg derivations
+  of the pristine rung, so a missing one is re-derived from that table before running the grid;
+  the pristine rung is the one that cannot be replaced.
 - `testdata/clips/source/` — primary recordings that nothing re-derives; the rest was cut from
   these.
 - `testdata/clips/calibration/` — clips a shipped constant was calibrated against. **It is empty
@@ -35,12 +35,8 @@ remove. Unlike `.notes/`, its contents are addressed **by name** from committed 
   checklist and its baseline measurements, filed here rather than under `evidence/` because it is
   a procedure to follow, not a record of a past measurement. The run artefacts are measurements;
   earlier runs are what a new run is compared against, so `runs/` is never emptied.
-  **`runs/` and `appdrive_root/` are empty on this machine, and were already empty before this
-  directory existed** — no earlier run artefacts were carried in, because there were none left to
-  carry. So the "compare against earlier runs" step has no left-hand side yet: the next
-  `app_drive_run.py` run becomes the baseline rather than being checked against one, and that is
-  worth saying in its report. The rule above is a prohibition on emptying `runs/` in future, not
-  a claim that it currently holds anything.
+  `runs/` holds earlier run artefacts on this machine, so a new `app_drive_run.py` run is checked
+  against them rather than becoming the baseline.
 - `testdata/evidence/` — primary material a shipped constant was derived from. A code comment
   does not cite it; it states what was derived inline (`.claude/CLAUDE.md`, `## Comments`).
   Named by dropping any `analysis/` level: `.notes/analysis/<X>/` → `testdata/evidence/<X>/`, and

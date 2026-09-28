@@ -57,7 +57,7 @@ void main() {
     test('applies the predicate to each value in order', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final spec = makeSpec(predicate: CharacterCardPredicate(rejects: {100}));
       expect(spec.evaluate(ref, [100, 200, 100, 300]), [isFalse, isTrue, isFalse, isTrue]);

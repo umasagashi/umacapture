@@ -30,6 +30,26 @@ enum RootMaintenanceReason {
   /// answer this from a memo of an earlier sweep: a write that failed after the
   /// memo was taken leaves exactly the slot this drain exists for.
   beforeDestroyingJournals,
+
+  /// The caller is about to rewrite `record.json` files from what memory holds,
+  /// for records it did not load itself.
+  ///
+  /// The enhancement merge does: it rewrites every record whose parent slot names
+  /// the retired id and then removes that record. Which records those are is read
+  /// off the in-memory store, so a slot the sweep could have published — a write
+  /// this session left half done — is a record the rewrite never sees, and
+  /// publishing it later resurrects a reference to an id that no longer exists.
+  /// Like [beforeDestroyingJournals] this is a precondition of the caller's
+  /// *next* action rather than a property of the store, so it may not be answered
+  /// from a memo of an earlier sweep: the slot it exists to find is created by the
+  /// very session the memo was taken in.
+  ///
+  /// A third value rather than a second use of [beforeDestroyingJournals],
+  /// because the two do different things with the answer — this caller *refuses*
+  /// when the sweep found anything and asks the user to try again once the store
+  /// has been reloaded, where the other carries on and reports what it may not
+  /// delete.
+  beforeRewritingRecords,
 }
 
 final class RootStorageMaintenanceRequest {

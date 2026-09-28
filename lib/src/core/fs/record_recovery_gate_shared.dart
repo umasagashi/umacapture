@@ -61,7 +61,9 @@ final class BeforeRootMaintenance {
 /// the hook, ahead of [runForRoot]'s action: `run`'s own `runUnlocked` would
 /// then find the root already marked swept and do nothing, leaving a method
 /// whose body no longer does its own work. It is named, with the reason, at the
-/// call, and `long_read_registry_test.dart` fails if a second one appears.
+/// call. Nothing checks that it stays the only one: a second bypass would leave
+/// its work unannounced, so delete buttons stay offered over it, but the lock
+/// still makes a delete wait for it.
 final class RecordRecoveryGate {
   const RecordRecoveryGate({
     required RecordMutationLock mutationLock,

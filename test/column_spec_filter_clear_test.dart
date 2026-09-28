@@ -40,7 +40,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       // A column created from that preset, but with the filter edited away.
       final spec = RangedLabelColumnSpec(
@@ -82,7 +82,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final spec = FactorColumnSpec(
         id: 'id-2',
@@ -99,7 +99,7 @@ void main() {
     test('an unknown builderId falls back to accept-all', () {
       final container = ProviderContainer.test(overrides: [columnBuilderProvider.overrideWithValue([])]);
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final spec = RangedLabelColumnSpec(
         id: 'id-3',
@@ -120,7 +120,7 @@ void main() {
     test('a column with builderId=null resets to accept-all', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(refBaseProvider);
+      final ref = container.read(containerRefProvider);
 
       final spec = SimpleLabelColumnSpec(
         id: 'id-4',

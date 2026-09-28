@@ -2,19 +2,20 @@
 //
 //   .fvm/flutter_sdk/bin/flutter test test/module_version_deferred_display_test.dart
 //
-// WHAT THE HARM WAS. An automatic module install that reaches a held `modules/`
+// WHAT IS AT STAKE. An automatic module install that reaches a held `modules/`
 // parks (`LongReadRegistry.holdWhenFree` with `LongReadContention.defer`) until the
 // reader — a re-recognition, a video import — lets go. That install runs inside
-// `moduleVersionLoader`'s body, so the loader stays `loading` for the whole park,
-// and the settings row read the loader alone: it said 「確認中...」 about a version
-// check that had already finished, for as long as a whole-store re-recognition
-// takes. Nothing on screen accounted for the wait, and the one place it existed
-// was two lines in the log.
+// `moduleVersionLoader`'s body, so the loader stays `loading` for the whole park.
+// A row that read the loader alone would say 「確認中...」 about a version check
+// that has already finished, for as long as a whole-store re-recognition takes,
+// with nothing on screen accounting for the wait.
 //
-// WHAT THE FIX IS. The park is now a state and not only an event:
+// HOW IT IS CARRIED. The park is a state and not only an event:
 // `holdWhenFree` enters and leaves `longReadDeferralsProvider` on the transitions,
-// and the row asks which of the two waits it is in. The sentences, and the decision that the row tells
-// the two waits apart, are the author's (`docs/wording-decisions.md` records both, and that an approved
+// and the row takes its sentence from `moduleUpdateActivityDisplay`, where a park wins over any
+// published update phase (checking, downloading, installing). This file covers the park against the
+// check; the download and install phases are `module_update_activity_test.dart`'s. The sentences, and
+// the decision that the row tells the waits apart, are the author's (`docs/wording-decisions.md` records both, and that an approved
 // sentence changes only after confirming with the author); what this file asserts is that the right one
 // reaches the row, and that it goes away again.
 //
@@ -94,7 +95,7 @@ void main() {
           await Future<void>.value();
           await runModuleInstall(
             ref.base,
-            _modulesDir,
+            _layout,
             () => installFinished.future,
             // The three surfaceless routes' answer, and the one this row is about.
             contention: LongReadContention.defer,
@@ -147,12 +148,7 @@ void main() {
       overrides: [
         moduleVersionLoader.overrideWith((ref) async {
           await Future<void>.value();
-          await runModuleInstall(
-            ref.base,
-            _modulesDir,
-            () => installFinished.future,
-            contention: LongReadContention.defer,
-          );
+          await runModuleInstall(ref.base, _layout, () => installFinished.future, contention: LongReadContention.defer);
           return _installedVersion();
         }),
       ],

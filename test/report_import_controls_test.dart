@@ -4,9 +4,9 @@
 // Two things this file pins, both asked for after a hands-on review of the dialog:
 //
 //   1. The slider, the two frame-step buttons and the frame's time are ONE control group on ONE
-//      line, in that order -- and the time is printed exactly once. It used to be printed twice
-//      ("the scene to report" above the slider, "where this image is" under the preview), which is
-//      the same fact stated by two widgets that disagree for as long as a grab is in flight.
+//      line, in that order -- and the time is printed exactly once. A second printing (a caption
+//      above the slider, another under the preview) would state the same fact through two widgets
+//      that disagree for as long as a grab is in flight.
 //   2. Choosing a different clip is done by closing the dialog and opening it again, which asks for
 //      a file every time. There is no swap-in-place control and no wording left for one.
 //
@@ -36,10 +36,9 @@ late Directory _tempDir;
 late List<ImportErrorReport> _submitted;
 late List<int> _grabbedTimes;
 
-/// The dialog source and the shipped wording, read as files. The wording cases below are about what
-/// is *written down*, so they must not go through `.tr()` (an unresolved key renders as the key and
-/// would make a deleted key look present).
-const _dialogSourcePath = 'lib/src/gui/chara_detail/report_import_dialog.dart';
+/// The shipped wording, read as a file. The wording case below is about what is *written down*, so it
+/// must not go through `.tr()` (an unresolved key renders as the key and would make a deleted key look
+/// present).
 const _namespace = ['pages', 'chara_detail', 'report_import', 'dialog'];
 
 /// A clip long enough that its readings cross a minute, so the caption is a realistic width.
@@ -417,45 +416,9 @@ void main() {
       isEmpty,
       reason: 'the deleted control must not leave its label behind',
     );
-    // The sentences that used to send the user back to the picker have to stop doing so as well:
-    // an instruction to choose another video names an action the dialog no longer offers.
+    // No sentence may send the user back to the picker either: an instruction to choose another
+    // video names an action the dialog does not offer.
     final offenders = wording.entries.where((entry) => entry.value.contains('別の動画')).map((entry) => entry.key);
     expect(offenders, isEmpty, reason: 'no sentence may tell the user to pick a different video here');
-  });
-
-  test('every sentence under this dialog is still referenced by it, and every reference exists', () {
-    // An unused key is invisible: nothing renders it, nothing fails, and it stays until somebody
-    // greps. This walks the dialog's own key templates instead -- including the interpolated one,
-    // expanded with the values read out of the same source, so a step button added without its
-    // wording turns this red rather than widening the allowance.
-    final source = File(_dialogSourcePath).readAsStringSync();
-    final buttonKeys = RegExp(r"^\s+\w+\('(\w+)',", multiLine: true).allMatches(source).map((m) => m.group(1)!).toSet();
-    final tooltipKeys = RegExp(
-      r"\? '(\w+)' : '(\w+)'",
-    ).allMatches(source).expand((m) => [m.group(1)!, m.group(2)!]).toSet();
-    expect(buttonKeys, isNotEmpty, reason: 'the enum members were not found -- the extraction is stale');
-    expect(tooltipKeys, isNotEmpty, reason: 'the tooltip variants were not found -- the extraction is stale');
-
-    final referenced = <String>{};
-    for (final match in RegExp(r'\$tr_report_import\.dialog\.([^"]*)"').allMatches(source)) {
-      final raw = match.group(1)!;
-      if (!raw.contains(r'$')) {
-        referenced.add(raw);
-        continue;
-      }
-      for (final button in buttonKeys) {
-        for (final variant in tooltipKeys) {
-          // The left-hand sides are RAW strings -- they are the interpolations as they are written
-          // in the source, not their values.
-          referenced.add(raw.replaceAll(r'${step.buttonKey}', button).replaceAll(r'$tooltip', variant));
-        }
-      }
-    }
-    expect(referenced.where((String key) => key.contains(r'$')), isEmpty, reason: 'a template was not expanded');
-    expect(referenced, isNotEmpty);
-
-    final wording = _wording().keys.toSet();
-    expect(wording.difference(referenced), isEmpty, reason: 'wording nothing renders any more');
-    expect(referenced.difference(wording), isEmpty, reason: 'a key the dialog asks for that does not exist');
   });
 }

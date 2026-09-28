@@ -43,7 +43,6 @@
 // all, so no test anywhere can reach a real OPFS-backed `RecordImage`. Whether a
 // browser's own HTTP/blob layer holds a second copy is outside both suites.
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -59,18 +58,9 @@ import 'package:umacapture/src/gui/record_image.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
+import 'support/record_image_fixture.dart';
 import 'support/web_like_fs_backend.dart';
-
-/// A real 1x1 RGBA PNG, so the decode under test is the platform's own.
-///
-/// A stub of arbitrary bytes would fail to decode, and every assertion below
-/// would then be satisfied by an image that was never in the cache in the first
-/// place.
-const _pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4z8DwHwAFAAH/VscvDQAAAABJRU5ErkJggg==';
-
-/// Rendered in place of an image that can no longer be read.
-const _unavailable = 'image-unavailable';
+import 'support/record_write_effects_fixture.dart';
 
 /// Delegates to the io backend but refuses to delete the paths [refuse] selects.
 ///
@@ -97,7 +87,7 @@ late FsBackend _realBackend;
 
 StorageGroup _groupOf(StorageGroupId id) => storageGroups.firstWhere((group) => group.id == id);
 
-/// Writes the PNG at [relative] under the temp root and answers it as a
+/// Writes [redPng] at [relative] under the temp root and answers it as a
 /// [FilePath].
 ///
 /// Spelled through [PathEntity] rather than with a literal separator: the report
@@ -110,11 +100,7 @@ FilePath _seedImage(String relative) {
   for (final part in parts.take(parts.length - 1)) {
     directory = directory / part;
   }
-  final path = directory.filePath(parts.last);
-  final file = File(path.path);
-  file.parent.createSync(recursive: true);
-  file.writeAsBytesSync(base64.decode(_pngBase64));
-  return path;
+  return writeImage(directory.filePath(parts.last), redPng);
 }
 
 /// The box every bounded case here asks for, small enough that the seeded PNG is
@@ -150,8 +136,6 @@ Future<Object> _boundedKeyOf(FilePath path) {
 
 ImageCache get _imageCache => PaintingBinding.instance.imageCache;
 
-bool _cached(FilePath path) => _imageCache.containsKey(FileImage(File(path.path)));
-
 ProviderContainer _container() {
   final container = ProviderContainer(
     overrides: [
@@ -164,38 +148,6 @@ ProviderContainer _container() {
   );
   addTearDown(container.dispose);
   return container;
-}
-
-/// One [RecordImage] whose element is distinct from the others in the tree.
-///
-/// The key matters: `Image` re-resolves its provider when the element is *new* or
-/// the provider changed, and `FileImage` has value equality, so re-pumping the
-/// same path into the same element resolves nothing and could never observe a
-/// cache miss. A new key is what forces the second lookup this suite is about.
-Widget _tile(String id, FilePath path) {
-  return RecordImage(
-    path,
-    key: ValueKey(id),
-    width: 8,
-    height: 8,
-    errorBuilder: (_, _, _) => const Text(_unavailable, textDirection: TextDirection.ltr),
-  );
-}
-
-Widget _screen(List<Widget> children) {
-  return Directionality(
-    textDirection: TextDirection.ltr,
-    child: Column(mainAxisSize: MainAxisSize.min, children: children),
-  );
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does
-/// not: an io delete, a file read and an image decode all complete off it.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 /// Decodes [provider] into the global cache and waits for it, without a widget.
@@ -266,34 +218,48 @@ void main() {
       // table as well as the cache proper. (Whether the live half is dropped is
       // not falsifiable from here -- `ImageCache.evict` includes live images by
       // default -- so this arrangement covers the live case without pinning it.)
-      await tester.pumpWidget(_screen([_tile('shown', shown), _tile('other', untouched)]));
-      await _settle(tester);
-      expect(find.text(_unavailable), findsNothing, reason: 'the seeded PNG never decoded');
-      expect(_cached(shown), isTrue, reason: 'the premise of this test — nothing was cached to evict');
-      expect(_cached(untouched), isTrue);
+      await tester.pumpWidget(
+        recordImageScreen([recordImageTile('shown', shown), recordImageTile('other', untouched)]),
+      );
+      await settleUntilPainted(tester, ['shown', 'other']);
+      expect(find.text(recordImageUnavailable), findsNothing, reason: 'the seeded PNG never decoded');
+      expect(cachedFileImage(shown), isTrue, reason: 'the premise of this test — nothing was cached to evict');
+      expect(cachedFileImage(untouched), isTrue);
 
       // Through `runAsync`: the delete is io, and a `testWidgets` body's fake
       // clock never advances the real event loop the io completes on.
       await tester.runAsync(
         () => runStorageDelete(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
+          effects: storageDeleteEffects(container),
           group: _groupOf(StorageGroupId.activeRecords),
           request: StorageDeletePathsRequest([shown.parent]),
           silent: true,
         ),
       );
-      await _settle(tester);
+      await settleUntilUnavailable(tester, id: 'shown');
       expect(File(shown.path).existsSync(), isFalse, reason: 'the delete itself did not run');
 
       // A second, freshly-keyed widget for the same path: what the user does when
-      // they open the picture again.
-      await tester.pumpWidget(_screen([_tile('shown', shown), _tile('other', untouched), _tile('reopened', shown)]));
-      await _settle(tester);
-      expect(find.text(_unavailable), findsOneWidget, reason: 'the deleted image was served out of the cache');
+      // they open the picture again. The tile that stayed open says the same: the
+      // delete told it its file went, so it re-read the path and failed too.
+      await tester.pumpWidget(
+        recordImageScreen([
+          recordImageTile('shown', shown),
+          recordImageTile('other', untouched),
+          recordImageTile('reopened', shown),
+        ]),
+      );
+      await settleUntilUnavailable(tester, count: 2);
+      expect(
+        find.text(recordImageUnavailable),
+        findsNWidgets(2),
+        reason: 'the deleted image was served out of the cache',
+      );
 
       // Control: the eviction is addressed, not a flush. `imageCache.clear()`
       // would satisfy every assertion above and fail this one.
-      expect(_cached(untouched), isTrue, reason: 'a picture nothing deleted was dropped from the cache');
+      expect(cachedFileImage(untouched), isTrue, reason: 'a picture nothing deleted was dropped from the cache');
     });
 
     testWidgets('an image whose delete was refused stays cached', (tester) async {
@@ -301,32 +267,37 @@ void main() {
       final container = _container();
       fsBackend = _RefusingFsBackend(fsBackend, refuse: (path) => path == held.path);
 
-      await tester.pumpWidget(_screen([_tile('shown', held)]));
-      await _settle(tester);
-      expect(_cached(held), isTrue);
+      await tester.pumpWidget(recordImageScreen([recordImageTile('shown', held)]));
+      await settleUntilPainted(tester, ['shown']);
+      expect(cachedFileImage(held), isTrue);
 
       final report = await tester.runAsync(
         () => runStorageDelete(
-          container.read(refBaseProvider),
+          container.read(containerRefProvider),
+          effects: storageDeleteEffects(container),
           group: _groupOf(StorageGroupId.activeRecords),
           request: StorageDeletePathsRequest([held.parent]),
           silent: true,
         ),
       );
-      await _settle(tester);
-
-      expect(report?.deletedPaths, isNot(contains(held.path)), reason: 'the refusal was not injected');
-      expect(File(held.path).existsSync(), isTrue);
+      // Read before any pump: the picture is on screen, so a frame after an
+      // eviction would decode it again and put it back, and the assertion could
+      // no longer tell a kept entry from a refilled one.
+      //
       // The file is still there, so its decoded pixels are still correct. An
       // eviction keyed off the *requested* targets instead of the report would
       // drop them and buy a re-decode of an unchanged picture.
-      expect(_cached(held), isTrue, reason: 'a picture that was not deleted was evicted anyway');
+      expect(cachedFileImage(held), isTrue, reason: 'a picture that was not deleted was evicted anyway');
+      await pumpRecordImageWindow(tester);
+
+      expect(report?.deletedPaths, isNot(contains(held.path)), reason: 'the refusal was not injected');
+      expect(File(held.path).existsSync(), isTrue);
     });
   });
 
   group('the web half of the eviction: the byte LRU and the identity-keyed decode', () {
     test('remove answers the held instance, which is the only key to the decode', () {
-      final bytes = base64.decode(_pngBase64);
+      final bytes = solidPng(255, 0, 0);
       RecordImageByteCache.instance.put('/opfs/a.png', bytes);
       addTearDown(() => RecordImageByteCache.instance.remove('/opfs/a.png'));
 
@@ -337,8 +308,8 @@ void main() {
     });
 
     testWidgets('evictRecordImages drops both the bytes and the picture they decoded to', (tester) async {
-      final bytes = base64.decode(_pngBase64);
-      final other = base64.decode(_pngBase64);
+      final bytes = solidPng(255, 0, 0);
+      final other = solidPng(255, 0, 0);
       RecordImageByteCache.instance.put('/opfs/gone.png', bytes);
       RecordImageByteCache.instance.put('/opfs/stays.png', other);
       addTearDown(() {
@@ -364,6 +335,55 @@ void main() {
     });
   });
 
+  // An eviction whose caller cannot name the files it has to drop: the
+  // enhancement merge replaces a record tree's contents under paths that do not
+  // change, so the only description it has of what went stale is the directory.
+  // Asking the disk which files are in there is what this replaces -- a listing
+  // answers with an empty result when it fails, and an empty result is also what
+  // an empty directory gives, so the caller cannot tell "nothing to drop" from
+  // "could not look".
+  group('an eviction named by directory', () {
+    testWidgets('drops a rendered picture whose name the caller never knew', (tester) async {
+      final inside = _seedImage('documents/storage/chara_detail/active/rec/skill.png');
+      final sibling = _seedImage('documents/storage/chara_detail/active/rec-2/skill.png');
+      await tester.pumpWidget(
+        recordImageScreen([recordImageTile('inside', inside), recordImageTile('sibling', sibling)]),
+      );
+      await settleUntilPainted(tester, ['inside', 'sibling']);
+      expect(cachedFileImage(inside), isTrue, reason: 'the fixture never rendered');
+      expect(cachedFileImage(sibling), isTrue, reason: 'the fixture never rendered');
+
+      evictRecordImagesWithin([
+        (DirectoryPath(_tempRoot.path) / 'documents' / 'storage' / 'chara_detail' / 'active' / 'rec').path,
+      ]);
+
+      expect(cachedFileImage(inside), isFalse);
+      // The control that makes the containment a path relation rather than a
+      // text one: `rec-2` starts with `rec` as a string and is a different
+      // record as a path.
+      expect(cachedFileImage(sibling), isTrue);
+    });
+
+    testWidgets('reaches the byte LRU and the bounded decode it was built over', (tester) async {
+      final inside = _seedImage('documents/storage/chara_detail/active/rec/skill.png');
+      final sibling = _seedImage('documents/storage/chara_detail/active/rec-2/skill.png');
+      await tester.pumpWidget(_boundedScreen({'inside': inside, 'sibling': sibling}));
+      await settleUntilPainted(tester, ['inside', 'sibling']);
+      final insideKey = await _boundedKeyOf(inside);
+      final siblingKey = await _boundedKeyOf(sibling);
+      expect(_imageCache.containsKey(insideKey), isTrue, reason: 'the bounded fixture never decoded');
+
+      evictRecordImagesWithin([
+        (DirectoryPath(_tempRoot.path) / 'documents' / 'storage' / 'chara_detail' / 'active' / 'rec').path,
+      ]);
+
+      expect(RecordImageByteCache.instance.get(inside.path), isNull);
+      expect(_imageCache.containsKey(insideKey), isFalse);
+      expect(RecordImageByteCache.instance.get(sibling.path), isNotNull);
+      expect(_imageCache.containsKey(siblingKey), isTrue);
+    });
+  });
+
   // A bounded decode is filed under a `ResizeImageKey`, which is equal to
   // neither `FileImage` (compares paths) nor `MemoryImage` (compares bytes by
   // identity). So the two bare evictions below cannot reach it, and on the
@@ -377,7 +397,7 @@ void main() {
       addTearDown(() => RecordImageByteCache.instance.remove(path.path));
 
       await tester.pumpWidget(_boundedScreen({'only': path}));
-      await _settle(tester);
+      await settleUntilPainted(tester, ['only']);
 
       final provider = (find.byType(Image).evaluate().single.widget as Image).image as ResizeImage;
       expect(
@@ -397,7 +417,7 @@ void main() {
       });
 
       await tester.pumpWidget(_boundedScreen({'gone': gone, 'kept': kept}));
-      await _settle(tester);
+      await settleUntilPainted(tester, ['gone', 'kept']);
       // Taken before the eviction: the key is only nameable while the LRU still
       // holds the bytes it wraps, which is the whole reason the registration
       // lives beside them.

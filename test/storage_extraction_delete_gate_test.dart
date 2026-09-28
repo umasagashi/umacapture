@@ -58,6 +58,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/settings_boxes.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
@@ -228,14 +229,32 @@ void main() {
       expect(storageDeleteAwaitsExtraction(null, _bundling(_activeDir)), isFalse);
     });
 
-    test('a settings-store delete is never covered, and the shape is what says so', () {
-      // Stores are not paths, and the settings group offers no zip for one to be
-      // running from. Asserted beside a path request under the *same* extraction,
-      // so this is a fact about the request's shape and not about an extraction
-      // that covers nothing.
-      final extraction = _bundling(_layout.settingsDir);
-      expect(storageDeleteAwaitsExtraction(const StorageDeleteSettingsRequest(), extraction), isFalse);
-      expect(storageDeleteAwaitsExtraction(StorageDeletePathsRequest([_layout.settingsDir]), extraction), isTrue);
+    test('a settings-store delete is covered by what holds the directory its stores live in, and on web by '
+        'nothing', () {
+      // The directories come from `settingsStoreDirectories`, as the view's own
+      // request does, so this asks about the directory the delete would claim and
+      // not about one written here. A relocation moves `settings/` wholesale,
+      // which is the holder the Windows answer is for.
+      StorageDeleteRequest request({required bool onWeb}) =>
+          StorageDeleteSettingsRequest(storeDirectories: settingsStoreDirectories(_layout, onWeb: onWeb));
+      final holdingSettings = _bundling(_layout.settingsDir);
+
+      expect(
+        storageDeleteAwaitsExtraction(request(onWeb: false), holdingSettings),
+        isTrue,
+        reason:
+            'the settings delete was offered while something held settings/, the directory it erases the stores from',
+      );
+      expect(
+        storageDeleteAwaitsExtraction(request(onWeb: false), _bundling(_layout.tempDir)),
+        isFalse,
+        reason: 'a holder of an unrelated directory withheld the settings delete',
+      );
+      expect(
+        storageDeleteAwaitsExtraction(request(onWeb: true), holdingSettings),
+        isFalse,
+        reason: 'on web the stores are IndexedDB databases with no path, so nothing holding settings/ holds them',
+      );
     });
 
     test('the refusal has a shipped sentence, and it is not the activity one', () {

@@ -27,7 +27,7 @@ import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
 import 'settings_boxes.dart';
-import 'storage_delete_report.dart';
+import 'storage_delete.dart';
 
 /// How the settings stores are removed, so a test can watch the outcome travel
 /// without a Hive of its own.
@@ -37,7 +37,10 @@ import 'storage_delete_report.dart';
 /// UI does with a report, and the only way to hand it a *failed* report is to
 /// substitute the thing that produces it. Removing eight real stores proves the
 /// removal works and says nothing about the announcement.
-typedef SettingsStoreDeleter = Future<StorageDeleteReport> Function();
+///
+/// Takes a [StorageDeleteClaim] because it runs inside the delete's claim over
+/// `StorageDeleteSettingsRequest.storeDirectories`, taken by `runStorageDelete`.
+typedef SettingsStoreDeleter = Future<StorageDeleteReport> Function(StorageDeleteClaim claim);
 
 final settingsStoreDeleteProvider = Provider<SettingsStoreDeleter>((_) => deleteSettingsStores);
 
@@ -69,7 +72,10 @@ final settingsStoreDeleteProvider = Provider<SettingsStoreDeleter>((_) => delete
 /// It is also why a restart is demanded whether or not the delete worked — after
 /// this call the session has no settings either way, and the restart is the only
 /// thing that gives it any.
-Future<StorageDeleteReport> deleteSettingsStores() async {
+///
+/// [claim] is [SettingsStoreDeleter]'s: its type is the proof that this runs
+/// inside the delete's claim.
+Future<StorageDeleteReport> deleteSettingsStores(StorageDeleteClaim claim) async {
   StorageBox.markHiveClosed();
   final deleted = <StorageDeleteSubject>[];
   final failed = <StorageDeleteFailure>[];
@@ -92,7 +98,7 @@ Future<StorageDeleteReport> deleteSettingsStores() async {
           // Refused by the platform, which is the only kind of failure reachable
           // here: this delete takes no lock, so neither lock reason can arise.
           reason: StorageDeleteFailureReason.refused,
-          detail: error.toString(),
+          detail: StorageDeletePlatformDetail(error),
         ),
       );
     }

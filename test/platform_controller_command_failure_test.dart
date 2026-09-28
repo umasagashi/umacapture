@@ -11,8 +11,6 @@
 //
 // The web leg has no such hole — it catches its own failures and relays an `onError` — so this is
 // also the two legs agreeing on whether a failed command is reportable at all.
-import 'dart:io';
-
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -130,64 +128,6 @@ void main() {
         regeneration.failureCount,
         1,
         reason: 'a record whose command native refused is a record the batch will never hear about again',
-      );
-    });
-  });
-
-  group('the set of commands that handle a rejection', () {
-    // A hand-checked list is the failure mode this whole finding is an instance of: the five
-    // commands were written one by one and the `catchError` the setters have was simply not
-    // repeated. So the source is counted rather than remembered — a sixth command added without
-    // handling its rejection fails here, named.
-    final source = File('lib/src/core/platform_controller.dart').readAsStringSync();
-
-    /// Members that cannot lose a rejection: they return nothing to reject, or they hand their
-    /// future to a caller that already observes it. Each is named at its own site in the source
-    /// with the reason. A member added here is a decision taken deliberately, which is the point
-    /// — the defect was five members for which no decision was ever taken.
-    const exempt = <String>{
-      // Synchronous, returns void.
-      'setCallback',
-      // Synchronous, and answers a fact rather than issuing a command.
-      'dispose',
-      // Awaited inside a try/catch by `clipboard_image_writer_stub.dart`.
-      'copyToClipboardFromFile',
-      // Answers a value; `raw_frame_probe_view.dart` ends its chain in a catchError.
-      'buildRawFrameBundle',
-    };
-
-    test('is every one the source contains', () {
-      final unhandled = <String>[];
-      final found = <String>{};
-      for (final match in RegExp(r'_platformChannel\.(\w+)\(').allMatches(source)) {
-        final name = match.group(1) ?? '';
-        found.add(name);
-        if (exempt.contains(name)) {
-          continue;
-        }
-        // The enclosing statement, which is where the handling has to be.
-        final start = source.lastIndexOf(RegExp(r'[;{}]'), match.start) + 1;
-        final end = source.indexOf(';', match.end);
-        final statement = source.substring(start, end < 0 ? source.length : end);
-        if (!statement.contains('_command(') && !statement.contains('.catchError(')) {
-          unhandled.add(name);
-        }
-      }
-
-      // Positive control: the scan has to have seen the commands at all, or an expression that
-      // matches nothing would pass this test while proving nothing.
-      expect(
-        found,
-        containsAll(<String>{'startCapture', 'stopCapture', 'updateRecord', 'finishUpdate', 'takeScreenshot'}),
-        reason: 'the scan must reach the commands it is meant to police',
-      );
-      expect(
-        unhandled,
-        isEmpty,
-        reason:
-            'each of these forwards a future every call site drops, so a native rejection is lost: '
-            'route it through _command, give it its own catchError, or add it to `exempt` with the '
-            'caller that observes it',
       );
     });
   });

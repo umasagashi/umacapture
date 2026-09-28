@@ -48,7 +48,6 @@ import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -194,7 +193,7 @@ void main() {
     final container = _container(dialog);
 
     final run = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,
@@ -222,7 +221,7 @@ void main() {
     container.listen(longReadRegistryProvider, (_, next) => kindsSeen.addAll(next.values.map((c) => c.kind)));
 
     final run = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,
@@ -246,7 +245,7 @@ void main() {
       final container = _container(dialog);
 
       final run = exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         _modulesDir,
         group: storageGroupOf(StorageGroupId.modules),
         silent: true,
@@ -275,7 +274,7 @@ void main() {
       final container = _container(dialog);
 
       final run = exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         _modulesDir,
         group: storageGroupOf(StorageGroupId.modules),
         silent: true,
@@ -296,7 +295,7 @@ void main() {
     final container = _containerWith(saveFile: dialogs.call);
 
     final first = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,
@@ -307,7 +306,7 @@ void main() {
     // A different folder, so `heldBy` has nothing to say about it even when the
     // claim is up: the only thing that can refuse this is the single flight.
     final second = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _tempDir,
       group: storageGroupOf(StorageGroupId.temp),
       silent: true,
@@ -340,7 +339,7 @@ void main() {
     final container = _containerWith(runner: runner.call);
 
     final first = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,
@@ -353,7 +352,7 @@ void main() {
 
     // The double click: the same button, while its own dialog is still up.
     final second = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,
@@ -390,7 +389,7 @@ void main() {
     final container = _container(dialog);
 
     final run = exportDirectoryAsZip(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       _modulesDir,
       group: storageGroupOf(StorageGroupId.modules),
       silent: true,

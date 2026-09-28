@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/long_read_registry.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
@@ -16,6 +17,16 @@ import '/src/gui/storage_tree.dart';
 
 // ignore: constant_identifier_names
 const tr_archive_record = "pages.chara_detail.archive_records";
+
+/// What an archive started from either dialog declares, read before the batch starts.
+///
+/// The moved records' cached pictures and previews are dropped, and the storage view's totals are
+/// re-measured: the dialog dismisses without awaiting the batch, so unlike a delete the batch can
+/// still be running when the user opens the storage manager, which then stays mounted over its end.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects archiveDialogEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
 
 /// Which long reader, if any, is holding a folder an archive of [recordIds]
 /// would write.
@@ -95,7 +106,8 @@ class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialo
   ArchiveImageOption? _option;
 
   void _confirm() {
-    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option!);
+    final effects = archiveDialogEffects(ref.read(containerRefProvider));
+    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option!, effects: effects);
     // The grid rebuilds without these rows; leave selection mode so the
     // checkbox column disappears and stale checks are dropped.
     exitSelection(ref);
@@ -193,7 +205,8 @@ class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
   ArchiveImageOption? _option;
 
   void _confirm() {
-    ref.read(charaArchiveControllerProvider.notifier).archive([widget.recordId], _option!);
+    final effects = archiveDialogEffects(ref.read(containerRefProvider));
+    ref.read(charaArchiveControllerProvider.notifier).archive([widget.recordId], _option!, effects: effects);
     CardDialog.dismiss(ref.base);
   }
 

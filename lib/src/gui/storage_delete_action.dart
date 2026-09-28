@@ -18,9 +18,9 @@
 /// bypass it: the tree's row menus open [StorageDeleteConfirmDialog], and that
 /// dialog is the only caller of the runner. The table itself lives in
 /// `storage_delete_invalidation.dart` — this file decides *when*, that one decides
-/// *what*. The image-cache eviction is applied at the same point and for
-/// the same reason, and what it drops lives with the caches themselves, in
-/// `record_image.dart`.
+/// *what*. The caller's [RecordWriteEffects] are applied at the same point and
+/// for the same reason, and what they drop and re-measure is decided in
+/// `record_write_effects.dart`.
 ///
 /// **The settings group finishes here too, through the same runner.** Its
 /// stores are not paths, so the removal itself belongs to
@@ -39,6 +39,9 @@ import 'package:material_symbols_icons/symbols.dart';
 import '/src/core/app_restart.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
+import '/src/core/storage/settings_boxes.dart';
 import '/src/core/storage/settings_store_delete.dart';
 import '/src/core/storage/storage_delete.dart';
 import '/src/core/storage/storage_delete_invalidation.dart';
@@ -47,9 +50,8 @@ import '/src/core/storage/storage_group.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
-import '/src/gui/record_image.dart';
+import '/src/gui/storage_action_blocker.dart';
 import '/src/gui/storage_status.dart';
-import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 
 /// Whether the view offers a delete for [group] at all.
@@ -100,7 +102,9 @@ StorageDeleteRequest? storageRowDeleteRequest(StorageGroup group, PathEntity ent
 /// branch would hand the view a request to erase `*.hive` and `*.lock` as files.
 /// That is precisely the removal stage 0 measured breaking: a sharing violation
 /// on Windows, an indefinite `blocked` on web. Its request therefore names
-/// no path at all and is finished by `settings_store_delete.dart`.
+/// no path to erase and is finished by `settings_store_delete.dart`; the one
+/// path it carries is the directory the stores live in, for the delete to claim
+/// ([settingsStoreDirectories], which is why [onWeb] is asked for).
 ///
 /// Two shapes have no group-level answer, each for its own reason:
 ///
@@ -108,12 +112,12 @@ StorageDeleteRequest? storageRowDeleteRequest(StorageGroup group, PathEntity ent
 ///    root of its own to name;
 ///  * **the font cache** is a filter over a directory it does not own, so
 ///    deleting that directory would take the recognition modules with it.
-StorageDeleteRequest? storageGroupDeleteRequest(PathInfo info, StorageGroup group) {
+StorageDeleteRequest? storageGroupDeleteRequest(PathInfo info, StorageGroup group, {required bool onWeb}) {
   if (!storageGroupOffersDelete(group)) {
     return null;
   }
   if (group.isSynthetic) {
-    return const StorageDeleteSettingsRequest();
+    return StorageDeleteSettingsRequest(storeDirectories: settingsStoreDirectories(info, onWeb: onWeb));
   }
   if (group.isResidualBucket || group.nameFilter != null) {
     return null;
@@ -315,6 +319,8 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
     // tooltip alike — is covered by the one decision, and the next one will be
     // too. The acknowledgement checkbox already gives way at exactly this point
     // for the same reason: nothing below is asking the user anything any more.
+    // The registry holds the delete's own claim for the whole run as well, so
+    // asking would answer about this dialog's own work.
     final refusal = _deleting ? null : storageDeleteRefusalOf(ref, group: widget.group, request: widget.request);
     final confirmEnabled = refusal == null && !_deleting && (!_needsAcknowledgement || _acknowledged);
     return ConstrainedBox(
@@ -351,10 +357,10 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
                 // line above still names what is being deleted, and the spinner
                 // says the rest.
                 // The view's own glyph (`storage_status.dart`), not a raw
-                // `CircularProgressIndicator`: `storage_status_test.dart` pins that
-                // this view has exactly one spinner and that every surface waits with
-                // it, so a second construction here would be a second dialect of
-                // "busy" on the same screen. Sized to the paragraph it replaces.
+                // `CircularProgressIndicator`: every surface of this view waits with
+                // that one spinner, so a second construction here would be a second
+                // dialect of "busy" on the same screen. Sized to the paragraph it
+                // replaces.
                 if (_deleting)
                   Center(
                     child: Padding(
@@ -483,8 +489,10 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
   ///
   /// The dismiss below is therefore only for the paths the runner does not reach:
   /// it threw. A token that is no longer in the stack dismisses nothing, so the
-  /// ordinary path passes through it untouched. Both the notifier and the token are
-  /// read before the await for the reason `DialogController.currentToken` gives —
+  /// ordinary path passes through it untouched. The one throw it skips is a
+  /// refusal to start ([LongReadNotStartedException] with a holder): nothing ran,
+  /// so the confirmation is still the question on screen and stays up. Both the
+  /// notifier and the token are read before the await for the reason `DialogController.currentToken` gives —
   /// they outlive this widget, and `WidgetRef` does not.
   Future<void> _confirm() async {
     if (_deleting) {
@@ -495,10 +503,24 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
     final base = ref.read(containerRefProvider);
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    var notStarted = false;
     try {
-      await runStorageDelete(base, group: widget.group, request: widget.request, confirmationToken: token);
+      await runStorageDelete(
+        base,
+        group: widget.group,
+        request: widget.request,
+        effects: storageViewDeleteEffects(base),
+        confirmationToken: token,
+      );
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing was removed and nothing was asked of the platform: the question
+      // this dialog asked is still open, so it stays up and says why, and
+      // [build]'s refusal takes over from here. An abandoned registry is the
+      // container going away, and then there is nothing left to keep it up for.
+      notStarted = exception.heldBy != null;
+      announceLongReadNotStarted(exception, operation: 'A storage delete');
     } on ArgumentError {
-      // Deliberately outside the guard below. `deleteStorageEntry` states that
+      // Deliberately outside the guard below. `deleteStorageEntries` states that
       // this one propagates: it means a caller paired a path with a group the
       // path is not inside, which is a defect and not a delete outcome. Turning
       // it into "the file could not be deleted" would make a wiring bug
@@ -522,7 +544,9 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
       if (mounted) {
         setState(() => _deleting = false);
       }
-      dialogs.dismiss(token);
+      if (!notStarted) {
+        dialogs.dismiss(token);
+      }
     }
   }
 }
@@ -533,10 +557,20 @@ typedef StorageDeleteMessage = ({ToastType type, String description});
 /// Performs the confirmed delete and announces the outcome.
 ///
 /// **The single completion point of a storage-view delete.** The provider-invalidate
-/// table and the image-cache eviction both run here, after the report arrives and
+/// table and the [effects] the caller declared both run here, after the report arrives and
 /// before anything is said to the user: a toast announcing a deletion while the
 /// table it came from still lists the entry — or while the picture it removed is
 /// still on screen — is the exact state those two exist to remove.
+///
+/// **The request is claimed as one, and for as long as the app remembers what
+/// it named.** Through [holdForDelete], over [StorageDeleteRequest.longReadPaths],
+/// before this function's first `await`: a request any part of which another
+/// job is holding throws [LongReadNotStartedException] having removed nothing,
+/// so there is no report, nothing to invalidate and no confirmation to close;
+/// the caller answers it with [announceLongReadNotStarted] and keeps the
+/// confirmation up. The claim is released after the invalidations and the
+/// declared effects, and before the confirmation closes: everything that makes
+/// the app forget runs under it, and nothing that only speaks does.
 ///
 /// [confirmationToken] is the dialog the delete was confirmed from. It is closed
 /// once the report is in and before anything is said, so the panel a partial
@@ -545,78 +579,37 @@ typedef StorageDeleteMessage = ({ToastType type, String description});
 /// close cannot be left to it: a token dismiss drops everything above the entry
 /// too, and a caller closing itself afterwards would close the panel with it.
 ///
+/// [effects] is applied on both branches: the images to what the report says went,
+/// the totals to the paths the delete touched or, for the settings stores, to
+/// everything.
+///
 /// [silent] suppresses both surfaces, as in `exportDirectoryAsZip`. It suppresses
-/// neither the eviction nor the invalidate — those are not surfaces, and a caller
+/// neither the effects nor the invalidate — those are not surfaces, and a caller
 /// that wanted the app to keep showing what it deleted is not a caller this
 /// function has.
 Future<StorageDeleteReport> runStorageDelete(
   RefBase ref, {
   required StorageGroup group,
   required StorageDeleteRequest request,
+  required RecordWriteEffects effects,
   bool silent = false,
   int? confirmationToken,
 }) async {
-  final StorageDeleteReport report;
-  switch (request) {
-    case StorageDeletePathsRequest(:final targets):
-      report = await deleteStorageEntries(ref, group: group, targets: targets);
-      // The image-cache eviction, and **before** the invalidate rather than
-      // after it: the invalidate
-      // is what makes the view redraw, and a redraw that reached a still-cached
-      // image would resolve the deleted path out of the cache this line is about
-      // to drop.
-      //
-      // `report.deleted` and not `targets`: a target is usually a directory,
-      // neither cache can be enumerated by prefix, and the report is the only
-      // list of the individual files that actually went. It is also the only
-      // list that stops at the ones that *went* — an entry the platform refused
-      // is still on disk, and dropping its decoded pixels would cost the user a
-      // re-decode of a picture that never changed.
-      evictRecordImages(report.deletedPaths);
-      await invalidateAfterStorageDelete(ref, group: group, targets: targets);
-      // The view itself, which that table does not cover: its rows and its sizes
-      // are read from the tree this delete just changed, so without this the
-      // screen the user is looking at keeps showing what was deleted. Applied
-      // from both branches, because both change it.
-      refreshStorageTabAfterDelete(ref, touched: targets);
-    case StorageDeleteSettingsRequest():
-      report = await ref.read(settingsStoreDeleteProvider)();
-      // Neither the eviction nor the invalidate table applies here, and both
-      // absences are decided by what
-      // a settings store *is* rather than by what this branch happens to reach:
-      //
-      //  * the eviction takes file paths, and this report carries store subjects,
-      //    which have none. It is not skipped by this branch's say-so:
-      //    `deletedPaths` answers empty for a report of stores, so calling it here
-      //    would evict nothing — as it should, since no picture the app draws
-      //    comes out of a settings store.
-      //  * the invalidate table answers this group with "invalidating is not
-      //    enough". Every
-      //    reader of a setting is now reading through a `StorageBox` that answers
-      //    null (`markHiveClosed`), so rebuilding them would show the app's
-      //    defaults with the user's own values still on screen elsewhere. The
-      //    restart demanded below is what makes the app consistent again, and it
-      //    is why this is the one delete that ends in a dialog the user cannot
-      //    dismiss.
-      //
-      // The view's own rows *are* refreshed, and this is the one case where that is
-      // not the same statement. The stores are gone and their rows must say so,
-      // and on Windows the group is sized by a directory whose files went with
-      // them; the restart is about the rest of the app still holding settings in
-      // memory, not about this screen. The request names no path, so the totals
-      // cache is cleared rather than invalidated per path.
-      refreshStorageTabAfterDelete(ref, touched: const []);
-  }
+  final report = await holdForDelete(
+    ref.read(longReadRegistryProvider.notifier),
+    paths: request.longReadPaths,
+    action: (claim) => _deleteAndForget(ref, claim: claim, group: group, request: request, effects: effects),
+  );
   // The confirmation this delete was asked from, closed here and nowhere else.
   //
-  // **It belongs to this function because the order does.** Everything above is
-  // "make the app forget what went"; everything below is "say what happened", and
-  // the confirmation has to be gone between the two — a result panel opened over
-  // an answered confirmation would stack on it, and closing it afterwards would
-  // take the panel with it (`DialogController.dismiss` with a token drops that
-  // entry and everything above). This is the same seam the invalidate and the
-  // eviction are applied at, for the same reason: the ordering is the
-  // thing being decided, and it is decided once.
+  // **It belongs to this function because the order does.** Everything in
+  // [_deleteAndForget] is "make the app forget what went"; everything below is
+  // "say what happened", and the confirmation has to be gone between the two — a
+  // result panel opened over an answered confirmation would stack on it, and
+  // closing it afterwards would take the panel with it (`DialogController.dismiss`
+  // with a token drops that entry and everything above). The delete's claim ends
+  // at the same seam: what makes the app forget runs under it, and nothing that
+  // only speaks does.
   //
   // Null for every caller that has no confirmation open — the tests, and anything
   // `silent`. A token whose dialog has already gone dismisses nothing.
@@ -665,6 +658,86 @@ Future<StorageDeleteReport> runStorageDelete(
           over: true,
         );
       }
+  }
+  return report;
+}
+
+/// The part of [runStorageDelete] that runs under the delete's claim: the
+/// removal, and then everything that makes the app forget what the removal took.
+///
+/// Returns once the last of those has run, which is what releases the claim, so
+/// a writer that asks the registry after that release finds the app already
+/// forgetting — never still remembering entries that are gone.
+Future<StorageDeleteReport> _deleteAndForget(
+  RefBase ref, {
+  required StorageDeleteClaim claim,
+  required StorageGroup group,
+  required StorageDeleteRequest request,
+  required RecordWriteEffects effects,
+}) async {
+  final StorageDeleteReport report = switch (request) {
+    StorageDeletePathsRequest(:final targets) => await deleteStorageEntries(
+      ref,
+      claim: claim,
+      group: group,
+      targets: targets,
+    ),
+    StorageDeleteSettingsRequest() => await ref.read(settingsStoreDeleteProvider)(claim),
+  };
+  switch (request) {
+    case StorageDeletePathsRequest(:final targets):
+      // Resolved once and handed to every derivation below. They are projections
+      // of one set of drain destinations, and a layout read twice could answer
+      // them about two different trees.
+      final info = await ref.read(pathLayoutLoader.future);
+      // The images, and **before** the invalidate rather than after it: the
+      // invalidate is what makes the view redraw, and a redraw that reached a
+      // still-cached image would resolve the deleted path out of the cache this
+      // line is about to drop.
+      //
+      // `report.deletedPaths` and not `targets`: a target is usually a directory,
+      // and the report is the only list of the individual files that actually
+      // went. Dropping a whole directory would also drop the images the platform
+      // refused to delete, which are still on disk, and cost the user a re-decode
+      // of a picture that never changed.
+      effects.images.apply(RecordImageScope(info: info, changed: report.deletedPaths));
+      invalidateAfterStorageDelete(ref, group: group, info: info, targets: targets);
+      // The view itself, which that table does not cover: its rows and its sizes
+      // are read from the tree this delete just changed, so without this the
+      // screen the user is looking at keeps showing what was deleted.
+      //
+      // What it is told to forget is not `targets`: a delete that drains the
+      // journals also changes the trees the drain publishes into, and the totals
+      // cache drops a path, its ancestors and its descendants only.
+      effects.totals.apply(TotalsScope.paths(storageDeleteTotalsTargets(group: group, info: info, targets: targets)));
+    case StorageDeleteSettingsRequest():
+      // The images are applied to the same expression as above, which is empty
+      // here: a report of settings stores carries no path, and no picture the app
+      // draws comes out of a settings store. The layout the scope needs is read
+      // only for that, so failing to read it is logged and does not turn a
+      // delete that has already happened into a reported failure.
+      try {
+        final info = await ref.read(pathLayoutLoader.future);
+        effects.images.apply(RecordImageScope(info: info, changed: report.deletedPaths));
+      } catch (error, stackTrace) {
+        logger.w('Storage delete: the layout was unavailable, so no image was dropped.', error, stackTrace);
+      }
+      // The invalidate table does not apply here: it answers this group with
+      // "invalidating is not enough". Every reader of a setting is now reading
+      // through a `StorageBox` that answers null (`markHiveClosed`), so rebuilding
+      // them would show the app's defaults with the user's own values still on
+      // screen elsewhere. The restart demanded below is what makes the app
+      // consistent again, and it is why this is the one delete that ends in a
+      // dialog the user cannot dismiss.
+      //
+      // The view's own rows *are* refreshed, and this is the one case where that is
+      // not the same statement. The stores are gone and their rows must say so,
+      // and on Windows the group is sized by a directory whose files went with
+      // them; the restart is about the rest of the app still holding settings in
+      // memory, not about this screen. The request names no file it removes --
+      // only the directory the stores live in, for the claim, and none on web --
+      // so every total is re-measured.
+      effects.totals.apply(const TotalsScope.everything());
   }
   return report;
 }
@@ -865,7 +938,8 @@ class StorageDeleteResultDialog extends ConsumerWidget {
                   const SizedBox(height: 12),
                   Text('pages.storage.delete.result_heading'.tr(), style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  for (final failure in report.failed) _survivor(theme, failure.subject, failure.detail),
+                  for (final failure in report.failed)
+                    _survivor(theme, failure.subject, storageDeleteFailureDetailText(failure.detail)),
                   for (final retention in report.retained)
                     _survivor(theme, retention.subject, _retentionDetail(retention.reason)),
                 ],
@@ -960,3 +1034,10 @@ class StorageDeleteResultDialog extends ConsumerWidget {
     );
   }
 }
+
+/// What the storage view's delete (`StorageDeleteConfirmDialog`) declares: the erased trees' cached reads are
+/// dropped and the view's totals are re-measured.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects storageViewDeleteEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));

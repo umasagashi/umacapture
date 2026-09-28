@@ -136,6 +136,14 @@ Future<List<SettingsBoxListing>> listSettingsBoxes(PathInfo info, {required bool
   return listings;
 }
 
+/// The directories the settings stores occupy, which is what deleting them claims.
+///
+/// Empty on web, for the reason [listSettingsBoxes] gives no size there: the stores are
+/// IndexedDB databases with no filesystem presence, so there is no path of theirs for a
+/// claim to hold — and no relocation to collide with, which web refuses outright.
+List<DirectoryPath> settingsStoreDirectories(PathInfo info, {required bool onWeb}) =>
+    onWeb ? const [] : [info.settingsDir];
+
 /// When the store was last written: the `.hive`'s timestamp, never the `.lock`'s.
 ///
 /// The pair is treated differently here than it is for the size, and the reason

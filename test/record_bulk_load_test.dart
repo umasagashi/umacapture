@@ -17,7 +17,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 
 import 'support/riverpod.dart';
 
-Character _chara(int card) => Character(0, 0, card, 0);
+Character _chara(int card) => Character(0, 0, card, 0, null);
 
 Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 
@@ -88,7 +88,7 @@ void main() {
     }
 
     final (:results, :unavailable) = await loadAllCharaDetailRecord(
-      ProviderContainer.test().read(refBaseProvider),
+      ProviderContainer.test().read(containerRefProvider),
       activeDir,
     );
 
@@ -104,7 +104,7 @@ void main() {
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
     final (:results, :unavailable) = await loadAllCharaDetailRecord(
-      ProviderContainer.test().read(refBaseProvider),
+      ProviderContainer.test().read(containerRefProvider),
       activeDir,
     );
 
@@ -120,7 +120,7 @@ void main() {
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
     final (:results, :unavailable) = await loadAllCharaDetailRecord(
-      ProviderContainer.test().read(refBaseProvider),
+      ProviderContainer.test().read(containerRefProvider),
       activeDir,
     );
     expect(results, isEmpty);
@@ -133,7 +133,7 @@ void main() {
     seedRecordJson('id-corrupt', 'not valid json');
 
     final (:results, :unavailable) = await loadAllCharaDetailRecord(
-      ProviderContainer.test().read(refBaseProvider),
+      ProviderContainer.test().read(containerRefProvider),
       activeDir,
     );
 

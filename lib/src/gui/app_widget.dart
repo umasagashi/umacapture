@@ -1,7 +1,6 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,7 +11,6 @@ import '/const.dart';
 import '/src/addon/addon_dispatcher.dart';
 import '/src/app/pages.dart';
 import '/src/app/route.dart';
-import '/src/core/fs/temp_session.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
@@ -180,7 +178,7 @@ class _ResponsiveScaffold extends StatelessWidget {
                       child: Column(
                         children: [
                           // App level, not the record tab: every persisted record
-                          // read and write takes the cross-tab lock, so when it is
+                          // read and write takes the record mutation lock, so when it is
                           // missing capture, import and the record list all fail
                           // together. Renders nothing when the lock is available.
                           const RecordLockUnavailableBanner(),
@@ -295,53 +293,6 @@ class ApplicationWidget extends ConsumerStatefulWidget {
 }
 
 class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
-  @override
-  void initState() {
-    super.initState();
-    // Reclaim scratch space left over from a previous run, once at startup --
-    // keeping the temp directory itself -- rather than on exit, which never runs
-    // after a crash. Desktop leaves scraping fragments there when a capture is
-    // interrupted (or the app is killed); both platforms can leave an abandoned
-    // bug-report screenshot (sentry_util.takeScreenshot), which on web is a full
-    // frame of a screen share sitting in OPFS with no other sweeper. The owning
-    // dialog deletes its own shot on close, so this only reclaims what an
-    // abnormal termination stranded.
-    ref.read(pathInfoLoader.future).then(_clearTempDir).catchError((Object error, StackTrace stackTrace) {
-      logger.e("Failed to clear temp directory on startup.", error, stackTrace);
-    });
-  }
-
-  /// Reclaims stranded scratch space, keeping what is still in use.
-  ///
-  /// Desktop empties the whole tree synchronously: one process owns it, so
-  /// everything in it at startup is by definition left over, and the synchronous
-  /// variant keeps startup from racing the native pipeline's first writes.
-  ///
-  /// Web cannot do that. OPFS is shared by every tab of the origin while this
-  /// runs once per tab, so an unconditional clear deleted a *live* tab's
-  /// in-flight bug-report screenshot or module download. It sweeps by ownership
-  /// instead (see `temp_session.dart`), which still reclaims exactly what an
-  /// abnormal termination stranded — a dead tab holds no lock. `clearSync` is
-  /// also unavailable there: it goes through the sync FS, which OPFS does not
-  /// implement.
-  Future<void> _clearTempDir(PathInfo info) async {
-    if (!kIsWeb) {
-      info.tempDir.clearSync();
-      return;
-    }
-    // Writers reach for this path without creating it (OPFS refuses a write into
-    // a missing directory), and it is one level deeper than it used to be.
-    await info.tempDir.create(recursive: true);
-    if (info.tempSession == null) {
-      // No claim of our own means the lock primitive is missing here, so the
-      // liveness answer cannot be trusted either -- and our own scratch is
-      // sitting in the shared root where a sweep would take it.
-      logger.w("Skipped the temp sweep: this session holds no claim on the temp tree.");
-      return;
-    }
-    await sweepTempSessions(info.tempRootDir, liveSessions: liveTempSessionIds);
-  }
-
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
     // FontWeight.index was deprecated in favor of the numeric `value` (100-900).
     // Reproduce the old index (value ~/ 100 - 1, clamped to 0..8) and step by `offset`,

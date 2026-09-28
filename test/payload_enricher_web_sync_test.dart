@@ -29,7 +29,6 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-import 'support/riverpod.dart';
 import 'support/web_like_fs_backend.dart';
 
 void main() {
@@ -71,7 +70,7 @@ void main() {
   RefBase newRef() {
     final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
     addTearDown(container.dispose);
-    return container.read(refBaseProvider);
+    return container.read(containerRefProvider);
   }
 
   // Installs a backend that rejects the sync surface exactly as the web one does.

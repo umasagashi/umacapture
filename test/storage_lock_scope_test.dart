@@ -42,7 +42,7 @@ void main() {
       }
       expect(byScope[StorageLockScope.perRecord], {StorageGroupId.activeRecords, StorageGroupId.archivedRecords});
       expect(byScope[StorageLockScope.exclusiveRoot], {StorageGroupId.quarantine, StorageGroupId.retired});
-      expect(byScope[StorageLockScope.providerSerialized], {StorageGroupId.metadata});
+      expect(byScope[StorageLockScope.exclusiveRootProviderSerialized], {StorageGroupId.metadata});
       expect(byScope.values.expand((e) => e).length, storageGroups.length);
     });
   });
@@ -113,13 +113,13 @@ void main() {
     }
   });
 
-  group('metadata is serialised through its owning provider, not locked', () {
-    test('a rating file resolves to the provider-serialised scope', () {
+  group('metadata takes the exclusive root and is serialised through its owning provider', () {
+    test('a rating file resolves to the root-plus-provider scope', () {
       final plan = _planFor(
         StorageGroupId.metadata,
         FilePath('/root/documents/storage/chara_detail/metadata/rating/main.json'),
       );
-      expect(plan.scope, StorageLockScope.providerSerialized);
+      expect(plan.scope, StorageLockScope.exclusiveRootProviderSerialized);
       expect(plan.recordIds, isEmpty);
     });
 
@@ -128,7 +128,15 @@ void main() {
         StorageGroupId.metadata,
         FilePath('/root/documents/storage/chara_detail/metadata/memo/main.json'),
       );
-      expect(plan.scope, StorageLockScope.providerSerialized);
+      expect(plan.scope, StorageLockScope.exclusiveRootProviderSerialized);
+    });
+
+    test('the dismissal file — the group\'s third root — resolves the same', () {
+      final plan = _planFor(
+        StorageGroupId.metadata,
+        FilePath('/root/documents/storage/chara_detail/metadata/enhancement_dismissed.json'),
+      );
+      expect(plan.scope, StorageLockScope.exclusiveRootProviderSerialized);
     });
   });
 

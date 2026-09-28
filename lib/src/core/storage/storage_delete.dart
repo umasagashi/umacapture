@@ -30,15 +30,12 @@
 /// **The one sentence this library does compose**, and why it is here rather
 /// than with the others. A slot whole-store recovery could not empty is *this
 /// app* declining to delete, not a platform refusing, so there is no platform
-/// message for [StorageDeleteFailure.detail] to carry and the field's producer
-/// has to supply one. That producer is here. What it must not do is write the
-/// words out: a `detail` is rendered verbatim in the result panel, so a
-/// hand-written one reaches the user with no key, no translation and nothing for
-/// the walk over `pages.storage.*` to see — which is exactly what it did, in
-/// English, until [storageRecoveryIncompleteDetail] gave it the shipped keys
-/// every other sentence on that screen goes through. **Both halves of it**: the
-/// frame first, and then the clause in its brackets, which went on arriving as
-/// recovery's own English for as long as the reason was a `String`.
+/// message for [StorageDeleteFailure.detail] to carry. The detail carries the
+/// facts instead ([StorageDeleteRecoveryIncompleteDetail]), and
+/// [storageRecoveryIncompleteDetail] renders them from the shipped keys every
+/// other sentence on that screen goes through — **both halves of it**: the frame,
+/// and the clause in its brackets, which is chosen by the recovery reason as a
+/// value rather than taken from recovery's own English.
 library;
 
 import 'dart:io' show FileSystemException;
@@ -59,13 +56,47 @@ import 'storage_group.dart';
 export 'storage_delete_report.dart';
 export 'storage_exclusion.dart' show StorageDeleteSerializer, storageDeleteSerializerProvider, storageLockGateProvider;
 
+/// Proof that the caller is inside a delete's claim.
+///
+/// Only [holdForDelete] makes one (the constructor is private to this library),
+/// so a delete that has not asked the registry has no value to pass and does
+/// not compile. It carries nothing else: that the claim names exactly what is
+/// erased is the caller's contract, kept by building both from one request.
+final class StorageDeleteClaim {
+  StorageDeleteClaim._();
+}
+
+/// Runs [action] as a delete of [paths], if nothing is holding any of them.
+///
+/// **Asking and claiming are one step, and this is the only place a delete takes
+/// either.** [LongReadRegistry.holdWhenFree] with [LongReadContention.refuse]: a
+/// path something already holds throws [LongReadNotStartedException] before
+/// [action] is called, and otherwise [LongReadKind.delete] is registered over
+/// [paths] before this returns its future, so a writer asking after that finds
+/// it. The claim is released however [action] ends.
+///
+/// [action] receives the [StorageDeleteClaim] an erase requires.
+Future<T> holdForDelete<T>(
+  LongReadRegistry registry, {
+  required List<PathEntity> paths,
+  required Future<T> Function(StorageDeleteClaim claim) action,
+}) {
+  return registry.holdWhenFree(
+    kind: LongReadKind.delete,
+    paths: paths,
+    // A delete has a person in front of it, so it never parks: see [LongReadContention].
+    contention: LongReadContention.refuse,
+    action: (_) => action(StorageDeleteClaim._()),
+  );
+}
+
 /// Deletes [target], which must belong to [group], under that group's exclusion.
 ///
 /// Never throws for a filesystem or lock failure: every one of those is a state
 /// the user has to be told about, so it comes back in the report. An
 /// [ArgumentError] from the plan does propagate — that is a caller pairing a path
 /// with the wrong group, which is a defect and not a delete outcome.
-Future<StorageDeleteReport> deleteStorageEntry(
+Future<StorageDeleteReport> _deleteStorageEntry(
   RefBase ref, {
   required StorageGroup group,
   required PathEntity target,
@@ -77,12 +108,12 @@ Future<StorageDeleteReport> deleteStorageEntry(
       group: group,
       target: target,
       intent: StorageExclusionIntent.mutate,
-      // The destructive side of the whole arrangement: this is the operation the
-      // registry withholds while somebody else holds the paths, and it is the
-      // one caller that must never announce a claim of its own — the menu entry it
-      // was pressed from reads the same registry.
+      // Announced once, above this seam: runStorageDelete took the delete's claim
+      // over the whole request before the first target reached here, and asking
+      // again for one target would find that claim and refuse this delete with its
+      // own registration.
       declaration: const LongReadDeclaration.none(
-        reason: 'a delete is the destructive side the registry withholds, not a long read that withholds anything',
+        reason: 'claimed once above this seam, by runStorageDelete over the whole request',
       ),
       // **The set is taken before whole-store recovery runs, not after.** The
       // exclusion is already held here, so nothing of ours can add to the
@@ -109,14 +140,14 @@ Future<StorageDeleteReport> deleteStorageEntry(
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(target.path),
       reason: StorageDeleteFailureReason.lockBusy,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   } on RecordMutationLockUnavailable catch (error, stackTrace) {
     logger.w('Storage delete has no exclusion primitive: ${target.path}', error, stackTrace);
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(target.path),
       reason: StorageDeleteFailureReason.lockUnavailable,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   }
 }
@@ -127,14 +158,24 @@ Future<StorageDeleteReport> deleteStorageEntry(
 /// separate records must not hold every record's lock for the whole batch — and
 /// the counts are added up once, in [StorageDeleteReport.merge], so the figure
 /// the user is shown does not depend on which caller assembled it.
+///
+/// **Runs only inside a delete's claim over [targets]**, which [claim] is the
+/// proof of: the caller took it through [holdForDelete] over the whole request,
+/// before any target was touched, so a request any part of which another job is
+/// holding never reaches here. This function asks nothing of the registry
+/// itself.
+///
+/// An [ArgumentError] from a target's plan propagates: a target paired with the
+/// wrong group is a defect in the caller and not a delete outcome.
 Future<StorageDeleteReport> deleteStorageEntries(
   RefBase ref, {
+  required StorageDeleteClaim claim,
   required StorageGroup group,
   required List<PathEntity> targets,
 }) async {
   final reports = <StorageDeleteReport>[];
   for (final target in targets) {
-    reports.add(await deleteStorageEntry(ref, group: group, target: target));
+    reports.add(await _deleteStorageEntry(ref, group: group, target: target));
   }
   return StorageDeleteReport.merge(reports);
 }
@@ -311,7 +352,7 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(root.path),
       reason: StorageDeleteFailureReason.refused,
-      detail: surveyFailure.toString(),
+      detail: StorageDeletePlatformDetail(surveyFailure),
     );
   }
   final List<PathEntity> extant;
@@ -324,7 +365,7 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
     return StorageDeleteReport.wholeRequest(
       subject: StorageDeletePathSubject(root.path),
       reason: StorageDeleteFailureReason.refused,
-      detail: error.toString(),
+      detail: StorageDeletePlatformDetail(error),
     );
   }
   return _deleteOne(root, deepestFirst: extant, plan: plan, outcome: outcome);
@@ -407,7 +448,7 @@ Future<StorageDeleteReport> _deleteOne(
           StorageDeleteFailure(
             subject: StorageDeletePathSubject(entity.path),
             reason: StorageDeleteFailureReason.recoveryIncomplete,
-            detail: storageRecoveryIncompleteDetail(recordId: undrained.recordId, reason: undrained.reason),
+            detail: StorageDeleteRecoveryIncompleteDetail(recordId: undrained.recordId, reason: undrained.reason),
           ),
         );
       }
@@ -456,7 +497,7 @@ Future<StorageDeleteReport> _deleteOne(
         StorageDeleteFailure(
           subject: StorageDeletePathSubject(entity.path),
           reason: StorageDeleteFailureReason.refused,
-          detail: error.toString(),
+          detail: StorageDeletePlatformDetail(error),
         ),
       );
       survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
@@ -544,6 +585,18 @@ Future<bool> _deletedByClearingReadOnly(PathEntity entity, Object error) async {
 
 PathEntity _typed(FsEntry entry) => entry.isDirectory ? DirectoryPath(entry.path) : FilePath(entry.path);
 
+/// The sentence a survivor row shows for [detail].
+///
+/// A `switch` over the sealed type, so a third kind of detail stops this file
+/// compiling until it is given a rendering.
+String storageDeleteFailureDetailText(StorageDeleteFailureDetail detail) => switch (detail) {
+  StorageDeletePlatformDetail(:final error) => error.toString(),
+  StorageDeleteRecoveryIncompleteDetail(:final recordId, :final reason) => storageRecoveryIncompleteDetail(
+    recordId: recordId,
+    reason: reason,
+  ),
+};
+
 /// What the result panel says about a slot recovery could not empty.
 ///
 /// **Two keys rather than one sentence with a blank in it.** [recordId] is
@@ -555,23 +608,19 @@ PathEntity _typed(FsEntry entry) => entry.isDirectory ? DirectoryPath(entry.path
 /// shown with a hole in it.
 ///
 /// **[reason] arrives as a value, and the clause it fills the brackets with is
-/// shipped like every other sentence on this screen.** It used to arrive as the
-/// English prose recovery wrote at the point of failure, and this function put
-/// it in the brackets unchanged: 「… の保存途中のデータを回収できませんでした
-/// （its manifest could not be read）。」 went to the user, with no key, no
-/// translation, and nothing for the walk over `pages.storage.*` to see. Fixing
-/// the sentence *around* it left that hole open, because the hole was the
-/// argument and not the frame.
+/// shipped like every other sentence on this screen.** Recovery's own English
+/// prose stays in the log: in the brackets it would reach the user with no key,
+/// no translation, and nothing for the walk over `pages.storage.*` to see.
 ///
 /// A `switch` over the enum and not a lookup table, for the reason the delete
 /// toast's own `_causeOf` states: it is exhaustive, so a twentieth
 /// [RecordRecoveryIncompleteReason] stops this file compiling instead of
 /// reaching the screen as its own value name.
 ///
-/// **The mapping is deliberately many-to-one.** Nineteen failures, six
+/// **The mapping is deliberately many-to-one.** Twenty-three failures, eight
 /// sentences: what the user can do about a slot does not divide as finely as
 /// what the machine could not do with it, and a sentence per value would ship
-/// nineteen ways of saying "it did not finish". The two merges worth naming:
+/// twenty-three ways of saying "it did not finish". The two merges worth naming:
 ///
 ///  * The `foreign` clause covers both "another version minted this" and "this
 ///    is not a slot at all". Neither is the user's doing and neither offers
@@ -616,7 +665,17 @@ String _recoveryReasonClauseKey(RecordRecoveryIncompleteReason reason) => switch
   // it, which is what separates this from the clause below.
   RecordRecoveryIncompleteReason.stagedTreeNotPublished ||
   RecordRecoveryIncompleteReason.publishedCopyFailed ||
-  RecordRecoveryIncompleteReason.publishedTreeMismatch => 'pages.storage.delete.recovery_reason.write_failed',
+  RecordRecoveryIncompleteReason.publishedTreeMismatch ||
+  RecordRecoveryIncompleteReason.restoreCopyFailed => 'pages.storage.delete.recovery_reason.write_failed',
+
+  // The save was undone: its new data was lost, and the record went back to
+  // what it was before the save began.
+  RecordRecoveryIncompleteReason.stagedTreeGoneRestored => 'pages.storage.delete.recovery_reason.restored',
+
+  // A tree the save needs in order to continue or to undo itself is missing,
+  // so the app left the save's data exactly where it found it.
+  RecordRecoveryIncompleteReason.displacedTreeGone ||
+  RecordRecoveryIncompleteReason.supersededCopyGone => 'pages.storage.delete.recovery_reason.source_missing',
 
   // A move onto one of the shelves the app owns could not be completed.
   RecordRecoveryIncompleteReason.supersededCopyNotSaved ||

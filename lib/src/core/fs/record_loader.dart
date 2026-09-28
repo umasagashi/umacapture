@@ -9,8 +9,8 @@
 /// record it could not.
 ///
 /// Only the web loader *refuses* a record — an unusable directory name, a
-/// recovery gate or a cross-tab lock — and only part of that is a capability web
-/// has and desktop has not. The cross-tab lock is one (Web Locks), and the name
+/// recovery gate or a record lock — and only part of that is a capability web
+/// has and desktop has not. The Web Locks acquisition is one, and the name
 /// check is web's own because there an id is also an OPFS path segment, a
 /// transaction slot key and a lock name. **The recovery gate is not**: desktop
 /// installs a per-record gate too — `record_recovery_gate_io.dart` wires

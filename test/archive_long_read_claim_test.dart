@@ -45,6 +45,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -52,8 +53,10 @@ import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
+import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
@@ -80,10 +83,11 @@ mixin _FakeRecordStore on CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id}) => _held.contains(id) ? makeRecord(id: id, card: 1) : null;
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     _held.removeAll(idSet);
@@ -177,7 +181,11 @@ _PinnedArchive _startPinnedArchive(ProviderContainer container, List<String> ids
       return action();
     }),
   );
-  return (reached: reachedLock.future, archiving: controller.archive(ids, ArchiveImageOption.none), release: release);
+  return (
+    reached: reachedLock.future,
+    archiving: controller.archive(ids, ArchiveImageOption.none, effects: archiveEffects(container)),
+    release: release,
+  );
 }
 
 Finder get _confirm => find.widgetWithIcon(FilledButton, Symbols.delete_rounded);
@@ -352,6 +360,75 @@ void main() {
       );
     });
 
+    test('a batch over a held record is refused before anything moves, and leaves no progress behind', () async {
+      // The dialog's confirm answered from the registry as it stood when it was
+      // built; a zip of the record's folder taken since is what this batch meets.
+      // The progress overlay is the thing a refusal can leave behind: it replaces
+      // the record table and only the archive's own `finally` clears it, so a
+      // progress raised before the ask would outlive the refusal indefinitely.
+      final container = _container();
+      final published = <Progress>[];
+      final progressSubscription = container.listen(
+        charaArchiveControllerProvider,
+        (_, next) => published.add(next),
+        fireImmediately: true,
+      );
+      addTearDown(progressSubscription.close);
+      final toasts = <ToastData>[];
+      final toastSubscription = container.listen<AsyncValue<ToastData>>(
+        plainToastEventProvider,
+        (_, next) => next.whenData(toasts.add),
+      );
+      addTearDown(toastSubscription.close);
+      final source = _seedRecord('a');
+      container.read(longReadRegistryProvider.notifier).claimUntilReleased(kind: LongReadKind.zip, paths: [source]);
+
+      // Passes straight through to the real executor, so a batch that was not
+      // refused moves the directory for real and the assertions below see it.
+      var executorReached = false;
+      final controller = container.read(charaArchiveControllerProvider.notifier);
+      controller.debugRecoveryGate = RecordRecoveryGate(
+        mutationLock: RecordMutationLock((name, mode, action) async {
+          executorReached = true;
+          return action();
+        }),
+      );
+      // The refusal is the archive's to announce, not its caller's to catch: the
+      // confirmation that starts a batch closes without awaiting it, so a refusal
+      // that escaped here would reach nobody but the zone. Caught and compared
+      // rather than left to fail the case, so an escape is this assertion's red.
+      Object? escaped;
+      try {
+        await controller.archive(['a'], ArchiveImageOption.none, effects: archiveEffects(container));
+      } catch (error) {
+        escaped = error;
+      }
+      expect(escaped, isNull, reason: 'the refusal escaped the archive instead of being announced');
+      // Toasts reach the container through a stream, behind the call's own completion.
+      await pumpEventQueue();
+
+      expect(
+        published.where((progress) => !progress.isEmpty),
+        isEmpty,
+        reason: 'a refused batch published a progress, which hides the record table until something clears it',
+      );
+      expect(executorReached, isFalse, reason: 'the refused batch still reached the executor');
+      expect(Directory(source.path).existsSync(), isTrue, reason: 'the refused batch moved the record');
+      expect(Directory((_archiveDir / 'a').path).existsSync(), isFalse);
+      // The shipped sentence read out of `ja.json`, not `key.tr()`: an unresolved
+      // key renders as itself, so `tr()` would compare the toast with itself.
+      expect(
+        toasts.map((toast) => toast.description),
+        [appSentenceAt(longReadBusyKey)],
+        reason: 'a refusal says the one long-read sentence and nothing else -- no "archived", no "failed"',
+      );
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        [LongReadKind.zip],
+        reason: 'the refused batch left an archive claim behind, or took the zip\'s away',
+      );
+    });
+
     test('the transaction journal is held too, and only the journal the archive writes', () async {
       final container = _container();
       final archive = _startPinnedArchive(container, ['a']);
@@ -422,7 +499,7 @@ void main() {
       );
       storage.readLockHeld = () => lockHeld;
 
-      await controller.archive(['a'], ArchiveImageOption.none);
+      await controller.archive(['a'], ArchiveImageOption.none, effects: archiveEffects(container));
 
       expect(lockWasTaken, isTrue, reason: 'the control: an executor that took no lock proves nothing about order');
       expect(
@@ -521,7 +598,10 @@ void main() {
 
       archive.release.complete();
       await archive.archiving;
-      await tester.pump();
+      // Settled rather than pumped: the end of a batch also announces the record
+      // tree to the storage view (`record_write_invalidation.dart`), so the rows
+      // are being walked again and a single frame finds none of them.
+      await _settle(tester);
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
 
       // What the returned control leads to is still the delete: the claim above

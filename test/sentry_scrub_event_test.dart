@@ -14,6 +14,8 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 
+import 'support/source_syntax.dart';
+
 /// The same fixture as `app_root_scrub_test.dart`: the Windows account name that must never leave
 /// the machine, and the three roots `pathInfoLoader` registers.
 const _account = 'hazuki';
@@ -176,6 +178,15 @@ SentryEvent _eventWithUnpopulatedFields() => SentryEvent(
   fingerprint: ['failed writing $_downloadPath'],
 );
 
+/// The member name an assignment writes — `beforeSend` for `options.beforeSend = …` and for a cascade
+/// `..beforeSend = …` — or `null` for any other target.
+String? _assignedName(Expression target) => switch (target) {
+  SimpleIdentifier(:final name) => name,
+  PrefixedIdentifier(:final identifier) => identifier.name,
+  PropertyAccess(:final propertyName) => propertyName.name,
+  _ => null,
+};
+
 /// Every field name declared on [className] in the locked SDK's own source file [relativePath].
 ///
 /// Flutter has no mirrors, so the alternative is a hand-written list that is out of date the first
@@ -201,7 +212,13 @@ Set<String> _declaredFieldsOf(String relativePath, String className) =>
 /// fields into one would be caught loudly by the `containsAll` and length guards each caller
 /// carries, not silently absorbed the way a type spelling was.
 Set<String> declaredInstanceFields(String source, String className) {
-  final unit = parseString(content: source, throwIfDiagnostics: false).unit;
+  final parsed = parseString(content: source, throwIfDiagnostics: false);
+  if (parsed.errors.isNotEmpty) {
+    throw StateError(
+      'the source of `class $className` does not parse, so its fields were not read: ${parsed.errors.first}',
+    );
+  }
+  final unit = parsed.unit;
   final declared = unit.declarations.whereType<ClassDeclaration>().where((e) => e.name.lexeme == className).toList();
   if (declared.length != 1) {
     throw StateError('expected exactly one `class $className`, found ${declared.length}; this rule reads nothing now');
@@ -432,12 +449,19 @@ void main() {
     });
 
     test('the wiring exists on both platforms, which the suite cannot observe because no hub runs', () {
-      final source = File('lib/src/core/sentry_util.dart').readAsStringSync();
-      expect('options.beforeSend = sentryBeforeSend;'.allMatches(source), hasLength(2));
-      // The guard is the whole body, not a line of it: the scrub is the last statement of the try.
-      // What the *catch* returns is asserted by behaviour above, not read out of the source — a
-      // `contains('return null;')` here would have matched five other returns in the file.
-      expect(source, contains('return scrubUserPathsFromEvent(event);'));
+      // Read off the syntax tree because it cannot be run: both assignments sit inside the options
+      // callback `SentryFlutter.init` invokes, and invoking that from a test would start the real SDK.
+      final sentryUtil = parseDartFile('lib/src/core/sentry_util.dart');
+      expect(sentryUtil.diagnostics, isEmpty, reason: 'sentry_util.dart does not parse, so the wiring was not read');
+      final unit = sentryUtil.unit;
+      final wired = {
+        for (final assignment in nodesOf<AssignmentExpression>(unit))
+          if (_assignedName(assignment.leftHandSide) == 'beforeSend')
+            enclosingDeclarationName(assignment): assignment.rightHandSide.toSource(),
+      };
+      // One per init path, desktop and web, and each hands over the shared function itself.
+      expect(wired, {'_runWithSentry': 'sentryBeforeSend', '_runWithSentryWeb': 'sentryBeforeSend'});
+      // What `sentryBeforeSend` returns, scrubbed or dropped, is asserted by behaviour above.
     });
   });
 
@@ -669,14 +693,25 @@ class NotTheModel {
       final writers = RegExp(r'serverName\s*=(?!=)').allMatches(client).map((e) => e.group(0)).toList();
       expect(writers, hasLength(1), reason: 'the SDK grew another writer of serverName; re-judge the exclusion');
       expect(client, contains('..serverName = event.serverName ?? _options.serverName'));
-      // And nothing in this app configures it, so it is null on every event.
-      final appSources = Directory(
-        'lib',
-      ).listSync(recursive: true).whereType<File>().where((e) => e.path.endsWith('.dart'));
+      // And nothing in this app configures it, so it is null on every event: no code under `lib/` names
+      // it, as a member it reads or assigns or as an argument label. Read as syntax, so a comment that
+      // explains the exclusion is not mistaken for a writer.
+      final appSources = parseDartTree('lib');
       expect(appSources, isNotEmpty, reason: 'the app sources are not where this rule looks');
-      for (final file in appSources) {
-        expect(file.readAsStringSync(), isNot(contains('serverName')), reason: '${file.path} sets serverName now');
-      }
+      expect(
+        [for (final source in appSources) ...source.diagnostics.map((d) => '${source.path}: ${d.message}')],
+        isEmpty,
+        reason: 'a file that does not parse was not read, so serverName could be set in it',
+      );
+      final named = [
+        for (final source in appSources) ...[
+          for (final reference in referencesIn(source.unit))
+            if (reference.name == 'serverName') source.locate(reference.identifier),
+          for (final argument in nodesOf<NamedExpression>(source.unit))
+            if (argument.name.label.name == 'serverName') source.locate(argument),
+        ],
+      ];
+      expect(named, isEmpty, reason: 'the app sets serverName now');
     });
 
     test('every field of a thread and of a user is either swept or excluded on the record', () {

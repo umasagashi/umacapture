@@ -13,9 +13,9 @@
 //
 // WHAT EACH CLAIM IS.
 //  1. The declaration is applied around **every** scope, not forwarded into the
-//     gate. Two of the four scopes (`providerSerialized`, `unlocked`) never
-//     reach `RecordRecoveryGate`, so a declaration handed only to the gate calls
-//     would vanish for a group whose scope happened to be one of those. The
+//     gate. One of the four scopes (`unlocked`) never reaches
+//     `RecordRecoveryGate`, so a declaration handed only to the gate calls
+//     would vanish for a group whose scope happened to be that one. The
 //     cases are generated from `StorageLockScope.values`, so a fifth scope is
 //     covered the day it is added rather than the day somebody remembers.
 //  2. The claim is live *while the guarded action runs* and gone once it
@@ -42,8 +42,6 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_exclusion.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/storage_lock_scope.dart';
-
-import 'support/riverpod.dart';
 
 void main() {
   late Directory tempRoot;
@@ -74,7 +72,8 @@ void main() {
         ),
         // The real serialiser drops the controller that owns the target file,
         // which is a different subject; what matters here is only that the
-        // `providerSerialized` leg runs its action inside the declaration.
+        // `exclusiveRootProviderSerialized` leg runs its action inside the
+        // declaration.
         storageDeleteSerializerProvider.overrideWithValue((target, action) => action()),
       ],
     );
@@ -110,7 +109,7 @@ void main() {
       Map<LongReadToken, LongReadClaim> whileRunning = const {};
 
       final answer = await runUnderStorageExclusion<int>(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: subject.group,
         target: subject.target,
         intent: StorageExclusionIntent.mutate,
@@ -153,7 +152,7 @@ void main() {
 
     await expectLater(
       runUnderStorageExclusion<void>(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         group: subject.group,
         target: subject.target,
         intent: StorageExclusionIntent.mutate,
@@ -183,7 +182,7 @@ void main() {
     Map<LongReadToken, LongReadClaim> whileRunning = const {};
 
     await runUnderStorageExclusion<void>(
-      container.read(refBaseProvider),
+      container.read(containerRefProvider),
       group: subject.group,
       target: subject.target,
       intent: StorageExclusionIntent.mutate,

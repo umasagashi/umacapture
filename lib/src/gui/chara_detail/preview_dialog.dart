@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderOrFamily;
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -237,6 +238,19 @@ final previewImagePathsProvider = FutureProvider.autoDispose.family<PreviewImage
   return PreviewImagePaths.load(DirectoryPath(path));
 });
 
+/// Every provider above that reads a record's files, keyed by the record directory's path.
+///
+/// **The list a write drops when it replaces a record's files** (`record_write_effects.dart`): each
+/// of them memoizes what it read for as long as something watches it, so a preview left open across
+/// a write keeps the old geometry, overlay and image paths unless the write names it here. [family]
+/// drops every record at once; [at] addresses one record by the same key its readers build.
+final List<({ProviderOrFamily family, ProviderOrFamily Function(String recordDir) at})> recordPreviewReaders = [
+  (family: imageSizeContainerProvider, at: imageSizeContainerProvider.call),
+  (family: predictionContainerProvider, at: predictionContainerProvider.call),
+  (family: predictionAvailableProvider, at: predictionAvailableProvider.call),
+  (family: previewImagePathsProvider, at: previewImagePathsProvider.call),
+];
+
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
@@ -425,10 +439,21 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final List<DirectoryPath> recordDirs;
   final int initialIdx;
 
-  const CharaDetailPreviewDialog({super.key, required this.recordDirs, required this.initialIdx});
+  /// Whether this preview was opened on top of other dialogs rather than in place of them.
+  ///
+  /// Carried into everything the preview opens in turn, so a dialog it hands over to replaces only
+  /// the preview and leaves the dialogs underneath where they were.
+  final bool over;
 
-  static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
-    CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));
+  const CharaDetailPreviewDialog({super.key, required this.recordDirs, required this.initialIdx, this.over = false});
+
+  /// Shows the preview in place of every open dialog, or, with [over], on top of them.
+  static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx, {bool over = false}) {
+    CardDialog.show(
+      ref,
+      (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx, over: over),
+      over: over,
+    );
   }
 
   @override
@@ -511,7 +536,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                   label: Text("$tr_preview.dialog.report_button.label".tr()),
                   onPressed: () {
                     CardDialog.dismiss(ref.base);
-                    ReportRecordDialog.show(ref.base, widget.recordDirs[currentIdx]);
+                    ReportRecordDialog.show(ref.base, widget.recordDirs[currentIdx], over: widget.over);
                   },
                 ),
               ),

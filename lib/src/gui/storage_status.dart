@@ -16,10 +16,8 @@
 /// one for a file being read and one for a settings store, and neither said a
 /// word.
 /// The helpers are public here so that the rule is reachable from every surface
-/// of the view, and `storage_status_test.dart` reads the sources to assert that no
-/// other file in the view constructs a progress indicator of its own — the check
-/// counts the occurrences itself rather than listing the sites that had one at
-/// the time it was written.
+/// of the view: a file in the view waits with these rather than constructing a
+/// progress indicator of its own.
 library;
 
 import 'dart:math' as math;

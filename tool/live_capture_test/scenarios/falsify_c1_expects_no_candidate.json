@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "falsify_c1_expects_no_candidate",
+  "description": "FALSIFICATION of the 'no candidate' judgement. Identical to c1_hopstep_pre_then_post except that clip 1 expects no candidate. The run is the normal one, so it must exit 1 with exactly [candidate_unexpected] on clip 1: the candidate that is really there must not be missed. Exit 1 alone is not the pass condition; another code, or exit 2, means the judgement was not tested.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_post_starup_addwhite.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c1_hopstep_pre_then_post.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

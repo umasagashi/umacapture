@@ -1,17 +1,15 @@
-// The record export is the third long reader to register, and the first one the
-// gate itself claims for: `ZipExporter` hands `RecordRecoveryGate` a
-// `LongReadDeclaration.claim`, and the gate — not the exporter — puts it on the
-// registry and takes it off again.
+// The record export is a long reader the gate claims for: `ZipExporter` hands
+// `RecordRecoveryGate` a `LongReadDeclaration.claimWhenFree` with
+// `LongReadContention.refuse`, and the gate — not the exporter — asks the
+// registry, puts the claim on it, and takes it off again.
 //
 //   .fvm/flutter_sdk/bin/flutter test test/export_long_read_claim_test.dart
 //
 // WHY THIS OPERATION. It is a pure long reader: it opens every file of every
 // selected record and copies the bytes out, on desktop inside a `compute`
-// isolate whose handles outlive the acquisition. `ZipExporter` had already
-// written down, in its own comment, that nothing in the UI prevents an overlap —
-// and the sentence was true of deletes as well as of writers. Wiring it is
-// therefore the smallest honest demonstration of the gate claiming: no new
-// window has to be invented, only announced.
+// isolate whose handles outlive the acquisition. A delete or a writer landing on
+// a record it is reading is the overlap the claim is there to announce, so no
+// new window has to be invented to demonstrate the gate claiming.
 //
 // WHERE THE CLAIM IS TAKEN. At the gate, from a declaration both legs build with
 // one function (`exportLongReadDeclaration`). Desktop reaches the gate in
@@ -25,8 +23,9 @@
 //    FS backend on the VM, which reaches the same Dart but not a browser.
 //  * The handle-release window on Windows. The claim exists so that timing is
 //    unreachable; observing it needs a real export with a delete timed into it.
-//  * Anything about the record lock. The registry grants nothing and refuses
-//    nothing; these cases are about what the two delete surfaces offer.
+//  * Anything about the record lock. The registry grants no lock; these cases
+//    are about what the two delete surfaces offer while the claim is on, and
+//    about the export being refused over a claim already held.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -48,6 +47,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -82,10 +82,11 @@ mixin _FakeRecordStore on CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id}) => _held.contains(id) ? makeRecord(id: id, card: 1) : null;
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     _held.removeAll(idSet);
@@ -469,8 +470,8 @@ void main() {
       expect(_confirmLive(tester), isTrue, reason: 'withheld for the length of the export, not of the session');
     });
 
-    // The row's delete is now one entry of the row's menu rather than a button of
-    // its own, so the claim moved up one level — the export's hold closes the
+    // The row's delete is one entry of the row's menu, so the claim is read at
+    // the menu — the export's hold closes the
     // menu's ⋮, and with it all three entrances. That the control still leads to
     // a delete is asserted at the end, once the claim is released: with it in
     // force no entrance opens, so there is no menu to read.
@@ -557,9 +558,6 @@ void main() {
         }, output),
       );
       final toasts = _observedToasts(container);
-      // The layout resolved, which it always has by the time a record page can
-      // offer an export: the re-check asks `pathLayoutProvider`, and an unresolved
-      // layout is nothing to ask about.
       await container.read(pathLayoutLoader.future);
       // The gate is left open rather than pinned, so an export that is *not*
       // refused runs to its end and this case fails on its assertions. Pinned, the
@@ -622,6 +620,97 @@ void main() {
 
       pinned.release.complete();
       await exporting;
+    });
+
+    // The question is the zip claim's, not every format's: CSV and JSON build
+    // their bytes from memory and open no record file, so a claim that lands over
+    // what the zip would read while the picker is up has nothing to stop.
+    for (final format in ['csv', 'json']) {
+      test('a $format export is not refused by a claim over what the zip reads', () async {
+        final records = [_seedRecord('a')];
+        final pinned = _PinnedGate();
+        final output = '${_tempRoot.path}/export.$format';
+        late ProviderContainer container;
+        container = _container(
+          pinned,
+          records,
+          saveFile: pickerDuring(() {
+            container
+                .read(longReadRegistryProvider.notifier)
+                .claimUntilReleased(
+                  kind: LongReadKind.moduleInstall,
+                  paths: [_activeDir / 'a', _layout.modulesDir.filePath(exportLabelsFileName)],
+                );
+          }, output),
+        );
+        final toasts = _observedToasts(container);
+        await container.read(pathLayoutLoader.future);
+        final ref = container.read(_refProvider);
+        final exporter = format == 'csv'
+            ? CsvExporter(
+                'Export records',
+                'records.csv',
+                ref,
+                const {'a'},
+                RecordSource.active,
+                CharCodec.utf8Bom,
+                Grid.empty,
+              )
+            : JsonExporter('Export records', 'records.json', ref, const {'a'}, RecordSource.active);
+
+        await exporter.export();
+
+        expect(File(output).existsSync(), isTrue, reason: 'the $format export was refused over a file it never reads');
+        expect(container.read(exportingStateProvider), isFalse);
+        await Future<void>.delayed(Duration.zero);
+        expect(toasts, isEmpty);
+      });
+    }
+  });
+
+  group('the web leg', () {
+    test('a claim over what it would read refuses it and says why, as the desktop leg does', () async {
+      // Web has no picker, so the claim is already live when the export is
+      // pressed; the gate is left open, as in the desktop case above, so an
+      // export that is not refused runs to its end and fails the assertions.
+      fsBackend = WebLikeFsBackend(_originalBackend);
+      final records = [_seedRecord('a')];
+      final pinned = _PinnedGate();
+      var saved = false;
+      final container = _container(
+        pinned,
+        records,
+        web: true,
+        saveFile:
+            ({
+              required String dialogTitle,
+              required String fileName,
+              String? initialDirectory,
+              required Uint8List bytes,
+              required bool lockParentWindow,
+            }) async {
+              saved = true;
+              return null;
+            },
+      );
+      container
+          .read(longReadRegistryProvider.notifier)
+          .claimUntilReleased(kind: LongReadKind.moduleInstall, paths: [_activeDir / 'a']);
+      final toasts = _observedToasts(container);
+      pinned.release.complete();
+
+      await _exporter(container, const {'a'}).export();
+
+      expect(pinned.claimsAtFirstAcquisition, isNull, reason: 'the web export walked into a record another job holds');
+      expect(saved, isFalse, reason: 'a download was offered after the export was refused');
+      expect(container.read(longReadRegistryProvider).values.map((claim) => claim.kind), [LongReadKind.moduleInstall]);
+      expect(container.read(exportingStateProvider), isFalse);
+      for (var round = 0; round < 100 && toasts.isEmpty; round++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      // The busy sentence and not `toast.record_export_failure`: nothing was
+      // attempted and nothing failed.
+      expect(toasts.map((toast) => toast.description), [longReadBusyMessage()]);
     });
   });
 }

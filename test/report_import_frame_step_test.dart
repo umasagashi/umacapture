@@ -794,9 +794,11 @@ void main() {
   ) async {
     // WEB IS NOT A LEG THAT CANNOT STEP. `web/worker.js` states `nextMediaTsMs` (omitting the key at
     // the tail, as Windows does) and `web/video_import.mjs` computes it from the second sample of
-    // the same decode pass -- measured in a real browser by stage H1-3b. What the VM can reach of
-    // that path is the shared parser `grabbedVideoFrameFromWire`, which is all
-    // `video_frame_grab_web.dart` does with the reply; the browser itself is out of reach here.
+    // the same decode pass. The producers' replies are checked by running them, outside this VM:
+    // web's by `tool/test_web_video_frame_grab.mjs`, Windows' by
+    // `native/test/runner/test_video_frame_grab_reply.cpp`. What the VM can reach of the web path is
+    // the shared parser `grabbedVideoFrameFromWire`, which is all `video_frame_grab_web.dart` does
+    // with the reply; the browser itself is out of reach here.
     final clip = _WebWireClip();
     await _open(tester, clip);
 
@@ -814,28 +816,6 @@ void main() {
       reason: 'and the tail reply omits the key entirely, which reads as "no successor"',
     );
     expect(_enabled(tester, 'previous_frame_button'), isTrue);
-  });
-
-  test('both shipped producers still put the successor on the wire', () {
-    // A STRUCTURAL GUARD, AND A WEAK ONE ON PURPOSE: it establishes that each producer's source
-    // still names the field, never that the value it puts there is right. The values were measured
-    // elsewhere -- Windows by `native/test/cv/test_video_frame_grabber.cpp`, web by stage H1-3b in a
-    // real browser -- and neither measurement is reachable from a Flutter VM test. What this catches
-    // is the regression that would silently disable a button on one platform only.
-    for (final path in const ['web/worker.js', 'web/video_import.mjs', 'windows/runner/video_frame_grab_service.h']) {
-      expect(
-        File(path).readAsStringSync(),
-        contains('nextMediaTsMs'),
-        reason: '$path no longer states the successor, so the forward step dies on that platform',
-      );
-    }
-    // The same check over a copy with the field renamed away, so an assertion that could never fail
-    // is not mistaken for coverage.
-    expect(
-      File('web/worker.js').readAsStringSync().replaceAll('nextMediaTsMs', 'removed'),
-      isNot(contains('nextMediaTsMs')),
-      reason: 'INSTRUMENT REACTS',
-    );
   });
 
   testWidgets('_control: the ordinal instrument reacts to an ordinal (it is not vacuous)', (tester) async {

@@ -17,7 +17,7 @@
 //
 // WHAT THIS SUITE DOES NOT REACH. It runs on the io backend behind
 // `WebLikeFsBackend`, so the async semantics are io's and not OPFS's. A bounded
-// image resolves through `Image.memory` on this platform too (`RecordImage.build`
+// image resolves through `Image.memory` on this platform too (`RecordImage._content`
 // says why), so what a VM build cannot reach is the *unbounded* web branch: the
 // OPFS read behind it is reachable only in a browser. Nothing here says anything about how a browser lays the dialog out at
 // a narrow width.

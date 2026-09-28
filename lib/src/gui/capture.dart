@@ -26,7 +26,12 @@ import '/src/core/video_import_ops.dart';
 import '/src/gui/capture_preview_view.dart';
 import '/src/gui/chara_detail/report_import_dialog.dart';
 import '/src/gui/chara_detail/report_screen_dialog.dart';
+import '/src/chara_detail/enhancement_merge.dart';
+import '/src/chara_detail/factor_enhancement.dart';
+import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
+import '/src/gui/chara_detail/enhancement_review_list.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/settings.dart';
 import '/src/gui/storage_persistence_banner.dart';
 import '/src/gui/storage_tree.dart';
@@ -1006,6 +1011,47 @@ CaptureToggleBlocker? resolveCaptureToggleBlocker({
   return null;
 }
 
+/// Re-asks, at the moment the source picker resolves, whether a live session may still start.
+///
+/// **This is the only gate in the live-capture path that is asked twice, and the picker is why.**
+/// The toggle resolves [resolveCaptureToggleBlocker] in `build` and withholds itself while another
+/// job holds the record store, but a web press opens `getDisplayMedia` and the session does not
+/// announce itself as [LongReadKind.liveCapture] until the core reports it capturing — minutes
+/// later, if that is how long the user takes over the picker. Everything the toggle refused can
+/// therefore begin *inside* that window: an enhancement merge is exactly such a job, and it owns
+/// the record root for its snapshot, rewrite and delete. See `startCapture` on the web leg, which
+/// is where this is called.
+///
+/// Read through the container and not a widget's `ref`, for the reason `VideoImportButton.preflight`
+/// states about its own: the page can be gone by the time the picker closes, while the container is
+/// the app's.
+///
+/// The blocker is returned rather than a bool so a case can say *which* reason held; the channel
+/// only needs whether, and words its refusal with one sentence that names no holder — the same
+/// thing `longReadBusyMessage` deliberately does.
+@visibleForTesting
+CaptureToggleBlocker? liveCaptureStartPreflight(ProviderContainer container) {
+  final layout = container.read(pathLayoutProvider);
+  return resolveCaptureToggleBlocker(
+    controllerUnavailable: container.read(platformControllerProvider) == null,
+    // Not re-asked from the capability probe: a browser that could not capture never opened a
+    // picker, so reaching here already answers it. Passed as a constant rather than omitted
+    // because the resolver has no optional terms.
+    captureUnsupported: false,
+    // **THIS SESSION'S OWN ACTIVITY IS WHAT IS BEING ASKED ABOUT**, the same rule
+    // `VideoImportButton.preflight` states: the start that is asking is not yet `capturing`, and an
+    // import or a clip picker that began while the picker was open is a genuine refusal.
+    activity: resolveCaptureActivity(
+      capturing: container.read(capturingStateProvider),
+      importState: videoImportState.value,
+    ),
+    // The gate this function exists for. A null layout answers "nothing can be holding a path under
+    // a root the app has not resolved", which is `listenLiveCaptureLongRead`'s own reading of it.
+    heldByLongRead:
+        layout != null && liveCaptureBlockedBy(layout, container.read(longReadRegistryProvider).values) != null,
+  );
+}
+
 /// The **full** translation key for [blocker]'s sentence.
 ///
 /// Full keys rather than a leaf under one `blocked` map — the shape [captureActivityBlockedKey] uses —
@@ -1390,8 +1436,16 @@ class CaptureMessageTile extends StatelessWidget {
   /// here to open the table" would be the longest thing in a tile whose subject is one word.
   final VoidCallback? onTap;
 
-  /// What the trailing chevron says on hover. Required in practice whenever [onTap] is set.
-  final String? tapTooltip;
+  /// What the tile says on hover: what a tap would do, or why it is withheld.
+  ///
+  /// Rendered whether or not [onTap] is set. Hanging it off the trailing chevron would make it
+  /// vanish together with the affordance, i.e. precisely in the state whose reason the user cannot
+  /// work out from the tile itself.
+  ///
+  /// It therefore has to be **true of the state the tile is actually in**: a caller that withheld
+  /// the tap passes the reason, and a caller that has no destination at all passes null rather
+  /// than a sentence about a tap that cannot happen.
+  final String? tooltip;
 
   /// Centres the icon and the text as one group instead of running them along the left edge.
   ///
@@ -1411,7 +1465,7 @@ class CaptureMessageTile extends StatelessWidget {
     required this.text,
     this.hint,
     this.onTap,
-    this.tapTooltip,
+    this.tooltip,
     this.centered = false,
   });
 
@@ -1420,7 +1474,7 @@ class CaptureMessageTile extends StatelessWidget {
     final theme = Theme.of(context);
     final accent = captureToneColor(theme, tone);
     final hintText = hint;
-    final tooltip = tapTooltip;
+    final tooltipText = tooltip;
     final tile = Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(color: accent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16)),
@@ -1457,17 +1511,15 @@ class CaptureMessageTile extends StatelessWidget {
           ),
           if (onTap != null) ...[
             const SizedBox(width: 8),
-            Tooltip(
-              message: tooltip ?? "",
-              child: Icon(Symbols.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant, size: 20),
-            ),
+            Icon(Symbols.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant, size: 20),
           ],
         ],
       ),
     );
+    final body = onTap == null ? tile : InkWell(borderRadius: BorderRadius.circular(16), onTap: onTap, child: tile);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: onTap == null ? tile : InkWell(borderRadius: BorderRadius.circular(16), onTap: onTap, child: tile),
+      child: tooltipText == null ? body : Tooltip(message: tooltipText, child: body),
     );
   }
 }
@@ -1509,14 +1561,65 @@ class CaptureEventView extends ConsumerWidget {
     };
     final text = event.status == CharaDetailCaptureStatus.failed ? _failureText(event.error) : "$base.$key.text".tr();
     final recordId = event.recordId;
-    return CaptureMessageTile(
+    final tile = CaptureMessageTile(
       icon: icon,
       tone: tone,
       text: text,
       hint: optionalMessageLine("$base.$key.hint"),
       onTap: recordId == null ? null : () => _openInTable(context, ref, recordId),
-      tapTooltip: "$base.open_table_tooltip".tr(),
+      // Null and not the open-the-table sentence when there is no record: an event that names none
+      // has nothing to say on hover, and saying it anyway would be an offer the tile cannot keep.
+      tooltip: recordId == null ? null : "$base.open_table_tooltip".tr(),
     );
+    // The approval is deferred, not modal: the record is already saved, and this is the notice that
+    // says the app noticed. It is derived from the candidate list rather than from a flag the
+    // capture set, so a merge or a dismissal made anywhere else removes it with no extra state.
+    final candidates = event.status != CharaDetailCaptureStatus.succeeded || recordId == null
+        ? const <EnhancementCandidate>[]
+        : ref
+              .watch(pendingEnhancementCandidatesProvider)
+              .where((e) => e.olderId == recordId || e.newerId == recordId)
+              .toList();
+    if (recordId == null || candidates.isEmpty) {
+      return tile;
+    }
+    // The same claim question every merge surface asks; in practice this is exactly the window in
+    // which the capture or import that produced the event is still running.
+    final blocked = enhancementMergeBlockedBy(ref) != null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        tile,
+        CaptureMessageTile(
+          key: const Key('capture_enhancement_candidate'),
+          icon: Symbols.merge_rounded,
+          tone: CaptureStatusTone.hint,
+          text: "$base.enhancement_candidate.text".tr(),
+          hint: "$base.enhancement_candidate.hint".tr(),
+          // Disabled means no callback at all, so the tile stops announcing itself as tappable
+          // rather than accepting a tap it will refuse.
+          onTap: blocked ? null : () => _openMerge(ref, recordId, candidates),
+          tooltip: blocked ? longReadBusyKey.tr() : "$base.enhancement_candidate.action".tr(),
+        ),
+      ],
+    );
+  }
+
+  /// Opens the one candidate straight away, or the review list when this record is in several.
+  ///
+  /// A record can belong to more than one pair (a chain of three copies), and the dialog decides
+  /// one pair: offering the first of them would hide the rest behind a choice the user never made.
+  ///
+  /// [recordId] travels with the list: what makes a pair a capture-card merge is that one of its
+  /// records was captured a moment ago and so carries no memo and no rating of its own, and the
+  /// other side's are the ones to keep. A list told nothing would default every row to the settings
+  /// route and drop them.
+  void _openMerge(WidgetRef ref, String recordId, List<EnhancementCandidate> candidates) {
+    if (candidates.length == 1) {
+      showEnhancementMergeDialog(ref.base, candidate: candidates.single, route: EnhancementMergeRoute.captureCard);
+      return;
+    }
+    showEnhancementReviewList(ref.base, capturedRecordId: recordId);
   }
 
   /// The failure line keyed by the code the core reported, falling back to the generic one for any
@@ -1929,7 +2032,15 @@ class CaptureControlGroup extends ConsumerWidget {
             // The picker (web `getDisplayMedia`) must be opened inside the tap's transient activation.
             // The banner is only an overlay, so it must invoke capture synchronously without waiting
             // for user acknowledgement.
-            WebCaptureTutorialDialog.show(ref.base, controller.startCapture);
+            //
+            // The container is resolved here, at the press, and not inside the preflight: the page can
+            // be disposed while the picker is open, and `ProviderScope.containerOf` needs a live
+            // element. The container outlives it.
+            final container = ProviderScope.containerOf(context, listen: false);
+            WebCaptureTutorialDialog.show(
+              ref.base,
+              () => controller.startCapture(mayStillStart: () => liveCaptureStartPreflight(container) == null),
+            );
             return;
           }
           controller.startCapture();
@@ -1955,6 +2066,10 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
             // screen for as long as the wasm module and the ONNX models take to arrive,
             // so it is the one loading state a user reliably reads.
             Text("$tr_capture.loading".tr()),
+            // The loader behind this layer waits on the module update, which can be
+            // a multi-megabyte download; this names it instead of leaving the
+            // spinner to look stuck.
+            const ModuleUpdateActivityView(),
           ],
         ),
       ),

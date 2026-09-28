@@ -39,13 +39,14 @@
 /// anything under it and of the group roots above it, because
 /// `storageDeleteAwaitsExtraction` asks containment both ways round.
 ///
-/// **What that over-refuses, stated rather than glossed.** `metadata/` (ratings
-/// and memos) is under the store root and is the one subtree no scan touches, so
-/// its delete is withheld for the length of a scan and would not have had to
-/// wait: its group is `StorageLockScope.providerSerialized`, which takes no
-/// record lock, unlike every other directory here — those are `perRecord` or
-/// `exclusiveRoot` and would queue behind the exclusive root name this scan holds
-/// anyway.
+/// **What that over-refuses, stated rather than glossed.** `metadata/` (ratings,
+/// memos and the merge dismissals) is under the store root and is the one subtree
+/// no scan touches, so its delete is withheld for the length of a scan although
+/// nothing the scan writes is in it. Its delete would queue behind the exclusive
+/// root name this scan holds anyway — its group is
+/// `StorageLockScope.exclusiveRootProviderSerialized`, which takes that name as
+/// the `perRecord` and `exclusiveRoot` groups do — so what the claim adds there
+/// is a delete refused up front instead of one that waits.
 ///
 /// **It is accepted because excluding it would put the list back, and not
 /// because the window is short.** The window is not short: the measured 250 ms

@@ -28,8 +28,12 @@ import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
+import '/src/chara_detail/enhancement_merge.dart';
+import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
+import '/src/gui/chara_detail/enhancement_review_list.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/raw_frame_probe_view.dart';
 import '/src/gui/toast.dart';
@@ -720,22 +724,20 @@ class AboutGroup extends ConsumerWidget {
 
   /// What the module row shows while the version check has not answered.
   ///
-  /// Two sentences and not one, because `loading` covers two states that differ
-  /// by minutes. An automatic install that reaches a held `modules/` parks until
-  /// the reader lets go ([LongReadRegistry.holdWhenFree]), and the loader this
-  /// row reads stays `loading` for the whole park — so the row said 「確認中...」
-  /// about a check that had already finished, for as long as a whole-store
-  /// re-recognition takes. The park is a state the registry carries
-  /// ([longReadDeferralsProvider]), so the row is told which of the two it is
-  /// rather than inferring it from how long it has been waiting.
+  /// Not one sentence, because `loading` covers states that differ by minutes:
+  /// the quick version check, the archive download, its extraction, and an
+  /// install parked until a held `modules/` is let go
+  /// ([LongReadRegistry.holdWhenFree]). The loader this row reads stays
+  /// `loading` through all of them. Each of the longer ones is a state carried as
+  /// data, and [moduleUpdateActivityLabel] is where they are told apart for every
+  /// page waiting on the loader; this row falls back to
+  /// `$tr_settings.about.version.checking` only when none of them holds.
   String moduleVersionLoadingLabel(WidgetRef ref) {
-    return ref.watch(longReadDeferralsProvider).containsKey(LongReadKind.moduleInstall)
-        ? "$tr_settings.about.version.waiting".tr()
-        : "$tr_settings.about.version.checking".tr();
+    return moduleUpdateActivityLabel(ref) ?? "$tr_settings.about.version.checking".tr();
   }
 
   String moduleVersion(WidgetRef ref) {
-    // Read before the `when`, so the row rebuilds when the park begins or ends:
+    // Read before the `when`, so the row rebuilds when the phase changes:
     // a watch inside the `loading` branch is only established while that branch
     // is the one being built, which is true here but rests on it.
     final loadingLabel = moduleVersionLoadingLabel(ref);
@@ -812,10 +814,11 @@ enum ResolveInheritanceBlocker {
 
   /// A registered long reader is holding the record store this resolution reads and writes back.
   ///
-  /// **This is the direction the tile was blind to.** `resolveAllInheritance` announces itself
-  /// (`LongReadKind.inherit` over the record store root), so every *other* surface was already
-  /// withheld while a resolution ran — but the tile itself asked nothing, and a resolution could be
-  /// started on top of a zip, an export, a scan or a module relocation that had the same tree open.
+  /// **This is the direction the tile has to ask about itself.** `resolveAllInheritance` announces
+  /// itself (`LongReadKind.inherit` over the record store root), so every *other* surface is withheld
+  /// while a resolution runs — but that announcement does not withhold the tile, and without this a
+  /// resolution could be started on top of a zip, an export, a scan or a module relocation that had
+  /// the same tree open.
   /// Named last on purpose; see [resolveInheritanceBlockerOf].
   longRead,
 }
@@ -824,9 +827,9 @@ enum ResolveInheritanceBlocker {
 ///
 /// **[longRead] is last, for the reason [resolveRegenerateAllBlocker] states.** A resolution that is
 /// running holds a claim of its own over the whole record store, so [resolving] and a non-null
-/// [heldBy] are true together for the whole of the most common case — and there 「再解決の実行中です」
-/// is both true and specific, while the long reader's sentence would answer "why?" with 「他の処理」
-/// about the user's own resolution.
+/// [heldBy] are true together for the whole of the most common case — and there the `resolving` sentence
+/// is both true and specific, while the long reader's sentence ([longReadBusyKey]) would answer "why?"
+/// with "another operation" about the user's own resolution.
 @visibleForTesting
 ResolveInheritanceBlocker? resolveInheritanceBlockerOf({required bool resolving, required LongReadKind? heldBy}) {
   if (resolving) {
@@ -846,10 +849,41 @@ ResolveInheritanceBlocker? resolveInheritanceBlockerOf({required bool resolving,
 @visibleForTesting
 String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch (blocker) {
   ResolveInheritanceBlocker.resolving => "$tr_settings.about.resolve_inheritance.blocked.resolving",
-  // Not a sentence of this control's own: the one refusal every long reader produces is worded
-  // once, in `long_read_registry.dart`, so this arm cost no new string.
+  // Not a sentence of this control's own: every long reader refuses with the one sentence
+  // `long_read_registry.dart` words, and this arm names that same key.
   ResolveInheritanceBlocker.longRead => longReadBusyKey,
 };
+
+/// Which reason (if any) makes the inheritance-resolution entry inert **right now**, asked of a
+/// live [WidgetRef].
+///
+/// One function rather than an expression inlined in `build`, because the flow asks the same
+/// question twice at two different moments: `build` asks it with [listen] so the tile comes
+/// back on its own when a claim ends, and the review list's close asks it again without listening,
+/// because a merge the user ran *inside* the list is exactly the thing that can be holding the
+/// store by then. Two spellings of the question would be two rules that can come to disagree.
+ResolveInheritanceBlocker? resolveInheritanceBlockerFor(WidgetRef ref, {required bool listen}) {
+  final resolving = listen
+      ? ref.watch(inheritanceResolutionRunningProvider)
+      : ref.read(inheritanceResolutionRunningProvider);
+  final claims = listen ? ref.watch(longReadRegistryProvider).values : ref.read(longReadRegistryProvider).values;
+  // The layout and not `pathInfoProvider`: this tile only needs to know where the store is, and
+  // it is drawn during a store outage -- the one state in which the app knows that and could not
+  // open the store. Watched for the same reason the claims are: the layout resolves a few frames
+  // into a launch and the tile has to start answering when it does.
+  final layout = listen ? ref.watch(pathLayoutProvider) : ref.read(pathLayoutProvider);
+  // **The record store root, which is the path the resolution itself claims.** Both stores are
+  // read in full and the changed records are written back to whichever one owns them, so the
+  // honest question is the one `CharaDetailRecordStorage.resolveAllInheritance` answers about
+  // itself: `rootDirectory.parent`, the parent of `active/` and `archive/`. Asking about either
+  // half, or about a list of record ids, would be a second derivation of the same fact -- and the
+  // one that goes stale when the store gains another directory.
+  final heldBy = storageDeleteBlockedBy(
+    layout == null ? null : StorageDeletePathsRequest([layout.charaDetailDir]),
+    claims,
+  );
+  return resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
+}
 
 /// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
 ///
@@ -864,38 +898,59 @@ String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch
 class ResolveInheritanceTile extends ConsumerWidget {
   const ResolveInheritanceTile({super.key});
 
+  /// The flow: the pending enhancement candidates first, the inheritance resolution afterwards.
+  ///
+  /// The order is not a preference. A merge collapses two records that would otherwise make a
+  /// child's parent slot ambiguous, so resolving first would leave exactly the links the merges
+  /// were about to make resolvable. The blocker is re-evaluated when the list is confirmed for the same
+  /// reason: by then the store may be held by a merge's own reload barrier. That re-evaluation chooses
+  /// the sentence (the `resolving` sentence before the long reader's); it is not what keeps a whole-store
+  /// rewrite off a held store. The resolution asks the registry itself in the turn it claims and
+  /// refuses there, which covers this path and the direct one alike.
+  void _run(WidgetRef ref) {
+    if (ref.read(pendingEnhancementCandidatesProvider).isEmpty) {
+      unawaited(ref.read(enhancementMergeActionsProvider).resolveInheritance());
+      return;
+    }
+    showEnhancementReviewList(
+      ref.base,
+      onConfirm: () {
+        final blocker = resolveInheritanceBlockerFor(ref, listen: false);
+        if (blocker != null) {
+          Toaster.show(ToastData.warning(description: resolveInheritanceBlockerKey(blocker).tr()));
+          return;
+        }
+        unawaited(ref.read(enhancementMergeActionsProvider).resolveInheritance());
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final resolving = ref.watch(inheritanceResolutionRunningProvider);
-    // Watched, not read: a long read can end while the settings page is open, and the tile has to
-    // come back on its own when it does.
-    final claims = ref.watch(longReadRegistryProvider).values;
-    // The layout and not `pathInfoProvider`: this tile only needs to know where the store is, and
-    // it is drawn during a store outage -- the one state in which the app knows that and could not
-    // open the store. Watched for the same reason the claims are: the layout resolves a few frames
-    // into a launch and the tile has to start answering when it does.
-    final layout = ref.watch(pathLayoutProvider);
-    // **The record store root, which is the path the resolution itself claims.** Both stores are
-    // read in full and the changed records are written back to whichever one owns them, so the
-    // honest question is the one `CharaDetailRecordStorage.resolveAllInheritance` answers about
-    // itself: `rootDirectory.parent`, the parent of `active/` and `archive/`. Asking about either
-    // half, or about a list of record ids, would be a second derivation of the same fact -- and the
-    // one that goes stale when the store gains another directory.
-    final heldBy = storageDeleteBlockedBy(
-      layout == null ? null : StorageDeletePathsRequest([layout.charaDetailDir]),
-      claims,
-    );
-    final blocker = resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
+    final blocker = resolveInheritanceBlockerFor(ref, listen: true);
+    // The count of pending merge candidates, so a duplicate that appeared without a capture (a
+    // re-recognition, or one already on disk at launch) is visible without running the flow.
+    final pending = ref.watch(pendingEnhancementCandidatesProvider).length;
+    final colorScheme = Theme.of(context).colorScheme;
     return Disabled(
       disabled: blocker != null,
       tooltip: blocker == null ? null : resolveInheritanceBlockerKey(blocker).tr(),
       child: ListTile(
         title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
         subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
-        trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
-        onTap: () {
-          ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
-        },
+        trailing: Padding(
+          padding: const EdgeInsets.only(right: 16),
+          // Pending work, not a failure: the neutral container role the column chips' count badge
+          // also reads, rather than the error role Badge falls back to.
+          child: Badge.count(
+            count: pending,
+            isLabelVisible: pending > 0,
+            backgroundColor: colorScheme.primaryContainer,
+            textColor: colorScheme.onPrimaryContainer,
+            child: const Icon(Symbols.refresh_rounded),
+          ),
+        ),
+        onTap: () => _run(ref),
       ),
     );
   }
@@ -1032,10 +1087,9 @@ enum RegenerateAllBlocker {
 
   /// A registered long reader is holding the active store this batch would rewrite.
   ///
-  /// The tile stopped a batch of this kind before it explained one:
   /// `CharaDetailRecordRegenerationController.start` — the funnel all five regeneration entry
-  /// points share — refuses while a long reader holds the records, so the tap did nothing and
-  /// said nothing. This is that refusal, given a reason.
+  /// points share — refuses while a long reader holds the records, so without this the tap would
+  /// do nothing and say nothing. This is that refusal, given a reason.
   ///
   /// Named last on purpose; see [resolveRegenerateAllBlocker].
   longRead,

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "falsify_c4_wrong_slot",
+  "description": "FALSIFICATION of the link judgement. Identical to c4_parent_cinderella_pre_then_hopstep_pre except that the link is expected in parent2. The run is the normal one, so it must exit 1 with exactly [link_mismatch] on clip 1. Exit 1 alone is not the pass condition.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    }
+  ],
+  "expect_links": [
+    {
+      "child": 1,
+      "slot": "parent2",
+      "parent": 0
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c4_parent_cinderella_pre_then_hopstep_pre.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

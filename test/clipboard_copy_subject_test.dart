@@ -143,7 +143,7 @@ void main() {
   group('what the toast says is what went on the clipboard', () {
     test('a folder is reported as a folder', () async {
       final observer = _ToastObserver();
-      final ref = _container().read(refBaseProvider);
+      final ref = _container().read(containerRefProvider);
 
       expect(await ClipboardAlt.pasteEntity(ref, DirectoryPath(_abs('folder'))), isTrue);
       await observer.drain();
@@ -157,7 +157,7 @@ void main() {
 
     test('a file is reported as a file', () async {
       final observer = _ToastObserver();
-      final ref = _container().read(refBaseProvider);
+      final ref = _container().read(containerRefProvider);
 
       expect(await ClipboardAlt.pasteEntity(ref, FilePath(_abs('folder/record.json'))), isTrue);
       await observer.drain();
@@ -172,7 +172,7 @@ void main() {
       // the sentences back to a single one leaves this green and the two above
       // red.
       final observer = _ToastObserver();
-      final ref = _container().read(refBaseProvider);
+      final ref = _container().read(containerRefProvider);
 
       expect(await ClipboardAlt.pasteImage(ref, FilePath(_abs('image.png')), userInitiated: true), isTrue);
       await observer.drain();
@@ -185,7 +185,7 @@ void main() {
       // toaster anyway would put a sentence in front of a user who pressed
       // nothing.
       final observer = _ToastObserver();
-      final ref = _container().read(refBaseProvider);
+      final ref = _container().read(containerRefProvider);
 
       expect(await ClipboardAlt.pasteEntity(ref, DirectoryPath(_abs('folder')), silent: true), isTrue);
       await observer.drain();

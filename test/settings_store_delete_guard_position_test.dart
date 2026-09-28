@@ -40,10 +40,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:umacapture/src/core/storage/settings_store_delete.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
+import 'support/storage_delete_claim.dart';
 
 /// One firing of a non-interactive writer, and what the app's accessor did.
 typedef _Firing = ({bool anyStoreGone, Object? error});
@@ -78,7 +78,7 @@ void main() {
     // awaits real file IO eight times, so this samples the window between the
     // first removal and the last one rather than hoping to land in it.
     final timer = Timer.periodic(Duration.zero, (_) => fire());
-    final report = await deleteSettingsStores();
+    final report = await deleteSettingsStoresUnderClaim();
     timer.cancel();
 
     // The delete itself did what it was asked, so a failure below is about the

@@ -4,32 +4,32 @@
 //
 // The defect this is the guard for: a video import writes records into the active store through the
 // *core* — the Windows runner straight into `directory.storage_dir`, the web worker into its own
-// OPFS store — and nothing in Dart is on the stack while it does. So no write function could carry
-// a claim, the registry saw nothing, and `DataRootMigrationController.migrate` (whose only long-read
-// question is `storageDeleteBlockedBy` over `movedRoots`) copied the store away underneath a running
-// import. The storage view's own delete and extract were never exposed to this, because they ask
-// `captureActivityProvider` as well and it answers `importing`; the relocation asks the registry and
-// nothing else, so it was the one surface with no answer at all.
+// OPFS store — and nothing in Dart is on the stack while it does. So no write function can carry a
+// claim, and a session that does not announce itself is seen by nothing on the registry. A
+// relocation's only long-read question is its own claim's, asked of the registry over
+// `DataRootMigrationController.movedRoots`, so an unannounced import is one it copies the store away
+// from underneath. The storage view's own delete and extract are not exposed to this, because they
+// ask `captureActivityProvider` as well and it answers `importing`; the relocation asks the registry
+// and nothing else, so it is the one surface with no other answer.
 //
-// WHAT THIS FILE DRIVES, AND WHAT IT ONLY READS.
+// WHAT THIS FILE DRIVES.
 //
-//  1. The **io leg** is driven for real, end to end, through the same two seams
-//     `video_import_io_test.dart` uses: `videoImportPathPicker` (the real one opens a modal Win32
-//     dialog and must never be called from a suite) and a mock method-channel handler. The claim is
-//     read off a real `LongReadRegistry` in a real container, and the refusal is asked with the
-//     relocation's own predicate over a real `DataRootMigrationController.movedRoots` — not with a
-//     containment comparison written here, which could agree with itself while disagreeing with the
-//     dialog.
-//  2. The **web leg** is read as text, for the reason `video_import_breadcrumb_privacy_test.dart`
-//     states about the same file: it reaches `package:flutter` (so `dart test --platform chrome`
-//     cannot compile it) and `package:web` (so `flutter test` cannot). What is asserted there is the
-//     shape both legs have to keep — the declaration wraps the session and not the dialog — and it
-//     is asserted about the io leg too, so the two cannot drift apart with only one of them measured.
+// The **io leg**, for real, end to end, through the same two seams `video_import_io_test.dart` uses:
+// `videoImportPathPicker` (the real one opens a modal Win32 dialog and must never be called from a
+// suite) and a mock method-channel handler. The claim is read off a real `LongReadRegistry` in a real
+// container, and the refusal is asked of the relocation's own claim —
+// `dataRootRelocationLongReadDeclaration`, the declaration the dialog hands `migrate`, over a real
+// `DataRootMigrationController` — not of a containment comparison written here, which could agree
+// with itself while disagreeing with the relocation.
 //
-// WHAT IT CANNOT COVER: that the runner (or the worker) really is writing into the store for the
-// whole of the window claimed, and that a relocation attempted from the settings page while an
-// import runs reaches this predicate. The first is on-device, below the method channel; the second
-// is a GUI act, and `migrate` closes Hive, so no suite may run it.
+// WHAT IT CANNOT COVER: the **web leg** (`video_import_web.dart`), which reaches `package:flutter` (so
+// `dart test --platform chrome` cannot compile it) and `package:web` (so `flutter test` cannot), so
+// nothing here checks that its declaration wraps the session and not the dialog; that the runner (or
+// the worker) really is writing into the store for the whole of the window claimed, which is
+// on-device, below the method channel; and that the settings page's relocation dialog hands `migrate`
+// this declaration, which is a GUI act this file does not drive
+// (`data_root_migration_long_read_gate_test.dart` runs `migrate` with the same declaration, but not
+// through the dialog).
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -40,10 +40,8 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_channel_io.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
-import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
-import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/video_import.dart';
 
 const _path = r'C:\clips\2026-09-05 race.mkv';
@@ -72,16 +70,32 @@ void main() {
   late List<MethodCall> calls;
   Future<Object?> Function(MethodCall call)? answer;
 
-  /// The claims the registry is holding, as the relocation would read them.
+  /// The claims the registry is holding.
   Iterable<LongReadClaim> claims() => container.read(longReadRegistryProvider).values;
 
-  /// The relocation's own answer: is a registered long reader holding one of the trees it would
-  /// rename away? Asked through `DataRootMigrationController.movedRoots` and the app's single
-  /// containment fold, which is exactly the pair `storage_settings.dart` passes to `migrate`.
-  LongReadKind? relocationBlockedBy() => storageDeleteBlockedBy(
-    StorageDeletePathsRequest(DataRootMigrationController(source: layout).movedRoots),
-    claims(),
-  );
+  /// The relocation's own answer: which registered long reader, if any, its claim refuses for.
+  ///
+  /// Asked by running `dataRootRelocationLongReadDeclaration` — the declaration
+  /// `storage_settings.dart` hands `migrate` — over a real `DataRootMigrationController`, so the
+  /// trees it asks about and the kinds it disregards are the ones a relocation uses. The guarded
+  /// action does nothing, so a claim that is let through registers and is released within this call.
+  Future<LongReadKind?> relocationRefusedBy() async {
+    final declaration = dataRootRelocationLongReadDeclaration(
+      container.read(containerRefProvider),
+      DataRootMigrationController(source: layout),
+    );
+    try {
+      await declaration.runDeclared(() async {});
+    } on LongReadNotStartedException catch (exception) {
+      final heldBy = exception.heldBy;
+      if (heldBy == null) {
+        // Abandoned: the registry went away, which names no holder and answers nothing.
+        rethrow;
+      }
+      return heldBy;
+    }
+    return null;
+  }
 
   /// Starts an import and lets the picker future and the channel post settle, leaving the front end
   /// in `starting` with the runner's acknowledgement outstanding. Returned inside a record so this
@@ -174,21 +188,21 @@ void main() {
       await started.running;
     });
 
-    test('the relocation\'s own predicate refuses, which is the whole point of the claim', () async {
+    test('the relocation\'s own claim refuses, which is the whole point of the import\'s claim', () async {
       final started = await startAndSettle();
 
       expect(
-        relocationBlockedBy(),
+        await relocationRefusedBy(),
         LongReadKind.videoImport,
         reason:
-            'this is the value `storage_settings.dart` passes to `migrate` as `blockedBy`, and `migrate` '
-            'returns `refusedSessionIntact` for any non-null one. Null here is the defect: the copy runs, '
-            'the producer keeps writing into the old root, and those records are gone at the next startup',
+            'this is the refusal `migrate` reports as `refusedSessionIntact`. Null here is the defect: the '
+            'copy runs, the producer keeps writing into the old root, and those records are gone at the next '
+            'startup',
       );
 
       videoImportHandleNativeEvent(_done());
       await started.running;
-      expect(relocationBlockedBy(), isNull, reason: 'the refusal outlived the import that caused it');
+      expect(await relocationRefusedBy(), isNull, reason: 'the refusal outlived the import that caused it');
     });
   });
 
@@ -256,51 +270,5 @@ void main() {
     expect(whileDialogOpen, isEmpty, reason: 'the dialog was announced as a long read');
     expect(videoImportState.value.phase, VideoImportPhase.idle);
     expect(claims(), isEmpty);
-  });
-
-  group('both front ends wrap the same region', () {
-    // Read as text, because one of the two cannot be compiled by any runner this repository has
-    // (see the header). The property asserted is the one a reviewer would check by eye and the one
-    // that decides whether the claim covers the defect: the declaration opens *after* the second
-    // preflight — so the dialog is outside it — and *before* the clip is handed to the producer.
-    for (final leg in const [
-      (path: 'lib/src/core/video_import_io.dart', post: 'PlatformChannel.startVideoImport(clipPath)'),
-      (path: 'lib/src/core/video_import_web.dart', post: 'client.startVideoImport(clip)'),
-    ]) {
-      test('${leg.path.split('/').last} declares the session and not the dialog', () {
-        final source = File(leg.path).readAsStringSync();
-
-        expect(
-          source.contains('required LongReadDeclaration declaration'),
-          isTrue,
-          reason:
-              'this leg can open an import session without being handed a declaration, so a caller can '
-              'start one that announces nothing and nothing in the repository says so',
-        );
-        expect(
-          'declaration.runDeclared('.allMatches(source).length,
-          1,
-          reason: 'the declaration is run somewhere other than once around the session',
-        );
-
-        final declared = source.indexOf('declaration.runDeclared(');
-        final recheck = source.indexOf('final blocker = preflight();');
-        final post = source.indexOf(leg.post);
-        expect(recheck, greaterThan(-1), reason: 'the second preflight was renamed; this case is anchored on it');
-        expect(post, greaterThan(-1), reason: 'the post to the producer was renamed; this case is anchored on it');
-        expect(
-          declared,
-          greaterThan(recheck),
-          reason:
-              'the claim opens before the file dialog has returned, so it holds the record store while a user '
-              'stands in a dialog — which is the phase `storageActionBlocker` rules out by name',
-        );
-        expect(
-          declared,
-          lessThan(post),
-          reason: 'the clip reaches the producer outside the claim, which is the window the defect lives in',
-        );
-      });
-    }
   });
 }

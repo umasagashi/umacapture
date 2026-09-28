@@ -59,6 +59,8 @@ lib/*.g.dart
 # Cloudflare R2 setup credentials (real token/account id; scripts are tracked,
 # the secrets file is not). Copy tool/cloudflare/.env.example to .env.
 /tool/cloudflare/.env
+# Pointer/alias backups written by tool/cloudflare/publish_modules.sh.
+/tool/cloudflare/.publish-backup/
 
 # FVM
 .fvm/

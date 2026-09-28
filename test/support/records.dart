@@ -11,7 +11,7 @@ import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 
 /// A [Character] carrying only its [card] id; the other slots are irrelevant to
 /// the domain logic these fixtures exercise.
-Character chara(int card) => Character(0, 0, card, 0);
+Character chara(int card) => Character(0, 0, card, 0, null);
 
 /// A [Parent] whose own card is [card]; its grandparents are zeroed.
 Parent parentOf(int card) => Parent(chara(card), chara(0), chara(0), null);
@@ -40,13 +40,14 @@ CharaDetailRecord makeRecord({
   String trainedDate = '2026/01/01',
   int fans = 0,
   int evaluationValue = 0,
+  String capturedDate = '2026-01-01T00:00:00+0900',
 }) {
   final metadata = Metadata(
     '1.0.0',
     'JPN',
     RecordId(id, parent1Id, parent2Id),
     'trainer',
-    '2026-01-01T00:00:00+0900',
+    capturedDate,
     '2026-01-01T00:00:00+0900',
     RecordStage.active,
     0,

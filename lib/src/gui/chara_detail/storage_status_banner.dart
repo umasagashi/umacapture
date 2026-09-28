@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_store_unavailable.dart';
@@ -12,8 +13,8 @@ import '/src/gui/record_store_banner.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-/// Blocking banner shown whenever this context cannot provide the cross-tab
-/// record lock.
+/// Blocking banner shown whenever this context cannot provide the record
+/// mutation lock.
 ///
 /// Mounted at app level, not on the record tab: every persisted read and write
 /// goes through that lock, so capture, import, archive and the record list all
@@ -75,7 +76,7 @@ class _StoreOutageBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return RecordStoreBanner(
       // A blocked store is not going to clear on its own, so it gets the harder
-      // icon; a busy one is the ordinary "another tab is working" wait.
+      // icon; a busy one is the ordinary "something else is still running" wait.
       icon: outage.transient ? Symbols.hourglass_top_rounded : Symbols.dangerous_rounded,
       message: "$messageKey.${outage.transient ? 'busy' : 'blocked'}".tr(),
       actions: [
@@ -207,6 +208,46 @@ class IncompleteStoreBanner extends ConsumerWidget {
           onPressed: () {
             ref.invalidate(charaDetailRecordStorageLoaderProvider);
             ref.invalidate(charaDetailArchiveStorageLoaderProvider);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Persistent banner shown while a rating or memo storage file is behind the
+/// controller that owns it.
+///
+/// The toast raised at the moment of the failure is not enough on its own, by the
+/// same reasoning [IncompleteStoreBanner] carries: it is said once, while the
+/// condition lasts. Until a write lands, the ratings and memos the user entered
+/// exist only in this process - a restart discards them - and the enhancement
+/// merge keeps refusing, because it will not re-key a file that is out of date.
+///
+/// The retry re-issues each failing controller's write. Nothing is reconstructed
+/// for it: the controller still holds the values, so the only thing that failed
+/// is the one step being repeated.
+class MetadataWriteFailureBanner extends ConsumerWidget {
+  const MetadataWriteFailureBanner({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final failures = ref.watch(metadataWriteFailureProvider);
+    if (failures.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return RecordStoreBanner(
+      icon: Symbols.dangerous_rounded,
+      message: "$tr_chara_detail.metadata_write_failure_banner.message".tr(namedArgs: {"count": "${failures.length}"}),
+      actions: [
+        RecordStoreBannerAction(
+          label: "$tr_chara_detail.metadata_write_failure_banner.retry".tr(),
+          icon: Symbols.refresh_rounded,
+          // A copy, because a retry that succeeds empties the map this iterates.
+          onPressed: () {
+            for (final chain in [...failures.values]) {
+              chain.retryWrite();
+            }
           },
         ),
       ],

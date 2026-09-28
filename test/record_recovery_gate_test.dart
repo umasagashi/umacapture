@@ -1,9 +1,18 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
+import 'package:umacapture/src/core/fs/record_recovery_gate_io.dart' as io_leg;
+import 'package:umacapture/src/core/fs/record_recovery_gate_web.dart' as web_leg;
+import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
 import 'support/long_read_declarations.dart';
+import 'support/web_like_fs_backend.dart';
 
 void main() {
   final storageRoot = DirectoryPath(['storage']);
@@ -111,4 +120,66 @@ void main() {
   //
   // The composition against real on-disk slot state lives in
   // record_recovery_gate_web_policy_test.dart and record_recovery_gate_integration_test.dart.
+
+  group('the per-record gate resumes a replacing slot of the id it is asked about, on both legs', () {
+    // A replacing publication of `older` built from `newer`'s tree, stopped
+    // right after its `parked` manifest: `older` still stands in `active/`,
+    // its copy is parked in the slot, and the survivor is staged for
+    // `archive/`. The slot is `older`'s alone — `newer` is only where its bytes
+    // came from.
+    final legs = {'desktop': io_leg.createPlatformRecordRecoveryGate, 'web': web_leg.createPlatformRecordRecoveryGate};
+    for (final MapEntry(key: leg, value: createGate) in legs.entries) {
+      for (final webLike in [false, true]) {
+        test('$leg leg, ${webLike ? 'web-like' : 'io'} backend', () async {
+          final temp = Directory.systemTemp.createTempSync('umacapture_gate_replacing');
+          final original = fsBackend;
+          if (webLike) fsBackend = WebLikeFsBackend(original);
+          addTearDown(() {
+            fsBackend = original;
+            temp.deleteSync(recursive: true);
+          });
+          final storage = DirectoryPath(temp.path) / 'storage';
+          final dataRoot = storage / 'chara_detail';
+          await (dataRoot / 'active' / 'older').create(recursive: true);
+          await (dataRoot / 'active' / 'older').filePath('old.bin').writeAsBytes([7]);
+          await (dataRoot / 'archive' / 'newer').create(recursive: true);
+          await (dataRoot / 'archive' / 'newer').filePath('new.bin').writeAsBytes([1, 2]);
+          final survivor = Uint8List.fromList(utf8.encode('{"self":"older"}'));
+          final stopped = WebRecordWriteTransaction(
+            onCheckpoint: (point) async {
+              if (point == WebRecordWriteCheckpoint.parkedPersisted) throw StateError('stop');
+            },
+          );
+          expect(
+            await stopped.publish(
+              dataRoot,
+              'older',
+              [
+                (relativeSegments: ['record.json'], bytes: survivor),
+              ],
+              store: 'archive',
+              baseFrom: dataRoot / 'archive' / 'newer',
+            ),
+            WebRecordWriteResult.incomplete,
+          );
+          final slotRoot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1';
+          expect(await slotRoot.list().length, 1);
+          final gate = createGate(mutationLock: RecordMutationLock((_, _, action) => action()));
+
+          await gate.runForRecord(storage, 'newer', declaration: undeclaredInTest, () async {});
+          expect(await slotRoot.list().length, 1, reason: 'the gate for newer touched the slot of older');
+          expect(await (dataRoot / 'active' / 'older').filePath('old.bin').readAsBytes(), [7]);
+
+          await gate.runForRecord(storage, 'older', declaration: undeclaredInTest, () async {
+            // Inside the action: the gate finished the slot before handing over.
+            expect(await slotRoot.list().isEmpty, isTrue);
+            expect(await (dataRoot / 'active' / 'older').exists(), isFalse);
+            expect(await (dataRoot / 'archive' / 'older').filePath('record.json').readAsBytes(), survivor);
+            expect(await (dataRoot / 'archive' / 'older').filePath('new.bin').readAsBytes(), [1, 2]);
+            expect(await (dataRoot / 'archive' / 'newer').filePath('new.bin').readAsBytes(), [1, 2]);
+          });
+        });
+      }
+    }
+  });
 }

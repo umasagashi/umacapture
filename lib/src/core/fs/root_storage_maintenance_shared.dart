@@ -112,10 +112,7 @@ final class JournalRootStorageMaintenance implements RootStorageMaintenance {
     // is not an exclusion (`long_read_registry.dart` says so in its opening
     // paragraph), so how the lock is taken and whether the work is announced are
     // separate decisions, and only the first of them is what this comment
-    // sanctions. The sanctioned set in `long_read_registry_test.dart` covers that
-    // decision, and it is a set and not a count: an acquisition outside it turns
-    // that case red wherever it is written, so a further bypass cannot appear
-    // unnoticed however many there come to be.
+    // sanctions.
     return _mutationLock.runForRoot(() => runUnlocked(request));
   }
 
@@ -125,25 +122,29 @@ final class JournalRootStorageMaintenance implements RootStorageMaintenance {
   /// and for [RootMaintenanceReason.readyToUse] a sweep that already succeeded
   /// is an answer that stays true: the store is readable, and every slot made
   /// *and finished* since then was finished inside the record lock. Repeating it
-  /// is a pure cost, and it was being paid three times per startup: once at the
-  /// `pathInfo` boundary and once more for each of the active and archive store
-  /// scans, each one a full walk of the store.
+  /// is a pure cost, and without this memo it is paid three times per startup:
+  /// once at the `pathInfo` boundary and once more for each of the active and
+  /// archive store scans, each one a full walk of the store.
   ///
-  /// **What the memo may not be used to answer is
-  /// [RootMaintenanceReason.beforeDestroyingJournals].** This table used to be
-  /// consulted for every caller, on the reasoning that "nothing else can create a
-  /// slot behind our back". A slot is created behind our back, by this very
+  /// **What the memo may not be used to answer is any reason whose caller is
+  /// about to act on the sweep's result** — today
+  /// [RootMaintenanceReason.beforeDestroyingJournals] and
+  /// [RootMaintenanceReason.beforeRewritingRecords], and the `switch` next door
+  /// is where each one says so. Consulting this table for every caller would
+  /// rest on "nothing else can create a slot behind our back", and that is
+  /// false. A slot is created behind our back, by this very
   /// session: a write that fails partway leaves its slot on disk, and it is left
   /// by an operation that took the record lock exactly as designed. The two
   /// escapes named next door do not reach it either — a restart is not involved,
   /// and the per-record gate only runs for a record something reads, which for a
   /// first publication, or for one whose `active/<id>/` has already been carried
   /// into the slot, is a record that appears in no list. Removing the journals in
-  /// that state destroys the only copy of the record, so that reason sweeps
-  /// whatever this table says.
+  /// that state destroys the only copy of the record, and rewriting the records
+  /// that reference one leaves the slot to publish a reference the rewrite has
+  /// already taken out, so both of those reasons sweep whatever this table says.
   ///
-  /// **The two intents mean the same thing on both legs**, because the slot the
-  /// second one exists for is created on both: a browser tab and a Windows
+  /// **The intents mean the same thing on both legs**, because the slot the
+  /// later ones exist for is created on both: a browser tab and a Windows
   /// session leave an interrupted publication behind in the same journal, by the
   /// same shared code.
   ///
@@ -187,6 +188,7 @@ final class JournalRootStorageMaintenance implements RootStorageMaintenance {
     return switch (request.reason) {
       RootMaintenanceReason.readyToUse => true,
       RootMaintenanceReason.beforeDestroyingJournals => false,
+      RootMaintenanceReason.beforeRewritingRecords => false,
     };
   }
 

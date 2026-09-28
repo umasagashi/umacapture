@@ -30,7 +30,6 @@ import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 import 'support/settling.dart';
 
 /// The one sentence both storages answer a load failure with, as shipped.
@@ -72,7 +71,7 @@ void main() {
     final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
     addTearDown(subscription.close);
     await container.read(pathInfoLoader.future);
-    return (container.read(refBaseProvider), toasts);
+    return (container.read(containerRefProvider), toasts);
   }
 
   /// Lets the toast stream deliver: `plainToastEventProvider` is a StreamProvider, so a listener

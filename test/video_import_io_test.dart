@@ -387,6 +387,23 @@ void main() {
       expect(videoImportState.value.outcome?.message, contains('pickFile'));
     });
 
+    test('a dialog failure that quotes a path publishes it without its directory', () async {
+      // The plugin's text reaches the page and the report, so a directory it quoted — which names the
+      // account on Windows — must be gone from the published message, while the file's own name and
+      // the failure stay readable.
+      videoImportPathPicker = () async =>
+          throw const FileSystemException('Cannot open', r'C:\Users\hazuki\Videos\clip.mkv');
+
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
+
+      final message = videoImportState.value.outcome?.message;
+      expect(videoImportState.value.outcome?.kind, VideoImportOutcomeKind.failed);
+      expect(message, contains('Cannot open'));
+      expect(message, contains('clip.mkv'));
+      expect(message, isNot(contains('hazuki')));
+      expect(message, isNot(contains(r'C:\Users')));
+    });
+
     test('a picked path is handed to the runner exactly as the dialog gave it', () async {
       // Verbatim, with its backslashes and its spaces: the runner opens this string with
       // `cv::VideoCapture`, so anything this side normalised would be a different file — and nothing

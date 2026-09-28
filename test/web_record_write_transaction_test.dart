@@ -218,16 +218,17 @@ void main() {
         reason: 'the parked copy of the version being replaced is a merge of it and the new one',
       );
 
-      // And that is the tree the user is handed: a slot given up on promotes
-      // its parked copy to `quarantine/`, which the app counts and shows as
-      // records to recover.
+      // And that is the tree the record goes back to when the staged tree is
+      // lost: the resume restores the parked copy into the record's own store.
       await (slot / 'desired').delete(recursive: true, emptyOk: true);
       expect(await WebRecordWriteTransaction().recoverAll(dataRoot), hasLength(1));
       expect(
-        await sameDirectoryTree(dataRoot / 'quarantine' / id, before),
+        await sameDirectoryTree(dataRoot / 'active' / id, before),
         isTrue,
-        reason: 'quarantine holds a tree that is neither the old version nor the new one',
+        reason: 'the record was restored as a tree that is neither the old version nor the new one',
       );
+      expect(await slot.exists(), isFalse);
+      expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
     });
 
     test('still publishes the staged tree when a later recovery finishes it', () async {
@@ -294,7 +295,12 @@ void main() {
     // exercised, because a promotion in one of them and not the other is
     // indistinguishable from no promotion at all for whichever record takes the
     // other route.
-    for (final route in ['staging-gone', 'manifest-gone']) {
+    //
+    // A lost staged tree is not one of those places for a slot this build
+    // mints: it is resumed, by restoring the parked copy into the store (the
+    // case below). An unreadable manifest is what takes such a slot to
+    // `_abandonSlot` now.
+    for (final route in ['manifest-unreadable', 'manifest-gone']) {
       final finalDir = await _seed(dataRoot, route);
       final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(route);
       final interrupted = WebRecordWriteTransaction(
@@ -305,11 +311,10 @@ void main() {
       expect(await interrupted.publish(dataRoot, route, _overlay(route)), WebRecordWriteResult.incomplete);
       expect(await finalDir.exists(), isFalse, reason: '$route: the replacement is mid-flight');
 
-      // `staging-gone` reaches `_abandonSlot` (a `ready` manifest naming a tree
-      // that is no longer there); `manifest-gone` reaches `_discardSlot` (a slot
-      // of ours carrying no manifest at all).
-      if (route == 'staging-gone') {
-        await (slot / 'desired').delete(recursive: true, emptyOk: true);
+      // `manifest-unreadable` reaches `_abandonSlot`; `manifest-gone` reaches
+      // `_discardSlot` (a slot of ours carrying no manifest at all).
+      if (route == 'manifest-unreadable') {
+        await slot.filePath('manifest.json').writeAsString('{ torn');
       } else {
         await slot.filePath('manifest.json').delete();
       }
@@ -324,6 +329,31 @@ void main() {
       expect(await quarantined.filePath('old.bin').readAsBytes(), [7], reason: route);
       expect(await quarantined.filePath('new.bin').exists(), isFalse, reason: route);
     }
+  });
+
+  test('a slot whose staged tree is lost after parking restores the version it was replacing', () async {
+    // A staged tree lost after the slot said `parked`: the parked copy was
+    // verified by then, so it goes back into the store the record came from
+    // rather than to `quarantine/`.
+    const id = 'staging-gone';
+    final finalDir = await _seed(dataRoot, id);
+    final before = DirectoryPath(root.path) / 'before-$id';
+    await finalDir.copyTreeInto(before);
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
+    final interrupted = WebRecordWriteTransaction(
+      onCheckpoint: (point) async {
+        if (point == WebRecordWriteCheckpoint.finalSetAside) throw StateError('stop');
+      },
+    );
+    expect(await interrupted.publish(dataRoot, id, _overlay(id)), WebRecordWriteResult.incomplete);
+    expect(await finalDir.exists(), isFalse, reason: 'the replacement is mid-flight');
+    await (slot / 'desired').delete(recursive: true, emptyOk: true);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await slot.exists(), isFalse);
+    expect(await sameDirectoryTree(finalDir, before), isTrue);
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
   });
 
   test('when both shelves fill at once the record takes the plain name and the staging the suffix', () async {
@@ -460,12 +490,19 @@ void main() {
   });
 
   test('a manifest of ours we cannot resume takes its staging to quarantine, not the bin', () async {
-    // The counterpart of the test above: the same four manifests, in slot names
+    // The counterpart of the test above: the same four kinds of manifest, a
+    // version-2 one that names no stores, and a version-1 one, in slot names
     // that *are* ours. Without this, "leave everything alone" would pass there.
     final transactionRoot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1';
     for (final values in [
       _manifest(dataRoot, 'owner', owner: 'foreign'),
-      _manifest(dataRoot, 'version', version: 2),
+      _manifest(dataRoot, 'version', version: 3),
+      // Version 2 is this build's, and names its stores; one that does not is
+      // not a version-2 manifest.
+      _manifest(dataRoot, 'unstored', namesStores: false),
+      // Version 1 is read by no version of this build: its staging is kept on
+      // the shelf for records the app could not read, not deleted with the slot.
+      _manifest(dataRoot, 'protocol-1', version: 1, namesStores: false),
       _manifest(dataRoot, 'root', dataRootPath: (DirectoryPath(root.path) / 'foreign').path),
       _manifest(dataRoot, 'final', finalPath: (dataRoot / 'active' / 'other').path),
     ]) {
@@ -482,7 +519,7 @@ void main() {
     final recovered = await WebRecordWriteTransaction().recoverAll(dataRoot);
     expect(recovered.map((entry) => entry.result), everyElement(WebRecordWriteResult.incomplete));
     expect(await transactionRoot.list().isEmpty, isTrue);
-    for (final id in ['owner', 'version', 'root', 'final']) {
+    for (final id in ['owner', 'version', 'unstored', 'protocol-1', 'root', 'final']) {
       expect(await (dataRoot / 'quarantine' / id).filePath('staged.bin').readAsBytes(), [9], reason: id);
       expect(await (dataRoot / 'active' / id).filePath('record.json').exists(), isTrue, reason: id);
     }
@@ -763,6 +800,7 @@ void main() {
               dataRoot,
               'brand-new',
               state: 'building',
+              displacedStore: null,
               overlays: {'record.json': _recordJson('brand-new').length, 'half.bin': 1},
             ),
           ),
@@ -809,6 +847,7 @@ void main() {
               dataRoot,
               'brand-new',
               state: 'building',
+              displacedStore: null,
               overlays: {'record.json': _recordJson('brand-new').length, 'half.bin': 1},
             ),
           ),
@@ -836,13 +875,12 @@ void main() {
     expect(await slot.exists(), isFalse);
   });
 
-  test('a manifest that predates the overlay paths cannot vouch for its staging', () async {
-    // Backward compatibility, decided on the safe side. A slot an earlier build
-    // staged carries the eight original keys and no record of what it was
-    // writing, so "the staging is whole" is not a fact this build can establish
-    // about it — and the fixture below is a tree that looks complete. Reading
-    // the silence as completeness is the defect this whole case exists over,
-    // one build removed.
+  test('a manifest without the overlay paths cannot vouch for its staging', () async {
+    // Decided on the safe side. A manifest without `overlays` carries no record
+    // of what it was writing, so "the staging is whole" is not a fact this build
+    // can establish about it — and the fixture below is a tree that looks
+    // complete. Reading the silence as completeness would publish a staging
+    // nothing vouches for, so the slot goes to `quarantine/` instead.
     final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('older-build');
     await slot.create(recursive: true);
     await slot
@@ -1038,7 +1076,9 @@ void main() {
     await archived.filePath('record.json').writeAsBytes(_recordJson('brand-new'));
     final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('brand-new');
     await slot.create(recursive: true);
-    await slot.filePath('manifest.json').writeAsString(jsonEncode(_manifest(dataRoot, 'brand-new', state: 'building')));
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(jsonEncode(_manifest(dataRoot, 'brand-new', state: 'building', displacedStore: null)));
     await (slot / 'desired').create(recursive: true);
     await (slot / 'desired').filePath('half.bin').writeAsBytes([9]);
 
@@ -1170,13 +1210,18 @@ String _slotName(String id) => base64Url.encode(utf8.encode('publish-active-reco
 Map<String, Object?> _manifest(
   DirectoryPath dataRoot,
   String id, {
-  int version = 1,
+  int version = 2,
   String owner = 'umacapture.web-record-persistence',
   String? dataRootPath,
   String? finalPath,
   String state = 'ready',
+  // `false` writes a manifest without the two store keys, which is the shape of
+  // a version-1 manifest and not a readable version-2 one.
+  bool namesStores = true,
+  // `null` for a first publication, which displaces no tree.
+  String? displacedStore = 'active',
   // Omitted by default, so every case that does not name it is testing against
-  // a manifest in the shape builds before this field wrote one. Keyed by the
+  // a manifest that makes no claim about what its staging holds. Keyed by the
   // relative path and valued by the length the publication set out to write
   // there, which is the pair the manifest stores.
   Map<String, int>? overlays,
@@ -1189,6 +1234,7 @@ Map<String, Object?> _manifest(
   'dataRootPath': dataRootPath ?? dataRoot.path,
   'finalPath': finalPath ?? (dataRoot / 'active' / id).path,
   'state': state,
+  if (namesStores) ...{'store': 'active', 'displacedStore': displacedStore},
   if (overlays case final planned?)
     'overlays': [
       for (final entry in planned.entries) {'path': entry.key, 'bytes': entry.value},

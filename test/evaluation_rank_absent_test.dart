@@ -18,15 +18,14 @@ import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_label.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
-
-import 'support/riverpod.dart';
 
 // A synthetic rank ladder: evaluation < 300 -> index 0, < 1000 -> 1, < 5000 -> 2,
 // otherwise the top index 3.
 const _rankBorder = [300, 1000, 5000];
 
-Character _chara(int card) => Character(0, 0, card, 0);
+Character _chara(int card) => Character(0, 0, card, 0, null);
 
 Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 
@@ -82,7 +81,7 @@ CharaRankColumnSpec _rankSpec() {
 RefBase _refWithBorder() {
   final container = ProviderContainer.test(overrides: [charaRankBorderProvider.overrideWithValue(_rankBorder)]);
   addTearDown(container.dispose);
-  return container.read(refBaseProvider);
+  return container.read(containerRefProvider);
 }
 
 void main() {

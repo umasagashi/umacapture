@@ -3,10 +3,10 @@
 // The bulk scan skips a record it cannot open rather than failing the whole
 // store (one unrecoverable record must not hide every record). That skip has to
 // reach the screen, and it has to stay distinguishable from a quarantine: a
-// merely *busy* cross-tab lock leaves an intact record on disk that comes back on
+// merely *busy* record lock leaves an intact record on disk that comes back on
 // the next load, while a blocked one is a defect the user has to act on.
 //
-// Only the web loader can *refuse* a record -- a gate, a cross-tab lock, an
+// Only the web loader can *refuse* a record -- a gate, a record lock, an
 // unusable directory name -- and `flutter test` runs the VM (desktop) loader, so
 // those are driven through the storages' `scanRecords` seam. The one cause both
 // loaders produce, a decode failure whose quarantine move failed with it, needs
@@ -29,6 +29,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -93,7 +94,10 @@ void main() {
     // told it is a wait, not a loss.
     expect(active.length, 1);
     expect(active.isIncomplete, isTrue);
-    final busyToast = toasts.singleWhere((toast) => toast.description?.contains('他のタブ') ?? false);
+    // Identified by the reassurance only the busy sentence carries: the record is
+    // still on disk. The blocked sentence says the opposite -- the count is missing
+    // from the list -- so the two cannot be confused.
+    final busyToast = toasts.singleWhere((toast) => toast.description?.contains('記録は失われていません') ?? false);
     expect(busyToast.type, ToastType.warning);
     expect(busyToast.description, contains('1'));
     // Nothing claims the record is corrupt or was moved aside.
@@ -112,7 +116,7 @@ void main() {
     final blockedToast = toasts.single;
     // Same event, different verdict: this one is not going to fix itself.
     expect(blockedToast.type, ToastType.error);
-    expect(blockedToast.description, isNot(contains('他のタブ')));
+    expect(blockedToast.description, isNot(contains('記録は失われていません')));
   });
 
   test('a complete scan says nothing at all', () async {
@@ -184,7 +188,7 @@ void main() {
     // Reported as a defect to act on, not as a wait -- nothing here clears by
     // itself, and no toast claims the record was moved aside.
     final blockedToast = toasts.singleWhere((toast) => toast.type == ToastType.error);
-    expect(blockedToast.description, isNot(contains('他のタブ')));
+    expect(blockedToast.description, isNot(contains('記録は失われていません')));
     expect(
       toasts.where((toast) => toast.description?.contains('退避') ?? false),
       isEmpty,
@@ -209,7 +213,7 @@ void main() {
     // The end of the chain this stage exists to close: the stranded record could
     // have been this trainee, dedup cannot know, and the user is told so instead
     // of the capture being admitted in silence.
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);
@@ -265,10 +269,9 @@ void main() {
     expect(container.read(charaDetailArchiveOutageProvider), isNull);
     final busyToast = toasts.single;
     expect(busyToast.type, ToastType.warning);
-    // Deliberately not '他のタブ': this branch is reachable on desktop too now
-    // that the bulk scan takes the root record lock, and Windows has no tabs.
-    // What the string must still carry is that the wait — not the data — is the
-    // problem, so the assertion is on the reassurance, not on the holder.
+    // The assertion is on the reassurance, not on the holder: which operation is
+    // holding the lock is not something this branch can name, and what the string
+    // must carry is that the wait — not the data — is the problem.
     expect(busyToast.description, contains('記録は失われていません'));
     expect(busyToast.onTap, isNotNull, reason: 'the retry has to be reachable from the toast itself');
   });
@@ -289,7 +292,7 @@ void main() {
     expect(container.read(charaDetailRecordStorageLoaderProvider).storeOutage?.transient, isFalse);
     final blockedToast = toasts.single;
     expect(blockedToast.type, ToastType.error);
-    expect(blockedToast.description, isNot(contains('他のタブ')));
+    expect(blockedToast.description, isNot(contains('記録は失われていません')));
   });
 
   test('an archive outage keeps the active store usable and says what is missing', () async {
@@ -343,7 +346,7 @@ void main() {
 
     // The skipped record could have been this trainee: dedup cannot know, so the
     // capture is kept and the incompleteness is stated instead of hidden.
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);
@@ -364,7 +367,7 @@ void main() {
     writeRecord(pathInfoFor(root).charaDetailActiveDir / 'incoming', makeRecord(id: 'incoming', card: 2));
     toasts.clear();
 
-    await active.addFromFileAsync('incoming');
+    await active.addFromFileAsync('incoming', effects: arrivalEffects(container));
     await pumpEventQueue();
 
     expect(active.getBy(id: 'incoming'), isNotNull);

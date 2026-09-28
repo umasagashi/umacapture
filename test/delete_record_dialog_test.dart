@@ -16,9 +16,13 @@ import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
+import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
+import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
 import 'support/records.dart';
@@ -28,10 +32,13 @@ import 'support/records.dart';
 /// Deletes behave the way the real store behaves once the record lock has been
 /// acquired: the ids this store still holds are erased and reported as
 /// succeeded, and an id it no longer holds is reported as *failed* — the rule in
-/// `_deleteAllAsyncUnlocked` ("not in memory means this store cannot say the
+/// `deleteAllUnlocked` ("not in memory means this store cannot say the
 /// record is gone") that turns a repeated delete of an already-deleted record
-/// into a "deletion failed" toast. Calls settle in the order they arrived,
-/// because the lock serialises them rather than refusing the second one.
+/// into a "deletion failed" toast. Calls settle in the order they arrived. The
+/// real store refuses a second delete of records the first one still has
+/// claimed; this fake serves it instead, so a second call that reaches it shows
+/// up in [deleteAllCalls] and, after the first erased the records, as a failed
+/// batch — either way something a confirmation must never produce.
 class _FakeRecordStorage extends CharaDetailRecordStorage {
   final deleteAllCalls = <Set<String>>[];
 
@@ -52,10 +59,11 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
   }
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) => deleteAllAsync([id]);
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) =>
+      deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) {
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     final gate = Completer<void>();
@@ -80,6 +88,91 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
     reported.add(result);
     return result;
   }
+}
+
+/// Record storage whose two deletes are both answered by one function, and which
+/// records which of the two a confirmation called.
+///
+/// Both are overridden, and separately named in [calls], so a case about one
+/// dialog cannot pass through the other dialog's path.
+class _AnsweringRecordStorage extends CharaDetailRecordStorage {
+  _AnsweringRecordStorage(this._answer);
+
+  final Future<RecordDeleteResult> Function(LongReadRegistry registry, Iterable<String> ids) _answer;
+
+  final calls = <String>[];
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => const [];
+
+  @override
+  CharaDetailRecord? getBy({required String id}) => makeRecord(id: id, card: 1);
+
+  @override
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) {
+    calls.add('deleteAsync');
+    return _answer(ref.read(longReadRegistryProvider.notifier), [id]);
+  }
+
+  @override
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) {
+    calls.add('deleteAllAsync');
+    return _answer(ref.read(longReadRegistryProvider.notifier), ids);
+  }
+}
+
+final _layout = PathInfo(
+  documentDir: DirectoryPath('${Directory.systemTemp.path}/uma_delete_record_dialog'),
+  supportDir: DirectoryPath('${Directory.systemTemp.path}/uma_delete_record_dialog'),
+  executableDir: DirectoryPath('${Directory.systemTemp.path}/uma_delete_record_dialog/exe'),
+  downloadDir: DirectoryPath('${Directory.systemTemp.path}/uma_delete_record_dialog/dl'),
+);
+
+/// Opens the single (`bulk: false`, record `a`) or the bulk (`a` and `b`)
+/// confirmation over [storage], with a layout both dialogs can answer the
+/// registry's question about, and without answering it.
+Future<ProviderContainer> _open(WidgetTester tester, CharaDetailRecordStorage storage, {required bool bulk}) async {
+  final container = ProviderContainer(
+    overrides: [
+      charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
+      pathInfoProvider.overrideWithValue(_layout),
+      pathLayoutProvider.overrideWithValue(_layout),
+    ],
+  );
+  addTearDown(container.dispose);
+  if (bulk) {
+    container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
+    container.read(selectedRecordIdsProvider.notifier).set({'a', 'b'});
+  }
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: DialogLayer(child: Scaffold(body: bulk ? const _ShowButton() : const _ShowSingleButton())),
+      ),
+    ),
+  );
+  await tester.tap(find.text(bulk ? 'show delete dialog' : 'show single delete dialog'));
+  await tester.pump();
+  return container;
+}
+
+/// Holds what deleting [ids] claims, as a delete, until the returned completer completes.
+Completer<void> _holdAsDelete(ProviderContainer container, List<String> ids) {
+  final release = Completer<void>();
+  unawaited(
+    container
+        .read(longReadRegistryProvider.notifier)
+        .hold(
+          kind: LongReadKind.delete,
+          paths: recordDeleteLongReadPaths(pathInfo: _layout, source: RecordSource.active, recordIds: ids),
+          action: (_) => release.future,
+        ),
+  );
+  addTearDown(() {
+    if (!release.isCompleted) release.complete();
+  });
+  return release;
 }
 
 /// Settles every delete the fake is already holding, one per pumped frame.
@@ -287,10 +380,9 @@ void main() {
   testWidgets('a second confirm does not report the finished delete as a failure', (tester) async {
     final h = await _pump(tester);
 
-    // The record lock makes the first delete wait instead of refusing the second caller, and nothing on
-    // screen says the delete is running, so pressing again is the natural response to the silence. A second
-    // run reaching the store after the first one finished finds every id already gone and reports the whole
-    // batch as failed - an error toast for a delete that succeeded.
+    // Nothing else on screen says the delete is running, so pressing again is the natural response to the
+    // silence. The real store would refuse the second press as in use by the first delete's own claim; the
+    // fake serves it, so a second run shows up as a second call and as a batch reported failed.
     await tester.longPress(find.widgetWithIcon(FilledButton, Symbols.delete_rounded));
     await tester.pump();
 
@@ -395,11 +487,8 @@ void main() {
   // them.** The group above pins that a second press cannot be made through the
   // confirm button. It says nothing about the barrier, the title bar's x and
   // cancel, each of which unmounts the dialog outright -- and `_deleting` goes
-  // with the widget, so the rows are listed again with their delete entries live
-  // and the same records can be sent to the store a second time. The store's
-  // cross-tab lock makes that second call *wait* rather than refusing it, so it
-  // arrives after the first delete erased the records, finds every id missing and
-  // reports the whole batch as failed: an error toast for a delete that worked.
+  // with the widget, so the rows are still listed while the delete behind them
+  // runs with nothing on screen that says so.
   //
   // One test per exit and per dialog, so a guard put back for one door and not
   // the others cannot hide behind a neighbour.
@@ -515,4 +604,88 @@ void main() {
     );
     await _expectHeldDeleteFinished(tester, h.storage, find.byType(DeleteRecordDialog));
   });
+
+  // **A refused delete leaves its confirmation up and says why.** The store asks
+  // the registry and claims the records in one turn, so a job that took them after
+  // the dialog was drawn turns the press away with
+  // `LongReadNotStartedException`. Nothing was removed, so the question the dialog
+  // asked is still open. One case per dialog, each over a store that answers both
+  // deletes and records which one was called, so removing one dialog's handling
+  // leaves the other dialog's case green.
+  for (final bulk in [false, true]) {
+    final dialog = bulk ? find.byType(BulkDeleteRecordDialog) : find.byType(DeleteRecordDialog);
+    final called = bulk ? 'deleteAllAsync' : 'deleteAsync';
+    testWidgets('a refused ${bulk ? 'bulk' : 'single'} delete keeps the confirmation up and says it is in use', (
+      tester,
+    ) async {
+      final storage = _AnsweringRecordStorage(
+        (_, _) => Future.error(const LongReadNotStartedException.busy(LongReadKind.scan)),
+      );
+      final container = await _open(tester, storage, bulk: bulk);
+      final toasts = <ToastData>[];
+      final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
+      addTearDown(subscription.close);
+
+      await tester.longPress(find.widgetWithIcon(FilledButton, Symbols.delete_rounded));
+      await tester.pump();
+      await tester.pump();
+
+      expect(storage.calls, [called]);
+      expect(toasts.map((toast) => toast.description), [longReadBusyMessage()]);
+      expect(dialog, findsOneWidget, reason: 'the refused delete closed its confirmation');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  // **A running delete's own claim does not turn its confirmation into a
+  // refusal.** The store claims the records for the whole erasure, and both
+  // dialogs watch the registry, so without the running flag in the question the
+  // confirm would be relabelled "in use" by the dialog's own work. The control
+  // has another job put the same claim up while the dialog is open, which is what
+  // shows the two finders see a refusal when there is one.
+  for (final bulk in [false, true]) {
+    final ids = bulk ? ['a', 'b'] : ['a'];
+    final shape = bulk ? 'bulk' : 'single';
+    testWidgets('a $shape delete under way is not refused by its own claim', (tester) async {
+      final gate = Completer<void>();
+      final storage = _AnsweringRecordStorage(
+        (registry, ids) => holdForDelete(
+          registry,
+          paths: recordDeleteLongReadPaths(pathInfo: _layout, source: RecordSource.active, recordIds: ids),
+          action: (_) => gate.future.then((_) => RecordDeleteResult(succeeded: ids.toSet(), failed: const {})),
+        ),
+      );
+      final container = await _open(tester, storage, bulk: bulk);
+
+      await tester.longPress(find.widgetWithIcon(FilledButton, Symbols.delete_rounded));
+      await tester.pump();
+
+      expect(
+        container.read(longReadRegistryProvider).values.map((claim) => claim.kind),
+        [LongReadKind.delete],
+        reason: 'the premise: the delete holds its own claim',
+      );
+      expect(find.byTooltip(longReadBusyMessage()), findsNothing);
+      expect(find.text(longReadBusyMessage()), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(storage.calls, hasLength(1));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the same claim, taken by another job while the $shape confirmation is open, is a refusal', (
+      tester,
+    ) async {
+      final storage = _AnsweringRecordStorage((_, _) => fail('the refused confirm reached the store'));
+      final container = await _open(tester, storage, bulk: bulk);
+      _holdAsDelete(container, ids);
+      await tester.pump();
+
+      expect(find.byTooltip(longReadBusyMessage()), findsOneWidget);
+      expect(find.text(longReadBusyMessage()), findsOneWidget);
+    });
+  }
 }

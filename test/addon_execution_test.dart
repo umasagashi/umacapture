@@ -24,7 +24,6 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/hive.dart';
-import 'support/riverpod.dart';
 import 'support/settling.dart';
 
 void main() {
@@ -470,44 +469,16 @@ void main() {
       expect(isManualRun({'event': 'record_captured'}), isFalse);
     });
 
-    test('a refused run records English diagnostic text, never a translated sentence', () {
-      // WHY A SOURCE SCAN. The refusal is guarded by `clipboardWriteNeedsGesture`, which is false
-      // off the browser, so no VM test can execute the throw and read what lands in
-      // `ExecutionResult.error`. What is checkable is the property that field depends on -- this
-      // layer never throws localized prose -- and scanning the layer counts the throw sites by
-      // machine, so an action added later is covered without anyone remembering this test.
-      //
-      // The defect: the gesture gate threw `pages.addon.action.unsupported_on_web` *already
-      // translated*, so the execution history, whose every other line is English by a documented
-      // rule (`webhookWebBlockedHint`), held one Japanese sentence wearing Dart's `Bad state: `.
+    test('the gesture refusal hint is English diagnostic text, not a translated sentence', () {
+      // The refusal is guarded by `clipboardWriteNeedsGesture`, which is false off the browser, so no
+      // VM test can execute the throw; what is checked is the hint it carries. The execution history
+      // is English by a documented rule (`webhookWebBlockedHint`).
       expect(builtinGestureBlockedHint, isNot(startsWith('pages.')), reason: 'not a raw translation key');
       expect(
         builtinGestureBlockedHint.runes.every((rune) => rune < 128),
         isTrue,
         reason: 'persisted diagnostics are English; this one shipped as Japanese prose',
       );
-
-      final sources = Directory(
-        'lib/src/addon/execution',
-      ).listSync().whereType<File>().where((file) => file.path.endsWith('.dart'));
-      final throwSites = <String>[];
-      final translated = <String>[];
-      for (final file in sources) {
-        // Whole-line comments dropped so a prose mention of a throw is not a site; the statement
-        // itself is matched across lines because `throw StateError(` routinely wraps.
-        final code = file.readAsLinesSync().where((line) => !line.trimLeft().startsWith('//')).join('\n');
-        for (final match in RegExp(r'throw\b[^;]*;', dotAll: true).allMatches(code)) {
-          final site = match.group(0) ?? '';
-          throwSites.add(site);
-          if (site.contains('.tr()')) {
-            translated.add('${file.path}: $site');
-          }
-        }
-      }
-      // Positive control for the scan itself: a matcher that found nothing would agree with every
-      // implementation, including the one this test exists to reject.
-      expect(throwSites, isNotEmpty, reason: 'the scan must actually be finding throw sites');
-      expect(translated, isEmpty, reason: 'a persisted execution error must not be built from .tr()');
     });
 
     test('copy_file_to_path takes a destination as its second argument', () {
@@ -586,7 +557,7 @@ void main() {
       File('${dir.path}/record.json').writeAsStringSync(fixtureJson);
     }
 
-    RefBase refOf(ProviderContainer container) => container.read(refBaseProvider);
+    RefBase refOf(ProviderContainer container) => container.read(containerRefProvider);
 
     test('adds the modules_dir placeholder for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);

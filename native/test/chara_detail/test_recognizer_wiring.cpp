@@ -173,12 +173,15 @@ TEST_CASE("an update request for a record that cannot be read is reported on the
     REQUIRE_FALSE(std::filesystem::exists(missingRecordRoot()));
     Wiring wiring;
 
-    wiring.update_ready->send(RecordInfo{"missing", record::RecordType::Standard});
+    // No record_type, as the Windows regeneration and wasm updateRecord send it: the recognizer has to recover the
+    // type from the record's own record.json, and that is the first thing a missing record fails on.
+    wiring.update_ready->send(RecordInfo{"missing"});
 
     // The update path is the only one that reports a failure on this channel, so the message also proves the
     // request was routed to update mode.
     REQUIRE(wiring.errors.size() == 1);
-    CHECK(wiring.errors[0].rfind("updateRecord failed for record_id=missing: ", 0) == 0);
+    CHECK(wiring.errors[0]
+          == "updateRecord failed for record_id=missing: record.json not found, cannot resolve record_type");
     CHECK(wiring.updated.empty());
     CHECK(wiring.recognized.empty());
     CHECK(wiring.probes.empty());
@@ -193,6 +196,8 @@ TEST_CASE("the capture input is subscribed once and a failed capture does not re
 
     // Capture mode reports a failure to the log only. An error here would mean this input reached update mode.
     wiring.recognize_ready->send(RecordInfo{"missing", record::RecordType::Standard});
+    // Without a record_type too, as the CLI's `recognize --id` sends it.
+    wiring.recognize_ready->send(RecordInfo{"missing"});
 
     CHECK(wiring.errors.empty());
     CHECK(wiring.recognized.empty());

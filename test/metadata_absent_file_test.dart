@@ -3,8 +3,8 @@
 //
 //   .fvm/flutter_sdk/bin/flutter test test/metadata_absent_file_test.dart
 //
-// WHY THIS EXISTS. Metadata gets no lock -- its writers take none -- so the
-// exclusion it does get drops the owning controller
+// WHY THIS EXISTS. The rating and memo controllers take no lock, so the
+// exclusion a metadata delete has against them drops the owning controller
 // *before* the file is deleted (`runStorageDeleteSerialized`), so a controller
 // with a listener rebuilds into the delete: its `exists()` check passes and its
 // read then finds the file gone. That was reported as a load failure -- a
@@ -46,7 +46,7 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
+import 'support/record_write_effects_fixture.dart';
 
 void main() {
   late Directory tempRoot;
@@ -145,7 +145,8 @@ void main() {
     lines.clear();
 
     await runStorageDelete(
-      scope.read(refBaseProvider),
+      scope.read(containerRefProvider),
+      effects: storageDeleteEffects(scope),
       group: metadata(),
       request: StorageDeletePathsRequest([path]),
       silent: true,

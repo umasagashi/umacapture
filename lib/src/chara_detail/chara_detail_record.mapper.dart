@@ -110,6 +110,7 @@ class CharacterMapper extends ClassMapperBase<Character> {
   static CharacterMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = CharacterMapper._());
+      RecordTypeMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -128,6 +129,12 @@ class CharacterMapper extends ClassMapperBase<Character> {
   static const Field<Character, int> _f$card = Field('card', _$card);
   static int _$rank(Character v) => v.rank;
   static const Field<Character, int> _f$rank = Field('rank', _$rank);
+  static RecordType? _$recordType(Character v) => v.recordType;
+  static const Field<Character, RecordType> _f$recordType = Field(
+    'recordType',
+    _$recordType,
+    key: r'record_type',
+  );
 
   @override
   final MappableFields<Character> fields = const {
@@ -135,7 +142,10 @@ class CharacterMapper extends ClassMapperBase<Character> {
     #character: _f$character,
     #card: _f$card,
     #rank: _f$rank,
+    #recordType: _f$recordType,
   };
+  @override
+  final bool ignoreNull = true;
 
   static Character _instantiate(DecodingData data) {
     return Character(
@@ -143,6 +153,7 @@ class CharacterMapper extends ClassMapperBase<Character> {
       data.dec(_f$character),
       data.dec(_f$card),
       data.dec(_f$rank),
+      data.dec(_f$recordType),
     );
   }
 

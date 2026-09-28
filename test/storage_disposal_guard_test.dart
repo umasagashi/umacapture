@@ -30,6 +30,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -92,7 +93,7 @@ void main() {
     final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
     controller.beginBatch(1);
 
-    final updated = controller.updated('r1');
+    final updated = controller.updated('r1', effects: regenerationEffects(container));
     container.dispose();
 
     // `updated` catches and logs a failed reload, so an unguarded `_count` after
@@ -126,7 +127,7 @@ void main() {
     final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
     controller.beginBatch(1);
 
-    await controller.updated('r1');
+    await controller.updated('r1', effects: regenerationEffects(container));
     final toast = await toasts.next();
 
     expect(toast.type, ToastType.success);
@@ -147,7 +148,7 @@ void main() {
     // unhandled async error, but an implementation that swallows the throw and
     // toasts anyway does not throw at all -- so the toast itself is what is
     // measured here, from a container the teardown cannot reach.
-    await controller.updated('r1');
+    await controller.updated('r1', effects: regenerationEffects(gone));
     gone.dispose();
 
     // The clock, in place of a fixed sleep: a live batch arms its own tail
@@ -160,7 +161,7 @@ void main() {
     final live = await loadedContainer();
     final liveController = live.read(charaDetailRecordRegenerationControllerProvider.notifier);
     liveController.beginBatch(2);
-    await liveController.updated('r1');
+    await liveController.updated('r1', effects: regenerationEffects(live));
     liveController.fail('r2');
     final clock = await toasts.next(where: (toast) => toast.type == ToastType.warning);
 

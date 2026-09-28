@@ -170,7 +170,7 @@ void main() {
     // watches the filesystem on either platform (`directory_totals.dart` states
     // the same limit for the byte totals), so this refresh is the only thing
     // that ever asks again.
-    reloadStorageTab(container.read(refBaseProvider));
+    reloadStorageTab(container.read(containerRefProvider));
     await _settle(tester);
 
     await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.quarantine));

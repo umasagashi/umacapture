@@ -29,7 +29,7 @@ final class _NamedRecordMutationScope extends _RecordMutationScope {
   const _NamedRecordMutationScope(super.lockName) : super._();
 }
 
-/// Why the platform cannot provide the cross-tab exclusion primitive.
+/// Why the platform cannot provide the record mutation exclusion primitive.
 ///
 /// Named separately from the exception so a caller can tell the two apart
 /// without parsing a message: [insecureContext] is fixable by the *deployment*
@@ -47,7 +47,7 @@ enum RecordMutationLockUnavailableReason {
 }
 
 /// Raised before a mutation starts when the platform cannot provide the
-/// required cross-tab exclusion primitive.
+/// exclusion primitive every record mutation requires.
 final class RecordMutationLockUnavailable implements Exception {
   const RecordMutationLockUnavailable([this.reason = RecordMutationLockUnavailableReason.notConfigured]);
 
@@ -70,10 +70,10 @@ final class RecordMutationLockUnavailable implements Exception {
 /// Raised when a lock could not be acquired within the acquisition budget.
 ///
 /// Distinct from [RecordMutationLockUnavailable]: the primitive works, but
-/// something else — another tab mid-regeneration, or a queued exclusive request
-/// the Web Locks grant algorithm puts ahead of every later shared one — is
-/// holding the name. Bounding the wait is what keeps that from presenting as an
-/// indefinite hang with nothing on screen.
+/// something else — a long operation of this app's own, such as a regeneration,
+/// or a queued exclusive request the grant algorithm puts ahead of every later
+/// shared one — is holding the name. Bounding the wait is what keeps that from
+/// presenting as an indefinite hang with nothing on screen.
 final class RecordMutationLockBusy implements Exception {
   const RecordMutationLockBusy(this.lockName, this.timeout);
 
@@ -83,7 +83,7 @@ final class RecordMutationLockBusy implements Exception {
   @override
   String toString() =>
       'RecordMutationLockBusy: "$lockName" was still held after ${timeout.inSeconds}s; '
-      'another tab is probably busy with the record store.';
+      'a long-running record store operation is probably still holding it, or its holder is wedged.';
 }
 
 /// Fakeable facade over an exclusive mutation lock.

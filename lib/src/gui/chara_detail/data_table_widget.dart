@@ -16,6 +16,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
@@ -31,6 +32,7 @@ import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/record_store_banner.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
@@ -40,6 +42,16 @@ import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
+
+/// The declaration the one-time archive geometry repair makes.
+///
+/// It rewrites the geometry json the preview sizes its box from and deletes the
+/// `prediction.json` its overlay reads, so both are dropped, and the bytes it
+/// deletes change the archive store's measured size. It runs before the stores
+/// load, so normally nothing has read them yet; the declaration does not rest on
+/// that ordering.
+RecordWriteEffects archiveGeometryRepairEffects(RefBase ref) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(ref), totals: RecordTotalsEffect.remeasure(ref));
 
 // Same retry policy as the stores it awaits: this loader inherits their
 // rejection, and riverpod would otherwise keep re-running it (staying *loading*
@@ -53,6 +65,7 @@ final charaDetailInitialDataLoader = FutureProvider(retry: retryUnlessStoreOutag
   await runArchiveGeometryMigrationIfNeeded(
     pathInfo,
     declaration: archiveGeometryRepairLongReadDeclaration(ref.base, pathInfo),
+    effects: archiveGeometryRepairEffects(ref.read(containerRefProvider)),
   );
   return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
 });
@@ -1621,7 +1634,14 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: const [CircularProgressIndicator(), SizedBox(height: 8), Text("Loading")],
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 8),
+          Text("$tr_chara_detail.loading".tr()),
+          // The initial data waits on the module update (through the module info
+          // loaders), which can be a multi-megabyte download.
+          const ModuleUpdateActivityView(),
+        ],
       ),
     );
   }
@@ -1645,6 +1665,10 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
         // dedup and inheritance decision. Above the table, not instead of it:
         // the active records are loaded and usable.
         ArchiveStoreOutageBanner(),
+        // A third condition that is invisible without a statement: the rating or
+        // memo the user entered is in memory only, and the enhancement merge
+        // refuses while it stays that way.
+        MetadataWriteFailureBanner(),
         TopControlsLayer(),
         SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),
@@ -1654,7 +1678,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Blocking, and ahead of the loader: without the cross-tab lock every record
+    // Blocking, and ahead of the loader: without the record mutation lock every record
     // read throws, so the loader can only ever reach its error branch and paint a
     // raw English exception in a Japanese UI. Draw nothing rather than pretend the
     // table is loading -- and nothing rather than the banner, for the same reason

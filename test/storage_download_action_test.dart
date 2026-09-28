@@ -40,7 +40,6 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
 
 /// A group whose [StorageLockScope] is `unlocked`, for the cases that are not
 /// about the per-group exclusion. Named rather than inlined so a case that *is* about
@@ -187,7 +186,7 @@ void main() {
       _answer = '${_root.path}${Platform.pathSeparator}chosen.onnx';
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         file,
         silent: true,
         group: _unlockedGroup,
@@ -209,7 +208,7 @@ void main() {
       _answer = null;
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         file,
         silent: true,
         group: _unlockedGroup,
@@ -226,7 +225,7 @@ void main() {
       final container = _container(reportsPath: true);
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         FilePath('${_root.path}${Platform.pathSeparator}gone.json'),
         silent: true,
         group: _unlockedGroup,
@@ -257,7 +256,7 @@ void main() {
       addTearDown(container.dispose);
 
       expect(
-        await downloadStorageFile(container.read(refBaseProvider), file, silent: true, group: _unlockedGroup),
+        await downloadStorageFile(container.read(containerRefProvider), file, silent: true, group: _unlockedGroup),
         StorageDownloadOutcome.failed,
       );
     });
@@ -285,7 +284,7 @@ void main() {
       final container = _container(reportsPath: false, requiresExtension: true);
       final toasts = _ToastObserver();
 
-      final outcome = await downloadStorageFile(container.read(refBaseProvider), file, group: _unlockedGroup);
+      final outcome = await downloadStorageFile(container.read(containerRefProvider), file, group: _unlockedGroup);
       await toasts.drain();
 
       expect(outcome, StorageDownloadOutcome.extensionRefused);
@@ -307,7 +306,7 @@ void main() {
       _answer = '${_root.path}${Platform.pathSeparator}LICENSE';
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         file,
         silent: true,
         group: _unlockedGroup,
@@ -339,7 +338,7 @@ void main() {
       final toasts = _ToastObserver();
       _answer = destination.path;
 
-      final outcome = await downloadStorageFile(container.read(refBaseProvider), file, group: _unlockedGroup);
+      final outcome = await downloadStorageFile(container.read(containerRefProvider), file, group: _unlockedGroup);
       await toasts.drain();
 
       // The harm this case exists for: the destination is a file the user
@@ -370,7 +369,7 @@ void main() {
       _answer = '${_root.path}${Platform.pathSeparator}chosen.bin';
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         file,
         silent: true,
         group: _unlockedGroup,
@@ -389,7 +388,7 @@ void main() {
       final container = _container(reportsPath: false);
       final toasts = _ToastObserver();
 
-      final outcome = await downloadStorageFile(container.read(refBaseProvider), file, group: _unlockedGroup);
+      final outcome = await downloadStorageFile(container.read(containerRefProvider), file, group: _unlockedGroup);
       await toasts.drain();
 
       // The two legs disagree about *how* they refuse, so the question this case
@@ -412,7 +411,7 @@ void main() {
       _answer = destination.path;
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         file,
         silent: true,
         group: _unlockedGroup,
@@ -433,7 +432,7 @@ void main() {
       final toasts = _ToastObserver();
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         FilePath('${_root.path}${Platform.pathSeparator}gone.json'),
         group: _unlockedGroup,
       );
@@ -455,7 +454,7 @@ void main() {
       final toasts = _ToastObserver();
       _answer = null;
 
-      final outcome = await downloadStorageFile(container.read(refBaseProvider), file, group: _unlockedGroup);
+      final outcome = await downloadStorageFile(container.read(containerRefProvider), file, group: _unlockedGroup);
       await toasts.drain();
 
       expect(outcome, StorageDownloadOutcome.cancelled);
@@ -468,7 +467,7 @@ void main() {
       final toasts = _ToastObserver();
       _answer = null;
 
-      final outcome = await downloadStorageFile(container.read(refBaseProvider), file, group: _unlockedGroup);
+      final outcome = await downloadStorageFile(container.read(containerRefProvider), file, group: _unlockedGroup);
       await toasts.drain();
 
       // THE POSITIVE CONTROL for the case above: the same `null`, the same call,
@@ -487,7 +486,7 @@ void main() {
       final file = _writeFile('record.json', _sampleBytes(32));
       final saved = _ToastObserver();
       _answer = '${_root.path}${Platform.pathSeparator}chosen.json';
-      await downloadStorageFile(_container(reportsPath: true).read(refBaseProvider), file, group: _unlockedGroup);
+      await downloadStorageFile(_container(reportsPath: true).read(containerRefProvider), file, group: _unlockedGroup);
       await saved.drain();
 
       expect(saved.seen.single.description, appSentenceAt('pages.storage.download.saved'));

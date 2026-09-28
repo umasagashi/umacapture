@@ -80,8 +80,7 @@ Future<String?> platformStorageZipPreflight(RefBase ref, DirectoryPath directory
       // No `namedArgs`. The approved sentence names neither figure — it says the
       // folder is too large and what to do instead — so a `{size}` / `{limit}`
       // pair would have nowhere to land and `easy_localization` would drop it
-      // silently. `storage_wording_test.dart` holds the two sides together in
-      // both directions.
+      // silently.
       return 'pages.storage.zip.too_large'.tr();
   }
 }

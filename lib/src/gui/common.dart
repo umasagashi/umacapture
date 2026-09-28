@@ -1285,14 +1285,18 @@ class DialogController extends Notifier<DialogEntry?> {
   /// The open dialogs, bottom first, for [DialogLayer] to render.
   List<DialogEntry> get entries => List.unmodifiable(_entries);
 
-  /// Token of the dialog currently on screen (0 before the first [show]).
+  /// Token of the dialog currently on top (0 while none is open).
   ///
   /// For callers that did not open the dialog themselves but still have to
   /// dismiss it later: the dialog reads its own token while it is being
   /// interacted with, then passes it to [dismiss] after the await, so a dialog
   /// opened meanwhile is left alone. Reading it before the await also keeps the
   /// caller off `WidgetRef`, which throws once the dialog is unmounted.
-  int get currentToken => _token;
+  ///
+  /// It is the top entry's token, not the last one issued: after a dialog opened
+  /// [over] this one has closed, the last issued token names that closed dialog,
+  /// and a [dismiss] with it would close nothing.
+  int get currentToken => _entries.isEmpty ? 0 : _entries.last.token;
 
   /// Shows [builder] and returns its token.
   ///

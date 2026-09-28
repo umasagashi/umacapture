@@ -18,6 +18,7 @@ import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_activity.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 
@@ -357,7 +358,7 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
             const SizedBox(height: 12),
             _LabeledField(
               label: "$tr_module_update.dialog.module_label".tr(),
-              child: _UrlBox(url: Const.moduleZipUrl),
+              child: _UrlBox(url: Const.moduleZipAliasUrl),
             ),
             const SizedBox(height: 24),
             _Step(number: 3, text: "$tr_module_update.dialog.step_3".tr()),
@@ -501,10 +502,12 @@ class _CurrentVersion extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    // Read before the `when`, so the box rebuilds when the update phase changes.
+    final activityLabel = moduleUpdateActivityLabel(ref);
     final version = ref
         .watch(moduleVersionLoader)
         .when(
-          loading: () => "$tr_module_update.dialog.version_checking".tr(),
+          loading: () => activityLabel ?? "$tr_module_update.dialog.version_checking".tr(),
           error: (_, _) => "$tr_module_update.dialog.version_unknown".tr(),
           data: (data) =>
               data?.recognizerVersion.toLocal().toString() ?? "$tr_module_update.dialog.version_unknown".tr(),

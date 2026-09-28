@@ -35,8 +35,9 @@ final class RecordStoreUnavailable implements Exception {
   /// The root-scope failure this wraps, kept for the log and for triage.
   final Object cause;
 
-  /// Whether simply retrying is expected to succeed (a lock still held by
-  /// another tab), as opposed to a condition that needs the user to act.
+  /// Whether simply retrying is expected to succeed (a lock still held by an
+  /// operation that is going to finish), as opposed to a condition that needs
+  /// the user to act.
   final bool transient;
 
   @override

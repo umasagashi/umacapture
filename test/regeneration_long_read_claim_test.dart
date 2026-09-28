@@ -5,9 +5,10 @@
 // leaves the delete buttons over its records live while it rewrites them, or
 // leaves them greyed after it has stopped.*
 //
-// The scan in `long_read_registry_test.dart` cannot answer either half. It reads
-// `lib/` as text and asks whether `claimUntilReleased(` is written where it is
-// sanctioned; a claim that is written but never reached, or reached but never
+// The scan in `long_read_registry_test.dart` cannot answer either half. It parses
+// `lib/` and asks whether each hand-released claim method (`claimUntilReleased`,
+// `claimUntilReleasedWhenFree`) is referred to where it is sanctioned; a claim
+// that is written but never reached, or reached but never
 // released, is a green scan and a wedged delete button. The registry is observed
 // here at run time instead, from a listener that collects every state the batch
 // passes through -- so "it was claimed at some point" and "it is not claimed at
@@ -15,8 +16,8 @@
 // taken between them.
 //
 // Driven through `start`, never through `beginBatch`: that door takes a count and
-// no records, so it claims nothing by construction and the four existing
-// regeneration suites that use it observe none of this.
+// no records, so it claims nothing by construction and the suites that drive a
+// batch through it observe none of this.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/regeneration_long_read_claim_test.dart
 import 'dart:io';
@@ -248,4 +249,114 @@ void main() {
       reason: 'a claim taken before the refusals in start would be left on by a batch that never began',
     );
   });
+
+  test('a start while a batch is running is refused, and the running batch keeps its claim and its count', () async {
+    final container = containerFor();
+    final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+    await controller.start([record('r1')]);
+    final running = container.read(longReadRegistryProvider);
+    expect(running, hasLength(1));
+
+    // A different record, so the only folders the two batches share are the
+    // journal and the module directory -- which every batch names. That is what
+    // refuses the second start, and it is why no start ever replaces a batch.
+    await controller.start([record('r2')]);
+
+    expect(
+      container.read(longReadRegistryProvider),
+      running,
+      reason: 'the refused start took a claim of its own or dropped the running batch\'s',
+    );
+    expect(controller.state.total, 1, reason: 'the refused start replaced the running batch');
+
+    // The running batch still ends on its own record, and its end still releases.
+    controller.fail('r1');
+    expect(controller.failureCount, 1);
+    expect(container.read(longReadRegistryProvider), isEmpty, reason: 'the running batch\'s claim outlived it');
+  });
+
+  test('an empty start begins no batch and leaves a running one alone', () async {
+    final container = containerFor();
+    final seen = _RegistrySeen(container);
+    final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+    await controller.start(const []);
+    expect(seen.everyClaim, isEmpty, reason: 'a batch of no records can never end, so nothing may be claimed for it');
+
+    await controller.start([record('r1')]);
+    final running = container.read(longReadRegistryProvider);
+    await controller.start(const []);
+
+    expect(container.read(longReadRegistryProvider), running, reason: 'an empty start released the running batch');
+    expect(controller.state.total, 1, reason: 'an empty start replaced the running batch');
+    controller.fail('r1');
+    expect(container.read(longReadRegistryProvider), isEmpty);
+  });
+
+  // The completion tail runs 200 ms after the batch's claim is already released,
+  // so a start inside that window begins a batch the tail must not touch. The
+  // window is real time, so these two cases wait it out on the clock rather than
+  // shortening it: its length is what they are about.
+
+  /// Waits until the regeneration progress is cleared, polling it.
+  Future<void> untilProgressCleared(ProviderContainer container) async {
+    for (var i = 0; i < 400 && !container.read(charaDetailRecordRegenerationControllerProvider).isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
+  test('a batch started after the previous batch\'s tail is counted and releases its claim', () async {
+    final container = containerFor();
+    final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+    await controller.start([record('r1')]);
+    controller.fail('r1');
+    await untilProgressCleared(container);
+    expect(controller.state.isEmpty, isTrue, reason: 'the finished batch\'s tail no longer clears its progress');
+
+    await controller.start([record('r2')]);
+    expect(container.read(longReadRegistryProvider), hasLength(1));
+    controller.fail('r2');
+
+    expect(controller.failureCount, 1);
+    expect(container.read(longReadRegistryProvider), isEmpty);
+  });
+
+  test(
+    'a batch started inside the previous batch\'s tail survives the tail, is counted, and releases its claim',
+    () async {
+      final container = containerFor();
+      final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+
+      await controller.start([record('r1')]);
+      controller.fail('r1');
+      expect(container.read(longReadRegistryProvider), isEmpty, reason: 'the window this case needs is not open');
+      await controller.start([record('r2')]);
+      expect(container.read(longReadRegistryProvider), hasLength(1), reason: 'the second batch never began');
+      final running = controller.state;
+
+      // Past the first batch's 200 ms tail, with margin for a loaded machine.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(
+        controller.state,
+        same(running),
+        reason: 'the first batch\'s tail cleared the second batch\'s progress, so its outcomes are discarded',
+      );
+
+      controller.fail('r2');
+      expect(controller.failureCount, 1, reason: 'the second batch\'s outcome was not counted');
+      expect(
+        container.read(longReadRegistryProvider),
+        isEmpty,
+        reason: 'the second batch never finished, so its claim stays until the app restarts',
+      );
+
+      // And the registry answers the next start the way it would have before.
+      await controller.start([record('r3')]);
+      expect(container.read(longReadRegistryProvider).values.single.kind, LongReadKind.regeneration);
+      controller.fail('r3');
+      expect(container.read(longReadRegistryProvider), isEmpty);
+    },
+  );
 }

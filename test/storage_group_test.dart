@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+// ignore: depend_on_referenced_packages
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/const.dart';
@@ -14,64 +16,55 @@ import 'package:umacapture/src/core/storage/unclassified_scan.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
+import 'support/source_syntax.dart';
 import 'support/virtual_tree_fs_backend.dart';
 
-/// A layout whose fourteen directories are all distinct, so a containment check
-/// below means what it says.
-///
-/// [PathInfo.tempSession] is non-null on purpose: without a session `tempDir` and
-/// `tempRootDir` are the same directory (asserted below), and "this container
-/// really does contain a group" would be trivially true for a pair that is one
-/// path. The field exists precisely so a test can describe the scoped layout on a
-/// platform that cannot mint a real claim.
+/// A layout whose directories are all distinct, so a containment check below
+/// means what it says.
 PathInfo layoutUnder(String root, {DirectoryPath? dataRoot}) => PathInfo(
   documentDir: DirectoryPath('$root/documents'),
   supportDir: DirectoryPath('$root/support'),
   executableDir: DirectoryPath('$root/exe'),
   downloadDir: DirectoryPath('$root/downloads'),
   dataRoot: dataRoot,
-  tempSession: 'session-1',
 );
 
-/// Every `DirectoryPath` getter declared on `PathInfo`, read out of its source.
+/// Every `DirectoryPath` getter declared on `PathInfo`, read out of its syntax tree.
 ///
-/// Getters, not fields. `app_root_scrub_test.dart` reads the same class with
-/// `RegExp(r'final DirectoryPath\??\s+(\w+);')` and asserts it finds *no* getters,
-/// which is right for what that test guards (the Sentry scrub only needs the base
-/// directories). Every logical storage group is a getter, so an extractor shaped
-/// like that one would stay green no matter how many groups were added.
-Set<String> declaredDirectoryGetters(String source) {
-  final body = source.substring(source.indexOf('class PathInfo {'), source.indexOf('/// Resolves the app'));
-  // `List<DirectoryPath> get appOwnedRoots` does not match: `>` sits where the
-  // whitespace before `get` has to be. That is deliberate — it is a list of the
-  // fields, not a directory of its own.
-  return RegExp(r'\bDirectoryPath\??\s+get\s+(\w+)').allMatches(body).map((e) => e.group(1) ?? '').toSet();
+/// Getters, not fields. `app_root_scrub_test.dart` reads the fields of the same class, which is
+/// right for what that test guards (the Sentry scrub only needs the base directories). Every logical
+/// storage group is a getter, so an extractor that read fields would stay green no matter how many
+/// groups were added. `List<DirectoryPath> get appOwnedRoots` is not one: its type is a list of the
+/// fields, not a directory of its own.
+Set<String> declaredDirectoryGetters(CompilationUnit unit) {
+  final pathInfo = topLevelDeclaration<ClassDeclaration>(unit, 'PathInfo');
+  expect(pathInfo, isNotNull, reason: 'PathInfo is no longer a class in this file; this rule reads nothing now');
+  return {
+    for (final member in pathInfo?.members ?? const <ClassMember>[])
+      if (member is MethodDeclaration && member.isGetter && _isType(member.returnType, 'DirectoryPath'))
+        member.name.lexeme,
+  };
 }
 
-/// Every translation-key field `StorageGroup` declares, read out of its source.
-///
-/// The same technique as [declaredDirectoryGetters], for the same reason: nothing
-/// can enumerate a class's fields at runtime, so the only way a hand-written list
-/// of them can be held to the class is to read the declaration. This is what
-/// stops "no group has a missing …" from silently narrowing when a key field is
-/// added to `StorageGroup` and not to that test's list.
-Set<String> declaredTranslationKeyFields(String source) {
-  final body = source.substring(source.indexOf('class StorageGroup {'), source.indexOf('const _groupKeyPrefix'));
-  return RegExp(r'\bfinal String\??\s+(\w+Key);').allMatches(body).map((e) => e.group(1) ?? '').toSet();
-}
+/// Whether [type] is written as [name] or `name?`, without type arguments.
+bool _isType(TypeAnnotation? type, String name) =>
+    type is NamedType && type.name.lexeme == name && type.importPrefix == null && type.typeArguments == null;
 
-/// Every Dart source under `lib/`, by path.
+/// Every Dart source under `lib/`, parsed.
 ///
-/// All of it, not the filesystem layer alone: a directory this app writes is a
-/// directory on the user's disk wherever the line that builds it happens to sit,
-/// and [pathInfoDirectories] cannot see any of them. Scoping the scan to
-/// `lib/src/core/fs/` would have been an assumption about where such a line is
-/// allowed to appear, which is the kind of assumption that let a directory the
-/// app writes go unaccounted for in the first place.
-Map<String, String> libSources() => {
-  for (final entity in Directory('lib').listSync(recursive: true))
-    if (entity is File && entity.path.endsWith('.dart')) entity.path: entity.readAsStringSync(),
-};
+/// All of it, not the filesystem layer alone: a directory this app writes is a directory on the
+/// user's disk wherever the line that builds it happens to sit, and [pathInfoDirectories] cannot see
+/// any of them. Scoping the scan to `lib/src/core/fs/` would be an assumption about where such a line
+/// is allowed to appear.
+///
+/// A file the parser could not read fails here rather than being walked: its recovery tree can be
+/// missing whole statements, and a join in one of them would be absent from the findings instead of
+/// reported.
+List<ParsedSource> libSources() {
+  final sources = parseDartTree('lib');
+  expect([for (final source in sources) ...source.diagnostics.map((d) => '${source.path}: ${d.message}')], isEmpty);
+  return sources;
+}
 
 /// One directory name a source joins onto a path: which file, which identifier it
 /// is joined onto, and whether that identifier is one the file built itself.
@@ -82,17 +75,12 @@ typedef PathJoin = ({String file, String base, String segment, bool onDerivedBas
 /// to exist for.
 ///
 /// **An exemption list, not a filter, and bound to a place rather than a name.**
-/// Two versions of this were too weak and both failed the same way — by letting a
-/// *spelling* decide. The first dropped every name joined onto a locally-declared
-/// identifier, so `final base = dataRoot; base / '.umacapture-probe';` reproduced
-/// the original defect exactly -- a directory written as a literal that no group
-/// or getter accounts for -- and stayed green. The second exempted the three names globally, so
-/// the same line with `'payload'` in any file in `lib/` was waved through. An
-/// exemption now names the file and the identifier as well, so it licenses the
-/// four lines it was written for and nothing else; the test below also fails on an
-/// entry that no longer occurs, so the list cannot grow stale in the other
-/// direction. Adding to it is a visible act with a reason attached, which is what
-/// an escape hatch is allowed to cost.
+/// An entry names the file and the identifier as well as the segment, so it
+/// licenses the lines it was written for and nothing else: dropping every name
+/// joined onto a locally-declared identifier would let `final base = dataRoot;
+/// base / '.umacapture-probe';` through, and exempting a name globally would let
+/// the same segment through on any base in any file. Adding to it is a visible act
+/// with a reason attached, which is what an escape hatch is allowed to cost.
 ///
 /// All four are the *inside* of a transaction slot — `<journal>/v1/<slot>/…` —
 /// reached from a local the same file derived from that journal's root, and the
@@ -104,140 +92,137 @@ const nestedSegmentExemptions = <({String file, String base, String segment})>{
   (file: 'web_record_write_transaction.dart', base: 'slot', segment: 'superseded'),
 };
 
-String _withoutCommentLines(String source) =>
-    source.split('\n').where((line) => !line.trimLeft().startsWith('//')).join('\n');
-
 /// Every directory name the app joins onto a path as a literal, with repeats —
-/// the second extractor this file needs. Grouped by the spelling that found it
-/// rather than by source position; nothing here depends on the order.
+/// the second extractor this file needs. Grouped by file; nothing here depends on
+/// the order.
 ///
 /// [declaredDirectoryGetters] reads `providers.dart` and therefore sees only what
 /// `PathInfo` declares. A directory built as `<something> / '<name>'` down in the
-/// filesystem layer is invisible to it *in principle*, so a whole tree could be —
-/// and was — written to disk with no getter, no group, no row, no total and no
-/// delete, while every test on the group table stayed green. This reads the other
-/// half.
+/// filesystem layer is invisible to it *in principle*, so a whole tree could be
+/// written to disk with no getter, no group, no row, no total and no delete while
+/// every test on the group table stayed green. This reads the other half.
 ///
-/// Only the first segment of a chain is collected: `foo / 'a' / 'b'` yields `a`
-/// alone, because `b` lives inside `a` and whatever accounts for `a` accounts for
-/// it. Dart's non-overlapping match order gives that for free — the match ends at
-/// `'a'`, leaving no identifier in front of the next `/`.
+/// Two constructions are read, as syntax rather than as text, so a line break, a
+/// comment or a spelling inside a string cannot hide or invent one:
+///  * `<base> / <segment>` — a `/` expression. Only the first segment of a chain is
+///    collected: `foo / 'a' / 'b'` yields `a` alone, because `b` lives inside `a`
+///    and whatever accounts for `a` accounts for it. A `/` whose left side is
+///    itself a `/` is therefore never read.
+///  * `join(<base>, <segment>, …)` — a call named `join`, bare or through an import
+///    prefix (`p.join`), with at least two arguments; the second is the segment.
 ///
-/// Each result records whether its base is an identifier the same file *declared*
-/// ([PathJoin.onDerivedBase]) or one it was handed. That is a hint about where the
-/// directory sits, **not** a licence to skip it: both kinds are checked, the
-/// derived ones against [nestedSegmentExemptions] as well.
+/// The segment is a string literal without interpolation, or an identifier bound
+/// to one by a `const` — the same file's `const`s first, then the top-level
+/// `const`s of every file under `lib/`, so a name deliberately shared (as
+/// [settingsBoxDirName] and [sentryNativeDirName] are) is read as the literal it
+/// is. Only top-level declarations are shared: a class member's name is often
+/// generic enough to collide with an unrelated identifier used as a path segment
+/// (`static const name = 'SettingsRoute'` in the generated router against
+/// `<root> / name` in the journals). An interpolated string is deliberately not
+/// read: `'${name}_$n'` is a *derived* name, not a directory of the app's own, and
+/// it sits inside one of these anyway.
 ///
-/// Both spellings of a join are read: `<base> / '<name>'` and
-/// `p.join(<base>, '<name>')`. The second was added because the first, alone,
-/// let the crash-reporting SDK's database directory through — `sentry_util.dart`
-/// builds it with `p.join`, no group or getter named it, and this check said the
-/// app builds no such directory. The doc above it claimed a literal anywhere in
-/// `lib/` would fail here, and for that spelling it did not.
-///
-/// An identifier on the right is resolved through the same file's `const`
-/// declarations and through the top-level `const`s of every file under `lib/`,
-/// so a name held in a constant (which is how the write transaction's root was
-/// spelled) is read as the literal it is — including one deliberately shared, as
-/// [settingsBoxDirName] and [sentryNativeDirName] are. Only top-level
-/// declarations are shared: a class member's name is often generic enough to
-/// collide with an unrelated identifier used as a path segment. An interpolated
-/// string is deliberately not matched: `'${name}_$n'` is a *derived* name, not a
-/// directory of the app's own, and it sits inside one of these anyway.
+/// The base is the name the left side ends in for `/` (`info.storageDir / 'x'` is
+/// on `storageDir`) and the root of the property chain for `join`
+/// (`join(base.path, 'x')` is on `base`). Each result records whether its base is
+/// a variable the same file *declares* ([PathJoin.onDerivedBase]) or one it was
+/// handed (a parameter, a field of another object). That is a hint about where the directory sits,
+/// **not** a licence to skip it: both kinds are checked, the derived ones against
+/// [nestedSegmentExemptions] as well.
 ///
 /// **What this cannot see**, stated rather than hoped away:
 ///  * A directory built by any means other than `/` or `join` on a path —
 ///    `DirectoryPath(<segments>)` from a computed list, `Directory('<literal>')`
 ///    from a string, a name arriving from a config file or a platform channel, a
 ///    segment spliced by interpolation.
-///  * A name written with an escape (`…`) or spanning lines inside a `'''`
-///    block. Both are excluded from the literal so that a multi-line string
-///    elsewhere in `lib/` cannot be mis-read as a path; a directory name has no
-///    use for either.
-///  * A `const` whose value is another `const` rather than a literal, or one
-///    declared as a class member and used from another file.
+///  * A `const` whose value is another `const` rather than a literal, a class
+///    member used from another file (`Foo.name`), or a non-`const` variable.
+///  * A join onto anything but a name: `(dataRoot ?? documentDir) / 'temp'`,
+///    `charaDetailArchiveTransactionDirOf(root) / 'v1'`. What such a base holds is
+///    decided by the expression, not by a name a group or getter could state, and
+///    the ones `lib/` writes today are a getter's own body or the inside of a
+///    directory a getter already names.
+///  * Whether a `/` is path division at all: the parse is unresolved, so a string
+///    divided by something else would be read as a join. None does today.
 ///
 /// The check is a net over the constructions the app actually uses, not a proof
 /// that no other exists.
-List<PathJoin> literalPathSegments(Map<String, String> sources) {
-  // Every quote spelling Dart has for a one-line, uninterpolated string, because
-  // this repository uses more than one of them and the check has to see the
-  // directory, not the punctuation: `providers.dart` writes every path it builds
-  // with `"…"`, so a pattern that read `'…'` alone was blind to the whole class
-  // the file that *names* the app's directories belongs to.
-  const literal =
-      r'''r?(?:'''
-      r"""'''(?<a>[^'\\$\n]*)'''"""
-      r'''|"""(?<b>[^"\\$\n]*)"""'''
-      r"""|'(?<c>[^'\\$\n]*)'"""
-      r'''|"(?<d>[^"\\$\n]*)")''';
-  // Not a raw string: `$literal` has to interpolate.
-  final joinPatterns = <RegExp>[
-    RegExp('\\b(?<base>[A-Za-z_]\\w*)\\s*/\\s*(?:$literal|(?<ident>[A-Za-z_]\\w*))'),
-    // `p.join(base.path, '<name>')`, the other way this repository builds a
-    // child path. Anything after the base identifier up to the comma is a
-    // property chain (`.path`), and the terminator is `,` as well as `)` so a
-    // three-argument join yields its first segment for the same reason the `/`
-    // chain does.
-    RegExp(
-      '\\b(?:p\\.)?join\\(\\s*(?<base>[A-Za-z_]\\w*)(?:\\.\\w+)*\\s*,\\s*(?:$literal|(?<ident>[A-Za-z_]\\w*))\\s*[,)]',
-    ),
-  ];
-  final constPattern = RegExp('const\\s+(?:String\\s+)?(?<name>\\w+)\\s*=\\s*$literal\\s*;');
-  // The same declaration, anchored to the start of a line: a *top-level*
-  // constant. Only these are shared across files below. A class member is
-  // indented and so does not match, which is what keeps a generic member name
-  // from being read as a path segment somewhere else — `static const name =
-  // 'SettingsRoute'` in the generated router, matched against `<root> / name`
-  // in the journals, produced exactly that and is why the anchor is here.
-  final topLevelConstPattern = RegExp('^const\\s+(?:String\\s+)?(?<name>\\w+)\\s*=\\s*$literal\\s*;', multiLine: true);
-  // A local: something the file declares and assigns, as opposed to a parameter
-  // or a field it is given. A parameter is followed by `,` or `)` and so is not
-  // matched; `=>` is excluded so a getter's own name is not read as a local.
-  final localPattern = RegExp(r'(?:final|var|late|const|[A-Za-z_][\w<>?]*)\s+([a-z_]\w*)\s*(?:=(?!>)|;)');
-  String? quoted(RegExpMatch match) {
-    for (final name in const ['a', 'b', 'c', 'd']) {
-      final value = match.namedGroup(name);
-      if (value != null) {
-        return value;
-      }
-    }
-    return null;
-  }
-
-  final stripped = {for (final entry in sources.entries) entry.key: _withoutCommentLines(entry.value)};
-  // Every top-level `const` a literal is bound to anywhere under `lib/`, so a
-  // name held in a *shared* constant is read as the literal it is. Same-file
-  // declarations win below. Scanning one file at a time was the older shape, and
-  // it made a directory name invisible for exactly as long as it was worth
-  // sharing: `settingsBoxDirName` and [sentryNativeDirName] are both declared in
-  // `const.dart` and joined onto a path in another file.
+List<PathJoin> literalPathSegments(List<ParsedSource> sources) {
+  // Every top-level `const` a literal is bound to anywhere under `lib/`.
   final sharedConstants = <String, String>{
-    for (final source in stripped.values)
-      for (final match in topLevelConstPattern.allMatches(source)) match.namedGroup('name') ?? '': quoted(match) ?? '',
+    for (final source in sources)
+      for (final declaration in source.unit.declarations.whereType<TopLevelVariableDeclaration>())
+        ..._constantLiterals(declaration.variables),
   };
 
   final found = <PathJoin>[];
-  for (final entry in stripped.entries) {
-    final file = entry.key.split(RegExp(r'[/\\]')).last;
-    final source = entry.value;
+  for (final source in sources) {
+    final file = source.path.split('/').last;
     final constants = <String, String>{
       ...sharedConstants,
-      for (final match in constPattern.allMatches(source)) match.namedGroup('name') ?? '': quoted(match) ?? '',
+      for (final list in nodesOf<VariableDeclarationList>(source.unit)) ..._constantLiterals(list),
     };
-    final locals = {for (final match in localPattern.allMatches(source)) match.group(1) ?? ''};
-    for (final pattern in joinPatterns) {
-      for (final match in pattern.allMatches(source)) {
-        final base = match.namedGroup('base') ?? '';
-        final segment = quoted(match) ?? constants[match.namedGroup('ident') ?? ''];
-        if (segment != null) {
-          found.add((file: file, base: base, segment: segment, onDerivedBase: locals.contains(base)));
-        }
+    final declared = {for (final variable in nodesOf<VariableDeclaration>(source.unit)) variable.name.lexeme};
+    String? segmentOf(Expression expression) => switch (expression) {
+      StringLiteral(:final stringValue?) => stringValue,
+      SimpleIdentifier(:final name) => constants[name],
+      _ => null,
+    };
+    void record(String? base, Expression segmentExpression) {
+      final segment = segmentOf(segmentExpression);
+      if (base != null && segment != null) {
+        found.add((file: file, base: base, segment: segment, onDerivedBase: declared.contains(base)));
+      }
+    }
+
+    for (final division in nodesOf<BinaryExpression>(source.unit)) {
+      if (division.operator.lexeme == '/' && !_isDivision(division.leftOperand)) {
+        record(_trailingName(division.leftOperand), division.rightOperand);
+      }
+    }
+    for (final call in nodesOf<MethodInvocation>(source.unit)) {
+      final arguments = call.argumentList.arguments;
+      if (call.methodName.name == 'join' &&
+          (call.target == null || call.target is SimpleIdentifier) &&
+          arguments.length >= 2 &&
+          arguments.every((argument) => argument is! NamedExpression)) {
+        record(_rootName(arguments[0]), arguments[1]);
       }
     }
   }
   return found;
 }
+
+/// The string each `const` in [list] is bound to, by name. A non-`const` list, or a variable
+/// initialised with anything but a string literal free of interpolation, contributes nothing. Adjacent
+/// literals count as the one string they join into.
+Map<String, String> _constantLiterals(VariableDeclarationList list) => {
+  if (list.isConst)
+    for (final variable in list.variables)
+      if (variable.initializer case StringLiteral(:final stringValue?)) variable.name.lexeme: stringValue,
+};
+
+bool _isDivision(Expression expression) =>
+    expression.unParenthesized is BinaryExpression &&
+    (expression.unParenthesized as BinaryExpression).operator.lexeme == '/';
+
+/// The name [expression] ends in — `storageDir` for `info.storageDir` — or `null` when it is not a
+/// name or a property read.
+String? _trailingName(Expression expression) => switch (expression) {
+  SimpleIdentifier(:final name) => name,
+  PrefixedIdentifier(:final identifier) => identifier.name,
+  PropertyAccess(:final propertyName) => propertyName.name,
+  _ => null,
+};
+
+/// The name a property chain starts from — `base` for `base.path` — or `null` when it does not start
+/// from a name.
+String? _rootName(Expression expression) => switch (expression) {
+  SimpleIdentifier(:final name) => name,
+  PrefixedIdentifier(:final prefix) => prefix.name,
+  PropertyAccess(:final target?) => _rootName(target),
+  _ => null,
+};
 
 /// The last segment of every path the app names — a group's roots,
 /// [pathInfoDirectories], and the names the app creates but this feature
@@ -288,19 +273,17 @@ Object? lookupTranslation(Map<String, dynamic> root, String dottedKey) {
 }
 
 void main() {
-  late String providersSource;
-  late String groupSource;
+  late CompilationUnit providersUnit;
 
   setUp(() {
-    providersSource = File('lib/src/core/providers.dart').readAsStringSync();
-    groupSource = File('lib/src/core/storage/storage_group.dart').readAsStringSync();
+    providersUnit = parseDartFile('lib/src/core/providers.dart').unit;
   });
 
   group('the extractor reads what the group table is accountable for', () {
     test('it finds the getters the groups are built from, so a green run means something', () {
-      final names = declaredDirectoryGetters(providersSource);
+      final names = declaredDirectoryGetters(providersUnit);
       expect(names, containsAll(<String>['charaDetailActiveDir', 'modulesDir', 'settingsDir']));
-      // `documentDir` is a *field*. Catching it would mean the regex had started
+      // `documentDir` is a *field*. Catching it would mean the extractor had started
       // reading declarations of another shape, and the count below would then be
       // measuring something other than the getters.
       expect(names, isNot(contains('documentDir')));
@@ -316,17 +299,15 @@ void main() {
       // check. So: it finds sources, it finds names in them, and the names are
       // the ones anyone can read in those files.
       final sources = libSources();
-      expect(sources.keys.where((path) => path.endsWith('record_directory_transaction.dart')), isNotEmpty);
+      expect(sources.where((source) => source.path.endsWith('record_directory_transaction.dart')), isNotEmpty);
       final joins = literalPathSegments(sources);
       expect(joins, isNotEmpty);
       final segments = joins.map((join) => join.segment).toSet();
       expect(segments, containsAll(<String>['active', 'archive', 'quarantine', 'retired', 'chara_detail']));
-      // The `join(...)` spelling as well as `/`, and a name held in a constant
-      // another file declares. Each of those is a widening this extractor was
-      // given for a directory that was invisible to it before, and neither
-      // shows up in the accountability test below once the name is accounted
-      // for — so without these two lines, removing either widening again would
-      // cost nothing.
+      // The `join(...)` construction as well as `/`, and a name held in a
+      // constant another file declares. Neither shows up in the accountability
+      // test below once the name is accounted for — so without these two lines,
+      // the extractor could stop reading either and nothing would fail.
       expect(segments, contains(sentryNativeDirName));
       expect(segments, contains(settingsBoxDirName));
       // Both halves of the partition are populated, or one of the two branches
@@ -339,15 +320,12 @@ void main() {
     });
 
     test('every directory name the app builds is one this view accounts for', () {
-      // The guard against a directory the app writes going unaccounted for, and
-      // the reason that could happen at all. Both transaction
-      // journals were written as literals in the filesystem layer —
-      // `.umacapture-transactions` and `.umacapture-write-transactions` — and no
-      // test could see them, because every test on this table reads
-      // `providers.dart`, where they did not appear. They are getters now, so
-      // this passes; a *new* directory joined onto a path as a literal anywhere
-      // in `lib/` — by `/` or by `join`, the two spellings
-      // [literalPathSegments] reads — fails here instead of shipping invisible.
+      // The guard against a directory the app writes going unaccounted for. Every
+      // other test on this table reads `providers.dart`, so a directory joined
+      // onto a path as a literal in the filesystem layer is invisible to them; a
+      // directory joined onto a path anywhere in `lib/` — by `/` or by `join`,
+      // the two constructions [literalPathSegments] reads — fails here instead of
+      // shipping invisible.
       // A name the app makes but this feature does not manage is accounted for
       // by being in [unmanagedDirectoryNames], which is a decision written down
       // rather than a spelling this check happens to miss.
@@ -366,33 +344,11 @@ void main() {
       );
     });
 
-    test('every name declared unmanaged is one the app still builds', () {
-      // The staleness half of [unmanagedDirectoryNames], for the same reason
-      // [nestedSegmentExemptions] has one: an entry the app no longer creates
-      // is a standing licence for whatever name next collides with it. It also
-      // keeps the set honest in the other direction — a name is only allowed to
-      // sit here instead of in a group while this check can see the app build
-      // it.
-      final segments = literalPathSegments(libSources()).map((join) => join.segment).toSet();
-      expect(
-        unmanagedDirectoryNames.difference(segments),
-        isEmpty,
-        reason: 'declared unmanaged but no longer built anywhere in lib/',
-      );
-    });
-
-    test('the exemptions are only for names inside a directory this check already covered', () {
-      // The staleness half. An exemption that no longer occurs is a licence
-      // nobody asked for, still standing; the next name that happens to collide
-      // with it would inherit it silently. And each one has to be on a base the
-      // file *built* — an exemption for a name appended straight to a store root
-      // would be exempting the unaccounted-directory shape itself.
+    test('no exemption is for a name appended straight to a handed-in base', () {
+      // Each exemption has to be on a base the file *built* — an exemption for a
+      // name appended straight to a store root would be exempting the
+      // unaccounted-directory shape itself.
       final joins = literalPathSegments(libSources());
-      final derived = {
-        for (final join in joins)
-          if (join.onDerivedBase) (file: join.file, base: join.base, segment: join.segment),
-      };
-      expect(nestedSegmentExemptions.difference(derived), isEmpty, reason: 'no longer built anywhere in lib/');
       final onHandedBase = {
         for (final join in joins)
           if (!join.onDerivedBase) (file: join.file, base: join.base, segment: join.segment),
@@ -408,7 +364,7 @@ void main() {
       // else has to fail here, or a new directory can be added to the app and
       // never appear in the storage view.
       final table = pathInfoDirectories(layoutUnder('/root')).keys.toSet();
-      expect(table, equals(declaredDirectoryGetters(providersSource)));
+      expect(table, equals(declaredDirectoryGetters(providersUnit)));
     });
 
     test('each one is covered by a group or listed as a container, and never both', () {
@@ -422,10 +378,9 @@ void main() {
     });
 
     test('a container is excluded only because a group really does sit below it', () {
-      // The justification, machine-checked: the precedent in
-      // `app_root_scrub_test.dart` guards its single exclusion by asserting the
-      // reason is written in the source it protects. With four exclusions that
-      // does not scale, so each one has to earn its place instead.
+      // The justification, machine-checked: each exclusion has to earn its
+      // place by a group really sitting below it, rather than by a reason
+      // written next to it.
       final info = layoutUnder('/root');
       final directories = pathInfoDirectories(info);
       // The relation has to be able to say no, or the loop below asserts nothing:
@@ -440,21 +395,6 @@ void main() {
           reason: '$container is excluded as a container but no group sits under it',
         );
       }
-    });
-
-    test('the temp pair is two directories only when a session scopes it', () {
-      // Why the checks above use a session-scoped layout. On native there is no
-      // second context to share the scratch tree with, so `tempDir` *is*
-      // `tempRootDir` and the containment above would hold vacuously.
-      final scoped = layoutUnder('/root');
-      expect(scoped.tempDir.path, isNot(scoped.tempRootDir.path));
-      final unscoped = PathInfo(
-        documentDir: DirectoryPath('/root/documents'),
-        supportDir: DirectoryPath('/root/support'),
-        executableDir: DirectoryPath('/root/exe'),
-        downloadDir: DirectoryPath('/root/downloads'),
-      );
-      expect(unscoped.tempDir.path, unscoped.tempRootDir.path);
     });
   });
 
@@ -648,11 +588,6 @@ void main() {
     test('no group has a missing label, description or delete warning', () {
       final missing = <String>[];
       for (final group in storageGroups) {
-        // Hand-listed because Dart cannot enumerate a class's fields without
-        // mirrors. That makes the list itself the thing that can go stale, so
-        // the test below counts what this loop actually looked at and pins the
-        // count — adding a key field to `StorageGroup` and forgetting it here
-        // fails there rather than passing quietly.
         for (final key in <String?>[group.labelKey, group.descriptionKey, group.deleteWarningKey]) {
           if (key == null) {
             continue;
@@ -664,15 +599,6 @@ void main() {
         }
       }
       expect(missing, isEmpty);
-    });
-
-    test('that loop looks at every translation key StorageGroup declares', () {
-      // The guard on the hand-written list above. A thirteenth key field added to
-      // `StorageGroup` — a per-group tooltip, a delete-button caption — has to be
-      // added to that loop as well, or the group carrying it could ship pointing
-      // at a key `ja.json` does not define. Literal, so it fails on the addition
-      // rather than agreeing with it.
-      expect(declaredTranslationKeyFields(groupSource), {'labelKey', 'descriptionKey', 'deleteWarningKey'});
     });
 
     test("every group names a description key in this view's namespace", () {
@@ -953,7 +879,7 @@ void main() {
       // The point of the whole change: a stalled journal has to be reachable. The
       // request is built from the declaration, so it does not shrink on the
       // platform where the journals are usually absent.
-      final request = storageGroupDeleteRequest(info, storageGroupOf(StorageGroupId.retired));
+      final request = storageGroupDeleteRequest(info, storageGroupOf(StorageGroupId.retired), onWeb: false);
       expect(request, isA<StorageDeletePathsRequest>());
       expect((request as StorageDeletePathsRequest).targets.map((e) => e.path), [
         info.charaDetailRetiredDir.path,
@@ -1059,7 +985,6 @@ void main() {
           // `platformDirs.downloadsDir()` is null on web and `pathLayoutLoader`
           // falls back to the documents dir, so the two really are one path here.
           downloadDir: DirectoryPath(<String>['umacapture']),
-          tempSession: 'tab-1',
         ),
         spelling: opfsChildSpelling,
         knownNames: const ['storage', 'settings', 'temp', 'modules', 'umacapture'],

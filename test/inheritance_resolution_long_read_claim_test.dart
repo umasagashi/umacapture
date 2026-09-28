@@ -32,12 +32,17 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/version_check.dart';
+import 'package:umacapture/src/gui/toast.dart';
 
+import 'support/localization.dart';
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializeMappers);
+  setUpAll(loadAppTranslations);
 
   late Directory tempRoot;
   setUp(() => tempRoot = Directory.systemTemp.createTempSync('uma_inh_claim'));
@@ -93,7 +98,7 @@ void main() {
     final seen = <Map<LongReadToken, LongReadClaim>>[];
     container.listen(longReadRegistryProvider, (_, next) => seen.add(next));
 
-    active.resolveAllInheritance();
+    active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
 
     // Read synchronously, before any turn of the event loop the resolution could
     // have finished in: `hold` registers before its first `await`, so the claim
@@ -129,6 +134,85 @@ void main() {
     );
   });
 
+  test(
+    'a resolution pressed while a long reader holds the store is refused, said as busy, and runs once it lets go',
+    () async {
+      // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *a resolution started
+      // over a store a long reader is holding either starts underneath it, or is
+      // turned away with the failure toast as though something had gone wrong.*
+      //
+      // The entry's own gate is drawn from a registry one frame older than the
+      // press, so the resolution asks again in the turn it claims
+      // (`holdWhenFree(refuse)`) and reports a refusal in the app's one long-read
+      // sentence, as every press-started writer without a refusal of its own does.
+      final root = DirectoryPath(tempRoot.path);
+      final info = pathInfoFor(root);
+      writeRecord(
+        info.charaDetailActiveDir,
+        makeRecord(id: 'child-active', card: 20, parent1Card: 10, parent1: const [Factor(1, 1)]),
+      );
+      writeRecord(info.charaDetailArchiveDir, makeRecord(id: 'parent-archive', card: 10, self: const [Factor(1, 1)]));
+      final childFile = File('${(info.charaDetailActiveDir / 'child-active').path}/record.json');
+
+      final container = makeContainer(root);
+      addTearDown(container.dispose);
+      final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+      await container.read(charaDetailArchiveStorageLoaderProvider.future);
+      final toasts = <ToastData>[];
+      final subscription = container.listen<AsyncValue<ToastData>>(
+        plainToastEventProvider,
+        (_, current) => current.whenData(toasts.add),
+      );
+      addTearDown(subscription.close);
+      await pumpEventQueue();
+
+      final registry = container.read(longReadRegistryProvider.notifier);
+      final zip = registry.claimUntilReleased(kind: LongReadKind.zip, paths: [info.charaDetailActiveDir]);
+      final before = childFile.readAsBytesSync();
+      final seen = <LongReadKind>{};
+      container.listen(longReadRegistryProvider, (_, next) => seen.addAll(next.values.map((claim) => claim.kind)));
+
+      await active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
+      await pumpEventQueue();
+
+      expect(seen, isNot(contains(LongReadKind.inherit)), reason: 'the refused resolution registered a claim anyway');
+      expect(childFile.readAsBytesSync(), before, reason: 'the refused resolution wrote a record under the reader');
+      expect(container.read(inheritanceResolutionRunningProvider), isFalse, reason: 'the entry stayed inert');
+      expect(
+        toasts.map((toast) => (toast.type, toast.description)),
+        [(ToastType.error, longReadBusyMessage())],
+        reason: 'a refusal is told in the sentence every withheld control shows, and is not reported as a failure',
+      );
+      expect(
+        longReadBusyMessage(),
+        isNot(appSentenceAt('app.inheritance.failed')),
+        reason: 'the two sentences must differ',
+      );
+
+      // The control: the same press once the reader lets go runs and rewrites the
+      // child, so the unchanged bytes above come from the refusal and not from a
+      // resolution that had nothing to write.
+      registry.release(zip);
+      toasts.clear();
+      await active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
+      await settleInheritanceResolution(container);
+      await pumpEventQueue();
+
+      expect(seen, contains(LongReadKind.inherit));
+      expect(
+        childFile.readAsBytesSync(),
+        isNot(before),
+        reason: 'the resolution had nothing to write, so this case proves nothing',
+      );
+      expect(
+        toasts.where((toast) => toast.description == longReadBusyMessage()),
+        isEmpty,
+        reason: 'the refusal outlived the holder it was for',
+      );
+    },
+  );
+
   test('an import merge announces nothing at all', () async {
     final root = DirectoryPath(tempRoot.path);
     final info = pathInfoFor(root);
@@ -145,7 +229,7 @@ void main() {
     container.listen(longReadRegistryProvider, (_, next) => seen.add(next), fireImmediately: true);
 
     writeRecord(info.charaDetailActiveDir, makeRecord(id: 'fresh', card: 2));
-    await active.addFromFileAsync('fresh');
+    await active.addFromFileAsync('fresh', effects: arrivalEffects(container));
 
     // The instrument's control first: a merge that never happened would report
     // an empty registry for the most uninteresting reason there is.

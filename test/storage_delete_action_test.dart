@@ -29,7 +29,7 @@
 //     and passes with the key deleted.
 //
 // WHAT THIS SUITE DOES NOT REACH. The delete runs on the io backend behind
-// `WebLikeFsBackend`, so OPFS's own refusal modes and the cross-tab lock timeout
+// `WebLikeFsBackend`, so OPFS's own refusal modes and the lock acquisition timeout
 // are not exercised here (`storage_delete_test.dart` injects the latter at the
 // lock boundary). The settings group's stores are not reached at all: they are
 // not paths, and their own removal path -- one `Hive.deleteBoxFromDisk` per store
@@ -65,6 +65,7 @@ import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
 import 'support/web_like_fs_backend.dart';
+import 'support/record_write_effects_fixture.dart';
 
 /// Delegates to the io backend but refuses to delete the paths [refuse] selects.
 ///
@@ -144,7 +145,7 @@ List<String>? _pathsOf(StorageDeleteRequest? request) {
   return request is StorageDeletePathsRequest ? [for (final target in request.targets) target.path] : null;
 }
 
-List<String>? _requestedPaths(StorageGroup group) => _pathsOf(storageGroupDeleteRequest(_layout, group));
+List<String>? _requestedPaths(StorageGroup group) => _pathsOf(storageGroupDeleteRequest(_layout, group, onWeb: false));
 
 ProviderContainer _container({StorageDeleteReport? storeOutcome, Future<void>? storeGate}) {
   final container = ProviderContainer(
@@ -168,7 +169,7 @@ ProviderContainer _container({StorageDeleteReport? storeOutcome, Future<void>? s
       // instead of racing a clock the fake one does not advance. Every other test
       // here passes none and keeps the microtask it was written against.
       if (storeOutcome case final outcome?)
-        settingsStoreDeleteProvider.overrideWithValue(() async {
+        settingsStoreDeleteProvider.overrideWithValue((_) async {
           await storeGate;
           return outcome;
         }),
@@ -264,10 +265,10 @@ Future<_HeldDelete> _startHeldSettingsDelete(WidgetTester tester) async {
     ),
   );
   CardDialog.show(
-    container.read(refBaseProvider),
+    container.read(containerRefProvider),
     (_) => StorageDeleteConfirmDialog(
       group: _groupOf(StorageGroupId.settings),
-      request: const StorageDeleteSettingsRequest(),
+      request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
       subject: 'settings',
     ),
     over: true,
@@ -405,7 +406,7 @@ void main() {
             // exercised as the view actually builds it rather than through a path
             // request it would never be given.
             request:
-                storageGroupDeleteRequest(_layout, group) ??
+                storageGroupDeleteRequest(_layout, group, onWeb: false) ??
                 StorageDeletePathsRequest([FilePath('${_tempRoot.path}/nothing.bin')]),
             subject: 'nothing.bin',
           ),
@@ -462,7 +463,7 @@ void main() {
           StorageDeleteFailure(
             subject: StorageDeletePathSubject('a/two.json'),
             reason: StorageDeleteFailureReason.refused,
-            detail: _refusalDetail,
+            detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
           ),
         ],
         retained: [
@@ -496,7 +497,7 @@ void main() {
         StorageDeleteReport.wholeRequest(
           subject: StorageDeletePathSubject('a'),
           reason: StorageDeleteFailureReason.lockBusy,
-          detail: 'busy',
+          detail: StorageDeletePlatformDetail(FileSystemException('busy')),
         ),
       );
       expect(refused.type, ToastType.error);
@@ -516,7 +517,8 @@ void main() {
       addTearDown(subscription.close);
 
       final report = await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([_layout.tempDir / 'session']),
       );
@@ -555,7 +557,8 @@ void main() {
       final container = _container();
 
       final report = await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
       );
@@ -571,7 +574,7 @@ void main() {
           StorageDeleteFailure(
             subject: StorageDeletePathSubject('a/two.json'),
             reason: StorageDeleteFailureReason.refused,
-            detail: _refusalDetail,
+            detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
           ),
         ],
         retained: [
@@ -638,7 +641,11 @@ void main() {
         deleted: subjects.take(deleted).toList(),
         failed: [
           for (final subject in subjects.skip(deleted))
-            StorageDeleteFailure(subject: subject, reason: StorageDeleteFailureReason.refused, detail: _refusalDetail),
+            StorageDeleteFailure(
+              subject: subject,
+              reason: StorageDeleteFailureReason.refused,
+              detail: StorageDeletePlatformDetail(FileSystemException(_refusalDetail)),
+            ),
         ],
       );
     }
@@ -648,9 +655,10 @@ void main() {
       final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
       addTearDown(subscription.close);
       await runStorageDelete(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
+        effects: storageDeleteEffects(container),
         group: _groupOf(StorageGroupId.settings),
-        request: const StorageDeleteSettingsRequest(),
+        request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
       );
       // The toast travels through a stream provider, so the listener runs a turn
       // later than the delete returns.
@@ -855,11 +863,12 @@ void main() {
 
   group('the tree offers the button exactly where the group allows one', () {
     test('a group row removes its own roots, and two shapes have no root to name', () {
-      // Two directories, one group: metadata is `rating/` and `memo/`, which is
+      // Three roots, one group: metadata is `rating/`, `memo/` and the dismissal file, which is
       // why the runner takes a list rather than one entity.
       expect(_requestedPaths(_groupOf(StorageGroupId.metadata)), [
         _layout.charaDetailRatingDir.path,
         _layout.charaDetailMemoDir.path,
+        _layout.charaDetailEnhancementDismissedFile.path,
       ]);
       expect(_requestedPaths(_groupOf(StorageGroupId.activeRecords)), [_layout.charaDetailActiveDir.path]);
       for (final id in [
@@ -871,13 +880,17 @@ void main() {
         // Offers no delete at all.
         StorageGroupId.dataRootConfig,
       ]) {
-        expect(storageGroupDeleteRequest(_layout, _groupOf(id)), isNull, reason: '\${id.name} asked for a delete');
+        expect(
+          storageGroupDeleteRequest(_layout, _groupOf(id), onWeb: false),
+          isNull,
+          reason: '\${id.name} asked for a delete',
+        );
       }
     });
 
     test('the settings group asks for its stores, never for the path it also names', () {
       final group = _groupOf(StorageGroupId.settings);
-      expect(storageGroupDeleteRequest(_layout, group), isA<StorageDeleteSettingsRequest>());
+      expect(storageGroupDeleteRequest(_layout, group, onWeb: false), isA<StorageDeleteSettingsRequest>());
       // The hazard the ordering inside `storageGroupDeleteRequest` exists for.
       // The group *does* resolve to `settings/` — Windows sizes it by that
       // directory — so a resolver that fell through to the path branch would ask
@@ -1011,7 +1024,7 @@ void main() {
       });
 
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.temp),
           request: StorageDeletePathsRequest([file]),
@@ -1077,10 +1090,10 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1149,17 +1162,17 @@ void main() {
           home: Scaffold(body: DialogLayer(child: SizedBox.shrink())),
         ),
       );
-      StorageManagerDialog.show(container.read(refBaseProvider));
+      StorageManagerDialog.show(container.read(containerRefProvider));
       await _settle(tester);
       final dialogs = container.read(dialogBuilderProvider.notifier);
       final treeToken = dialogs.currentToken;
       expect(dialogs.entries, hasLength(1));
 
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1217,10 +1230,10 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.settings),
-          request: const StorageDeleteSettingsRequest(),
+          request: StorageDeleteSettingsRequest(storeDirectories: [_layout.settingsDir]),
           subject: 'settings',
         ),
         over: true,
@@ -1336,7 +1349,7 @@ void main() {
         ),
       );
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => StorageDeleteConfirmDialog(
           group: _groupOf(StorageGroupId.temp),
           request: StorageDeletePathsRequest([file]),
@@ -1366,7 +1379,7 @@ void main() {
     });
 
     // **NOT HERE: the guard's narrowness.** `_confirm` rethrows `ArgumentError`
-    // rather than announcing it, because `deleteStorageEntry` states that a path
+    // rather than announcing it, because `deleteStorageEntries` states that a path
     // paired with the wrong group is a defect and not a delete outcome. That
     // cannot be asserted from this suite: the button drops `_confirm`'s future,
     // so the rethrow reaches the zone, and `flutter_test` reports a dropped-future

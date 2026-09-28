@@ -11,7 +11,6 @@ import '/src/core/bootstrap.dart';
 import '/src/core/fs/platform_dirs.dart';
 import '/src/core/fs/record_store_unavailable.dart';
 import '/src/core/fs/root_storage_maintenance.dart';
-import '/src/core/fs/temp_session.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
@@ -38,6 +37,13 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
 /// changes, this provider is invalidated and its element disposed — and *every*
 /// [RefBase] already handed out from it starts throwing `UnmountedRefException`,
 /// including ones belonging to operations already in flight.
+///
+/// **A provider and not an extension on [ProviderContainer].** The ref handed
+/// out here is a real `Ref`, so [RefBase.mounted] keeps answering; a [RefBase]
+/// built on the container itself could not answer it at all, because
+/// riverpod marks `ProviderContainer.disposed` internal. This provider is never
+/// auto-disposed, so the ref stays usable for as long as the container it came
+/// from.
 final containerRefProvider = Provider<RefBase>((ref) => ref.base);
 
 /// A module-level broadcast event stream exposed as a [StreamProvider].
@@ -101,6 +107,18 @@ DirectoryPath charaDetailArchiveTransactionDirOf(DirectoryPath charaDetailDir) =
 DirectoryPath charaDetailWriteTransactionDirOf(DirectoryPath charaDetailDir) =>
     charaDetailDir / charaDetailWriteTransactionDirName;
 
+/// Both journal roots of one record store.
+///
+/// A free function beside the two definitions, and [PathInfo.charaDetailTransactionJournalDirs]
+/// delegates to it, for the reason that getter's doc gives: a caller holding only
+/// the record store root — the write journal's own recovery derives one, and so
+/// does the merge's slot count — must not re-list the two journals, because a
+/// second enumeration is how a third journal comes to be covered nowhere.
+List<DirectoryPath> charaDetailTransactionJournalDirsOf(DirectoryPath charaDetailDir) => [
+  charaDetailArchiveTransactionDirOf(charaDetailDir),
+  charaDetailWriteTransactionDirOf(charaDetailDir),
+];
+
 class PathInfo {
   final DirectoryPath documentDir;
   final DirectoryPath supportDir;
@@ -115,37 +133,23 @@ class PathInfo {
   /// [downloadDir] are intentionally never relocated.
   final DirectoryPath? dataRoot;
 
-  /// This context's claim on a private slice of the shared scratch tree, or
-  /// `null` when the platform has no second context to share it with (native) or
-  /// could not claim one (see `claimTempSession`).
-  ///
-  /// A field rather than a global so the layout stays a property of the resolved
-  /// [PathInfo] — the same reason [dataRoot] is one — and so a test can describe
-  /// a scoped layout on a platform that cannot mint a real claim.
-  final String? tempSession;
-
   const PathInfo({
     required this.documentDir,
     required this.supportDir,
     required this.executableDir,
     required this.downloadDir,
     this.dataRoot,
-    this.tempSession,
   });
 
-  /// The scratch tree as a whole. Shared across tabs on web, so only the startup
-  /// sweep addresses it; everything that *writes* scratch uses [tempDir].
-  DirectoryPath get tempRootDir => (dataRoot ?? documentDir) / "temp";
-
-  /// Where this context writes scratch files.
+  /// The scratch tree. One app instance owns it, so the startup sweep takes
+  /// everything in it and every writer (bug-report screenshots, the module
+  /// download) writes directly here.
   ///
-  /// Scoped by [tempSession] so every existing writer (bug-report screenshots,
-  /// the module download) becomes tab-private without knowing about sessions at
-  /// all, and so another tab's startup sweep can spare it.
-  DirectoryPath get tempDir {
-    final session = tempSession;
-    return session == null ? tempRootDir : tempRootDir / session;
-  }
+  /// **A writer takes this off a swept layout, which means off [pathInfoLoader]
+  /// or [pathInfoProvider] and not off [pathLayoutLoader].** The sweep is a step
+  /// of the former (see [prepareScratchDir]); the latter answers where the tree
+  /// is before anyone has been through it.
+  DirectoryPath get tempDir => (dataRoot ?? documentDir) / "temp";
 
   DirectoryPath get storageDir => (dataRoot ?? documentDir) / "storage";
 
@@ -282,16 +286,20 @@ class PathInfo {
   /// of a *path*, and answering it by naming the two getters again at the asking
   /// site is how a third journal comes to be covered nowhere: it is enumerated
   /// here, beside the two definitions, and nowhere else.
-  List<DirectoryPath> get charaDetailTransactionJournalDirs => [
-    charaDetailArchiveTransactionDir,
-    charaDetailWriteTransactionDir,
-  ];
+  List<DirectoryPath> get charaDetailTransactionJournalDirs => charaDetailTransactionJournalDirsOf(charaDetailDir);
 
   DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";
 
   DirectoryPath get charaDetailRatingDir => charaDetailMetadataDir / "rating";
 
   DirectoryPath get charaDetailMemoDir => charaDetailMetadataDir / "memo";
+
+  /// The user's "these two records are not the same uma" decisions: a JSON list of record-id pairs.
+  ///
+  /// A file *beside* `rating/` and `memo/` rather than inside one: it is keyed by a pair of record ids and not by a
+  /// storage-set key, so it is neither a memo nor a rating store and the two directory listings that build those key
+  /// lists must not find it.
+  FilePath get charaDetailEnhancementDismissedFile => charaDetailMetadataDir.filePath("enhancement_dismissed.json");
 
   /// The directories this app owns, from which **every other path in this class is derived**.
   ///
@@ -300,11 +308,9 @@ class PathInfo {
   /// is `(dataRoot ?? documentDir) / …` or `supportDir / …`, so covering the bases covers the tree,
   /// and `withoutUserPaths` matches the longest root first.
   ///
-  /// **This list cannot be derived by the machine at runtime** — Flutter has no `dart:mirrors`, so
-  /// nothing can enumerate a class's fields. It is instead derived by the machine at *test* time:
-  /// `test/app_root_scrub_test.dart` reads this file and fails when a `DirectoryPath` field exists
-  /// that is neither listed here nor named in that test's stated exclusions. A field that escaped
-  /// both would not leak anything new — its paths simply fall back to `<redacted>`, losing the
+  /// **This list is written by hand** — Flutter has no `dart:mirrors`, so nothing can enumerate a
+  /// class's fields — and nothing checks that a new `DirectoryPath` field is added to it. A field left
+  /// out would not leak anything new: its paths simply fall back to `<redacted>`, losing the
   /// diagnostic detail rather than the privacy.
   ///
   /// [downloadDir] is deliberately **excluded**: it is the OS downloads folder, which belongs to the
@@ -325,7 +331,6 @@ class PathInfo {
     executableDir: executableDir,
     downloadDir: downloadDir,
     dataRoot: root,
-    tempSession: tempSession,
   );
 
   @override
@@ -345,11 +350,6 @@ class PathInfo {
 /// screen that must still open during an outage. Everything else wants the store
 /// to have been checked and must keep watching [pathInfoLoader]; watching this
 /// one means "I only need to know where things are".
-///
-/// A provider and not a function, because the resolution must happen exactly
-/// once per app: it claims a temp session, and a second resolution would claim a
-/// second one and leave a second scratch directory behind for the startup sweep
-/// to find.
 final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
   final appName = (await ref.watch(packageInfoLoader.future)).appName;
   // Resolve the OS base directories through the platform_dirs facade: the io
@@ -368,9 +368,6 @@ final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
     executableDir: executableDir,
     downloadDir: downloadDirRaw ?? documentDir / appName,
     dataRoot: override == null ? null : DirectoryPath(override),
-    // Claimed before the layout is published, so nothing can write scratch into
-    // the shared root while the claim is still in flight.
-    tempSession: await claimTempSession(),
   );
   // Before startup maintenance, because maintenance logs: this is the earliest point at which the
   // app knows where its own directories are, and every log line from here on can therefore name the
@@ -379,7 +376,8 @@ final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
   return info;
 });
 
-/// Resolves the app's directory layout and prepares the record store.
+/// Resolves the app's directory layout, sweeps the scratch tree, and prepares
+/// the record store.
 ///
 /// Declares [retryUnlessStoreOutage] because it can now fail with a store
 /// outage: nearly everything watches this provider, so the framework's automatic
@@ -388,6 +386,9 @@ final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
 /// whole app — in `AsyncLoading` for minutes before admitting anything is wrong.
 final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (ref) async {
   final info = await ref.watch(pathLayoutLoader.future);
+  // Awaited, so the scratch tree is swept before this loader hands its layout to
+  // anything that writes into it. See [prepareScratchDir].
+  await prepareScratchDir(info);
   // Write transaction recovery completes on both platforms, and archive
   // transaction recovery and its cleanup on web, before this PathInfo can reach
   // active/archive scanners.
@@ -405,6 +406,59 @@ final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (
   await runPathInfoStartupMaintenance(info, declaration: startupStorageMaintenanceLongReadDeclaration(ref.base, info));
   return info;
 });
+
+/// Empties the scratch tree, keeping the directory itself, and makes sure it
+/// exists.
+///
+/// **A step of startup, awaited by [pathInfoLoader], and that is the whole
+/// point.** Every writer into [PathInfo.tempDir] takes the directory's name from
+/// that loader's result or from [pathInfoProvider], neither of which has a value
+/// until this has returned: the bug-report screenshot (`takeScreenshot` in
+/// `sentry_util.dart`), the imported-video report frame
+/// (`report_import_dialog.dart`), the module archive download
+/// (`version_check.dart`), and the native pipeline's staging directory, which is
+/// handed the path through `platformConfigLoader`. A sweep running *beside* them
+/// instead could enumerate the tree while one of them was writing into it and
+/// then delete the file that writer had just been told it had successfully
+/// written.
+///
+/// Run at startup rather than on exit, which never runs after a crash. Desktop
+/// leaves scraping fragments here when a capture is interrupted (or the app is
+/// killed); both platforms can leave an abandoned bug-report screenshot, which on
+/// web is a full frame of a screen share sitting in OPFS with no other sweeper.
+/// The owning dialog deletes its own shot on close, so this only reclaims what an
+/// abnormal termination stranded. One app instance owns the tree on either
+/// platform — a named mutex on Windows, a page-lifetime origin lock on web — so
+/// everything in it at startup is by definition left over from a previous run.
+///
+/// **Asynchronous on both platforms.** `clearSync` goes through the synchronous
+/// FS surface, which OPFS does not implement, so web has no synchronous route at
+/// all; Windows has one, but taking it would be a divergence with nothing behind
+/// it, because being awaited — not being synchronous — is what keeps a writer
+/// from interleaving with the sweep.
+///
+/// A failure is logged and startup continues: scratch the app could not reclaim
+/// is wasted space, not a reason to refuse the record store.
+///
+/// **It tells the storage view nothing, unlike the other writers into the tree
+/// that view measures** (`record_write_invalidation.dart`,
+/// `storage_delete_invalidation.dart`). Being a step of resolving the layout is
+/// what excuses it: [pathInfoLoader] awaits this before publishing, so on the
+/// first resolution nothing has been able to measure [PathInfo.tempDir] yet, and
+/// the one later re-resolution that reaches here — a data-root change — drops
+/// every cached total anyway (`DirectoryTotalsCache.clear`). The remainder is a
+/// retry of a failed [pathInfoLoader] from the startup-outage banner, which is a
+/// control on the page underneath the storage view's dialog.
+Future<void> prepareScratchDir(PathInfo info) async {
+  try {
+    await info.tempDir.clear();
+    // Writers reach for this path without creating it: OPFS refuses a write into
+    // a missing directory.
+    await info.tempDir.create(recursive: true);
+  } catch (error, stackTrace) {
+    logger.e('Failed to clear the scratch directory on startup.', error, stackTrace);
+  }
+}
 
 /// What [runPathInfoStartupMaintenance] announces to the long-read registry.
 ///
@@ -443,7 +497,7 @@ LongReadDeclaration startupStorageMaintenanceLongReadDeclaration(RefBase ref, Pa
 /// Testable startup boundary called exactly once by [pathInfoLoader].
 ///
 /// Root-scope maintenance takes the *exclusive* root lock before any scan, so it
-/// fails for the same two reasons a store scan does — another tab held the root
+/// fails for the same two reasons a store scan does — something held the root
 /// past the acquisition budget, or whole-store recovery refused — and it fails
 /// one scope higher, where nearly every provider in the app is waiting. Left
 /// bare, that reached the screen as an English `RecordMutationLockBusy` or
@@ -506,7 +560,8 @@ final pathLayoutProvider = Provider<PathInfo?>((ref) {
 });
 
 /// The layout of a record store that has been prepared — the layout *and* the
-/// statement that startup maintenance opened the store in it.
+/// statement that startup maintenance opened the store in it, and that the
+/// scratch tree has been swept ([prepareScratchDir]).
 ///
 /// Reading this is that statement, so the two states it has no answer for are
 /// contract violations rather than values, and it says which one happened. It

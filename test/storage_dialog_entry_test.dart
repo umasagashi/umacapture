@@ -117,7 +117,7 @@ Future<void> _pump(WidgetTester tester, ProviderContainer container, Widget body
 /// that mounts `FreshStorageTree` (its `initState` says why it cannot be applied
 /// inline) and the tree is only built once it has been: mount, apply, build.
 Future<void> _open(WidgetTester tester, ProviderContainer container) async {
-  StorageManagerDialog.show(container.read(refBaseProvider));
+  StorageManagerDialog.show(container.read(containerRefProvider));
   await tester.pump();
   await tester.pump();
   await tester.pump();
@@ -133,7 +133,7 @@ Finder _closeButton() {
 }
 
 Future<void> _close(WidgetTester tester, ProviderContainer container) async {
-  CardDialog.dismiss(container.read(refBaseProvider));
+  CardDialog.dismiss(container.read(containerRefProvider));
   await tester.pump();
 }
 
@@ -370,7 +370,7 @@ void main() {
       expect(find.byType(StorageTreeView), findsOneWidget);
 
       // The preview's own close button, as the user presses it.
-      CardDialog.dismiss(container.read(refBaseProvider));
+      CardDialog.dismiss(container.read(containerRefProvider));
       await tester.pump();
       await tester.pump();
 
@@ -427,7 +427,7 @@ void main() {
       expect(find.byType(StorageDeleteConfirmDialog), findsOneWidget);
       expect(find.byType(StorageTreeView), findsOneWidget);
 
-      CardDialog.dismiss(container.read(refBaseProvider));
+      CardDialog.dismiss(container.read(containerRefProvider));
       await tester.pump();
       await tester.pump();
 
@@ -476,7 +476,7 @@ void main() {
       expect(find.byType(StorageSettingsBoxDialog), findsOneWidget);
       expect(find.byType(StorageTreeView), findsOneWidget);
 
-      CardDialog.dismiss(container.read(refBaseProvider));
+      CardDialog.dismiss(container.read(containerRefProvider));
       await tester.pump();
       expect(find.byType(StorageSettingsBoxDialog), findsNothing);
       expect(find.byType(StorageTreeView), findsOneWidget);
@@ -492,7 +492,9 @@ void main() {
         overrides: [
           pathLayoutLoader.overrideWith((ref) async => _info),
           pathInfoProvider.overrideWithValue(_info),
-          settingsStoreDeleteProvider.overrideWithValue(() async => const StorageDeleteReport(deleted: [], failed: [])),
+          settingsStoreDeleteProvider.overrideWithValue(
+            (_) async => const StorageDeleteReport(deleted: [], failed: []),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -531,7 +533,7 @@ void main() {
       expect(find.byKey(storageDeleteResultKey), findsOneWidget);
       expect(find.byType(StorageTreeView), findsOneWidget);
 
-      CardDialog.dismiss(container.read(refBaseProvider));
+      CardDialog.dismiss(container.read(containerRefProvider));
       await tester.pump();
       expect(find.byKey(storageDeleteResultKey), findsNothing);
       expect(find.byType(StorageTreeView), findsOneWidget);
@@ -551,7 +553,7 @@ void main() {
       await _settle(tester);
 
       CardDialog.show(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         (_) => const StorageDeleteResultDialog(
           report: StorageDeleteReport(
             deleted: [],
@@ -559,7 +561,7 @@ void main() {
               StorageDeleteFailure(
                 subject: StorageDeletePathSubject('a.png'),
                 reason: StorageDeleteFailureReason.refused,
-                detail: 'refused',
+                detail: StorageDeletePlatformDetail(FileSystemException('refused')),
               ),
             ],
           ),

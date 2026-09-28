@@ -15,6 +15,7 @@ import '/src/core/platform_channel.dart';
 import '/src/core/providers.dart';
 import '/src/core/raw_frame_probe.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/record_write_effects.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
@@ -37,6 +38,13 @@ final capturingStateProvider = Provider<bool>((ref) {
         },
       );
 });
+
+/// What a successful re-recognition (`onCharaDetailUpdated`) declares: the record's directory has new
+/// bytes, so its cached reads are dropped and the record root is re-measured.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects recordRegenerationEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
 
 /// The import state every gate outside the capture card reads, as a substitutable value.
 ///
@@ -114,6 +122,10 @@ const _webToastedErrorCodes = <String>{
   'screen_share_denied',
   'screen_share_no_video',
   'live_capture_start_failed',
+  // Refused after the source picker closed because something else had taken the record store in
+  // the meantime; see `liveCaptureStartPreflight`. A start failure like the three above it, and
+  // reported before any session exists, so the capture state would be wiped before it was read.
+  'live_capture_blocked',
   // See `liveRecordsNotStoredErrorCode` in platform_channel_web_ops.dart. Kept as a literal
   // with the others rather than imported: this switch is shared code, and the codes it
   // routes are web-only strings that never resolve to anything on desktop.
@@ -576,6 +588,26 @@ class CharaDetailCaptureState {
     );
   }
 
+  /// This state with every record id it names moved from [from] to [to].
+  ///
+  /// An enhancement merge retires one of two records and keeps the other's id,
+  /// so a capture card still offering "open the duplicate" would open an id
+  /// nothing holds. Both slots the card can reach are re-pointed: the duplicate
+  /// it reported and the link it captured, which is the pair
+  /// [CharaCaptureEvent.recordId] is derived from.
+  CharaDetailCaptureState renameRecord({required String from, required String to}) {
+    final next = clone();
+    if (next.duplicateRecordId == from) {
+      next.duplicateRecordId = to;
+    }
+    if (next.link?.id == from) {
+      // A fresh link, not a mutation: [clone] shares the object, so editing it
+      // in place would also edit the state a listener has already captured.
+      next.link = CharaDetailLink(id: to);
+    }
+    return next;
+  }
+
   CharaDetailCaptureState reset() {
     // Everything about the character is dropped; the attempt's IDENTITY is not. A reset is an
     // attempt ending (the screen closed) or a terminal outcome being built on top of one -- neither
@@ -966,6 +998,15 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   CharaDetailCaptureState build() => CharaDetailCaptureState();
 
   void reset() => state = state.reset();
+
+  /// Re-points this state at [to] wherever it named [from], and publishes only
+  /// if it did — an unrelated merge must not rebuild the capture card.
+  void renameRecord({required String from, required String to}) {
+    if (state.duplicateRecordId != from && state.link?.id != from) {
+      return;
+    }
+    state = state.renameRecord(from: from, to: to);
+  }
 
   void started(String recordId) => state = state.started(recordId);
 
@@ -2211,7 +2252,10 @@ class PlatformController {
           if (id is! String) {
             throw ArgumentError.value(id, 'id', 'onCharaDetailUpdated expects a String id');
           }
-          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(id);
+          final container = _ref.read(containerRefProvider);
+          _ref
+              .read(charaDetailRecordRegenerationControllerProvider.notifier)
+              .updated(id, effects: recordRegenerationEffects(container));
           break;
         case 'onFrameRateReported':
           {
@@ -2324,9 +2368,11 @@ class PlatformController {
     try {
       await _ref.read(charaDetailRecordStorageLoaderProvider.future);
       final storage = _ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+      final container = _ref.read(containerRefProvider);
+      final effects = recordArrivalEffects(container);
       for (final id in ids) {
         try {
-          await storage.addFromFileAsync(id, notifyDuplicate: !fromVideoImport);
+          await storage.addFromFileAsync(id, notifyDuplicate: !fromVideoImport, effects: effects);
         } catch (error, stackTrace) {
           logger.w('Failed to add harvested live record $id', error, stackTrace);
         }
@@ -2337,7 +2383,14 @@ class PlatformController {
     }
   }
 
-  Future<void> startCapture() => _command('startCapture', _platformChannel.startCapture());
+  /// Starts a live capture session.
+  ///
+  /// [mayStillStart] is re-asked by the web leg once its source picker resolves, and is the answer
+  /// to a window no control can gate from its build: a press is gated, the picker then stays open
+  /// for as long as the user takes to choose, and only the session that follows announces itself as
+  /// [LongReadKind.liveCapture]. See `liveCaptureStartPreflight`, which builds it.
+  Future<void> startCapture({bool Function()? mayStillStart}) =>
+      _command('startCapture', _platformChannel.startCapture(mayStillStart: mayStillStart));
 
   /// Stops the live capture session.
   ///

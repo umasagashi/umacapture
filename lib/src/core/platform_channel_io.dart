@@ -145,7 +145,17 @@ class PlatformChannel {
     return channel.invokeMethod<String>('grabVideoFrame', request);
   }
 
-  Future<void> startCapture() {
+  /// Starts a live capture session in the native runner.
+  ///
+  /// [mayStillStart] is accepted and **deliberately never called**, and the divergence from the web
+  /// leg is a platform constraint, not a preference: the web start has to open `getDisplayMedia`
+  /// and await the user's choice of surface, so minutes can pass between the press that was gated
+  /// and the moment the session takes its [LongReadKind.liveCapture] claim. A native runner opens
+  /// no picker — this call reaches the core within the same turn as the press — so there is no
+  /// window for another holder to appear in, and a second evaluation here could only re-answer the
+  /// question the control already answered. The parameter exists on both legs because
+  /// `PlatformController` compiles against whichever one it gets.
+  Future<void> startCapture({bool Function()? mayStillStart}) {
     return channel.invokeMethod('startCapture');
   }
 

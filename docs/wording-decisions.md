@@ -8,7 +8,7 @@ taken at all.
 **Change an approved sentence only after confirming the change with the app's author.** No machine
 check enforces this. `test/storage_wording_test.dart` checks the `pages.storage.*` wording's
 *properties* (no implementation vocabulary, no remedy the view does not offer, two paragraphs in a
-delete warning, no unfilled placeholder, keys and code naming each other in both directions), and a
+delete warning, no unfilled placeholder), and a
 property holds through a reword that quietly drops a clause — a reword that drops a clause is still
 two paragraphs and still carries no jargon. That is why the clauses are written out below.
 
@@ -29,10 +29,23 @@ two paragraphs and still carries no jargon. That is why the clauses are written 
 
 ## Settings — the module version row
 
-- **`pages.settings.about.version.checking`** and **`…waiting`** distinguish "still checking" from
-  "waiting for another job". These two sentences are the only record of the decision that the row
-  makes that distinction. `test/module_version_deferred_display_test.dart` asserts that the right one
-  reaches the row.
+- **`pages.settings.about.version.checking`** and **`pages.settings.module_update.activity.waiting`**
+  distinguish "still checking" from "waiting for another job". These two sentences are the only
+  record of the decision that the row makes that distinction. The second is shared by every page
+  waiting on the module update (see below), which is why it lives under `module_update.activity`.
+  `test/module_version_deferred_display_test.dart` asserts that the right one reaches the row.
+
+## Module update — what a waiting page is waiting for
+
+- **`pages.settings.module_update.activity.downloading`**,
+  **`…downloading_unknown_length`** and **`…installing`** name the module download and its
+  extraction on every page that waits on the module update (the capture and chara-detail loading
+  screens, a card on the dashboard, the settings version row, the manual update dialog). The
+  download shows both a percentage and the megabytes received out of the total; when the server
+  sends no length, the percentage is left out and only the megabytes received remain. **No
+  qualifier such as "first time only" is added:** the download can run on any launch whose local
+  module differs from the published one, so such a clause would be untrue.
+  `test/module_update_activity_test.dart` asserts which one reaches the page.
 
 ## Capture card — no recognition module
 

@@ -20,12 +20,14 @@ import 'package:archive/archive.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
@@ -33,6 +35,7 @@ import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/file_picker.dart';
 import 'support/localization.dart';
+import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
 
@@ -78,6 +81,10 @@ String _sentence(String dottedKey, [Map<String, String> args = const {}]) {
 
 void main() {
   setUpAll(loadAppTranslations);
+  // The duplicate check decodes each `record.json` into a [CharaDetailRecord]; without the mappers
+  // every decode throws and is swallowed, so the check would answer "not a duplicate" for
+  // everything and the tests below would pass on a wire that was never connected.
+  setUpAll(initializeMappers);
 
   late Directory tempRoot;
   late FakeFilePicker picker;
@@ -104,6 +111,20 @@ void main() {
     for (final id in recordIds) {
       final json = _recordJson(id);
       archive.addFile(ArchiveFile('chara_detail/active/$id/record.json', json.length, json));
+    }
+    final path = '${tempRoot.path}${Platform.pathSeparator}$fileName';
+    File(path).writeAsBytesSync(ZipEncoder().encode(archive));
+    return path;
+  }
+
+  /// Writes a real zip holding [records] verbatim, so the importer's duplicate check has something
+  /// it can decode. [writeZip]'s `record.json` carries a record id and nothing else, which
+  /// `RecordZipService` fails to decode and therefore never weighs against anything.
+  String writeRecordZip(String fileName, List<CharaDetailRecord> records) {
+    final archive = Archive();
+    for (final record in records) {
+      final json = Uint8List.fromList(utf8.encode(jsonEncode(record.toMap())));
+      archive.addFile(ArchiveFile('chara_detail/active/${record.id}/record.json', json.length, json));
     }
     final path = '${tempRoot.path}${Platform.pathSeparator}$fileName';
     File(path).writeAsBytesSync(ZipEncoder().encode(archive));
@@ -156,14 +177,25 @@ void main() {
   }
 
   /// Pumps the button, taps it, and returns the toasts it emitted.
-  Future<List<ToastData>> tapImport(WidgetTester tester, DirectoryPath root) async {
+  Future<List<ToastData>> tapImport(
+    WidgetTester tester,
+    DirectoryPath root, {
+    List<Override> extraOverrides = const [],
+    Future<void> Function(ProviderContainer container)? prepare,
+  }) async {
     final container = ProviderContainer(
       overrides: [
         pathInfoLoader.overrideWith((ref) async => pathInfoFor(root)),
         // Skip the (network/version) module check so nothing reaches for the network.
         moduleVersionLoader.overrideWith((ref) async => null),
+        ...extraOverrides,
       ],
     );
+    // Runs before the button is pumped, for the cases that need the record store actually built:
+    // the button asks `ProviderContainer.exists` and takes silence for "no store to ask".
+    if (prepare != null) {
+      await prepare(container);
+    }
     final toasts = <ToastData>[];
     final subscription = container.listen<AsyncValue<ToastData>>(
       plainToastEventProvider,
@@ -672,6 +704,131 @@ void main() {
     expect(toasts.single.description, _sentence("$tr_import.all_failure", {'failed': '2'}));
   });
 
+  // The duplicate rule the button hands to the import service, and the records it carries from one
+  // zip of a selection to the next. Both are a single line in `_pickAndImport`, and both are wires
+  // rather than logic: sameness itself is settled in `storage.dart` and tested there, so what is
+  // left to break is the button forgetting to ask, or forgetting what the previous zip let in.
+  // Neither failure shows up anywhere else -- the import simply succeeds and the table grows a
+  // second row of a trainee the user already has, which is what the capture path refuses outright.
+
+  testWidgets('refuses a zip record the loaded store already holds under another id', (tester) async {
+    final root = DirectoryPath(tempRoot.path);
+    // The shape an export, a re-capture on another machine and an import back produces: same
+    // trainee, new id. `other` rides along as this test's own control -- the store is consulted
+    // for it too and has nothing against it -- so the case cannot pass on a rule that refuses
+    // everything it is shown.
+    final owned = makeRecord(id: 'owned', card: 100, self: const [Factor(5, 3)]);
+    final sameCharaNewId = makeRecord(id: 'arrived', card: 100, self: const [Factor(5, 3)]);
+    final otherChara = makeRecord(id: 'other', card: 200, self: const [Factor(7, 1)]);
+    picker.answerWithPaths([
+      writeRecordZip('part1.zip', [sameCharaNewId, otherChara]),
+    ]);
+
+    final toasts = await tapImport(
+      tester,
+      root,
+      extraOverrides: [
+        charaDetailRecordStorageLoaderProvider.overrideWith(() => _StockedRecordStorage([owned])),
+        charaDetailArchiveStorageLoaderProvider.overrideWith(() => _CountingArchiveStorage(() {})),
+      ],
+      // Listened as well as read: the button reaches the store through `ProviderContainer.exists`,
+      // which is false again for a provider riverpod has already dropped.
+      prepare: (container) async {
+        addTearDown(container.listen(charaDetailRecordStorageLoaderProvider, (_, _) {}).close);
+        await container.read(charaDetailRecordStorageLoaderProvider.future);
+      },
+    );
+
+    // The whole point: the duplicate is not on disk, and the record duplicating nothing is.
+    expect(
+      Directory('${activeDir(root).path}${Platform.pathSeparator}arrived').existsSync(),
+      isFalse,
+      reason: 'the store was never asked, so a trainee the user already has arrived a second time',
+    );
+    expect(Directory('${activeDir(root).path}${Platform.pathSeparator}other').existsSync(), isTrue);
+    // And the user is told which half of the zip did not land, with its count: a refusal the import
+    // keeps to itself is the silence this control exists to avoid.
+    expect(toasts.map((toast) => toast.type), [ToastType.success, ToastType.warning]);
+    expect(toasts.first.description, _sentence("$tr_import.success", {'count': '1'}));
+    expect(toasts.last.description, _sentence("$tr_import.refused.duplicate_of_existing", {'count': '1'}));
+  });
+
+  // Negative control for the test above: a loaded store holding an unrelated trainee refuses
+  // nothing. Without it those assertions would hold just as well for a wire that answered
+  // "duplicate" to every record a zip carries.
+  testWidgets('still imports a zip record the loaded store does not hold', (tester) async {
+    final root = DirectoryPath(tempRoot.path);
+    final owned = makeRecord(id: 'owned', card: 100, self: const [Factor(5, 3)]);
+    final otherChara = makeRecord(id: 'other', card: 200, self: const [Factor(7, 1)]);
+    picker.answerWithPaths([
+      writeRecordZip('part1.zip', [otherChara]),
+    ]);
+
+    final toasts = await tapImport(
+      tester,
+      root,
+      extraOverrides: [
+        charaDetailRecordStorageLoaderProvider.overrideWith(() => _StockedRecordStorage([owned])),
+        charaDetailArchiveStorageLoaderProvider.overrideWith(() => _CountingArchiveStorage(() {})),
+      ],
+      prepare: (container) async {
+        addTearDown(container.listen(charaDetailRecordStorageLoaderProvider, (_, _) {}).close);
+        await container.read(charaDetailRecordStorageLoaderProvider.future);
+      },
+    );
+
+    expect(Directory('${activeDir(root).path}${Platform.pathSeparator}other').existsSync(), isTrue);
+    expect(toasts, hasLength(1));
+    expect(toasts.single.type, ToastType.success);
+    expect(toasts.single.description, _sentence("$tr_import.success", {'count': '1'}));
+  });
+
+  testWidgets('refuses a chara the previous zip of the same selection already brought in', (tester) async {
+    final root = DirectoryPath(tempRoot.path);
+    // No record store at all, on purpose: an export over the size limit is imported as several
+    // pieces in one selection, and the store cannot answer for a record that is only now arriving.
+    // What refuses the second copy is the list the button carries between zips and nothing else,
+    // so this case fails if that list is dropped even while the store is consulted correctly.
+    final first = makeRecord(id: 'first', card: 300, self: const [Factor(9, 2)]);
+    final sameCharaAgain = makeRecord(id: 'second', card: 300, self: const [Factor(9, 2)]);
+    picker.answerWithPaths([
+      writeRecordZip('part1.zip', [first]),
+      writeRecordZip('part2.zip', [sameCharaAgain]),
+    ]);
+
+    final toasts = await tapImport(tester, root);
+
+    expect(Directory('${activeDir(root).path}${Platform.pathSeparator}first').existsSync(), isTrue);
+    expect(
+      Directory('${activeDir(root).path}${Platform.pathSeparator}second').existsSync(),
+      isFalse,
+      reason: 'the second zip was not told what the first one had already let in',
+    );
+    expect(toasts.map((toast) => toast.type), [ToastType.success, ToastType.warning]);
+    expect(toasts.first.description, _sentence("$tr_import.success", {'count': '1'}));
+    expect(toasts.last.description, _sentence("$tr_import.refused.duplicate_of_existing", {'count': '1'}));
+  });
+
+  // Negative control for the test above: two zips carrying different trainees both land. It is what
+  // makes that refusal specific to a repeat rather than to "a second zip".
+  testWidgets('still imports two zips of one selection carrying different charas', (tester) async {
+    final root = DirectoryPath(tempRoot.path);
+    final first = makeRecord(id: 'first', card: 300, self: const [Factor(9, 2)]);
+    final second = makeRecord(id: 'second', card: 400, self: const [Factor(4, 1)]);
+    picker.answerWithPaths([
+      writeRecordZip('part1.zip', [first]),
+      writeRecordZip('part2.zip', [second]),
+    ]);
+
+    final toasts = await tapImport(tester, root);
+
+    expect(Directory('${activeDir(root).path}${Platform.pathSeparator}first').existsSync(), isTrue);
+    expect(Directory('${activeDir(root).path}${Platform.pathSeparator}second').existsSync(), isTrue);
+    expect(toasts, hasLength(1));
+    expect(toasts.single.type, ToastType.success);
+    expect(toasts.single.description, _sentence("$tr_import.success", {'count': '2'}));
+  });
+
   testWidgets('says nothing when the dialog was cancelled', (tester) async {
     final root = DirectoryPath(tempRoot.path);
     picker.result = null;
@@ -699,6 +856,18 @@ class _CountingRecordStorage extends CharaDetailRecordStorage {
     onBuild();
     return const [];
   }
+}
+
+/// A stand-in active record store that already holds [records], so the button's duplicate question
+/// has something to be answered with. `build()` is replaced outright, so none of the real store's
+/// scanning or capture wiring runs; the records it holds are the whole of its behaviour.
+class _StockedRecordStorage extends CharaDetailRecordStorage {
+  _StockedRecordStorage(this.stocked);
+
+  final List<CharaDetailRecord> stocked;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => stocked;
 }
 
 /// [_CountingRecordStorage]'s counterpart for the archive store.

@@ -12,7 +12,7 @@
 //
 // The failure this is written against is not a wrong answer but an unhandled
 // one: `pathInfoProvider` is `pathInfoLoader.value!`, so *reading* it during an
-// outage throws a `TypeError`, and `deleteStorageEntry` catches only the two
+// outage throws a `TypeError`, and `_deleteStorageEntry` catches only the two
 // lock exceptions. The user got a red screen instead of the repair the view was
 // opened for.
 //
@@ -44,7 +44,7 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
+import 'support/storage_delete_claim.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -135,10 +135,10 @@ void main() {
       final container = _container();
       final target = _seedFile('documents/storage/unclassified/scratch.bin', 'x');
 
-      final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+      final report = await deleteUnderClaim(
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.unclassified),
-        target: target,
+        targets: [target],
       );
 
       expect(report.failed, isEmpty);
@@ -150,10 +150,10 @@ void main() {
       final record = _layout.charaDetailActiveDir / 'record-1';
       _seedFile('documents/storage/chara_detail/active/record-1/record.json', '{}');
 
-      final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+      final report = await deleteUnderClaim(
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.activeRecords),
-        target: record,
+        targets: [record],
       );
 
       expect(report.failed, isEmpty);
@@ -164,10 +164,10 @@ void main() {
       final container = _container();
       final target = _seedFile('documents/storage/chara_detail/metadata/rating/default.json', '{}');
 
-      final report = await deleteStorageEntry(
-        container.read(refBaseProvider),
+      final report = await deleteUnderClaim(
+        container.read(containerRefProvider),
         group: _groupOf(StorageGroupId.metadata),
-        target: target,
+        targets: [target],
       );
 
       expect(report.failed, isEmpty);
@@ -186,9 +186,10 @@ void main() {
       // the same whether the function answers `void` or a future: what is under
       // test is that it does not throw, not which of the two it returns.
       await Future<void>.sync(
-        () => invalidateAfterStorageDelete(
-          container.read(refBaseProvider),
+        () async => invalidateAfterStorageDelete(
+          container.read(containerRefProvider),
           group: _groupOf(StorageGroupId.metadata),
+          info: await container.read(pathLayoutLoader.future),
           targets: [target],
         ),
       );
@@ -199,7 +200,7 @@ void main() {
       final target = _seedFile('documents/storage/unclassified/notes.json', '{}');
 
       final outcome = await downloadStorageFile(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         target,
         group: _groupOf(StorageGroupId.unclassified),
         silent: true,
@@ -235,7 +236,7 @@ void main() {
       addTearDown(container.dispose);
 
       final outcome = await exportDirectoryAsZip(
-        container.read(refBaseProvider),
+        container.read(containerRefProvider),
         DirectoryPath('${_tempRoot.path}/documents/storage/unclassified/bundle'),
         group: _groupOf(StorageGroupId.unclassified),
         silent: true,

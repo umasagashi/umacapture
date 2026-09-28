@@ -12,9 +12,7 @@
 // covers the delete pair, which was the first surface to subscribe. These three
 // are the rest of the same round: each acts on the same `active/<id>` directory a
 // zip may be bundling or an archive move may be renaming away, and each was
-// found by reading the tree rather than by any check — the scan in
-// `long_read_registry_test.dart` is anchored on `storageActionBlockerOf`, which
-// none of the three calls, so all three are outside its field of view.
+// found by reading the tree rather than by any check.
 //
 // EVERY REFUSAL STANDS BESIDE ITS OWN CONTROL. "Withheld while a long reader
 // runs" and "withheld always" are the same observation seen once, and the second
@@ -158,7 +156,7 @@ void _holdModules(ProviderContainer container) {
   // can be in flight without anybody having pressed anything.
   runModuleInstall(
     container.read(_refProvider),
-    _layout.modulesDir,
+    _layout,
     () => completer.future,
     contention: LongReadContention.defer,
   ).ignore();

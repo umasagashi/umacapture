@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/const.dart';
 import '/src/chara_detail/archive_executor.dart' as archive_executor;
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/factor_enhancement.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -23,19 +24,15 @@ import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/record_write_effects.dart';
+import '/src/core/storage/record_write_invalidation.dart';
+import '/src/core/storage/storage_delete.dart';
 import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/capture.dart';
-// For `storageDeleteBlockedBy`, the app's one answer to "is a registered long
-// reader holding any of these paths". The predicate underneath it
-// (`storageDeleteAwaitsExtraction`) is documented as the single place one storage
-// path is matched against another, and re-deriving it on this side is how the
-// two would come to disagree silently; that it currently lives under `gui/` is a
-// historic placement, not a statement that the question is a widget's.
-import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
@@ -53,7 +50,12 @@ part 'storage.mapper.dart';
 
 // Grade tag whose shared wins feed the inheritance relation bonus (G1 only, per
 // the current game rule). Matches the literal used by the race-grade column.
-const _gradeG1 = "grade_g1";
+/// The grade tag `race_title_info.json` marks a G1 race with.
+///
+/// Public because the enhancement merge runs the same additive resolution a
+/// capture does and has to ask for the same set of sids; a second spelling of
+/// the tag is a second thing to keep in step.
+const g1RaceGradeTag = "grade_g1";
 
 // Monotonic id so each duplicated-chara event yields a distinct StreamProvider value; the sound
 // listener uses ref.listen(), which would otherwise dedupe equal consecutive AsyncData and skip
@@ -67,10 +69,12 @@ final charaCardIconMapProvider = settableNotifierProvider<Map<int, FilePath>>({}
 
 /// True while the asynchronous manual inheritance resolution is running.
 ///
-/// The resolution is fire-and-forget (see [CharaDetailRecordStorage.resolveAllInheritance]),
-/// so without this the settings entry could be tapped again and start a second
-/// whole-store lock acquisition on top of the first. The settings tile watches it
-/// to disable itself, the notifier reads it to reject the re-entrant call.
+/// [CharaDetailRecordStorage.resolveAllInheritance] returns a future, but the
+/// settings entry that starts it discards it, so without this the entry could be
+/// tapped again and start a second whole-store lock acquisition on top of the
+/// first. The settings tile watches this to disable itself, the notifier reads it
+/// to reject the re-entrant call. It is also the only signal that tracks the run
+/// itself: the future of a call the guard refused is already complete.
 class InheritanceResolutionRunning extends Notifier<bool> {
   @override
   bool build() => false;
@@ -176,7 +180,7 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   Timer? _watchdog;
 
   // The registry entry for the batch in flight, or null when no batch is running
-  // (and when the batch names no records -- see [_claimBatch]).
+  // (and for a batch begun through [beginBatch], which names no records).
   LongReadToken? _token;
 
   // The registry [_token] belongs to, held from the claim to the release rather
@@ -192,6 +196,16 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   // [LongReadRegistry.release] carries its own `ref.mounted` guard for the case
   // where the container went away first.
   LongReadRegistry? _claimant;
+
+  // The totals halves of the declarations [updated] received during the batch in
+  // flight, applied once by [_finish] rather than once per record. A set, so the
+  // production declarations (all holding the container's one ref) fold into one.
+  // Emptied by [_finish] alone. No batch begins over another's pending totals:
+  // [start] refuses while a batch holds its claim.
+  final Set<RecordTotalsEffect> _pendingTotals = {};
+
+  // The layout [_pendingTotals] is applied over, from the latest [updated].
+  PathInfo? _pendingTotalsInfo;
 
   /// How long the batch may make no progress before the watchdog force-closes it.
   ///
@@ -250,6 +264,14 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // store outage reject `start` -- which the `platformControllerLoader` await
     // above can already do, at the same three call sites, none of which await it.
     final pathInfo = await ref.read(pathInfoLoader.future);
+    // **An empty batch is not begun**, because it would name nothing and could
+    // not end: a batch of no records completes the moment it begins (`Progress(
+    // total: 0)` reports `isCompleted`), so [_finish] is never reached and a
+    // claim taken for it -- the journal and the module directory are named for
+    // any batch -- would stay registered for the rest of the session.
+    if (records.isEmpty) {
+      return;
+    }
     // What this batch writes, derived once by [regenerateRecordLongReadPaths] and
     // not listed here: the surfaces that decide whether a batch may start ask that
     // same function, and the claim and the question ran apart for as long as they
@@ -257,16 +279,10 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // while a re-recognition on web publishes through the write transaction
     // journal for its whole length. Its doc carries which folders those are and
     // why both platforms name them.
-    //
-    // **An empty batch names nothing at all**, which the journal would otherwise
-    // undo: a batch of no records completes the moment it begins (`Progress(total:
-    // 0)` reports `isCompleted`), so [_finish] is never reached and a claim taken
-    // for it would stay registered for the rest of the session. [_claimBatch]
-    // declines an empty list, and this is what keeps the list empty when there is
-    // no batch to hold anything.
-    final paths = records.isEmpty
-        ? const <PathEntity>[]
-        : regenerateRecordLongReadPaths(pathInfo: pathInfo, recordIds: [for (final record in records) record.id]);
+    final paths = regenerateRecordLongReadPaths(
+      pathInfo: pathInfo,
+      recordIds: [for (final record in records) record.id],
+    );
     // The long-read half of the same rule the import refusal above states, and it
     // is here for the same reason: three of the five entrances are controls that
     // can withdraw themselves and say why, and the other two are not controls at
@@ -275,28 +291,37 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     // and the geometry files under a directory an archive is moving away or a zip
     // is reading — the collision the registry exists to name.
     //
-    // Asked of the *same* list the claim below is taken over, so "what this batch
-    // would touch" is derived once. Read rather than watched: `start` is not a
-    // build, and the claim it is about to take settles the question for the rest
-    // of the batch.
+    // Asked and claimed in one call, over the one list, so "what this batch would
+    // touch" is derived once and nothing can register between the question and
+    // the claim. Read rather than watched: `start` is not a build, and the claim
+    // settles the question for the rest of the batch.
+    //
+    // **A start while a batch is running is refused by the same question.** Every
+    // batch names the journal and the module directory, so the batch in flight is
+    // always holding part of what the next one would claim. A batch is never
+    // replaced, and a batch never begins over another's claim.
+    //
+    // **The unscoped half of the registry's protocol and not `holdWhenFree`.** The
+    // batch's end is a state transition, not a Dart scope: [_finish] is reached
+    // from a native callback ([updated]/[fail]) and from the watchdog timer, and
+    // neither of those is on this stack -- all three call sites of [start] fire and
+    // forget. There is no block to wrap, which is the same reason
+    // `StorageZipProgress` claims by hand. The release is [_closeBatch]'s, and both
+    // ways a batch can end reach it.
     //
     // No sentence anywhere: this is past every control, and the two UI-less
     // entrances have nothing to show one on. The controls carry their own.
-    //
-    // An empty batch is asked about nothing rather than asked about an empty
-    // request: `StorageDeletePathsRequest` is documented as never empty, and a
-    // batch that names no record is one [_claimBatch] already declines to claim
-    // for.
-    final blockedBy = paths.isEmpty
-        ? null
-        : storageDeleteBlockedBy(StorageDeletePathsRequest(paths), ref.read(longReadRegistryProvider).values);
-    if (blockedBy != null) {
+    final claimant = ref.read(longReadRegistryProvider.notifier);
+    final LongReadToken token;
+    try {
+      token = claimant.claimUntilReleasedWhenFree(kind: LongReadKind.regeneration, paths: paths);
+    } on LongReadNotStartedException catch (e) {
       logger.i(
-        "Declined to regenerate ${records.length} record(s): ${blockedBy.name} is holding a folder they live in.",
+        "Declined to regenerate ${records.length} record(s): ${e.heldBy?.name} is holding a folder they live in.",
       );
       return;
     }
-    _beginBatch(records.length, paths);
+    _beginBatch(records.length, token: token, claimant: claimant);
     for (final record in records) {
       platformController.updateRecord(record.id);
     }
@@ -310,44 +335,40 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   /// directory it could say it was holding. A test that means to observe the
   /// claim has to drive [start].
   @visibleForTesting
-  void beginBatch(int total) => _beginBatch(total, const []);
+  void beginBatch(int total) => _beginBatch(total);
 
-  void _beginBatch(int total, List<PathEntity> paths) {
+  /// Begins a batch of [total] records that holds [token], taken from [claimant].
+  ///
+  /// The token and the registry it came from arrive together because
+  /// [_releaseClaim] needs both: a token kept without its registry is a claim
+  /// nothing releases.
+  void _beginBatch(int total, {LongReadToken? token, LongReadRegistry? claimant}) {
+    assert(_token == null, 'a batch began over the claim of a batch still in flight; start refuses that');
     _counted.clear();
     _successCount = 0;
     _failureCount = 0;
-    _claimBatch(paths);
+    _token = token;
+    _claimant = claimant;
     state = Progress(total: total);
     _armWatchdog();
   }
 
-  /// Registers [paths] with the long-read registry for the batch that is starting.
+  /// Announces that regeneration of [id] rewrote its directory under `active/`.
   ///
-  /// **Why the unscoped half of the registry's protocol and not `hold`.** The
-  /// batch's end is a state transition, not a Dart scope: [_finish] is reached
-  /// from a native callback ([updated]/[fail]) and from the watchdog timer, and
-  /// neither of those is on [start]'s stack -- all three call sites of [start]
-  /// fire and forget. There is no block to wrap, which is the same reason
-  /// `StorageZipProgress` claims by hand. The release is [_closeBatch]'s, and both
-  /// ways a batch can end reach it.
-  ///
-  /// **A batch that names no records registers nothing**, and that is not a
-  /// shortcut either: `Progress(total: 0)` already reports `isCompleted`, so no
-  /// record is ever counted and [_finish] is never reached -- a claim taken here
-  /// would stay on for the rest of the session with nothing left to take it off.
-  void _claimBatch(List<PathEntity> paths) {
-    // A re-entrant start replaces the batch -- the previous batch's outstanding
-    // callbacks land in the new `_counted` -- so it has to replace the claim too.
-    _releaseClaim();
-    if (paths.isEmpty) {
-      return;
+  /// [effects] is applied in two halves. The image half runs here, per record and
+  /// before the reload, over `active/<id>` -- a regeneration only ever rewrites
+  /// the active store. The totals half is collected while a batch is in flight
+  /// and applied once when it finishes ([_finish]); an announcement that arrives
+  /// outside a batch applies it at once, since no batch end will come for it.
+  Future<void> updated(String id, {required RecordWriteEffects effects}) async {
+    PathInfo? pathInfo;
+    try {
+      final info = await ref.read(pathInfoLoader.future);
+      pathInfo = info;
+      effects.images.apply(RecordImageScope(info: info, changed: [recordDirOfId(info, RecordSource.active, id).path]));
+    } catch (e, s) {
+      logger.w("Failed to resolve the layout for regenerated record $id: $e\n$s");
     }
-    final claimant = ref.read(longReadRegistryProvider.notifier);
-    _token = claimant.claimUntilReleased(kind: LongReadKind.regeneration, paths: paths);
-    _claimant = claimant;
-  }
-
-  Future<void> updated(String id) async {
     // Always reload, even outside a batch: the native side can emit this for any
     // record regeneration, and a failed reload must not abort the refresh.
     // Completion is gated on the count reaching the total, so a single failed
@@ -365,6 +386,17 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     if (!ref.mounted) {
       return;
     }
+    if (pathInfo != null) {
+      // Read before [_count], which can complete the batch: the record that
+      // completes it belongs to it. `isCompleted` is also what [_count] reads to
+      // tell a batch from none.
+      if (state.isCompleted) {
+        effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+      } else {
+        _pendingTotals.add(effects.totals);
+        _pendingTotalsInfo = pathInfo;
+      }
+    }
     _count(id, failed: false);
   }
 
@@ -372,8 +404,12 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   ///
   /// A failed `updateRecord` emits an `onError` instead of the `onCharaDetailUpdated`
   /// that [updated] consumes, so without this the batch would wedge on the missing
-  /// callback. Counted as a processed (failed) record so the batch still completes;
-  /// no reload runs, since the record's files were not rewritten.
+  /// callback. Counted as a processed (failed) record so the batch still completes.
+  ///
+  /// A failure is not announced as a write: no reload runs and no [RecordWriteEffects]
+  /// is applied. Native can fail after it has already rewritten some of the record's
+  /// files (`record.json` is written last), and what the app shows of those files
+  /// stays as it was until they are next read.
   void fail(String id) {
     logger.w("Regeneration failed for record $id.");
     _count(id, failed: true);
@@ -415,11 +451,19 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
 
   void _finish() {
     _closeBatch();
+    _applyPendingTotals();
     // The batch is done. Release the native event loop that updateRecord spun up; the native guard leaves it
     // running if a live capture is sharing it, so this is safe to call unconditionally.
     ref.read(platformControllerProvider)?.finishUpdate();
     final succeeded = _successCount;
     final failed = _failureCount;
+    // The claim is already released, so another batch may begin before this tail
+    // runs. The finished batch's own `Progress` object identifies it: every batch
+    // publishes a fresh instance ([_beginBatch], [Progress.increment]) and
+    // `Progress` has no value equality, so `identical` tells this batch from the
+    // next one. Clearing another batch's state would make [_count] discard all of
+    // its outcomes, so it never reaches [_finish] and its claim is never released.
+    final finished = state;
     Future.delayed(const Duration(milliseconds: 200), () {
       // The container may have been torn down (app shutdown) while this was pending.
       if (!ref.mounted) {
@@ -427,8 +471,23 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
       }
       ref.read(charaDetailRecordStorageLoaderProvider.notifier).forceRebuild();
       _showCompletionToast(succeeded: succeeded, failed: failed);
-      state = Progress.none;
+      if (identical(state, finished)) {
+        state = Progress.none;
+      }
     });
+  }
+
+  void _applyPendingTotals() {
+    final info = _pendingTotalsInfo;
+    final pending = _pendingTotals.toList();
+    _pendingTotals.clear();
+    _pendingTotalsInfo = null;
+    if (info == null) {
+      return;
+    }
+    for (final totals in pending) {
+      totals.apply(TotalsScope.recordRoot(info));
+    }
   }
 
   void _showCompletionToast({required int succeeded, required int failed}) {
@@ -596,6 +655,22 @@ DirectoryPath recordDirOfId(PathInfo pathInfo, RecordSource source, String id) {
   return root / id;
 }
 
+/// What a delete of [recordIds] from [source] holds in the long-read registry:
+/// each record's own directory.
+///
+/// One derivation for both sides of that registration. The store claims these
+/// paths around its erasure ([CharaDetailRecordMutator.deleteAsync] and
+/// [CharaDetailRecordMutator.deleteAllAsync]), and the delete confirmations ask
+/// about the same paths before they offer the press
+/// (`delete_record_dialog.dart`'s `recordDeleteAwaitsExtraction`), so the two
+/// cannot come to disagree about what a record delete touches. The erasure writes
+/// no journal, so the directories are the whole of it.
+List<PathEntity> recordDeleteLongReadPaths({
+  required PathInfo pathInfo,
+  required RecordSource source,
+  required Iterable<String> recordIds,
+}) => [for (final id in recordIds) recordDirOfId(pathInfo, source, id)];
+
 /// Resolves the directory holding [record]'s files for the given [source].
 DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) =>
     recordDirOfId(pathInfo, source, record.id);
@@ -682,25 +757,103 @@ Future<void> _persistRecordJsonAsync(DirectoryPath recordDir, CharaDetailRecord 
 ///
 /// [emptyOk] is what makes "already gone" a success rather than a failure. The
 /// post-condition callers need is *the directory does not exist*, and a
-/// directory another tab (or an out-of-band deletion) already removed satisfies
+/// directory an out-of-band deletion (Explorer, the native capture process) or a
+/// second press already removed satisfies
 /// it. Without it, `delete(recursive: true)` raises `PathNotFoundException` on
 /// both platforms (`dart:io` by measurement, the web VFS by design), the id
 /// lands in the caller's `failed` set, `removeRecords` never sees it, and the
 /// row becomes permanently undeletable with an error toast on every retry.
 /// The `exists()` check below still catches a delete that silently did nothing.
-Future<void> _deleteDirectoryVerifiedAsync(DirectoryPath directory) async {
+/// `record.json` is erased last, and on its own, because a recursive delete that
+/// stops partway keeps whatever it has already erased erased. With the decode
+/// source taken first, what survives a failure is a directory the next scan
+/// cannot read, so the scan moves it aside as unreadable and the user is told a
+/// record is broken when what actually happened is that a delete failed. Taking
+/// every other entry first means a stop at any point leaves a directory that
+/// still decodes, and a failed delete stays a failed delete.
+@visibleForTesting
+Future<void> deleteRecordDirectoryVerifiedAsync(DirectoryPath directory) async {
+  await _eraseExceptRecordJsonAsync(directory);
+  await directory.filePath("record.json").delete(emptyOk: true);
   await directory.delete(recursive: true, emptyOk: true);
   if (await directory.exists()) {
     throw StateError('Record directory still exists after delete: ${directory.path}');
   }
 }
 
+/// Synchronous counterpart of [deleteRecordDirectoryVerifiedAsync], including
+/// its erasure order: the two run on the same store and a partial failure has
+/// the same consequence on either.
 void _deleteDirectoryVerifiedSync(DirectoryPath directory) {
+  _eraseExceptRecordJsonSync(directory);
+  directory.filePath("record.json").deleteSync(emptyOk: true);
   directory.deleteSync(recursive: true, emptyOk: true);
   if (directory.existsSync()) {
     throw StateError('Record directory still exists after delete: ${directory.path}');
   }
 }
+
+/// Erases every entry of [directory] except its `record.json`.
+///
+/// Leaves the directory decodable for as long as anything of it is left, so an
+/// erasure that stops here is still a record and not a casualty. A directory
+/// that is already gone has nothing to erase and is not an error - the caller
+/// wants the same post-condition either way.
+Future<void> _eraseExceptRecordJsonAsync(DirectoryPath directory) async {
+  if (!await directory.exists()) return;
+  await for (final entry in directory.list()) {
+    if (entry.name == "record.json") continue;
+    await entry.delete(recursive: true, emptyOk: true);
+  }
+}
+
+/// Synchronous counterpart of [_eraseExceptRecordJsonAsync].
+void _eraseExceptRecordJsonSync(DirectoryPath directory) {
+  if (!directory.existsSync()) return;
+  for (final entry in directory.listSync()) {
+    if (entry.name == "record.json") continue;
+    entry.deleteSync(recursive: true, emptyOk: true);
+  }
+}
+
+/// Whether [existing] already holds a record under [id].
+///
+/// One spelling of "the store knows this id", asked by the addition plan when it
+/// decides what a rejection may do to the arriving record's directory.
+bool _holdsRecordId(Iterable<CharaDetailRecord> existing, String id) => existing.any((e) => e.id == id);
+
+/// The id of the record in [existing] that [record] duplicates in content, or
+/// null when it duplicates none.
+///
+/// The one place the store answers "is this the same record". Both entrances use
+/// it - capture, when a freshly read chara arrives, and import, when a zip
+/// carries one - so the two cannot drift into different ideas of sameness.
+///
+/// A record matching *itself* by id is not a duplicate: re-adding or re-importing
+/// a known id replaces that record, which is what both the capture path and the
+/// interchange format mean by a colliding id. Only the record being replaced is
+/// left out, though: every *other* record is still asked, because a replacement
+/// whose new contents are another stored record's plants exactly the pair this
+/// check exists to keep out. Leaving the replaced record out by id, rather than
+/// stopping at whichever match the scan meets first, keeps the answer a property
+/// of the record set and not of the order [existing] happens to be listed in.
+String? duplicateCharaIdIn(Iterable<CharaDetailRecord> existing, CharaDetailRecord record) =>
+    existing.firstWhereOrNull((e) => e.id != record.id && record.isSameChara(e))?.id;
+
+/// The id whose `<root>/<id>/` directory a duplicate rejection may discard, or
+/// null when the rejection has no directory of its own to drop.
+///
+/// A rejected capture's directory is named by the arriving record's id, so the
+/// rejection branch drops it on the premise that the directory belongs to the
+/// record now arriving. When [existing] already holds that id, the directory is
+/// the stored record's own and erasing it destroys a record the user captured
+/// earlier. The premise is therefore settled here, by asking the record set, and
+/// handed to the branch as the decision itself rather than as a fact the branch
+/// has to re-read. A replacement whose new contents are another stored record's
+/// is refused with exactly this answer: the directory it would have written into
+/// is the stored record's, and it is kept.
+String? discardableArrivalIdIn(Iterable<CharaDetailRecord> existing, CharaDetailRecord record) =>
+    _holdsRecordId(existing, record.id) ? null : record.id;
 
 final class RecordDeleteResult {
   const RecordDeleteResult({required this.succeeded, required this.failed});
@@ -733,7 +886,7 @@ void _discardRejectedDuplicateSync(DirectoryPath directory) {
 /// OPFS import path.
 Future<void> _discardRejectedDuplicateAsync(DirectoryPath directory) async {
   try {
-    await _deleteDirectoryVerifiedAsync(directory);
+    await deleteRecordDirectoryVerifiedAsync(directory);
   } catch (error, stackTrace) {
     logger.e("Failed to delete the rejected duplicate ${directory.path}.", error, stackTrace);
     Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
@@ -749,9 +902,96 @@ Future<void> _discardRejectedDuplicateAsync(DirectoryPath directory) async {
 abstract interface class CharaDetailRecordMutator {
   CharaDetailRecord? getBy({required String id});
 
-  Future<RecordDeleteResult> deleteAsync(String id);
+  /// Deletes the record [id]. Once the delete reports, [effects] is applied: the images to its
+  /// directory if it is gone and to nothing if it is not, the totals to the record root either way.
+  ///
+  /// **Claimed as a delete before the first `await`**, through [holdForDelete] over
+  /// [recordDeleteLongReadPaths]: asked and registered in one turn, so while another job holds the
+  /// record's directory this throws [LongReadNotStartedException] having removed nothing and
+  /// applied nothing. The claim is released after the store's list has dropped what was erased and
+  /// [effects] has been applied, so a writer that asks the registry never finds the record unheld
+  /// while the app still remembers it.
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects});
 
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids);
+  /// Deletes every id in [ids]. Once the batch reports, [effects] is applied: the images to the
+  /// directories of the ids in [RecordDeleteResult.succeeded] and to no other, the totals to the
+  /// record root.
+  ///
+  /// Claimed as one delete over every id in [ids], and refused and released as [deleteAsync] is.
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects});
+}
+
+/// Hands [effects] what a finished delete in the store rooted at [store] erased, and returns [result].
+///
+/// The scope is the directories of [RecordDeleteResult.succeeded] only: a failed id's directory can
+/// still be on disk with the pictures it had, so dropping its cached reads would throw away pixels
+/// that are still correct.
+RecordDeleteResult _declareDeleted(
+  RecordDeleteResult result, {
+  required PathInfo info,
+  required DirectoryPath store,
+  required RecordWriteEffects effects,
+}) {
+  effects.images.apply(RecordImageScope(info: info, changed: [for (final id in result.succeeded) (store / id).path]));
+  effects.totals.apply(TotalsScope.recordRoot(info));
+  return result;
+}
+
+/// What a record merge asks of a store while it already holds the exclusive root
+/// lock.
+///
+/// Deliberately **not** members of [CharaDetailRecordMutator]. Everything there
+/// takes the lock it needs; everything here assumes the caller took it, and the
+/// locks are not re-entrant, so calling one of these from a context that has not
+/// acquired the root is a corruption and calling it from one that has is the only
+/// way through. Two surfaces say which is which; one surface with a sentence in
+/// the doc says it once and is read by whoever reads the doc.
+///
+/// The merge rewrites, publishes into and deletes from either store, so it asks
+/// for the store as this surface rather than branching on which one it has. The
+/// store's own name (`active` / `archive`) is [rootDirectory]'s leaf and is not
+/// restated here.
+abstract interface class CharaDetailRecordMergeSurface {
+  /// The directory whose children are this store's record directories.
+  DirectoryPath get rootDirectory;
+
+  /// Every record this store currently serves.
+  List<CharaDetailRecord> get recordsInMemory;
+
+  CharaDetailRecord? getBy({required String id});
+
+  /// Writes each of [records] back to its own `record.json`, and changes nothing
+  /// in memory.
+  ///
+  /// Disk only, because the merge's memory is republished once at its end (or
+  /// discarded by the reload its failure forces), never per record: a store that
+  /// published a half-rewritten set would be serving a view that exists in no
+  /// other place.
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records);
+
+  /// Erases each of [ids], accounting for every one of them separately.
+  ///
+  /// The same primitive the ordinary record delete runs, with the same failure
+  /// behaviour: a directory that could not be erased leaves its id in
+  /// [RecordDeleteResult.failed] and its row in the list.
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids);
+
+  /// Puts [record] into this store's published list, replacing an entry with the
+  /// same id or appending it when there is none, and changes nothing on disk.
+  ///
+  /// Both cases in one member because a merge cannot tell them apart without
+  /// knowing which store the survivor came from — which is the question the
+  /// merge is answering, not one it can ask. A store that has never loaded
+  /// ignores it: its next build reads the record.json the merge already wrote.
+  void adoptRecordInMemory(CharaDetailRecord record);
+
+  /// Drops [id] from this store's published list, and changes nothing on disk.
+  ///
+  /// This is the *other* half of a cross-store merge: the survivor lives in the
+  /// store of the enhanced side and is adopted there, so the older side's row is
+  /// not replaced but removed, and its directory was already taken by the
+  /// publication.
+  void forgetRecordInMemory(String id);
 }
 
 const _stableRecordSetMaxAttempts = 8;
@@ -767,14 +1007,17 @@ const _importMergeDeclaration = LongReadDeclaration.none(
   reason: 'one record read plus the inheritance merge its plan names; shorter than a claim is worth',
 );
 
-/// What a record delete announces to the long-read registry: nothing.
+/// What a record delete's acquisition announces: nothing, because the delete
+/// announced itself one frame up.
 ///
-/// A delete is the *destructive* side of this arrangement — the operation whose
-/// button the registry withholds while somebody else holds the paths. It is also
-/// short: it removes a directory and republishes. Announcing it would grey out
-/// the surface it was started from, for the length of its own run.
-const _recordDeleteDeclaration = LongReadDeclaration.none(
-  reason: 'a delete is the destructive side the registry withholds, not a long read that withholds anything',
+/// `deleteAsync` and `deleteAllAsync` take the delete's claim through
+/// [holdForDelete] around the gate call, asking and registering in one turn.
+/// Declaring it at the gate instead would register without asking, which is
+/// the half that lets a delete start underneath a job that already holds the
+/// record. The wording follows `_declaredByTheMergeFrame`, which is the same
+/// arrangement.
+const _declaredByTheDeleteClaim = LongReadDeclaration.none(
+  reason: 'a claim already taken above this seam, by holdForDelete around the gate call',
 );
 
 /// What the whole-store inheritance resolution's *acquisitions* announce:
@@ -868,7 +1111,12 @@ class _AdditionPlan {
   /// The full resolution, for the inheritance toasts.
   final InheritanceResolution? resolution;
 
-  const _AdditionPlan.duplicate(this.duplicatedId)
+  /// The id whose directory the rejection branch may discard, or null when it
+  /// has none to discard. See [discardableArrivalIdIn]. Always null on a resolved
+  /// plan: nothing was rejected, so nothing is dropped.
+  final String? discardableArrivalId;
+
+  const _AdditionPlan.duplicate(this.duplicatedId, {required this.discardableArrivalId})
     : resolvedRecord = null,
       activePersists = const [],
       archiveUpdates = const [],
@@ -881,16 +1129,27 @@ class _AdditionPlan {
     required this.archiveUpdates,
     required this.newState,
     required this.resolution,
-  }) : duplicatedId = null;
+  }) : duplicatedId = null,
+       discardableArrivalId = null;
 }
 
-class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
+class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
+    implements CharaDetailRecordMutator, CharaDetailRecordMergeSurface {
+  @override
   late DirectoryPath rootDirectory;
+
+  /// The layout this build resolved, kept because [addFromFile] is synchronous
+  /// and cannot await `pathInfoLoader` again at the moment a record arrives.
+  /// [rootDirectory] is taken from the same value, so the two cannot describe
+  /// different trees.
+  late PathInfo _pathInfo;
+
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
   @override
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
+    _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailActiveDir;
     // Kick off the archive build so capture-time dedup and inheritance
     // resolution can consider archived records; its bulk scan waits for this
@@ -939,7 +1198,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
         // The origin rides the event rather than being read back from the import's state here: the
         // two agree only while this callback is synchronous, and pinning the decision to the record
         // means it stays right if it ever is not. See [CharaDetailRecordCapturedEvent].
-        next.whenData((e) => addFromFile(e.id, notifyDuplicate: !e.fromVideoImport));
+        next.whenData((e) => addFromFile(e.id, notifyDuplicate: !e.fromVideoImport, effects: _captureArrivalEffects()));
       });
       _scheduleRetainedCaptureDrain();
     }
@@ -981,7 +1240,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
         // gap the marker exists to survive.
         for (final (:id, :fromVideoImport) in capturedRecordRetention.pendingEvents) {
           try {
-            addFromFile(id, notifyDuplicate: !fromVideoImport);
+            addFromFile(id, notifyDuplicate: !fromVideoImport, effects: _captureArrivalEffects());
           } catch (error, stackTrace) {
             logger.e("Failed to ingest the retained captured record $id.", error, stackTrace);
           }
@@ -1009,12 +1268,25 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   Set<String> get unavailableRecordIds => _unavailableRecordIds;
 
   /// Whether this store's view of the record set is known to be incomplete.
-  @visibleForTesting
+  ///
+  /// Read by the enhancement merge's complete-view check, which rewrites the
+  /// parent slots of the records memory holds and so refuses while a record on
+  /// disk is not among them. Not `@visibleForTesting`: production asks it.
   bool get isIncomplete => _unavailableRecordIds.isNotEmpty;
+
+  /// Whether a regeneration batch has staged records this store has not published
+  /// yet, so the read surface answers from the buffer while [state] still holds
+  /// the older list.
+  ///
+  /// Read by the enhancement merge's complete-view check
+  /// (`enhancement_merge.dart`), which rewrites whole `record.json` files from
+  /// memory and refuses to run while the two disagree. Not `@visibleForTesting`:
+  /// production asks it.
+  bool get hasPendingRecords => _pendingRecords != null;
 
   /// Seam over the bulk scan.
   ///
-  /// Only the web loader can report a record *refused* — a gate, a cross-tab
+  /// Only the web loader can report a record *refused* — a gate, a record
   /// lock, an unusable directory name — and the conditional import resolves to
   /// the desktop loader under `flutter test`, so this is the one place a test can
   /// drive those outcomes: the same reason [recordMutationLock] exists. The one
@@ -1101,6 +1373,20 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     return true;
   }
 
+  /// Every record a new one has to be weighed against: the active set plus the
+  /// archived one.
+  ///
+  /// Archived records count, so a re-capture of an archived chara is rejected as a
+  /// duplicate and inheritance can link across both sets. Falls back to
+  /// active-only if the archive failed to preload (see build()).
+  ///
+  /// Public so the import path weighs its records against the same set the capture
+  /// path does, with the versions an import has just written laid over it.
+  List<CharaDetailRecord> existingRecords() => [
+    ..._records,
+    ...?ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value,
+  ];
+
   /// Computes the side-effect-free plan for adding [record]: duplicate check,
   /// inheritance resolution, the active-vs-archive split of the changed records,
   /// and the list to republish.
@@ -1110,22 +1396,24 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// differ only in how they execute the resulting file I/O (sync vs. async FS).
   _AdditionPlan _resolveAddition(CharaDetailRecord record) {
     final activeRecords = _records;
-    // Consider archived records too, so a re-capture of an archived chara is
-    // rejected as a duplicate and inheritance can link across both sets. Falls
-    // back to active-only if the archive failed to preload (see build()).
+    final existing = existingRecords();
     final archiveRecords =
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
-    final existing = [...activeRecords, ...archiveRecords];
-    final duplicated = existing.firstWhereOrNull((e) => record.isSameChara(e));
-    if (duplicated != null && duplicated.id != record.id) {
-      return _AdditionPlan.duplicate(duplicated.id);
+    final duplicatedId = duplicateCharaIdIn(existing, record);
+    if (duplicatedId != null) {
+      return _AdditionPlan.duplicate(duplicatedId, discardableArrivalId: discardableArrivalIdIn(existing, record));
     }
 
     // Link this record to existing parents/children (in either the active or the
     // archive set) by matching factors and card. Each record whose parent ids
     // changed is split by its owning store: active-side changes persist here (the
     // new record among them), archive-side changes go to the archive store.
-    final resolution = InheritanceResolver.resolveForNewRecord(record, existing, g1RaceSids: _g1RaceSids());
+    final resolution = InheritanceResolver.resolveForNewRecord(
+      record,
+      existing,
+      g1RaceSids: _g1RaceSids(),
+      classifier: _factorClassifier(),
+    );
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
     final archiveIds = {for (final e in archiveRecords) e.id};
     final activePersists = <CharaDetailRecord>[];
@@ -1192,7 +1480,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   void add(CharaDetailRecord record, {bool notifyDuplicate = true}) {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
-      _discardRejectedDuplicateSync(rootDirectory / record.id);
+      // A directory named by an id the store already holds is that stored
+      // record's, not this arrival's, so there is nothing here to discard.
+      final discardableId = plan.discardableArrivalId;
+      if (discardableId != null) {
+        _discardRejectedDuplicateSync(rootDirectory / discardableId);
+      }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
@@ -1243,7 +1536,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// whatever else is running at the time. Only the sound is dropped -- the capture-state
   /// failure below still fires, so the visible status output is unchanged (for the attempt the
   /// record belongs to; see [_reportRejectedDuplicate]).
-  Future<void> addFromFileAsync(String id, {bool notifyDuplicate = true}) async {
+  ///
+  /// [effects] is applied to `<id>`'s directory on every exit, a throw included. [addFromFile]
+  /// applies its own only once the id is handled, and leaves an id that threw to the next build.
+  Future<void> addFromFileAsync(String id, {bool notifyDuplicate = true, required RecordWriteEffects effects}) async {
     final storageRoot = rootDirectory.parent.parent;
     try {
       final result = await recordRecoveryGate.runForRecord(
@@ -1267,9 +1563,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
             declaration: _importMergeDeclaration,
             action: () async {
               // The imported record's lock was released between the read above and
-              // this wider set, so re-confirm the directory is still there: another
-              // tab may have archived or deleted it, and persisting the plan would
-              // otherwise resurrect it as a record.json-only tree.
+              // this wider set, so re-confirm the directory is still there: a delete,
+              // an archive write-back or a whole-store resolution can take it in that
+              // gap, and persisting the plan would otherwise resurrect it as a
+              // record.json-only tree.
               if (!await (rootDirectory / id).exists()) {
                 logger.w("Imported record $id disappeared before it could be merged.");
                 return;
@@ -1291,6 +1588,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       // Rethrown, not swallowed: the callers decide whether one record's failure
       // ends the batch, and a test that awaits this must still see the failure.
       rethrow;
+    } finally {
+      // Every exit from here leaves the record on disk -- merged, quarantined,
+      // discarded as a duplicate, or stranded by the failure above -- so the tree
+      // differs from the one the view's totals were taken from in all of them.
+      _applyArrivalEffects(id, effects);
     }
   }
 
@@ -1319,7 +1621,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   Future<void> _addAsync(CharaDetailRecord record, {bool notifyDuplicate = true}) async {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
-      await _discardRejectedDuplicateAsync(rootDirectory / record.id);
+      // See [add]: a stored id's directory is never this arrival's to discard.
+      final discardableId = plan.discardableArrivalId;
+      if (discardableId != null) {
+        await _discardRejectedDuplicateAsync(rootDirectory / discardableId);
+      }
       _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
@@ -1354,7 +1660,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   ///
   /// Refusing the addition instead would be the worse trade: it would discard a
   /// capture the user just made because of a condition that is usually transient
-  /// (another tab holding the record lock), and the record on disk is not in
+  /// (a long operation of this app holding the record lock), and the record on disk is not in
   /// danger either way. So the addition proceeds and the incompleteness is stated
   /// rather than hidden. Desktop reaches this too, for the one cause its scan
   /// can report: a record whose decode failed and whose quarantine move failed
@@ -1363,7 +1669,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// condition was a full page reload, so a user who could not reload saw this
   /// same toast after *every* capture for the rest of the session with no way to
   /// act on it. Re-running the scan is also exactly the advice the sibling
-  /// "another tab is busy" toast gives, so the two now offer the same gesture.
+  /// busy-lock toast gives, so the two now offer the same gesture.
   void _warnIfCandidateSetIncomplete() {
     if (!isIncomplete && !ref.read(charaDetailArchiveStorageLoaderProvider.notifier).isIncomplete) {
       return;
@@ -1388,33 +1694,57 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// awaits it): the relation-bonus recompute walks archived ancestors, so running
   /// it without the archive would tear down bonuses that depend on them.
   ///
-  /// Both platforms take the asynchronous path. Web must (OPFS writes and the
-  /// cross-tab record locks are async), and the io lock now grants by the same
+  /// Both platforms take the asynchronous path. Web must (OPFS writes and its
+  /// Web Locks record acquisitions are async), and the io lock now grants by the same
   /// algorithm within the UI isolate (`record_mutation_lock_io.dart`; the io
   /// recovery gate stays a passthrough because native has no transaction to
   /// recover), so desktop runs the same code with the same exclusion — and gains
   /// the double-tap guard and the failure toast that only the asynchronous path
   /// had.
-  void resolveAllInheritance() {
-    // Fire-and-forget, so the in-flight flag is the only thing standing between
-    // a second tap and a second whole-store lock acquisition.
+  /// The returned future completes once the resolution has finished writing
+  /// both stores. Callers that only trigger the run discard it (the UI does);
+  /// callers that need the result on disk await it.
+  ///
+  /// When the double-tap guard below refuses to start a second run, the
+  /// returned future is already complete: it says "this call started nothing",
+  /// not "the run in flight has finished". `inheritanceResolutionRunningProvider`
+  /// is the only signal that tracks the run itself.
+  ///
+  /// [effects] is applied to the record root once the run ends, whatever its outcome: the run
+  /// rewrites `record.json` files in both stores and reports no list of them.
+  Future<void> resolveAllInheritance({required RecordWriteEffects effects}) {
+    // The in-flight flag is the only thing standing between a second tap and a
+    // second whole-store lock acquisition.
     if (ref.read(inheritanceResolutionRunningProvider)) {
-      return;
+      return Future.value();
     }
     ref.read(inheritanceResolutionRunningProvider.notifier).set(true);
-    unawaited(
-      _resolveAllInheritanceAsync().whenComplete(() {
-        // A whole-store resolution can outlive its container (the app closing,
-        // or a test tearing the container down mid-flight). `ref.read` on a
-        // disposed element throws, and this callback is unawaited, so the throw
-        // would surface only as an unhandled async error. Nothing needs
-        // clearing once the container is gone: the flag lives in it.
-        if (!ref.mounted) {
-          return;
-        }
-        ref.read(inheritanceResolutionRunningProvider.notifier).set(false);
-      }),
-    );
+    return _resolveAllInheritanceAsync().whenComplete(() {
+      // The resolution rewrites each changed record back into whichever store
+      // owns it, and the settings tile that starts it puts nothing in front of
+      // itself -- no dialog replaces the storage card, so the user can open the
+      // storage manager from the same page while the run is still writing.
+      //
+      // In `whenComplete` rather than after a successful run, for the reason the
+      // archive batch gives: a resolution that threw partway can already have
+      // persisted part of its changed set, so the outcome is not the question.
+      // The tap the double-tap guard refuses returns above and never arrives
+      // here, which is the one case that really wrote nothing. Ahead of the
+      // mounted check below, which guards this store's own `ref`: the
+      // declaration carries the container's ref and checks that one itself.
+      effects.images.apply(RecordImageScope(info: _pathInfo, changed: [_pathInfo.charaDetailDir.path]));
+      effects.totals.apply(TotalsScope.recordRoot(_pathInfo));
+      // A whole-store resolution can outlive its container (the app closing,
+      // or a test tearing the container down mid-flight). `ref.read` on a
+      // disposed element throws, and most callers discard the returned future,
+      // so the throw would surface only as an unhandled async error. Nothing
+      // needs clearing once the container is gone: the flag lives in it, and so
+      // does the state the storage view holds.
+      if (!ref.mounted) {
+        return;
+      }
+      ref.read(inheritanceResolutionRunningProvider.notifier).set(false);
+    });
   }
 
   /// Manual inheritance resolution. All relation reads and both-store writes
@@ -1454,14 +1784,21 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       // not a statement about what is written, and `modules/` and `settings/`
       // are under it and are never touched here.
       //
-      // [LongReadRegistry.hold] and not `claimUntilReleased`: the resolution is
-      // one `Future`, so the release belongs to a scope and there is nothing for
+      // A scoped hold and not `claimUntilReleased`: the resolution is one
+      // `Future`, so the release belongs to a scope and there is nothing for
       // this method to forget.
+      //
+      // **Asked and claimed in one turn, and refused while something holds the
+      // store** ([LongReadContention.refuse]): the resolution is started by a
+      // press, and the entry's own gate is drawn from a registry that can be one
+      // frame older than the press. The confirm path asks again before calling
+      // here, but only to choose its sentence; which claim wins is decided here.
       await ref
           .read(longReadRegistryProvider.notifier)
-          .hold(
+          .holdWhenFree(
             kind: LongReadKind.inherit,
             paths: [rootDirectory.parent],
+            contention: LongReadContention.refuse,
             action: (_) => _runForStableRecordSet<void>(
               recoveryGate: recordRecoveryGate,
               storageRoot: rootDirectory.parent.parent,
@@ -1474,10 +1811,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
                 if (archiveRecords == null) {
                   throw StateError('Archive storage became unavailable during inheritance resolution.');
                 }
-                resolution = InheritanceResolver.resolveAll([
-                  ...activeRecords,
-                  ...archiveRecords,
-                ], g1RaceSids: _g1RaceSids());
+                resolution = InheritanceResolver.resolveAll(
+                  [...activeRecords, ...archiveRecords],
+                  g1RaceSids: _g1RaceSids(),
+                  classifier: _factorClassifier(),
+                );
                 final archiveIds = {for (final record in archiveRecords) record.id};
                 final archiveStore = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
                 final archiveUpdates = <CharaDetailRecord>[];
@@ -1499,10 +1837,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
             ),
           );
       _surfaceInheritance(resolution, alwaysReport: true);
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing was read or written. The refusal is the app's one long-read
+      // sentence, which every press-started writer without a refusal of its own
+      // reports (the merge and the relocation carry theirs) — not
+      // "app.inheritance.failed", which would call a busy store a failure.
+      announceLongReadNotStarted(exception, operation: 'An inheritance resolution');
     } catch (error, stackTrace) {
-      // The desktop path reports through Flutter's error handling; this one is
-      // unawaited, so a failure would otherwise be invisible to the user who
-      // asked for the resolution.
+      // The desktop path reports through Flutter's error handling; the future
+      // this one runs on is discarded by the UI, so a failure would otherwise
+      // be invisible to the user who asked for the resolution.
       logger.e("Failed to resolve inheritance.", error, stackTrace);
       Toaster.show(ToastData.error(description: "app.inheritance.failed".tr()));
     }
@@ -1521,7 +1865,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (loaded == null) {
       return const {};
     }
-    return ref.read(raceGradeSidProvider(_gradeG1));
+    return ref.read(raceGradeSidProvider(g1RaceGradeTag));
+  }
+
+  /// The factor colour table for enhancement-aware parent matching, read through
+  /// `.asData` for the same reason as [_g1RaceSids] (`factorInfoProvider`
+  /// dereferences `.value!`). Null while the module has not resolved, which tells
+  /// the resolver to match parents exactly only.
+  FactorClassifier? _factorClassifier() {
+    final loaded = ref.read(factorInfoLoader).asData;
+    return loaded == null ? null : FactorClassifier.fromInfo(loaded.value);
   }
 
   /// Reports the outcome of an inheritance resolution via toasts.
@@ -1552,13 +1905,27 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// Asynchronous, web-safe counterpart of [_persist] for [addFromFileAsync].
   Future<void> _persistAsync(CharaDetailRecord record) => _persistRecordJsonAsync(recordPathOf(record), record);
 
+  @override
+  List<CharaDetailRecord> get recordsInMemory => _records;
+
+  @override
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) async {
+    for (final record in records) {
+      await _persistAsync(record);
+    }
+  }
+
   /// Loads `<id>`'s record and merges it, synchronously — the desktop capture path's [add].
   ///
   /// [notifyDuplicate] is false for a record a **video import** produced, and is the sync twin of
   /// [addFromFileAsync]'s parameter of the same name; the reasoning is written out there. It is
   /// threaded from the capture event's origin rather than read off the import state at merge time so
   /// that the two paths decide the same fact the same way, out of the same data, on both platforms.
-  void addFromFile(String id, {bool notifyDuplicate = true}) {
+  ///
+  /// [effects] is applied to `<id>`'s directory once the id is handled: a known id's arrival
+  /// replaces that record's files in place (see [duplicateCharaIdIn]), so the pictures cached by its
+  /// paths are as stale as the storage view's totals.
+  void addFromFile(String id, {bool notifyDuplicate = true, required RecordWriteEffects effects}) {
     final result = CharaDetailRecord.load(rootDirectory / id);
     switch (result) {
       case RecordLoaded(:final record):
@@ -1571,12 +1938,53 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     // retained, so the next build retries it rather than dropping the capture --
     // the same "retain until committed" rule the web harvest follows.
     capturedRecordRetention.acknowledge(id);
+    // After the acknowledgement rather than in a `finally`, because a throw above
+    // leaves this id for the next build to handle, and that attempt refreshes.
+    // [addFromFileAsync] has no such retry and so refreshes either way.
+    _applyArrivalEffects(id, effects);
   }
+
+  /// Applies an arrival's [effects] to `<id>`'s directory and to the record root.
+  ///
+  /// Both arrival paths end here, and neither knows whether the storage view is
+  /// open or which pictures are cached: the refresh is what a closed view costs
+  /// nothing for ([refreshStorageTabAfterRecordWrite]), and the drop is a scan of
+  /// the cache keys. The directory is the same one whether the record was merged,
+  /// quarantined or discarded as a duplicate.
+  void _applyArrivalEffects(String id, RecordWriteEffects effects) {
+    effects.images.apply(RecordImageScope(info: _pathInfo, changed: [(rootDirectory / id).path]));
+    effects.totals.apply(TotalsScope.recordRoot(_pathInfo));
+  }
+
+  /// What a capture's arrival declares, for the two callers inside this store.
+  ///
+  /// Through the container's ref rather than this notifier's, read before the
+  /// merge: the store can be invalidated while an arrival is still being handled.
+  RecordWriteEffects _captureArrivalEffects() => recordArrivalEffects(ref.read(containerRefProvider));
 
   @override
   CharaDetailRecord? getBy({required String id}) {
     return _records.firstWhereOrNull((e) => e.id == id);
   }
+
+  @override
+  void adoptRecordInMemory(CharaDetailRecord record) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    final records = _pendingRecords ??= [...current];
+    final index = records.indexWhere((e) => e.id == record.id);
+    if (index == -1) {
+      records.add(record);
+    } else {
+      records[index] = record;
+    }
+    forceRebuild();
+  }
+
+  @override
+  void forgetRecordInMemory(String id) => removeRecords([id]);
 
   void replaceBy(CharaDetailRecord record, {required String id}) {
     // Accumulate into a private buffer instead of mutating the list held by the
@@ -1668,12 +2076,19 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) async {
-    return recordRecoveryGate.runForRecord(
-      rootDirectory.parent.parent,
-      id,
-      () => _deleteAllAsyncUnlocked({id}),
-      declaration: _recordDeleteDeclaration,
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.active, recordIds: [id]),
+      action: (_) async {
+        final result = await recordRecoveryGate.runForRecord(
+          rootDirectory.parent.parent,
+          id,
+          () => deleteAllUnlocked({id}),
+          declaration: _declaredByTheDeleteClaim,
+        );
+        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+      },
     );
   }
 
@@ -1692,23 +2107,35 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   ///
   /// The map's values are unused: a delete's whole per-record payload is the id.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
-    final succeeded = <String>{};
-    final failed = <String>{};
-    await recordRecoveryGate.runPerRecord(
-      rootDirectory.parent.parent,
-      {for (final id in ids) id: null},
-      (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
-      declaration: _recordDeleteDeclaration,
-      onNotReady: (id, error, stackTrace) {
-        failed.add(id);
-        logger.e("Cannot delete active record $id: its recovery did not finish.", error, stackTrace);
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.active, recordIds: ids),
+      action: (_) async {
+        final succeeded = <String>{};
+        final failed = <String>{};
+        await recordRecoveryGate.runPerRecord(
+          rootDirectory.parent.parent,
+          {for (final id in ids) id: null},
+          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          declaration: _declaredByTheDeleteClaim,
+          onNotReady: (id, error, stackTrace) {
+            failed.add(id);
+            logger.e("Cannot delete active record $id: its recovery did not finish.", error, stackTrace);
+          },
+        );
+        return _declareDeleted(
+          _reportDeleted(succeeded: succeeded, failed: failed),
+          info: _pathInfo,
+          store: rootDirectory,
+          effects: effects,
+        );
       },
     );
-    return _reportDeleted(succeeded: succeeded, failed: failed);
   }
 
-  Future<RecordDeleteResult> _deleteAllAsyncUnlocked(Set<String> ids) async {
+  @override
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids) async {
     final succeeded = <String>{};
     final failed = <String>{};
     for (final id in ids) {
@@ -1716,6 +2143,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
+
+  /// Seam over the one destructive call of a record delete.
+  ///
+  /// Here and not around [deleteAllUnlocked], because what a test of an
+  /// interrupted delete has to choose is *which entry* the erasure stops at, and
+  /// only the call that erases one directory can be asked that. A merge's
+  /// retirement runs this same primitive, so a failure injected here is the one
+  /// the ordinary delete reports rather than a merge-specific invention.
+  @visibleForTesting
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => deleteRecordDirectoryVerifiedAsync(directory);
 
   /// Erases one record's directory, answering whether it is gone.
   ///
@@ -1735,7 +2172,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       return false;
     }
     try {
-      await _deleteDirectoryVerifiedAsync(rootDirectory / id);
+      await deleteRecordDirectory(rootDirectory / id);
       return true;
     } catch (error, stackTrace) {
       logger.e("Failed to delete active record $id.", error, stackTrace);
@@ -1841,17 +2278,17 @@ void _surfaceQuarantines(Ref ref, List<RecordQuarantined> quarantined) {
 ///
 /// Kept separate from [_surfaceQuarantines] on purpose. A quarantined record is
 /// permanently undecodable and has already been moved aside; an *unavailable*
-/// record is intact and still in place, and the most common cause — another tab
-/// holding its cross-tab lock past the acquisition budget — clears by itself.
-/// Collapsing the two would tell a user whose second tab is merely mid-
-/// regeneration that their records are corrupt, and the record would meanwhile
+/// record is intact and still in place, and the most common cause — one of this
+/// app's own long operations holding the record's lock past the acquisition
+/// budget — clears by itself. Collapsing the two would tell a user whose record
+/// is merely mid-regeneration that it is corrupt, and the record would meanwhile
 /// have vanished from the list with nothing on screen at all.
 void _surfaceUnavailableRecords(Ref ref, Map<String, Object> unavailable) {
   if (unavailable.isEmpty) {
     return;
   }
   // Transient: the store is fine, the lock was simply still held. Reloading once
-  // the other tab is idle brings the record back, so this is a warning that says
+  // the holder has finished brings the record back, so this is a warning that says
   // to retry rather than an error about broken data — and tapping it *is* the
   // retry. Telling the user to reload without giving them a reload left only the
   // browser's own page reload, which discards the whole session for a condition
@@ -1954,8 +2391,14 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
 /// capture-time and manual inheritance resolution and in capture dedup: the
 /// active store reads this set as extra candidates and writes back any archived
 /// record whose parent links change via [applyInheritanceUpdates].
-class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
+class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
+    implements CharaDetailRecordMutator, CharaDetailRecordMergeSurface {
+  @override
   late DirectoryPath rootDirectory;
+
+  /// The layout this build resolved, kept so a delete can name the preview providers of what it
+  /// erased without awaiting `pathInfoLoader` again. [rootDirectory] is taken from the same value.
+  late PathInfo _pathInfo;
 
   @visibleForTesting
   RecordMutationLock get recordMutationLock => platformRecordMutationLock;
@@ -1966,6 +2409,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
   @override
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
+    _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailArchiveDir;
     // Sequence the bulk scan after the active store's, so the two scans do not
     // fan out worker isolates at the same time (each spawns up to
@@ -1999,8 +2443,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
   Set<String> get unavailableRecordIds => _unavailableRecordIds;
 
   /// Whether this store's view of the archived record set is known to be
-  /// incomplete.
-  @visibleForTesting
+  /// incomplete. See [CharaDetailRecordStorage.isIncomplete].
   bool get isIncomplete => _unavailableRecordIds.isNotEmpty;
 
   /// Seam over the bulk scan. See [CharaDetailRecordStorage.scanRecords].
@@ -2019,6 +2462,13 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   /// Asynchronous, web-safe counterpart of [_persist].
   Future<void> _persistAsync(CharaDetailRecord record) => _persistRecordJsonAsync(recordPathOf(record), record);
+
+  @override
+  List<CharaDetailRecord> get recordsInMemory => state.asData?.value ?? const [];
+
+  @override
+  Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) =>
+      _applyInheritanceUpdatesAsyncUnlocked(records);
 
   /// Persists inheritance-updated archived [records] and swaps them into the
   /// in-memory list by id.
@@ -2053,6 +2503,31 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     }
   }
 
+  @override
+  void adoptRecordInMemory(CharaDetailRecord record) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    if (current.any((e) => e.id == record.id)) {
+      _swapInMemory([record]);
+    } else {
+      insert([record]);
+    }
+  }
+
+  @override
+  void forgetRecordInMemory(String id) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    state = AsyncData([
+      for (final e in current)
+        if (e.id != id) e,
+    ]);
+  }
+
   /// Swaps [records] into the in-memory list by id, a no-op if the archive view
   /// never loaded (the next build reads the updated json from disk).
   void _swapInMemory(List<CharaDetailRecord> records) {
@@ -2080,12 +2555,19 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   /// Permanently deletes an archived record's directory and republishes.
   @override
-  Future<RecordDeleteResult> deleteAsync(String id) async {
-    return recordRecoveryGate.runForRecord(
-      rootDirectory.parent.parent,
-      id,
-      () => _deleteAllAsyncUnlocked({id}),
-      declaration: _recordDeleteDeclaration,
+  Future<RecordDeleteResult> deleteAsync(String id, {required RecordWriteEffects effects}) async {
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.archive, recordIds: [id]),
+      action: (_) async {
+        final result = await recordRecoveryGate.runForRecord(
+          rootDirectory.parent.parent,
+          id,
+          () => deleteAllUnlocked({id}),
+          declaration: _declaredByTheDeleteClaim,
+        );
+        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+      },
     );
   }
 
@@ -2093,23 +2575,35 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
   /// per-record for the same reason: see that method for why one record's
   /// recovery failure must not be a precondition of the whole batch.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids) async {
-    final succeeded = <String>{};
-    final failed = <String>{};
-    await recordRecoveryGate.runPerRecord(
-      rootDirectory.parent.parent,
-      {for (final id in ids) id: null},
-      (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
-      declaration: _recordDeleteDeclaration,
-      onNotReady: (id, error, stackTrace) {
-        failed.add(id);
-        logger.e("Cannot delete archived record $id: its recovery did not finish.", error, stackTrace);
+  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
+    return holdForDelete(
+      ref.read(longReadRegistryProvider.notifier),
+      paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.archive, recordIds: ids),
+      action: (_) async {
+        final succeeded = <String>{};
+        final failed = <String>{};
+        await recordRecoveryGate.runPerRecord(
+          rootDirectory.parent.parent,
+          {for (final id in ids) id: null},
+          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          declaration: _declaredByTheDeleteClaim,
+          onNotReady: (id, error, stackTrace) {
+            failed.add(id);
+            logger.e("Cannot delete archived record $id: its recovery did not finish.", error, stackTrace);
+          },
+        );
+        return _declareDeleted(
+          _reportDeleted(succeeded: succeeded, failed: failed),
+          info: _pathInfo,
+          store: rootDirectory,
+          effects: effects,
+        );
       },
     );
-    return _reportDeleted(succeeded: succeeded, failed: failed);
   }
 
-  Future<RecordDeleteResult> _deleteAllAsyncUnlocked(Set<String> ids) async {
+  @override
+  Future<RecordDeleteResult> deleteAllUnlocked(Set<String> ids) async {
     final succeeded = <String>{};
     final failed = <String>{};
     for (final id in ids) {
@@ -2117,6 +2611,11 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     }
     return _reportDeleted(succeeded: succeeded, failed: failed);
   }
+
+  /// Seam over the one destructive call of an archived record delete. See
+  /// [CharaDetailRecordStorage.deleteRecordDirectory].
+  @visibleForTesting
+  Future<void> deleteRecordDirectory(DirectoryPath directory) => deleteRecordDirectoryVerifiedAsync(directory);
 
   /// Erases one archived record's directory, answering whether it is gone.
   Future<bool> _deleteOneUnlocked(String id) async {
@@ -2131,7 +2630,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
       return false;
     }
     try {
-      await _deleteDirectoryVerifiedAsync(rootDirectory / id);
+      await deleteRecordDirectory(rootDirectory / id);
       return true;
     } catch (error, stackTrace) {
       logger.e("Failed to delete archived record $id.", error, stackTrace);
@@ -2320,17 +2819,25 @@ class CharaArchiveController extends Notifier<Progress> {
   @override
   Progress build() => Progress.none;
 
-  Future<void> archive(List<String> ids, archive_executor.ArchiveImageOption option) async {
+  /// Moves [ids] from `active/` into `archive/` in one batch.
+  ///
+  /// [effects] is applied once the batch ends, to the ids the executor reports as moved: both
+  /// directories of each, the one it left and the one it now occupies. An id that failed is still
+  /// where it was, so nothing cached under it is dropped.
+  ///
+  /// A batch over something a long reader holds does not start: it moves nothing, publishes no
+  /// [Progress], and says [longReadBusyMessage].
+  Future<void> archive(
+    List<String> ids,
+    archive_executor.ArchiveImageOption option, {
+    required RecordWriteEffects effects,
+  }) async {
     if (ids.isEmpty) {
       return;
     }
     final pathInfo = await ref.read(pathInfoLoader.future);
     final activeRoot = pathInfo.charaDetailActiveDir;
     final archiveRoot = pathInfo.charaDetailArchiveDir;
-    // Whole-batch busy state: one isolate handles every record, so there is no
-    // per-record callback to advance a percentage. Mark it indeterminate so the
-    // indicator spins rather than sitting frozen at 0%.
-    state = Progress(total: ids.length, indeterminate: true);
     // Snapshot the to-be-archived records before they leave the active store, so
     // the archive store can be updated in memory (see below) without a re-scan.
     final activeStore = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
@@ -2366,72 +2873,120 @@ class CharaArchiveController extends Notifier<Progress> {
     // and closes after the stores have been brought back in step, so there is no
     // frame in which the record is listed as active, unheld, and already gone from
     // disk. What it is *not* is a second exclusion — see `long_read_registry.dart`.
-    await ref
-        .read(longReadRegistryProvider.notifier)
-        .hold(
-          kind: LongReadKind.archive,
-          paths: archiveRecordLongReadPaths(pathInfo: pathInfo, recordIds: ids),
-          action: (_) async {
-            try {
-              // The selected executor owns the platform execution model while preserving
-              // one index-aligned asynchronous result contract for this controller. It
-              // also owns the record locks (per record on web, whole batch on desktop), so
-              // this controller must not take one itself: the locks are not re-entrant.
-              final results = await archive_executor.archiveRecords(
-                archive_executor.ArchiveBatchArgs(items),
-                recoveryGate: debugRecoveryGate,
-              );
-              for (var i = 0; i < ids.length; i++) {
-                if (results[i]) {
-                  archived.add(ids[i]);
-                } else {
-                  failed++;
+    //
+    // Asked for and taken in one turn, and refused rather than waited for: the
+    // dialog's confirm was built from a registry that can be older than this call,
+    // so a delete, a zip or a relocation that claimed these records since turns the
+    // batch away here, before anything moves, instead of the batch starting
+    // underneath it.
+    try {
+      await ref
+          .read(longReadRegistryProvider.notifier)
+          .holdWhenFree(
+            kind: LongReadKind.archive,
+            paths: archiveRecordLongReadPaths(pathInfo: pathInfo, recordIds: ids),
+            contention: LongReadContention.refuse,
+            action: (_) async {
+              try {
+                // Whole-batch busy state: one isolate handles every record, so there is no
+                // per-record callback to advance a percentage. Mark it indeterminate so the
+                // indicator spins rather than sitting frozen at 0%.
+                //
+                // Published inside the claim and not before asking for it: a refused batch
+                // never enters this action, and the `finally` below -- the only thing that
+                // clears the overlay -- is this action's, so a progress raised above the ask
+                // would be left over the record table by every refusal.
+                state = Progress(total: ids.length, indeterminate: true);
+                // The selected executor owns the platform execution model while preserving
+                // one index-aligned asynchronous result contract for this controller. It
+                // also owns the record locks (per record on web, whole batch on desktop), so
+                // this controller must not take one itself: the locks are not re-entrant.
+                final results = await archive_executor.archiveRecords(
+                  archive_executor.ArchiveBatchArgs(items),
+                  recoveryGate: debugRecoveryGate,
+                );
+                for (var i = 0; i < ids.length; i++) {
+                  if (results[i]) {
+                    archived.add(ids[i]);
+                  } else {
+                    failed++;
+                  }
+                }
+                if (archived.isNotEmpty) {
+                  ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
+                  // Move the records into the archive store in memory, mirroring the active
+                  // store's surgical removal, instead of invalidating and re-scanning every
+                  // archived directory from disk. A no-op if the archive view never loaded.
+                  final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
+                  ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
+                }
+              } catch (error, stackTrace) {
+                // Catches everything on purpose, rather than listing the types that reach
+                // here. They are not enumerable from this side and the list would go stale:
+                // the executor's gate throws `RecordMutationLockBusy` /
+                // `RecordMutationLockUnavailable` when the acquisition budget runs out,
+                // web's record recovery throws a bare `StateError` from inside the lock and
+                // *before* the executor's own try/catch is entered
+                // (`_ensureRecordReady`/`_archiveRecordAsyncLocked`), and desktop can fail to
+                // spawn the `compute` isolate or to serialize its arguments. A type this
+                // clause did not name would land straight back on the defect it replaces.
+                logger.e('Failed to archive ${ids.length} chara detail record(s).', error, stackTrace);
+                // Whatever the batch did not account for never happened, so report it as
+                // failed instead of leaving it unmentioned -- the same accounting the
+                // regeneration watchdog does with its unaccounted records, and what makes
+                // the toast below fire on this path too.
+                failed = ids.length - archived.length;
+              } finally {
+                // The progress overlay replaces the record table while this is non-empty
+                // (`data_table_widget.dart`), and nothing else ever clears it: the provider
+                // is not auto-disposed and is never invalidated or refreshed, so a
+                // `Progress` left published here hides the table -- in both record sources
+                // -- until the app is restarted. That is the accident
+                // [CharaDetailRecordRegenerationController]'s watchdog exists for; a timer
+                // is not the right shape here because this failure arrives as a thrown
+                // error rather than as a callback that never comes, so the release can be
+                // immediate and exact instead of waiting out an inactivity window.
+                //
+                // Guarded like the regeneration controller's delayed tail: the container can
+                // go away mid-archive (app shutdown, a test teardown), and writing `state`
+                // throws once the element is disposed.
+                if (ref.mounted) {
+                  state = Progress.none;
                 }
               }
-              if (archived.isNotEmpty) {
-                ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
-                // Move the records into the archive store in memory, mirroring the active
-                // store's surgical removal, instead of invalidating and re-scanning every
-                // archived directory from disk. A no-op if the archive view never loaded.
-                final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
-                ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
-              }
-            } catch (error, stackTrace) {
-              // Catches everything on purpose, rather than listing the types that reach
-              // here. They are not enumerable from this side and the list would go stale:
-              // the executor's gate throws `RecordMutationLockBusy` /
-              // `RecordMutationLockUnavailable` when the acquisition budget runs out,
-              // web's record recovery throws a bare `StateError` from inside the lock and
-              // *before* the executor's own try/catch is entered
-              // (`_ensureRecordReady`/`_archiveRecordAsyncLocked`), and desktop can fail to
-              // spawn the `compute` isolate or to serialize its arguments. A type this
-              // clause did not name would land straight back on the defect it replaces.
-              logger.e('Failed to archive ${ids.length} chara detail record(s).', error, stackTrace);
-              // Whatever the batch did not account for never happened, so report it as
-              // failed instead of leaving it unmentioned -- the same accounting the
-              // regeneration watchdog does with its unaccounted records, and what makes
-              // the toast below fire on this path too.
-              failed = ids.length - archived.length;
-            } finally {
-              // The progress overlay replaces the record table while this is non-empty
-              // (`data_table_widget.dart`), and nothing else ever clears it: the provider
-              // is not auto-disposed and is never invalidated or refreshed, so a
-              // `Progress` left published here hides the table -- in both record sources
-              // -- until the app is restarted. That is the accident
-              // [CharaDetailRecordRegenerationController]'s watchdog exists for; a timer
-              // is not the right shape here because this failure arrives as a thrown
-              // error rather than as a callback that never comes, so the release can be
-              // immediate and exact instead of waiting out an inactivity window.
-              //
-              // Guarded like the regeneration controller's delayed tail: the container can
-              // go away mid-archive (app shutdown, a test teardown), and writing `state`
-              // throws once the element is disposed.
-              if (ref.mounted) {
-                state = Progress.none;
-              }
-            }
-          },
-        );
+            },
+          );
+    } on LongReadNotStartedException catch (exception) {
+      // Nothing moved and no progress went up. The dialog that started this has
+      // already closed, so the toast is the only place the refusal can be said, and
+      // nothing below applies: no directory changed, and "archived" / "failed" would
+      // both be false.
+      announceLongReadNotStarted(exception, operation: 'An archive of ${ids.length} record(s)');
+      return;
+    }
+    // The batch moved record directories out of `active/` and into `archive/`,
+    // both of which the storage view measures, and the dialog that started it
+    // dismissed without awaiting -- so unlike every other record mutation driven
+    // from a dialog, this one can still be running while the user opens the
+    // storage manager over the settings page. The pictures under a moved record
+    // are cached by path, and `active/<id>` no longer holds them. `archive/<id>`
+    // is dropped as well: it is normally a directory nothing had cached, but the
+    // declaration does not rest on that.
+    //
+    // Guarded like the progress release above, and for the same reason: the
+    // container can go away mid-archive, and reading a provider off a disposed
+    // element throws.
+    if (ref.mounted) {
+      effects.images.apply(
+        RecordImageScope(
+          info: pathInfo,
+          changed: [
+            for (final id in archived) ...[(activeRoot / id).path, (archiveRoot / id).path],
+          ],
+        ),
+      );
+      effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+    }
     if (archived.isNotEmpty) {
       Toaster.show(
         ToastData.success(
@@ -2541,6 +3096,13 @@ LongReadDeclaration archiveGeometryRepairLongReadDeclaration(RefBase ref, PathIn
   );
 }
 
+/// What a record's arrival declares: the store's capture listener and the web harvest both drop the
+/// arriving directory's cached reads and re-measure the record root.
+///
+/// [base] must live as long as the container: `containerRefProvider`.
+RecordWriteEffects recordArrivalEffects(RefBase base) =>
+    RecordWriteEffects(images: RecordImageEffect.drop(base), totals: RecordTotalsEffect.remeasure(base));
+
 /// Runs the one-time [migrateArchivedRecordsInIsolate] cleanup the first time
 /// only, recording completion so later launches skip the archive scan.
 ///
@@ -2555,9 +3117,16 @@ LongReadDeclaration archiveGeometryRepairLongReadDeclaration(RefBase ref, PathIn
 /// root scope in `record_loader_io.dart` and whose worker isolates can move an
 /// entire `archive/<id>` directory aside (quarantine) while this pass is
 /// deleting files out of it and rewriting files into it.
+///
+/// [effects] is applied once the pass has run, over the whole archive store: the
+/// worker rewrites geometry json and deletes `prediction.json` under any
+/// `archive/<id>` and reports no ids, so the archive root is the only complete
+/// account of what changed. A pass refused the root scope wrote nothing and
+/// applies nothing.
 Future<void> runArchiveGeometryMigrationIfNeeded(
   PathInfo pathInfo, {
   required LongReadDeclaration declaration,
+  required RecordWriteEffects effects,
   RecordRecoveryGate? recoveryGate,
 }) async {
   // Desktop-only one-time cleanup: it runs inside a `compute` isolate over sync
@@ -2606,11 +3175,13 @@ Future<void> runArchiveGeometryMigrationIfNeeded(
     logger.e("Archive geometry migration could not take the root record lock; skipped.", error, stackTrace);
     return;
   }
+  effects.images.apply(RecordImageScope(info: pathInfo, changed: [pathInfo.charaDetailArchiveDir.path]));
+  effects.totals.apply(TotalsScope.recordRoot(pathInfo));
   logger.i("Archive geometry migration visited $count archived record(s).");
   entry.push(true);
 }
 
-/// Why this platform cannot provide the cross-tab record lock, or null when it
+/// Why this platform cannot provide the record mutation lock, or null when it
 /// can.
 ///
 /// A `Provider` so the capability is probed once per session and read

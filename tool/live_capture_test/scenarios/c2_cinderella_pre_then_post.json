@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "c2_cinderella_pre_then_post",
+  "description": "Enhancement detected on the live path, inheritance-only record with stars raised and no factor added -- the conditions C1 does not cover. Both clips open the detail on the factor tab and never scroll the skill tab, so their sidecars carry tabs 1 and 2. Expected as in C1: no candidate for the first capture, one candidate pairing the two with the second as the enhanced side.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_post_starup.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_post_starup.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": {
+          "with": 0,
+          "enhanced": 1
+        }
+      }
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c2_cinderella_pre_then_post.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}

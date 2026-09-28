@@ -150,6 +150,11 @@ final class RecordDirectoryTransaction {
   /// disposition between "ours" and "another writer's": a slot naming a move
   /// this application has never performed is, by that name alone, foreign.
   static const _operation = 'archive';
+
+  /// The record store a slot moves a record out of, and the one it moves it
+  /// into.
+  static const _sourceStoreName = 'active';
+  static const _destinationStoreName = 'archive';
   static const _formatVersion = 1;
 
   Future<RecordTransactionResult> execute(
@@ -790,8 +795,8 @@ final class RecordDirectoryTransaction {
     }
 
     return spec.destination.name == spec.recordId &&
-        _samePath(spec.source.parent, dataRoot / 'active') &&
-        _samePath(spec.destination.parent, dataRoot / 'archive');
+        _samePath(spec.source.parent, dataRoot / _sourceStoreName) &&
+        _samePath(spec.destination.parent, dataRoot / _destinationStoreName);
   }
 
   static bool _samePath(DirectoryPath a, DirectoryPath b) {
@@ -1000,7 +1005,19 @@ Future<PathEntity?> retireEntryInto(DirectoryPath retiredRoot, PathEntity entry,
 /// the full comparison before it acts may pass false; the default keeps the
 /// byte-exact, kind-exact contract this function documents, and the set of
 /// conditions that yield false is otherwise unchanged.
-Future<bool> sameDirectoryTree(DirectoryPath left, DirectoryPath right, {bool compareBytes = true}) async {
+///
+/// [except] holds relative paths neither side is compared on — the entries a
+/// caller is deliberately publishing *over* the other tree. Without it a caller
+/// that overlays files onto a copy has to re-implement the whole walk to say
+/// "the same, apart from what I wrote", which is how two spellings of one
+/// comparison come about. An entry named here is ignored on both sides, so it may
+/// be present on one, on both with different bytes, or on neither.
+Future<bool> sameDirectoryTree(
+  DirectoryPath left,
+  DirectoryPath right, {
+  bool compareBytes = true,
+  Set<String> except = const {},
+}) async {
   try {
     // Kind first, on both roots. `exists()` is true for a file on either
     // backend, and `DirectoryPath.isFile()` answers from the static type rather
@@ -1013,7 +1030,11 @@ Future<bool> sameDirectoryTree(DirectoryPath left, DirectoryPath right, {bool co
     Future<Map<String, PathEntity>> entriesFor(DirectoryPath root) async {
       final entries = <String, PathEntity>{};
       await for (final entry in root.list(recursive: true, followLinks: false)) {
-        entries[PathEntity.context.relative(entry.path, from: root.path)] = entry;
+        final relative = PathEntity.context.relative(entry.path, from: root.path);
+        if (except.contains(relative)) {
+          continue;
+        }
+        entries[relative] = entry;
       }
       return entries;
     }

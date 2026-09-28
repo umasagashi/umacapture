@@ -148,7 +148,7 @@ void main() {
 
   testWidgets('a resolution of its own outranks it, and keeps its own specific sentence', (tester) async {
     // Both are true for the whole of the most common case: a running resolution claims the store it
-    // is resolving. 「再解決の実行中です」 is the true and specific answer there, and the long
+    // is resolving. 「親子関係の再解決を実行中です」 is the true and specific answer there, and the long
     // reader's sentence would answer "why?" with 「他の処理」 about the user's own resolution.
     await _pumpTile(tester, resolving: true, held: [_layout.charaDetailDir], kind: LongReadKind.inherit);
 

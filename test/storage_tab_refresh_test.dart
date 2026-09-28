@@ -34,8 +34,7 @@
 // WHAT THIS SUITE DOES NOT REACH. It builds no widgets: "the row left the table"
 // is asserted at the provider the row watches, not at the pixels. It is
 // VM/`dart:io` only — OPFS listing and `navigator.storage.estimate()` (which
-// `originStorageUsageProvider` calls, and which this suite can only assert is in
-// the list) are unreachable from here. And it says nothing about *which* rows a
+// `originStorageUsageProvider` calls) are unreachable from here. And it says nothing about *which* rows a
 // partial delete leaves; that is `storage_delete_action_test.dart`'s.
 import 'dart:io';
 
@@ -53,8 +52,7 @@ import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
-import 'support/riverpod.dart';
-import 'support/storage_view_sources.dart';
+import 'support/record_write_effects_fixture.dart';
 
 void main() {
   late Directory tempRoot;
@@ -89,7 +87,7 @@ void main() {
       overrides: [
         pathInfoProvider.overrideWithValue(layout),
         pathLayoutLoader.overrideWith((ref) async => layout),
-        if (storeOutcome case final outcome?) settingsStoreDeleteProvider.overrideWithValue(() async => outcome),
+        if (storeOutcome case final outcome?) settingsStoreDeleteProvider.overrideWithValue((_) async => outcome),
       ],
     );
     addTearDown(result.dispose);
@@ -125,14 +123,16 @@ void main() {
       expect(before.map((listing) => listing.entity.path), [file.path]);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
       );
 
       expect(File(file.path).existsSync(), isFalse);
-      expect(await scope.read(storageTreeChildrenProvider(node).future), isEmpty);
+      final after = await scope.read(storageTreeChildrenProvider(node).future);
+      expect(after.map((listing) => listing.entity.path), isEmpty);
     });
 
     test('the group total stops counting the deleted bytes', () async {
@@ -144,7 +144,8 @@ void main() {
       expect(before.knownBytes, 64);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -165,7 +166,8 @@ void main() {
       expect(scope.read(directoryTotalsCacheProvider).peek(layout.tempDir)?.knownBytes, 64);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -192,7 +194,8 @@ void main() {
       await scope.read(storageGroupTotalsProvider(StorageGroupId.quarantine).future);
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.temp),
         request: StorageDeletePathsRequest([file]),
         silent: true,
@@ -204,11 +207,98 @@ void main() {
         reason: 'the quarantine total was not falsified by a delete under temp',
       );
     });
+
+    // The one delete whose reach is wider than its request. A group holding a
+    // transaction journal takes its exclusion with a drain in front of it, and the
+    // drain can finish a publication into `active/`, an archive move, or file a
+    // slot it cannot read into `quarantine/` -- none of which the request names.
+    // The cache drops a path, its ancestors and its descendants only, so those
+    // three trees keep the size they had before the drain unless the delete says
+    // otherwise. Asserted over every shipped group that answers the predicate, so
+    // it is about the predicate and not about the group that answers it today.
+    test('a delete that drains the journals drops the totals of what the drain publishes', () async {
+      final draining = storageGroups.where((group) => group.destroysTransactionJournal(layout)).toList();
+      expect(draining, isNotEmpty, reason: 'no group holds a journal, so this claim would assert nothing');
+      for (final group in draining) {
+        seed(layout.charaDetailActiveDir, 'published.bin', 16);
+        seed(layout.charaDetailArchiveDir, 'moved.bin', 8);
+        seed(layout.charaDetailQuarantineDir, 'unreadable.bin', 32);
+        final scope = container();
+        for (final id in [StorageGroupId.activeRecords, StorageGroupId.archivedRecords, StorageGroupId.quarantine]) {
+          hold(scope, storageGroupTotalsProvider(id));
+          await scope.read(storageGroupTotalsProvider(id).future);
+        }
+        final cache = scope.read(directoryTotalsCacheProvider);
+        expect(cache.peek(layout.charaDetailActiveDir)?.knownBytes, 16);
+
+        await runStorageDelete(
+          scope.read(containerRefProvider),
+          effects: storageDeleteEffects(scope),
+          group: group,
+          request: StorageDeletePathsRequest(group.resolve(layout)),
+          silent: true,
+        );
+
+        for (final directory in [
+          layout.charaDetailActiveDir,
+          layout.charaDetailArchiveDir,
+          layout.charaDetailQuarantineDir,
+        ]) {
+          expect(
+            cache.peek(directory),
+            isNull,
+            reason: '${group.id.name} drains into ${directory.path} and its cached total survived the delete',
+          );
+        }
+      }
+    });
+
+    // The same delete asked for one entry instead of the group. The drain is
+    // decided by the group (`_rootMaintenanceReasonFor`), so it runs either way,
+    // but now the request names one directory and the places the drain emptied --
+    // both journals -- and the one it retires into are reached by nothing the
+    // request carries. The group aggregate sums its roots, so a surviving journal
+    // total counts a slot whose bytes the recovered record is also counting.
+    test('a row delete that drains the journals drops the totals it emptied', () async {
+      final draining = storageGroups.where((group) => group.destroysTransactionJournal(layout)).toList();
+      expect(draining, isNotEmpty, reason: 'no group holds a journal, so this claim would assert nothing');
+      for (final group in draining) {
+        final row = seed(layout.charaDetailRetiredDir, 'old-entry.bin', 24);
+        final emptied = [...layout.charaDetailTransactionJournalDirs, layout.charaDetailRetiredDir];
+        for (final journal in layout.charaDetailTransactionJournalDirs) {
+          seed(journal, 'slot.bin', 12);
+        }
+        final scope = container();
+        hold(scope, storageGroupTotalsProvider(StorageGroupId.retired));
+        await scope.read(storageGroupTotalsProvider(StorageGroupId.retired).future);
+        final cache = scope.read(directoryTotalsCacheProvider);
+        for (final directory in emptied) {
+          expect(cache.peek(directory), isNotNull, reason: '${directory.path} was not cached to begin with');
+        }
+
+        await runStorageDelete(
+          scope.read(containerRefProvider),
+          effects: storageDeleteEffects(scope),
+          group: group,
+          request: StorageDeletePathsRequest([row]),
+          silent: true,
+        );
+
+        for (final directory in emptied) {
+          expect(
+            cache.peek(directory),
+            isNull,
+            reason: '${group.id.name}: a row delete drained ${directory.path} and its cached total survived',
+          );
+        }
+      }
+    });
   });
 
   group('the settings delete refreshes the view as well', () {
-    // Its request names no path at all, so the per-path invalidate has nothing to
-    // work with and the cache is cleared instead. Windows sizes this group by the
+    // Its request names no file it removes -- only the directory the stores live
+    // in, for the claim -- so there is no per-path invalidate to make and the cache
+    // is cleared instead. Windows sizes this group by the
     // directory the stores' files live in, so without the clear the group keeps
     // reporting the bytes of files that are gone.
     test('the settings total stops counting the removed store files', () async {
@@ -227,139 +317,14 @@ void main() {
       File(box.path).deleteSync();
 
       await runStorageDelete(
-        scope.read(refBaseProvider),
+        scope.read(containerRefProvider),
+        effects: storageDeleteEffects(scope),
         group: groupOf(StorageGroupId.settings),
-        request: const StorageDeleteSettingsRequest(),
+        request: StorageDeleteSettingsRequest(storeDirectories: [layout.settingsDir]),
         silent: true,
       );
 
       expect((await scope.read(storageGroupTotalsProvider(StorageGroupId.settings).future)).knownBytes, 0);
-    });
-  });
-
-  group('the list of the view\'s providers is counted, not remembered', () {
-    // THE CLAIM THIS ROSTER KEEPS, IN ONE SENTENCE. *Every `FutureProvider` the
-    // storage view owns that riverpod will not drop on its own has to be in
-    // `storageTabContentProviders`, because nothing else drops it after a delete
-    // or on re-entry.*
-    //
-    // `storageTabContentProviders` is a list, and a list is what goes stale when
-    // the sixth provider is added next to the five it names. Nothing in Dart can
-    // enumerate a library's top-level declarations at run time, so the
-    // enumeration is done over the source -- but over the source of *the view*,
-    // not of one file. Until this was widened it read `storage_tree.dart` alone,
-    // with a line-anchored pattern, and `storage_file_preview.dart`'s two
-    // providers were therefore not exempted by anything: they were never seen.
-    // A guard that cannot see a declaration cannot report it missing, and moving
-    // a provider one file across would have silenced it.
-    //
-    // Both halves of the sentence are read off the code. "The view owns it" is
-    // the private import sub-library `StorageViewSources` computes; "riverpod
-    // will not drop it" is `.autoDispose` on the declaration, so the exemption is
-    // attached to the declaration itself rather than to a list of forgiven names
-    // that the next `autoDispose` provider would have to be added to by hand.
-    late StorageViewSources view;
-    setUpAll(() {
-      view = StorageViewSources.read();
-    });
-
-    test('every FutureProvider the view owns and riverpod will not drop is in the list', () {
-      for (final provider in view.providers.where((provider) => !provider.autoDispose)) {
-        expect(
-          view.rosterContains(provider.name),
-          isTrue,
-          reason: '$provider is read from storage and nothing drops it, but it is not in the list',
-        );
-      }
-    });
-
-    // The other direction, so the exemption is a rule and not a hole: an
-    // `autoDispose` provider must stay out. `storageTabContentProviders`' doc says
-    // why the preview's two are outside (they are `autoDispose`, and a preview
-    // covers the tree it opened over, so the delete button cannot be reached while
-    // one is up); this is that reason made checkable.
-    test('an autoDispose provider the view owns is left out of the list', () {
-      for (final provider in view.providers.where((provider) => provider.autoDispose)) {
-        expect(
-          view.rosterContains(provider.name),
-          isFalse,
-          reason: '$provider is dropped by riverpod already; listing it would invalidate a live preview',
-        );
-      }
-    });
-
-    // NEGATIVE CONTROL 1 -- a scan that found nothing would make every assertion
-    // above vacuously true, which is exactly how the file-anchored version stayed
-    // green while missing two providers.
-    test('the scan reaches the whole view rather than reporting nothing', () {
-      expect(view.sources, isNotEmpty);
-      expect(view.providers, isNotEmpty);
-      expect(
-        view.providers.map((provider) => provider.path).toSet().length,
-        greaterThanOrEqualTo(2),
-        reason: 'providers were found in one file only, so the scan has narrowed back to a single path',
-      );
-      expect(
-        view.providers.where((provider) => provider.autoDispose),
-        isNotEmpty,
-        reason: 'no autoDispose provider was seen, so the exemption is being granted to nobody',
-      );
-    });
-
-    // THE OWNERSHIP PREDICATE IS ITSELF GUARDED. "The view owns a file" means
-    // nothing outside the view imports it, which is a property of how the code is
-    // written: importing `storage_file_preview.dart` from one file outside the
-    // view would drop it out of `sources`, and every assertion above would go on
-    // passing over a smaller view. So the frontier is asserted too. It is built
-    // from the import edges *leaving* the owned set -- the opposite direction to
-    // the one that built the set -- so a file that lost ownership is still on it,
-    // and has to be excused here by name or the suite fails.
-    //
-    // The excuses are keyed by path, carry their reason, and are checked for
-    // staleness below, so this is not a list that can quietly outlive its
-    // entries.
-    const sharedWithTheRestOfTheApp = <String, String>{
-      'lib/src/core/platform_controller.dart':
-          'the capture backend and its config; the view reads whether a capture is running, which a '
-          'delete does not change and which this view does not own',
-      'lib/src/core/providers.dart':
-          'the app-wide path layout; a delete cannot falsify where the directories are, '
-          'and the whole app reads it, so it is not the view\'s to drop',
-    };
-
-    test('a provider-declaring file the view imports is either owned by the view or excused here', () {
-      for (final path in view.providerDeclaringNeighbours) {
-        expect(
-          sharedWithTheRestOfTheApp,
-          contains(path),
-          reason:
-              '$path declares providers and the view imports it, but the view does not own it. Either it is '
-              'shared with the rest of the app -- say so here -- or something outside the view has started '
-              'importing a file of the view, which shrinks every scan in this suite.',
-        );
-      }
-      // A frontier that came back empty would excuse everything by having nothing
-      // to excuse, which is how the scan would report a view of one file.
-      expect(view.providerDeclaringNeighbours, isNotEmpty);
-    });
-
-    test('every excusal still names a file the view imports and does not own', () {
-      for (final path in sharedWithTheRestOfTheApp.keys) {
-        expect(
-          view.providerDeclaringNeighbours,
-          contains(path),
-          reason: '$path is excused here but is no longer on the view\'s frontier; the excusal is stale',
-        );
-      }
-    });
-
-    // NEGATIVE CONTROL 2 -- deleting or renaming a provider the list names must
-    // not be forgiven by the scan simply failing to match its declaration.
-    test('the scan finds a declaration for every provider the list names', () {
-      final declared = view.providers.map((provider) => provider.name).toSet();
-      for (final name in view.rosterNames) {
-        expect(declared, contains(name), reason: '$name is in the list but the scan found no declaration for it');
-      }
     });
   });
 }

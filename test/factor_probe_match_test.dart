@@ -24,7 +24,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 
-Character _chara(int card) => Character(0, 0, card, 0);
+Character _chara(int card) => Character(0, 0, card, 0, null);
 
 Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 
@@ -93,6 +93,17 @@ void main() {
       final record = makeRecord(self: self);
 
       expect(record.matchesFactorProbe([...self], belowThreshold: false), isTrue);
+    });
+
+    test('a white-add-only enhanced uma still hits the probe', () {
+      // Enhancement appends added whites after the existing ones, so a probe capped at the
+      // threshold reads the same prefix as the stored pre-enhancement record: the early check keeps
+      // treating the enhanced uma as that record's duplicate.
+      final pre = [for (var id = 1; id <= 12; id++) Factor(id, id % 3 + 1)];
+      final enhanced = [...pre, const Factor(50, 3)];
+      final record = makeRecord(self: pre);
+
+      expect(record.matchesFactorProbe(enhanced.sublist(0, 10), belowThreshold: false), isTrue);
     });
 
     test('a diverging star fails the match', () {

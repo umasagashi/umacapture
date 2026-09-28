@@ -33,6 +33,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
+import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 
 void main() {
@@ -112,7 +113,7 @@ void main() {
     writeRecord(activeDir / 'stranger', makeRecord(id: 'stranger', card: 2));
     final toasts = listenToasts(container);
 
-    final result = await active.deleteAllAsync(['known', 'stranger']);
+    final result = await active.deleteAllAsync(['known', 'stranger'], effects: recordDeleteEffects(container));
 
     expect(result.failed, {'stranger'});
     expect(result.succeeded, {'known'});
@@ -135,7 +136,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     writeRecord(activeDir / 'stranger', makeRecord(id: 'stranger', card: 2));
 
-    final result = await active.deleteAsync('stranger');
+    final result = await active.deleteAsync('stranger', effects: recordDeleteEffects(container));
 
     expect(result.succeeded, isEmpty);
     expect(result.failed, {'stranger'});
@@ -158,7 +159,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     final toasts = listenToasts(container);
 
-    final result = await active.deleteAllAsync(['a', 'b']);
+    final result = await active.deleteAllAsync(['a', 'b'], effects: recordDeleteEffects(container));
 
     expect(result.succeeded, {'a', 'b'});
     expect(result.failed, isEmpty);
@@ -196,7 +197,7 @@ void main() {
 
     final RecordDeleteResult result;
     try {
-      result = await active.deleteAllAsync(['unrecoverable', 'healthy']);
+      result = await active.deleteAllAsync(['unrecoverable', 'healthy'], effects: recordDeleteEffects(container));
     } catch (error) {
       fail(
         "one record's gate exception stopped the whole delete: no RecordDeleteResult was reported "
@@ -237,7 +238,10 @@ void main() {
 
     final RecordDeleteResult result;
     try {
-      result = await archive.deleteAllAsync(['arch-unrecoverable', 'arch-healthy']);
+      result = await archive.deleteAllAsync([
+        'arch-unrecoverable',
+        'arch-healthy',
+      ], effects: recordDeleteEffects(container));
     } catch (error) {
       fail(
         "one record's gate exception stopped the whole delete: no RecordDeleteResult was reported "
@@ -268,7 +272,10 @@ void main() {
     writeRecord(archiveDir / 'arch-stranger', makeRecord(id: 'arch-stranger', card: 2));
     final toasts = listenToasts(container);
 
-    final result = await archive.deleteAllAsync(['arch-known', 'arch-stranger']);
+    final result = await archive.deleteAllAsync([
+      'arch-known',
+      'arch-stranger',
+    ], effects: recordDeleteEffects(container));
 
     expect(result.failed, {'arch-stranger'});
     expect(result.succeeded, {'arch-known'});
@@ -290,7 +297,7 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
     final toasts = listenToasts(container);
 
-    final result = await archive.deleteAllAsync(['arch-a', 'arch-b']);
+    final result = await archive.deleteAllAsync(['arch-a', 'arch-b'], effects: recordDeleteEffects(container));
 
     expect(result.succeeded, {'arch-a', 'arch-b'});
     expect(result.failed, isEmpty);
@@ -330,7 +337,10 @@ void main() {
     writeRecord(activeDir / 'incoming', makeRecord(id: 'incoming', card: 2));
     final toasts = listenToasts(container);
 
-    await expectLater(active.addFromFileAsync('incoming'), throwsA(isA<StateError>()));
+    await expectLater(
+      active.addFromFileAsync('incoming', effects: arrivalEffects(container)),
+      throwsA(isA<StateError>()),
+    );
     await settleToasts();
 
     // The merge really did exhaust its attempts rather than failing some other

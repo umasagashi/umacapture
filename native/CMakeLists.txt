@@ -199,6 +199,7 @@ set(
         test/core/test_frame_flow_counters.cpp
         test/core/test_frame_rate.cpp
         test/runner/test_method_argument.cpp
+        test/runner/test_video_frame_grab_reply.cpp
         test/util/test_thread_util.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp

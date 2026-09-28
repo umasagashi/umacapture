@@ -451,9 +451,11 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
             glow: false,
             itemPadding: EdgeInsets.zero,
             onRatingUpdate: (rating) {
-              // The cell only stops showing the "not rated yet" hint when the rating
-              // actually reached storage: a refused drag must not leave the column
-              // claiming this record is rated.
+              // The cell only stops showing the "not rated yet" hint when the
+              // change was accepted: a drag refused because the storage failed to
+              // load must not leave the column claiming this record is rated.
+              // Acceptance is all this answers - the write is queued behind it,
+              // and a write that then fails is reported where it happens.
               final saved = saveRating(
                 ref.base,
                 storageKey: widget.storageKey,

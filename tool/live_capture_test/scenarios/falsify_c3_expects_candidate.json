@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "name": "falsify_c3_expects_candidate",
+  "description": "FALSIFICATION of the 'candidate' judgement. Identical to c3_cross_hopstep_pre_cinderella_post except that clip 1 expects a candidate pairing it with clip 0. The run is the normal one, so it must exit 1 with exactly [candidate_mismatch] on clip 1: an absent candidate must not pass. Exit 1 alone is not the pass condition.",
+  "clips": [
+    {
+      "clip": "testdata/clips/golden/factor_enhance_hopstep_pre.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_hopstep_pre.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": null
+      }
+    },
+    {
+      "clip": "testdata/clips/golden/factor_enhance_cinderella_post_starup.mkv",
+      "stops": "testdata/clips/golden/factor_enhance_cinderella_post_starup.stops.json",
+      "expect": {
+        "status": "succeeded",
+        "candidate": {
+          "with": 0,
+          "enhanced": 1
+        }
+      }
+    }
+  ],
+  "expect_links": [
+    {
+      "child": 0,
+      "slot": "parent1",
+      "parent": 1
+    }
+  ],
+  "golden": "tool/live_capture_test/goldens/c3_cross_hopstep_pre_cinderella_post.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 900
+}
