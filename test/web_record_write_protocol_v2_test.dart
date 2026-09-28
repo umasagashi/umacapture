@@ -338,7 +338,7 @@ void _suite(_Backend backend) {
   ];
   final postReady = WebRecordWriteCheckpoint.values.where((c) => !preReady.contains(c)).toList();
 
-  group('T-A1..T-A3: interrupted at every checkpoint, and its first recovery at every checkpoint', () {
+  group('interrupted at every checkpoint, and its first recovery at every checkpoint', () {
     test('an uninterrupted publication commits, in every layout', () async {
       for (final layout in _Layout.values) {
         final s = await scene(layout);
@@ -348,7 +348,7 @@ void _suite(_Backend backend) {
     });
 
     test('a publication interrupted before ready converges to the old tree and no slot', () async {
-      // F5: `building` is discarded by design, so these rows cannot reach the
+      // `building` is discarded by design, so these rows cannot reach the
       // new tree. A first publication is not among them: its whole staging is
       // published by the give-up path, which the older suite covers.
       for (final layout in _Layout.withOldTree) {
@@ -389,7 +389,7 @@ void _suite(_Backend backend) {
     }
   });
 
-  test('T-A4: an unverified superseded copy found in ready is rebuilt from the displaced tree, never merged '
+  test('an unverified superseded copy found in ready is rebuilt from the displaced tree, never merged '
       'into', () async {
     for (final layout in _Layout.withOldTree) {
       final s = await scene(layout);
@@ -418,7 +418,7 @@ void _suite(_Backend backend) {
     }
   });
 
-  group('T-A5: a copy or delete that dies half-way leaves a state the next recovery finishes', () {
+  group('a copy or delete that dies half-way leaves a state the next recovery finishes', () {
     /// Drives [s] to the state the step runs in, recovers with [death] once,
     /// checks the invariants on what that left, then recovers cleanly.
     Future<void> interruptStep(
@@ -577,7 +577,7 @@ void _suite(_Backend backend) {
     });
   });
 
-  group('T-A6 (finding 1): staging lost after parked', () {
+  group('staging lost after parked', () {
     const restoreStops = [
       WebRecordWriteCheckpoint.restoreTargetCleared,
       WebRecordWriteCheckpoint.restoreCopied,
@@ -651,7 +651,7 @@ void _suite(_Backend backend) {
     });
   });
 
-  test('T-A7: a torn manifest at each transition leaves the id whole in a record store', () async {
+  test('a torn manifest at each transition leaves the id whole in a record store', () async {
     for (final layout in _Layout.withOldTree) {
       for (final state in ['building', 'ready', 'parked', 'published', 'restored']) {
         final where = '${layout.name} / torn $state';
@@ -683,7 +683,7 @@ void _suite(_Backend backend) {
     }
   });
 
-  group('T-A11: frozen states delete nothing', () {
+  group('frozen states delete nothing', () {
     test('parked without desired and without superseded deletes nothing', () async {
       for (final layout in _Layout.withOldTree) {
         for (final parkAt in [WebRecordWriteCheckpoint.parkedPersisted, WebRecordWriteCheckpoint.finalCopied]) {
@@ -719,7 +719,7 @@ void _suite(_Backend backend) {
     });
   });
 
-  group('T-A12: the publish API', () {
+  group('the publish API', () {
     test('baseFrom with the id in no store, or in two, is refused before anything is staged', () async {
       final s = await scene(_Layout.firstPublication);
       final base = s.dataRoot / 'active' / _r;
