@@ -112,6 +112,9 @@ void main() {
     await waitForWrite(file, (contents) => contents.contains('later'), 'the rating saved after the load');
     expect(file.readAsStringSync(), contains('"kept":3'));
     expect(file.readAsStringSync(), contains('"later":4'));
+    // The bytes are visible before the writer isolate closes the file; tearDown deletes the temp dir,
+    // which fails on Windows while that handle is open. `flush()` completes only after the write returns.
+    expect(await controller.flush(), isTrue);
   });
 
   test('memo updates during a pending load keep the stored memos', () async {
@@ -138,6 +141,9 @@ void main() {
     await waitForWrite(file, (contents) => contents.contains('later'), 'the memo saved after the load');
     expect(file.readAsStringSync(), contains('note'));
     expect(file.readAsStringSync(), contains('written'));
+    // The bytes are visible before the writer isolate closes the file; tearDown deletes the temp dir,
+    // which fails on Windows while that handle is open. `flush()` completes only after the write returns.
+    expect(await controller.flush(), isTrue);
   });
 
   // A load that failed never clears on its own (nothing re-reads the file, and
