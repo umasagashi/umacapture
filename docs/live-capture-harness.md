@@ -708,8 +708,12 @@ are expected; read them, then record that with `--allow-warnings`.
 * The scenarios drive capture into an empty store, a capture restarted in the same session, a
   second record, the duplicate refusal, the enhancement candidate, parent links and one merge.
   Not driven: the settings UI and the error path.
-* **No multi-clip scenario has been run end to end yet.** Their expectations are declared, not
-  observed, and so is some of what they rely on: that the driver's zero-move `scroll` confirms
-  the hold-to-confirm button, that a linked child's `relation_bonus` is `0` (the app writes it
-  only if its race title table had loaded when the link was resolved), and that the hand-set stops of the four
-  H.264-derived sidecars line up with the app's scroll-ready markers (§7).
+* **The multi-clip scenarios have been run end to end as a complete set only twice** (2026-09-27 and
+  2026-09-28). In both, each of the six scenarios matched its golden with no clip finding and each
+  of the four falsifications failed with exactly its expected codes; every hold waited for its own
+  clip's scroll-ready marker without a timeout, so the hand-set stops of the four H.264-derived
+  sidecars (§7) lined up; C4's linked child carried `relation_bonus` `0`; and C6's merge completed
+  after two holds. Two of these rest on timing no scenario controls, so a pass does not rule
+  out a later failure: the app writes `relation_bonus` only if its race title table had loaded when
+  the link was resolved, and the apply button ignores a hold that lands while it is still disabled
+  (*Merging*).
