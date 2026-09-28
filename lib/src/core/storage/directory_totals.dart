@@ -61,7 +61,7 @@ DirectoryTotals _empty() =>
 /// created but no file is written. Files are what both platforms can see.
 Future<DirectoryTotals> aggregateDirectoryTotals(DirectoryPath directory) async {
   // A group's directory legitimately does not exist yet (nothing quarantined, no
-  // temp session). That is an empty total, not an error; letting the backend
+  // module set downloaded). That is an empty total, not an error; letting the backend
   // throw would make an ordinary empty group look like a failure.
   if (!await directory.exists()) {
     return _empty();

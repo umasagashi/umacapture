@@ -350,11 +350,6 @@ class PathInfo {
 /// screen that must still open during an outage. Everything else wants the store
 /// to have been checked and must keep watching [pathInfoLoader]; watching this
 /// one means "I only need to know where things are".
-///
-/// A provider and not a function, because the resolution must happen exactly
-/// once per app: it claims a temp session, and a second resolution would claim a
-/// second one and leave a second scratch directory behind for the startup sweep
-/// to find.
 final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
   final appName = (await ref.watch(packageInfoLoader.future)).appName;
   // Resolve the OS base directories through the platform_dirs facade: the io

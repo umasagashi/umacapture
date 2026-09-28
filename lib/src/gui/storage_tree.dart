@@ -492,9 +492,9 @@ DirectoryPath? storageGroupZipTarget(PathInfo info, StorageGroup group) {
 ///
 /// [storageGroupZipTarget] cannot answer this itself — its own doc says the
 /// build that calls it cannot await an `exists()` — and a group's declared
-/// root legitimately can be absent: nothing quarantined yet, no temp session
-/// (`directory_totals.dart` states the identical fact for the group's byte
-/// total, which is `_empty()` rather than an error for the same directory).
+/// root legitimately can be absent: nothing quarantined yet, no module set
+/// downloaded yet (`directory_totals.dart` states the identical fact for the
+/// group's byte total, which is `_empty()` rather than an error for the same directory).
 /// Offering the zip entry for a root that is not there sends
 /// [exportDirectoryAsZip] into a listing that throws, and the entry had no
 /// way to know that in advance.
@@ -523,8 +523,8 @@ DirectoryPath? storageGroupZipTarget(PathInfo info, StorageGroup group) {
 /// watches it is on screen for as long as the view is: whether a group's root
 /// is there is exactly the kind of fact a delete falsifies — emptying
 /// `quarantine` can take the directory with it, and a group that had nothing in
-/// it acquires a root the moment anything is quarantined or a temp session
-/// starts. Held outside the list, the first answer would be the only one, and
+/// it acquires a root the moment anything is quarantined or a module set is
+/// downloaded. Held outside the list, the first answer would be the only one, and
 /// the entry would stay live over a root that is gone or dead over one that
 /// has since appeared, until the app was restarted.
 final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(

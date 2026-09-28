@@ -25,8 +25,7 @@ Future<AppInstanceClaim> claimAppInstance() => resolveAppInstanceClaim((
 ));
 
 /// Only the grant is reported; the callback's promise is never settled, so the
-/// lock stays held until the page goes away — the same pattern as the temp
-/// session claim.
+/// lock stays held until the page goes away.
 void _requestForPageLifetime({
   required void Function() onGranted,
   required void Function(Object, StackTrace) onRejected,
