@@ -1,20 +1,11 @@
 ---
 name: pre-pr-test
 description: >-
-  Run the full pre-PR test suite for this repository and report it stage by stage: stage 1 is
-  everything CI runs (build_runner, analyze, format, flutter test, the browser tests, flutter build
-  web, the node tests, the pre-commit gate self-test), stage 2 is what CI never runs (flutter build
-  windows, codegen freshness, the wasm rebuild compared against its pin, the strict web-pin check,
-  the Cloudflare publish stub test), stage 3 is the native ctest suite with the golden and
-  dual-decode cases in a freshly configured build dir, stage 4 is the live capture harness's
-  existing mimic player scenarios, and stage 5 is its multi-clip scenarios (duplicate refusal,
-  factor-enhancement candidate, parent links, merge). Covers choosing the stages from the diff
-  against develop, the exact commands in order, how to read each result (per-case ctest, Skipped
-  reasons, golden FAIL as a finding, the harness's exit 0/1/2 and the one re-run of an exit 2), the
-  permission a GUI run needs before it takes the user's focus, and the environment traps that have
-  cost time on this machine. Use when someone asks for a pre-PR test, a full or overall test run,
-  "run all the tests before the PR", the golden suite together with the mimic player, or the live
-  capture harness as part of a release-quality check.
+  Use as the final check before a pull request is opened, once, and only when the user explicitly
+  asks for it (directly, or through a delegation that states the user asked for this run). Do not use
+  it on your own initiative to check work in progress, a stage of a plan, or a completion condition.
+  A request to "run all the tests" that is not that final pre-PR check does not trigger it: ask
+  whether the pre-PR check is meant.
 ---
 
 # Pre-PR test suite
