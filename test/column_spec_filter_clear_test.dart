@@ -8,12 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/builder.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
+import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/logic.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_label.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/chara_detail/spec/simple_label.dart';
+import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 import 'support/riverpod.dart';
@@ -114,6 +116,51 @@ void main() {
       final reset = spec.withFilterReset(null) as RangedLabelColumnSpec;
       expect(reset.predicate.min, isNull);
     });
+  });
+
+  group('a reset onto a tag-driven filter drops the absence display it no longer offers', () {
+    SkillColumnSpec skill({required bool selectByTag, ItemDisplayMode mode = ItemDisplayMode.normal}) =>
+        SkillColumnSpec(
+          id: 'id-s',
+          title: 'skill',
+          parser: SkillParser(),
+          predicate: AggregateSkillPredicate.any(),
+          selectByTag: selectByTag,
+          displayMode: mode,
+        );
+
+    test('absence falls back to normal when the default is tag-driven', () {
+      final spec = skill(selectByTag: false, mode: ItemDisplayMode.absence);
+      final reset = spec.withFilterReset(skill(selectByTag: true)) as SkillColumnSpec;
+      expect(reset.selectByTag, isTrue);
+      expect(reset.displayMode, ItemDisplayMode.normal);
+    });
+
+    test('other modes and non-tag defaults keep the display mode', () {
+      final difference = skill(selectByTag: false, mode: ItemDisplayMode.difference);
+      expect(
+        (difference.withFilterReset(skill(selectByTag: true)) as SkillColumnSpec).displayMode,
+        ItemDisplayMode.difference,
+      );
+      final absence = skill(selectByTag: false, mode: ItemDisplayMode.absence);
+      expect((absence.withFilterReset(null) as SkillColumnSpec).displayMode, ItemDisplayMode.absence);
+    });
+  });
+
+  test('a factor column also drops absence when reset onto a tag-driven default', () {
+    FactorColumnSpec factor({required bool selectByTag, ItemDisplayMode mode = ItemDisplayMode.normal}) =>
+        FactorColumnSpec(
+          id: 'id-f',
+          title: 'factor',
+          parser: FactorSetParser(),
+          predicate: AggregateFactorSetPredicate.any(),
+          selectByTag: selectByTag,
+          displayMode: mode,
+        );
+    final spec = factor(selectByTag: false, mode: ItemDisplayMode.absence);
+    final reset = spec.withFilterReset(factor(selectByTag: true)) as FactorColumnSpec;
+    expect(reset.selectByTag, isTrue);
+    expect(reset.displayMode, ItemDisplayMode.normal);
   });
 
   group('non-preset filters reset to accept-all', () {

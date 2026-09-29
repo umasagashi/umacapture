@@ -12,9 +12,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
+import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/logic.dart';
+import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
+import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 import 'support/hive.dart';
@@ -112,6 +115,62 @@ void main() {
     expect(specs.single, isA<FactorColumnSpec>());
     expect((specs.single as FactorColumnSpec).selectByTag, isFalse);
     expect(container.read(currentColumnSpecBrokenIdsProvider), isNot(contains('grandfathered')));
+  });
+
+  group('a spec saved before the display mode existed loads healthy, not broken', () {
+    // Encoded from the current classes, then stripped of the two display fields
+    // (a non-null enum and a bool), leaving a map that lacks only those keys.
+    Map<String, dynamic> withoutDisplayFields(ColumnSpec spec) =>
+        spec.toMap()..removeWhere((key, _) => key == 'displayMode' || key == 'hideCommonItems');
+    final skill = withoutDisplayFields(
+      SkillColumnSpec(id: 'skill', title: 'skill', parser: SkillParser(), predicate: AggregateSkillPredicate.any()),
+    );
+    final factor = withoutDisplayFields(
+      FactorColumnSpec(
+        id: 'factor',
+        title: 'factor',
+        parser: FactorSetParser(),
+        predicate: AggregateFactorSetPredicate.any(),
+      ),
+    );
+
+    void expectDefaults(ColumnSpec spec) {
+      expect(spec, isA<ItemColumnSpec>());
+      expect((spec as ItemColumnSpec).displayMode, ItemDisplayMode.normal);
+      expect(spec.hideCommonItems, isFalse);
+    }
+
+    test('skill and factor root columns', () async {
+      expect(skill.containsKey('displayMode'), isFalse);
+      seed([skill, factor]);
+      final container = ProviderContainer.test();
+      await container.read(currentColumnSpecsLoaderProvider.future);
+
+      final specs = container.read(currentColumnSpecsProvider);
+      expect(specs.map((e) => e.id).toList(), ['skill', 'factor']);
+      specs.forEach(expectDefaults);
+      expect(container.read(currentColumnSpecBrokenIdsProvider), isEmpty);
+    });
+
+    test('skill and factor columns nested under a logic column', () async {
+      seed([
+        <String, dynamic>{
+          'type': 'LogicColumnSpec',
+          'id': 'and',
+          'title': 'AND',
+          'logic': 'and',
+          'hidden': false,
+          'children': [skill, factor],
+        },
+      ]);
+      final container = ProviderContainer.test();
+      await container.read(currentColumnSpecsLoaderProvider.future);
+
+      final children = container.read(currentColumnSpecsProvider).single.children;
+      expect(children.map((e) => e.id).toList(), ['skill', 'factor']);
+      children.forEach(expectDefaults);
+      expect(container.read(currentColumnSpecBrokenIdsProvider), isEmpty);
+    });
   });
 
   test('broken flag survives reload until the user heals via replaceById', () async {

@@ -527,6 +527,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       ParserMapper.ensureInitialized();
       AggregateFactorSetPredicateMapper.ensureInitialized();
       FactorDialogElementsMapper.ensureInitialized();
+      ItemDisplayModeMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -581,6 +582,20 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     opt: true,
     def: false,
   );
+  static ItemDisplayMode _$displayMode(FactorColumnSpec v) => v.displayMode;
+  static const Field<FactorColumnSpec, ItemDisplayMode> _f$displayMode = Field(
+    'displayMode',
+    _$displayMode,
+    opt: true,
+    def: ItemDisplayMode.normal,
+  );
+  static bool _$hideCommonItems(FactorColumnSpec v) => v.hideCommonItems;
+  static const Field<FactorColumnSpec, bool> _f$hideCommonItems = Field(
+    'hideCommonItems',
+    _$hideCommonItems,
+    opt: true,
+    def: false,
+  );
   static bool _$hidden(FactorColumnSpec v) => v.hidden;
   static const Field<FactorColumnSpec, bool> _f$hidden = Field(
     'hidden',
@@ -623,6 +638,8 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
     #selectByTag: _f$selectByTag,
+    #displayMode: _f$displayMode,
+    #hideCommonItems: _f$hideCommonItems,
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
@@ -654,6 +671,8 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
       selectByTag: data.dec(_f$selectByTag),
+      displayMode: data.dec(_f$displayMode),
+      hideCommonItems: data.dec(_f$hideCommonItems),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),

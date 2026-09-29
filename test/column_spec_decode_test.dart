@@ -11,6 +11,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
+import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
@@ -35,6 +36,8 @@ Map<String, dynamic> completeFactorMap() => <String, dynamic>{
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
   'selectByTag': false,
+  'displayMode': 'normal',
+  'hideCommonItems': false,
   'hidden': false,
 };
 
@@ -103,6 +106,24 @@ void main() {
     expect(spec, isA<FactorColumnSpec>());
     expect((spec as FactorColumnSpec).predicate.factorTags, isEmpty);
     expect(spec.predicate.skillTags, isEmpty);
+  });
+
+  test('a legacy FactorColumnSpec without the display fields decodes to their defaults', () {
+    // A map without displayMode (enum) and hideCommonItems (bool).
+    final legacy = completeFactorMap()
+      ..remove('displayMode')
+      ..remove('hideCommonItems');
+    final spec = ColumnSpecMapper.fromMap(legacy);
+
+    expect(spec, isA<FactorColumnSpec>());
+    expect((spec as FactorColumnSpec).displayMode, ItemDisplayMode.normal);
+    expect(spec.hideCommonItems, isFalse);
+    // And the non-default values round-trip through the mapper.
+    final roundTripped =
+        ColumnSpecMapper.fromMap(spec.copyWith(displayMode: ItemDisplayMode.difference, hideCommonItems: true).toMap())
+            as FactorColumnSpec;
+    expect(roundTripped.displayMode, ItemDisplayMode.difference);
+    expect(roundTripped.hideCommonItems, isTrue);
   });
 
   test('ScriptColumnSpec round-trips its source/title/apiVersion losslessly', () {

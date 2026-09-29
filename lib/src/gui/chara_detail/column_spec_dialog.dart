@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
@@ -119,6 +120,92 @@ class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch>
       description: Text("$tr_chara_detail.column_predicate.common.notation.show.tooltip".tr()),
       trailing: Switch(value: !hidden, onChanged: (value) => setState(() => hidden = !value)),
       onTap: () => setState(() => hidden = !hidden),
+    );
+  }
+}
+
+/// The display-mode choice and the "hide common items" switch shared by the skill
+/// and factor notation (表示) groups.
+///
+/// Drawn only for a root column: a column nested under a logic column never
+/// honours a non-normal mode (see [effectiveItemDisplayMode]), so the choice would
+/// edit a value with no effect. Absence display is refused for a column whose
+/// items come from tags ([ItemColumnSpec.offersAbsenceDisplay]), and hiding common
+/// items only applies to difference display. Like the notation mode, a choice is
+/// written to the dialog's clone at once and committed by the dialog's OK button.
+class ItemDisplaySelector extends ConsumerWidget {
+  final String specId;
+
+  const ItemDisplaySelector({super.key, required this.specId});
+
+  static const _tr = "$tr_chara_detail.column_predicate.common.display";
+
+  void _update(WidgetRef ref, ColumnSpec Function(ItemColumnSpec spec) apply) {
+    ref.read(specCloneProvider(specId).notifier).update((spec) => apply(spec as ItemColumnSpec));
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = ref.watch(specCloneProvider(specId));
+    if (spec is! ItemColumnSpec || !isRootColumn(ref.base, specId)) {
+      return const SizedBox.shrink();
+    }
+    final mode = spec.displayMode;
+    final hideCommon = spec.hideCommonItems;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ChoiceFormLine<ItemDisplayMode>(
+          title: Text("$_tr.label".tr()),
+          description: Text("$_tr.description".tr()),
+          prefix: "$_tr.mode",
+          values: ItemDisplayMode.values,
+          selected: mode,
+          disabled: spec.offersAbsenceDisplay ? const {} : const {ItemDisplayMode.absence},
+          onSelected: (value) => _update(ref, (spec) => spec.withDisplayMode(value)),
+        ),
+        Disabled(
+          disabled: mode != ItemDisplayMode.difference,
+          tooltip: "$_tr.hide_common.disabled_tooltip".tr(),
+          child: FormTile(
+            title: Text("$_tr.hide_common.label".tr()),
+            description: Text("$_tr.hide_common.description".tr()),
+            trailing: Switch(
+              value: hideCommon,
+              onChanged: (value) => _update(ref, (spec) => spec.withHideCommonItems(value)),
+            ),
+            onTap: () => _update(ref, (spec) => spec.withHideCommonItems(!hideCommon)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Disables [child], a filter setting (logic, lower bounds) that difference display
+/// does not use, while the column [specId] is in effect shown in difference display.
+///
+/// Difference display compares only the selected items (and, for factors, the
+/// subject), so the setting keeps its value and applies again once the column
+/// returns to normal. The mode is the effective one ([effectiveItemDisplayMode]):
+/// a column nested under a logic column filters with these settings whatever mode
+/// it has stored.
+class DifferenceIgnoredSetting extends ConsumerWidget {
+  final String specId;
+  final Widget child;
+
+  const DifferenceIgnoredSetting({super.key, required this.specId, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = ref.watch(specCloneProvider(specId));
+    final ignored =
+        spec is ItemColumnSpec &&
+        effectiveItemDisplayMode(ref.base, specId, spec.displayMode) == ItemDisplayMode.difference;
+    return Disabled(
+      disabled: ignored,
+      tooltip: "$tr_chara_detail.column_predicate.common.display.difference_ignores_filter".tr(),
+      child: child,
     );
   }
 }
