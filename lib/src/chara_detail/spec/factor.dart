@@ -10,6 +10,9 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
+import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/utils.dart';
@@ -91,6 +94,20 @@ extension FactorNotationModeProperties on FactorNotationMode {
       case FactorNotationMode.countEach:
         return false;
     }
+  }
+
+  /// This mode if it shows the name, otherwise the named mode with the same
+  /// [metric] and [granularity]. A highlighted item needs its name drawn.
+  FactorNotationMode get named {
+    if (showsName) {
+      return this;
+    }
+    return switch ((metric, granularity)) {
+      (FactorNotationMetric.star, FactorNotationGranularity.total) => FactorNotationMode.nameStarTotal,
+      (FactorNotationMetric.star, FactorNotationGranularity.individual) => FactorNotationMode.nameStarEach,
+      (FactorNotationMetric.count, FactorNotationGranularity.total) => FactorNotationMode.nameCountTotal,
+      (FactorNotationMetric.count, FactorNotationGranularity.individual) => FactorNotationMode.nameCountEach,
+    };
   }
 
   /// Whether a value (as opposed to only the name) is rendered.
@@ -296,7 +313,10 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
     ).checked();
   }
 
-  bool _isAcceptable(QueriedFactor factor) {
+  /// Whether one factor passes the per-factor threshold of [element]: the test
+  /// [apply] runs per factor under anyOf / allOf, and the absence display runs to
+  /// mark a held factor short.
+  bool acceptsItem(QueriedFactor factor) {
     switch (element.mode) {
       case FactorSearchElementMode.starOnly:
         return factor.sum() >= element.star;
@@ -325,32 +345,20 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
     final foundFactors = QueriedFactor.extract(query, value, subject == FactorSearchSubjectMode.trainee);
     switch (logic) {
       case FactorSetLogicMode.anyOf:
-        return foundFactors.any((e) => _isAcceptable(e));
+        return foundFactors.any((e) => acceptsItem(e));
       case FactorSetLogicMode.allOf:
-        return foundFactors.every((e) => _isAcceptable(e));
+        return foundFactors.every((e) => acceptsItem(e));
       case FactorSetLogicMode.mixed:
         return _isMixedAcceptable(foundFactors);
     }
   }
 }
 
-class FactorCellData implements CellData {
-  final String label;
-
-  @override
-  final String csv;
-
-  FactorCellData(this.label, {String? csv}) : csv = (csv ?? label);
-
-  @override
-  CellSelectedCallback? get onSelected => null;
-}
-
 @MappableEnum()
 enum FactorDialogElements { selectionList, selectionTags, modeLogic }
 
 @MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
-class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
+class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable, ItemColumnSpec<FactorSet> {
   final Parser parser;
   final String labelKey = LabelKeys.factor;
   final AggregateFactorSetPredicate predicate;
@@ -364,6 +372,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   /// current factor master at evaluation time (so newly tagged factors are included
   /// automatically), and the individual factor list is hidden in the dialog.
   final bool selectByTag;
+
+  @override
+  final ItemDisplayMode displayMode;
+
+  @override
+  final bool hideCommonItems;
 
   @override
   final String id;
@@ -395,6 +409,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
     this.selectByTag = false,
+    this.displayMode = ItemDisplayMode.normal,
+    this.hideCommonItems = false,
     this.hidden = false,
     this.description,
     this.width,
@@ -411,13 +427,30 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   @override
+  bool get offersAbsenceDisplay => !selectByTag;
+
+  @override
+  ColumnSpec withDisplayMode(ItemDisplayMode mode) => copyWith(displayMode: mode);
+
+  @override
+  ColumnSpec withHideCommonItems(bool hide) => copyWith(hideCommonItems: hide);
+
+  @override
   bool get hasFilter => true;
 
   @override
-  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => defaultSpec is FactorColumnSpec
-      // Keep selectByTag consistent with the adopted predicate (see SkillColumnSpec).
-      ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
-      : copyWith(predicate: AggregateFactorSetPredicate.any(), selectByTag: false);
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      (defaultSpec is FactorColumnSpec
+              // Keep selectByTag consistent with the adopted predicate (see SkillColumnSpec).
+              ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
+              : copyWith(predicate: AggregateFactorSetPredicate.any(), selectByTag: false))
+          ._withOfferedDisplayMode();
+
+  // Falls back to normal when the reset landed on a mode this column no longer
+  // offers (absence on a tag-driven column).
+  FactorColumnSpec _withOfferedDisplayMode() => !offersAbsenceDisplay && displayMode == ItemDisplayMode.absence
+      ? copyWith(displayMode: ItemDisplayMode.normal)
+      : this;
 
   FactorColumnSpec copyWith({
     String? id,
@@ -428,6 +461,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
     bool? selectByTag,
+    ItemDisplayMode? displayMode,
+    bool? hideCommonItems,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
@@ -442,6 +477,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
       selectByTag: selectByTag ?? this.selectByTag,
+      displayMode: displayMode ?? this.displayMode,
+      hideCommonItems: hideCommonItems ?? this.hideCommonItems,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
@@ -478,45 +515,122 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     return values.map((e) => resolved.apply(e)).toList();
   }
 
-  List<QueriedFactor> _extract(AggregateFactorSetPredicate predicate, FactorSet factorSet) {
+  /// The factors [factorSet] holds within the subject: the queried ones, or for an empty query every factor of
+  /// the three slots when [showAllWhenQueryIsEmpty].
+  ///
+  /// Under the trainee subject a factor only a parent holds extracts as an all-zero entry; it is not held, so it
+  /// is dropped here, for every display alike.
+  List<QueriedFactor> _heldFactors(AggregateFactorSetPredicate predicate, FactorSet factorSet) {
     final traineeOnly = predicate.subject == FactorSearchSubjectMode.trainee;
-    if (predicate.query.isEmpty) {
-      if (!showAllWhenQueryIsEmpty) {
-        return [];
-      } else {
-        return QueriedFactor.extract(factorSet.uniqueIds, factorSet, traineeOnly);
-      }
-    } else {
-      final factorOrder = factorSet.uniqueIds.toList();
-      final found = QueriedFactor.extract(predicate.query, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
-      // Since found is in query order, sort in order of appearance.
-      return found.sortedBy<num>((e) => factorOrder.indexOfOrNull(e.id) ?? found.length).toList();
+    if (predicate.query.isEmpty && !showAllWhenQueryIsEmpty) {
+      return [];
     }
+    final ids = predicate.query.isNotEmpty ? predicate.query : factorSet.uniqueIds;
+    return QueriedFactor.extract(ids, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, FactorSet value) {
+  bool hasQuerySelection(RefBase ref) => _resolved(ref).query.isNotEmpty;
+
+  @override
+  bool get notatesValueOnly => !predicate.notation.mode.showsName;
+
+  @override
+  Set<int> heldItemIds(RefBase ref, FactorSet value) => _heldFactors(_resolved(ref), value).map((e) => e.id).toSet();
+
+  @override
+  TrinaCell plutoCell(RefBase ref, FactorSet value) => itemCell(ref, value, const ItemCellContext.normal());
+
+  @override
+  TrinaCell itemCell(RefBase ref, FactorSet value, ItemCellContext context) {
     final predicate = _resolved(ref);
     final mode = predicate.notation.mode;
-    final factors = _extract(predicate, value);
+    final order = _order(ref, predicate);
+    final factors = order.sort(_heldFactors(predicate, value), (e) => e.id);
 
     // Value-only modes render a single aggregate value across all factors, with
     // no factor names, so the display-count limit does not apply.
-    if (!mode.showsName) {
+    if (notatesValueOnly) {
       final display = QueriedFactor.notationOf(factors, mode.metric, mode.granularity, width: 3);
-      final csv = QueriedFactor.notationOf(factors, mode.metric, mode.granularity);
-      return TrinaCell(value: display)..setUserData(FactorCellData("($csv)"));
+      final summary = "(${QueriedFactor.notationOf(factors, mode.metric, mode.granularity)})";
+      if (drawsSummary(context.mode)) {
+        return TrinaCell(value: display)..setUserData(ItemCellData(items: const [], summary: summary, csv: summary));
+      }
+      // Outside the normal display the factors are drawn named, since a highlight belongs to an item; the
+      // value (sorting) and the CSV stay those of the stored mode.
+      return TrinaCell(value: display)
+        ..setUserData(_annotatedCell(ref, predicate, order, value, context, csv: summary));
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
-    final notations = factors.map((q) {
-      final name = labels.getOrNull(q.id) ?? q.id;
-      return mode.showsValue ? "$name(${q.notation(mode.metric, mode.granularity)})" : "$name";
-    }).toList();
-    final desc = notations.partial(0, predicate.notation.max).join(", ");
-    return TrinaCell(value: desc)..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
+    final notations = factors.map((q) => _notation(q, labels.getOrNull(q.id) ?? q.id.toString(), mode)).toList();
+    final max = itemLimit(ref, predicate.notation.max);
+    final desc = (max == null ? notations : notations.partial(0, max)).join(", ");
+    final csv = const CsvEncoder().convert([notations]);
+    final data = context is NormalItemCellContext
+        ? ItemCellData.limited(
+            [for (final text in notations) CellItem(text, ItemState.normal)],
+            max,
+            hideCommon: false,
+            csv: csv,
+          )
+        : _annotatedCell(ref, predicate, order, value, context, csv: csv);
+    return TrinaCell(value: desc)..setUserData(data);
+  }
+
+  static ItemOrder _order(RefBase ref, AggregateFactorSetPredicate predicate) =>
+      ItemOrder(query: predicate.query, masterRank: ref.watch(factorMasterRankProvider));
+
+  static String _notation(QueriedFactor factor, String name, FactorNotationMode mode) =>
+      mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
+
+  /// An absence or difference cell: the factors held within the subject, drawn in the named counterpart of the
+  /// stored notation, and the placeholders, drawn in the same notation with every slot 0 so that a placeholder
+  /// takes the shape of a held factor, cut to the display count.
+  ItemCellData _annotatedCell(
+    RefBase ref,
+    AggregateFactorSetPredicate predicate,
+    ItemOrder order,
+    FactorSet factorSet,
+    ItemCellContext context, {
+    required String csv,
+  }) {
+    final labels = ref.watch(labelMapProvider)[labelKey]!;
+    String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
+    final mode = predicate.notation.mode.named;
+    String placeholderOf(int id) => _notation(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), nameOf(id), mode);
+    // Under mixed the threshold applies to the query as a whole, so no single factor is short of it; an empty
+    // query accepts every record, so no factor is short of it either.
+    final perItemThreshold = predicate.query.isNotEmpty && predicate.logic != FactorSetLogicMode.mixed;
+    final own = [
+      for (final factor in _heldFactors(predicate, factorSet))
+        OwnItem(
+          factor.id,
+          _notation(factor, nameOf(factor.id), mode),
+          meetsQuery: !perItemThreshold || predicate.acceptsItem(factor),
+          strength: factor.sum(),
+        ),
+    ];
+    final items = switch (context) {
+      NormalItemCellContext() => throw ArgumentError.value(context, 'context', 'not an annotating display'),
+      AbsenceItemCellContext() => absenceItems(
+        own,
+        predicate.query,
+        placeholderOf,
+        order,
+        perItemThreshold: perItemThreshold,
+      ),
+      DifferenceItemCellContext(:final tally) => differenceItems(
+        own,
+        tally,
+        placeholderOf,
+        order,
+        strengthMax: predicate.subject == FactorSearchSubjectMode.trainee ? 3 : 9,
+      ),
+    };
+    return ItemCellData.limited(items, itemLimit(ref, predicate.notation.max), hideCommon: hideCommonItems, csv: csv);
   }
 
   @override
@@ -531,8 +645,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
-        final data = context.cell.getUserData<FactorCellData>()!;
-        return CellText(data.label);
+        return ItemCellText(context.cell.getUserData<ItemCellData>()!);
       },
     )..setUserData(this);
   }
@@ -547,13 +660,20 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     const sep = "\n";
     String modeText = "$sep${"-" * 10}";
 
-    if (predicate.query.length >= 2) {
+    // Difference display compares by the subject alone; the logic, the element
+    // mode and the lower bounds are ignored, so their lines are left out.
+    final ignoresFilter = effectiveItemDisplayMode(ref, id, displayMode) == ItemDisplayMode.difference;
+    if (predicate.query.length >= 2 && !ignoresFilter) {
       final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.label".tr();
       modeText += "$sep${"$tr_factor.mode.logic.label".tr()}: $selection";
     }
 
     final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.label".tr();
     modeText += "$sep${"$tr_factor.mode.subject.label".tr()}: $subject";
+
+    if (ignoresFilter) {
+      return "${_queryNames(ref, predicate)}$modeText";
+    }
 
     if (predicate.query.length >= 2) {
       final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.label".tr();
@@ -568,11 +688,17 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
     }
 
+    return "${_queryNames(ref, predicate)}$modeText";
+  }
+
+  /// The queried factors' names, one per line, cut after 30 with a count of the rest.
+  String _queryNames(RefBase ref, AggregateFactorSetPredicate predicate) {
+    const sep = "\n";
     final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final factors = predicate.query.map((e) => labels.getOrNull(e) ?? e.toString()).toList();
+    final names = predicate.query.map((e) => labels.getOrNull(e) ?? e.toString()).toList();
     const limit = 30;
-    final ellipsis = factors.length > limit ? "$sep- ${factors.length - limit} more" : "";
-    return "${factors.partial(0, limit).join(sep)}$ellipsis$modeText";
+    final ellipsis = names.length > limit ? "$sep- ${names.length - limit} more" : "";
+    return "${names.partial(0, limit).join(sep)}$ellipsis";
   }
 
   @override
@@ -912,11 +1038,21 @@ class _ModeSelector extends ConsumerWidget {
       title: Text("$tr_factor.mode.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
-        if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic)) logicChoiceWidget(context, ref),
+        if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic))
+          DifferenceIgnoredSetting(specId: specId, child: logicChoiceWidget(context, ref)),
+        // The subject stays editable: difference display compares within it.
         subjectChoiceWidget(context, ref),
-        elementChoiceWidget(context, ref),
-        elementStarWidget(context, ref),
-        elementCountWidget(context, ref),
+        DifferenceIgnoredSetting(
+          specId: specId,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              elementChoiceWidget(context, ref),
+              elementStarWidget(context, ref),
+              elementCountWidget(context, ref),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -954,6 +1090,13 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     super.dispose();
   }
 
+  /// Whether the column is in effect shown in a non-normal display mode, which
+  /// names every factor whatever notation mode is stored.
+  bool _namesItems(WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    return effectiveItemDisplayMode(ref.base, widget.specId, spec.displayMode) != ItemDisplayMode.normal;
+  }
+
   Widget notationChoiceWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return ChoiceFormLine<FactorNotationMode>(
@@ -962,6 +1105,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       prefix: "$tr_factor.notation.mode",
       values: FactorNotationMode.values,
       selected: predicate.notation.mode,
+      disabled: _namesItems(ref) ? FactorNotationMode.values.where((e) => !e.showsName).toSet() : null,
       onSelected: (value) {
         _clonedSpecProvider.update(ref, widget.specId, (spec) {
           return spec.copyWith(
@@ -973,15 +1117,24 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   }
 
   Widget notationMaxWidget(WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    final predicate = spec.predicate;
+    // Value-only modes render a single aggregate cell, so the per-cell factor limit
+    // has no effect. A non-normal display mode names the factors even under a
+    // value-only mode, and the limit applies again. When both reasons hold, the
+    // value-only mode is named: it keeps the limit off whatever is selected.
+    final valueOnly = !predicate.notation.mode.showsName && !_namesItems(ref);
+    // A column that selects items shows every one of them, so the limit applies
+    // only while nothing is selected.
+    final selecting = spec.hasQuerySelection(ref.base);
     return FormTile(
       title: Text("$tr_factor.notation.max.label".tr()),
       description: Text("$tr_factor.notation.max.description".tr()),
       trailing: Disabled(
-        // Value-only modes render a single aggregate cell, so the per-cell
-        // factor limit has no effect and is disabled.
-        disabled: !predicate.notation.mode.showsName,
-        tooltip: "$tr_factor.notation.max.disabled_tooltip".tr(),
+        disabled: valueOnly || selecting,
+        tooltip: valueOnly
+            ? "$tr_factor.notation.max.disabled_tooltip".tr()
+            : "$tr_common.notation.max_selected_tooltip".tr(),
         child: IntStepperField(
           min: 1,
           max: 100,
@@ -1018,6 +1171,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
+        ItemDisplaySelector(specId: widget.specId),
         notationChoiceWidget(context, ref),
         notationMaxWidget(ref),
         notationTitleWidget(ref),

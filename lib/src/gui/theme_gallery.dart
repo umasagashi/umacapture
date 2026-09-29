@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/theme_extensions.dart';
@@ -11,6 +14,7 @@ import '/src/gui/theme_extensions.dart';
 /// Renders the full `ColorScheme` role set (roles the app never references keep
 /// their normal swatch but carry a "not used" note), the `ThemeData` colors, the role-based
 /// translucent composites resolved over the real background they are painted on,
+/// the record table's item cell drawn by the real cell widget,
 /// and the custom `ThemeExtension` tokens (`AppSemanticColors`, `AppChartColors`,
 /// `CodeHighlightColors`). Each swatch is annotated with a short description of
 /// what the color is used for.
@@ -41,6 +45,7 @@ class ThemeGalleryDialog extends ConsumerWidget {
           _ColorSchemeSection(),
           _ThemeDataSection(),
           _BlendSection(),
+          _ItemCellSection(),
           _SemanticSection(),
           _ChartSection(),
           _CodeHighlightSection(),
@@ -404,6 +409,61 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
+            'item normal',
+            overlay: cs.outline.withValues(alpha: itemNormalAlpha),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Rounded background behind each skill or factor of the record table cell in normal display, in the '
+          'outline role. It is not painted for an item the absence display holds, nor for one every compared '
+          'record shares in difference display. See the item cell rows below.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item missing',
+            overlay: s.danger.withValues(alpha: itemMissingAlpha),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Background of an item the record table cell marks red: a queried skill or factor the record does not '
+          'have, a factor short of the required stars or count, and, in difference display, an item only some of '
+          'the compared records have while this one does not. One fixed strength for every red item. Only the '
+          'missing and partial-missing items also dim their text (disabledColor); a short factor keeps its '
+          'normal text. See the item cell rows below.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item partial (weakest)',
+            overlay: s.success.withValues(alpha: itemPartialHeldAlphaMin),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Weakest green of the record table cell in difference display: an item only some of the compared '
+          'records have while this one does, at the lowest factor-star total (one star).',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item partial (middle)',
+            // Strength 5 on the nine-step lineage scale (the trainee alone has three steps).
+            overlay: s.success.withValues(alpha: itemPartialHeldAlpha(5, 9)),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Mid-scale green of the same cell: a lineage factor whose star total across the trainee and its '
+          'parents is 5 of 9. The shade steps linearly between the weakest and strongest ends.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item partial (strongest)',
+            overlay: s.success.withValues(alpha: itemPartialHeldAlphaMax),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Strongest green of the same cell: the top of the factor-star scale (9 across the lineage, 3 for the '
+          'trainee alone). A skill has no strength, so a skill always takes this shade.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
             'loading veil',
             overlay: cs.surface.withValues(alpha: 0.85),
             base: cs.onSurface,
@@ -524,6 +584,169 @@ class _BlendSection extends StatelessWidget {
   }
 }
 
+/// The record table's skill / factor cell drawn by the real cell widget ([ItemCellText]), so the text colour
+/// on the tinted background and the omission counter are seen as the table paints them. Colours and sizes come
+/// from the cell's own theme reads, not from values repeated here.
+class _ItemCellSection extends ConsumerWidget {
+  const _ItemCellSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // The table fixes a row's height only in the wrap mode; the auto modes grow the row to its content.
+    final fixedRowHeight = ref.watch(charaDetailRowHeightModeProvider) == RowHeightMode.wrap;
+    final measurement = CellMeasurement(
+      style: Theme.of(context).textTheme.bodySmall ?? const TextStyle(),
+      textScaler: MediaQuery.textScalerOf(context),
+    );
+    final oneRowHeight = itemBoxesMinHeight(1, measurement);
+    const manyItems = [
+      CellItem('Item A', ItemState.normal),
+      CellItem('Item B', ItemState.normal),
+      CellItem('Item C', ItemState.normal),
+      CellItem('Item D', ItemState.normal),
+      CellItem('Item E', ItemState.normal),
+      CellItem('Item F', ItemState.normal),
+    ];
+    return _Section(
+      'Record table item cell (live widget)',
+      [
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'normal display',
+            ItemCellData(
+              items: const [
+                CellItem('Item A', ItemState.normal),
+                CellItem('Item B', ItemState.normal),
+                CellItem('Item C', ItemState.normal),
+              ],
+              csv: '',
+            ),
+          ),
+          'The default display of a skill or factor cell: every item is its own box (text plus the padding '
+          'inside it) with a rounded outline background, and boxes sit a fixed gap apart. Check that the text '
+          'stays legible on it in both themes.',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'absence display',
+            ItemCellData(
+              items: const [
+                CellItem('Item A(3)', ItemState.held),
+                CellItem('Item B(1)', ItemState.short),
+                CellItem('Item C(0)', ItemState.missing),
+              ],
+              csv: '',
+            ),
+          ),
+          'A queried list as the absence display shows it, in factor notation: an item the record has (no '
+          'background), a factor below the per-item threshold (red background, normal text), and a factor the '
+          'record lacks (red background, text dimmed to disabledColor, drawn with a value of 0 so every row '
+          'lines its factors up alike). Check that the dimmed text stays legible on the red in both themes.',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'difference display',
+            ItemCellData(
+              items: const [
+                CellItem('Item A', ItemState.common),
+                CellItem('Item B', ItemState.partialHeld, strength: 2, strengthMax: 9),
+                CellItem('Item C', ItemState.partialHeld, strength: 9, strengthMax: 9),
+                CellItem('Item D', ItemState.partialMissing),
+              ],
+              csv: '',
+            ),
+          ),
+          'The same cell in difference display: an item every compared record has (no background), items only '
+          'some have and this one does (green, shaded by strength: weak then strong), and an item only others '
+          'have (red background, dimmed text).',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'omission counter',
+            ItemCellData(
+              items: const [CellItem('Item A', ItemState.normal), CellItem('Item B', ItemState.normal)],
+              total: 10,
+              csv: '',
+            ),
+          ),
+          'The counter a cell appends when it lists fewer items than it has (the display limit, or too few '
+          'lines): "... shown/total", in disabledColor at a reduced size (itemCounterScale). It is a box of its '
+          'own, so the cut always falls between boxes, never inside one.',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen('wraps across rows', ItemCellData(items: manyItems, csv: '')),
+          'Enough items to outgrow one row at this width: a row breaks only between boxes, never inside one, so '
+          'the horizontal gap, the row gap, and the vertical padding inside each box are all visible together.',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'cut by a fixed row height',
+            ItemCellData(items: manyItems, csv: ''),
+            itemAreaHeight: fixedRowHeight ? oneRowHeight : null,
+          ),
+          'The same items given only one row of height (itemBoxesMinHeight(1, ...)): the cell shows as many '
+          'boxes as that row fits and appends the omission counter for the rest, in RowHeightMode.wrap (the app '
+          'default). An auto row-height mode grows the row to fit its content instead, so under that mode this '
+          'specimen is given no bound either and shows every box, as the table does.',
+        ),
+        _SwatchRow(
+          _ItemCellSpecimen(
+            'one item wider than the column',
+            ItemCellData(
+              items: const [CellItem('A Very Long Item Name That Cannot Fit In One Box', ItemState.normal)],
+              csv: '',
+            ),
+          ),
+          'An item wider than the column is shortened to the longest prefix that fits, followed by the '
+          'ellipsis, inside its own box: never split across boxes.',
+        ),
+      ],
+      note:
+          'Drawn by ItemCellText, so it honours the current row-height setting: the "cut by a fixed row '
+          'height" specimen above is bounded only in RowHeightMode.wrap, to demonstrate that a small row-height '
+          'setting cuts the cell itself and shows a counter for the rest.',
+    );
+  }
+}
+
+/// A caption over one live [ItemCellText] on the surface it is painted on, in the size of a swatch. When
+/// [itemAreaHeight] is given, the item boxes alone (not the label above them) are bounded to that height,
+/// the way a real cell in [RowHeightMode.wrap] gives its row only a fixed height.
+class _ItemCellSpecimen extends StatelessWidget {
+  final String label;
+  final ItemCellData data;
+  final double? itemAreaHeight;
+
+  const _ItemCellSpecimen(this.label, this.data, {this.itemAreaHeight});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final itemText = DefaultTextStyle(
+      style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(color: cs.onSurface),
+      child: ItemCellText(data),
+    );
+    return Container(
+      width: 168,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(label, style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10)),
+          const SizedBox(height: 4),
+          if (itemAreaHeight case final height?) SizedBox(height: height, child: itemText) else itemText,
+        ],
+      ),
+    );
+  }
+}
+
 class _SemanticSection extends StatelessWidget {
   const _SemanticSection();
 
@@ -543,7 +766,8 @@ class _SemanticSection extends StatelessWidget {
         s.success,
         null,
         'Toast success, capture requirement OK, addon success, a finished tab\'s progress ring, the "safe to switch '
-            'characters" arrows, and every CaptureStatusTone.success line of the capture card.',
+            'characters" arrows, every CaptureStatusTone.success line of the capture card, and the green '
+            'difference shades of the record table\'s skill and factor cells (see the item partial rows above).',
       ),
       (
         'warning',
@@ -568,7 +792,9 @@ class _SemanticSection extends StatelessWidget {
         null,
         'Toast error, capture requirement insufficient (wired to colorScheme.error), and every '
             'CaptureStatusTone.error line of the capture card -- the controller load error, a failed character or '
-            'import, and a tab refused for having been scrolled before it was ready.',
+            'import, and a tab refused for having been scrolled before it was ready. It is also the red of the '
+            'record table\'s skill and factor cells for an item the record lacks or holds below the requirement (see the '
+            'item missing row above).',
       ),
       (
         'onAccent',
@@ -680,7 +906,10 @@ const Map<String, String> _roleUsages = {
       'view\'s row menus.',
   'surfaceContainerHigh': 'Chip backgrounds (global chipTheme) and the page background (scaffold).',
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
-  'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
+  'outline':
+      'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules. Also '
+      'the translucent background behind each item of the record table\'s skill and factor cells in normal '
+      'display (see the item normal row).',
   'outlineVariant':
       'Faint outlines: the app-wide chip border (global chipTheme), the column-chip "settings group" frame, the '
       'inset per-row dividers in the column/table settings dialogs, and the enhancement merge dialog\'s '
@@ -697,6 +926,7 @@ const Map<String, String> _themeDataUsages = {
   'disabledColor':
       'Disabled-state elements (data-table, family registration, script), and the withheld entries of the storage '
       'view\'s row menus -- where it outranks the destructive red, so an entry that cannot act reads as dead '
-      'rather than as danger.',
+      'rather than as danger. It also dims the text of a skill or factor the record table cell shows as missing, '
+      'and its omission counter.',
   'hintColor': 'Input placeholders and hints (task dialog, column builder, script).',
 };

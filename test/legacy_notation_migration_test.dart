@@ -33,6 +33,8 @@ Map<String, dynamic> _factorMap(Map<String, dynamic> notation) => <String, dynam
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
   'selectByTag': false,
+  'displayMode': 'normal',
+  'hideCommonItems': false,
   'hidden': false,
 };
 
@@ -52,6 +54,8 @@ Map<String, dynamic> _skillMap(Map<String, dynamic> notation) => <String, dynami
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
   'selectByTag': false,
+  'displayMode': 'normal',
+  'hideCommonItems': false,
   'hidden': false,
 };
 

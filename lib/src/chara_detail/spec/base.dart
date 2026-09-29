@@ -295,8 +295,10 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   bool get isObsolete => false;
 
   /// Whether this column is hidden from the grid. A hidden column contributes no
-  /// visible column, yet still participates in row filtering and the pass-count
-  /// badge — so it acts as an invisible filter. Defaults to false (shown); legacy
+  /// visible column, yet a column that filters (every column except a root item
+  /// column in a non-normal display mode, see [ItemColumnSpec]) still participates
+  /// in row filtering and the pass-count badge — so it acts as an invisible
+  /// filter. Defaults to false (shown); legacy
   /// specs saved before this field existed therefore decode as shown.
   bool get hidden;
 
@@ -339,19 +341,32 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// placeholder, which is never editable, overrides this back to a no-op.
   ColumnSpec withWidth(double? width) => throw UnsupportedError('Concrete specs must override withWidth');
 
-  /// Whether this column renders wrapping text (and so can grow a row's height
-  /// when narrowed). Columns that render a fixed-height widget or icon (character
+  /// Whether this column renders wrapping content (text or item boxes, and so can grow a
+  /// row's height when narrowed). Columns that render a fixed-height widget or icon (character
   /// portrait, logic mark, rating stars, family-registration badge) override this
   /// to false so the auto row-height pass never inflates a row from their
   /// width-measurement placeholder text. Defaults to true.
   bool get wrapsText => true;
 
-  /// The text the cell actually paints, used by the row-height pass and the
-  /// column-width auto-fit to measure what is shown. Defaults to the
-  /// trina-formatted cell value; specs whose renderer substitutes text (e.g.
-  /// memo's null placeholder, the family-registration all-slots label) override
-  /// this so the measured size matches what is shown.
+  /// The text the cell actually paints, which [measuredContent] measures by default.
+  /// Defaults to the trina-formatted cell value; specs whose renderer
+  /// substitutes text (e.g. memo's null placeholder, the family-registration
+  /// all-slots label) override this so the measured size matches what is shown.
   String measuredText(TrinaCell? cell, String formatted) => formatted;
+
+  /// What the cell actually lays out, which the row-height pass and the
+  /// column-width auto-fit measure. Defaults to [measuredText] as wrapping text;
+  /// a spec whose cell lays out something other than one wrapping string (the
+  /// item boxes of a skill or factor cell) overrides this so the measured size
+  /// matches what is shown.
+  MeasuredContent measuredContent(TrinaCell? cell, String formatted) =>
+      TextMeasuredContent(measuredText(cell, formatted));
+
+  /// The height of [lines] lines of this column's content in [cell], cell padding excluded: what the row-height
+  /// floor keeps visible of this column in the cell's row. Defaults to [lines] lines of text; a spec whose cell
+  /// lays out something taller than a text line per line (the item boxes of a skill or factor cell) overrides
+  /// this, reading what [cell] draws the same way [measuredContent] does.
+  double minContentHeight(int lines, CellMeasurement m, {TrinaCell? cell}) => m.preferredLineHeight * lines;
 
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
   /// editable spec must override this via copyWith. Unlike [withChildren] (which
@@ -708,6 +723,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // merely for lacking it.
   static const _selectByTagKey = 'selectByTag';
 
+  // Serialized field names of the skill/factor display mode (enum, default
+  // normal) and "hide common items" flag (bool, default false). A stored map may
+  // lack them, like [_selectByTagKey], so they are excluded for the same reason.
+  static const _displayModeKey = 'displayMode';
+  static const _hideCommonItemsKey = 'hideCommonItems';
+
   Set<String> get brokenIds => {..._brokenIds};
 
   void _clearBroken(String id) {
@@ -798,6 +819,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       // 'selectByTag' was likewise added after specs existed on disk; its absence
       // decodes to the default (false) and must not flag a spec as broken.
       if (entry.key == _selectByTagKey) continue;
+      // The display mode and "hide common items" flag likewise decode to their
+      // defaults (normal, false) when absent.
+      if (entry.key == _displayModeKey || entry.key == _hideCommonItemsKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }
@@ -1046,36 +1070,132 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
 // in trina (it rescans the original list and rebuilds the filtered view), so a
 // large diff (e.g. a filter/search change that swaps most rows) would otherwise
 // be O(n^2); a wholesale removeAllRows + appendRows is O(n). Small edits stay
-// incremental so scroll offset and row identity are preserved.
+// incremental: the rows left unchanged keep their identity.
 const _bulkReconcileThreshold = 32;
 
-// A text-rendering ([ColumnSpec.wrapsText]) column paired with its per-pass
-// layout: the content max-width text wraps within and the vertical cell padding
+/// What one measuring pass (the row-height pass, the column-width auto-fit) lays
+/// cell content out with: a text style and the pass's text scaler. It owns a
+/// painter [TextMeasuredContent] reuses across the pass and a memo that lives as
+/// long as the pass; [dispose] it when the pass ends.
+class CellMeasurement {
+  CellMeasurement({required this.style, required this.textScaler});
+
+  final TextStyle style;
+  final TextScaler textScaler;
+
+  TextPainter? _painter;
+  double? _preferredLineHeight;
+  final _memo = <Object, Object>{};
+  final _disposers = <void Function()>[];
+
+  /// The painter text content lays out with. Only [TextMeasuredContent] uses it:
+  /// content that sets other painter properties (such as `maxLines`) keeps a
+  /// painter of its own, since those properties would carry over to the text
+  /// measured after it.
+  TextPainter get painter => _painter ??= TextPainter(textDirection: ui.TextDirection.ltr, textScaler: textScaler);
+
+  /// The height of one line of text in [style] under [textScaler].
+  double get preferredLineHeight => _preferredLineHeight ??= _measurePreferredLineHeight();
+
+  double _measurePreferredLineHeight() {
+    final painter = TextPainter(
+      text: TextSpan(style: style, text: 'X'),
+      textDirection: ui.TextDirection.ltr,
+      textScaler: textScaler,
+    )..layout();
+    final height = painter.preferredLineHeight;
+    painter.dispose();
+    return height;
+  }
+
+  /// The object stored under [key] for this pass, made by [create] on first use.
+  /// [dispose], when given, runs on it when the pass ends.
+  T memo<T extends Object>(Object key, T Function() create, {void Function(T)? dispose}) {
+    final existing = _memo[key];
+    if (existing != null) {
+      return existing as T;
+    }
+    final value = create();
+    _memo[key] = value;
+    if (dispose != null) {
+      _disposers.add(() => dispose(value));
+    }
+    return value;
+  }
+
+  void dispose() {
+    _painter?.dispose();
+    for (final dispose in _disposers) {
+      dispose();
+    }
+  }
+}
+
+/// What a cell lays out, compared by value so a pass measures equal contents once.
+@immutable
+abstract class MeasuredContent {
+  const MeasuredContent();
+
+  /// The size the content takes laid out within [maxWidth]; on one line when
+  /// [maxWidth] is infinite.
+  Size measure(CellMeasurement m, {double maxWidth = double.infinity});
+}
+
+/// A string in the pass's text style, wrapped at the width it is given: the
+/// content of every text column.
+class TextMeasuredContent extends MeasuredContent {
+  const TextMeasuredContent(this.text);
+
+  final String text;
+
+  @override
+  Size measure(CellMeasurement m, {double maxWidth = double.infinity}) {
+    if (text.isEmpty || maxWidth <= 0) {
+      return Size.zero;
+    }
+    m.painter
+      ..text = TextSpan(style: m.style, text: text)
+      ..layout(maxWidth: maxWidth);
+    return m.painter.size;
+  }
+
+  @override
+  bool operator ==(Object other) => other is TextMeasuredContent && other.text == text;
+
+  @override
+  int get hashCode => text.hashCode;
+
+  @override
+  String toString() => 'TextMeasuredContent($text)';
+}
+
+// A wrapping ([ColumnSpec.wrapsText]) column paired with its per-pass layout:
+// the content max-width its content wraps within and the vertical cell padding
 // added to the wrapped height. Constant across rows within one row-height pass.
 typedef _WrapColumn = ({TrinaColumn col, ColumnSpec spec, double maxWidth, double verticalPadding});
 
-// Measures wrapped-text row heights for one [applyRowHeights] pass. Built once
-// from the wrapping columns' fixed layout so the per-row scan does no repeated
-// column-metadata lookups, and reuses a single [TextPainter] across every cell
-// instead of allocating one per measurement. Call [dispose] when the pass ends.
+// Measures wrapped row heights for one [applyRowHeights] pass. Built once from
+// the wrapping columns' fixed layout so the per-row scan does no repeated
+// column-metadata lookups, and measures every cell through one
+// [CellMeasurement], so a single painter serves every text cell instead of one
+// per measurement. Call [dispose] when the pass ends.
 class _RowHeightMeasurer {
-  _RowHeightMeasurer({required this._columns, required this._style, required TextScaler textScaler})
-    : _painter = TextPainter(textDirection: ui.TextDirection.ltr, textScaler: textScaler);
+  _RowHeightMeasurer({required this._columns, required TextStyle style, required TextScaler textScaler})
+    : _measurement = CellMeasurement(style: style, textScaler: textScaler);
 
   final List<_WrapColumn> _columns;
-  final TextStyle _style;
-  final TextPainter _painter;
+  final CellMeasurement _measurement;
 
-  // The rendered height of [row]'s wrapped text across its text-rendering
-  // columns, or 0 when none wrap. Mirrors how [CellText] lays the same text out
-  // so a grown row fits exactly: a column clamped below its content wraps and
-  // must grow the row, while an auto-fit column stays one line and adds nothing.
+  // The rendered height of [row]'s wrapped content ([ColumnSpec.measuredContent])
+  // across its wrapping columns, or 0 when none wrap. A column clamped below its
+  // content wraps and must grow the row, while an auto-fit column stays one line
+  // and adds nothing.
   double contentHeight(TrinaRow row) {
     var maxHeight = 0.0;
     for (final column in _columns) {
       final cell = row.cells[column.col.field];
-      final text = column.spec.measuredText(cell, column.col.formattedValueForDisplay(cell?.value));
-      final height = _wrappedHeight(text, column.maxWidth) + column.verticalPadding;
+      final content = column.spec.measuredContent(cell, column.col.formattedValueForDisplay(cell?.value));
+      final height = content.measure(_measurement, maxWidth: column.maxWidth).height + column.verticalPadding;
       if (height > maxHeight) {
         maxHeight = height;
       }
@@ -1084,17 +1204,7 @@ class _RowHeightMeasurer {
     return maxHeight > 0 ? maxHeight + 2 : 0;
   }
 
-  double _wrappedHeight(String text, double maxWidth) {
-    if (text.isEmpty || maxWidth <= 0) {
-      return 0;
-    }
-    _painter
-      ..text = TextSpan(style: _style, text: text)
-      ..layout(maxWidth: maxWidth);
-    return _painter.height;
-  }
-
-  void dispose() => _painter.dispose();
+  void dispose() => _measurement.dispose();
 }
 
 // Parsed [Metadata.capturedDate] per record, filled lazily. The tiebreak
@@ -1115,17 +1225,6 @@ DateTime? _capturedDateTimeOf(TrinaRow row) {
 }
 
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
-  double _visualTextWidth(BuildContext context, String text, TextStyle style) {
-    if (text.isEmpty) {
-      return 0;
-    }
-    final textPainter = TextPainter(
-      text: TextSpan(style: style, text: text),
-      textDirection: ui.TextDirection.ltr,
-    )..layout();
-    return textPainter.width;
-  }
-
   // Single-pass auto-fit: size the column to max(title, widest cell). Replaces the
   // built-in autoFitColumn (which measures the title precisely but estimates cells
   // by character count) plus a separate cell pass, so the rows are scanned once.
@@ -1136,22 +1235,26 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       return;
     }
     final spec = column.getUserData<ColumnSpec>();
-    final texts = refRows.map((e) {
+    final contents = refRows.map((e) {
       final cell = e.cells[column.field];
       final formatted = column.formattedValueForDisplay(cell?.value);
       // Measure what the cell actually paints, not just the raw value: e.g. the
       // family-registration cell renders all six slot labels even though its
       // value lists only the registered subset.
-      return spec?.measuredText(cell, formatted) ?? formatted;
+      return spec?.measuredContent(cell, formatted) ?? TextMeasuredContent(formatted);
     });
-    final cellWidth = texts
-        .toSet()
-        .map((value) => _visualTextWidth(context, value, DefaultTextStyle.of(context).style))
-        .max;
+    // Both measurements lay out under the grid's text scaler, as the cells and the title (a plain `Text.rich`)
+    // are drawn.
+    final textScaler = MediaQuery.textScalerOf(context);
+    final cellMeasurement = CellMeasurement(style: DefaultTextStyle.of(context).style, textScaler: textScaler);
+    final titleMeasurement = CellMeasurement(style: configuration.style.columnTextStyle, textScaler: textScaler);
+    final cellWidth = contents.toSet().map((c) => c.measure(cellMeasurement).width).max;
 
     final cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
     final titlePadding = column.titlePadding ?? configuration.style.defaultColumnTitlePadding;
-    final titleWidth = _visualTextWidth(context, column.title, configuration.style.columnTextStyle);
+    final titleWidth = TextMeasuredContent(column.title).measure(titleMeasurement).width;
+    cellMeasurement.dispose();
+    titleMeasurement.dispose();
 
     final cellTarget = cellWidth + cellPadding.horizontal + 8;
     // Mirrors the built-in's title term. The checkbox-column width (enableRowChecked)
@@ -1216,20 +1319,21 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return result;
   }
 
-  // The pixel height of [minLines] text lines plus the default cell padding,
-  // serving as the fixed height in wrap mode and the floor in the auto modes.
-  double _minRowHeight(BuildContext context, TextStyle style, int minLines) {
-    final painter = TextPainter(
-      text: TextSpan(style: style, text: 'X'),
-      textDirection: ui.TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout();
-    final height = painter.preferredLineHeight * minLines + configuration.style.defaultCellPadding.vertical;
-    painter.dispose();
+  // The pixel height of [minLines] lines of the content [row] shows in every shown wrapping column
+  // ([ColumnSpec.minContentHeight]) plus its cell padding, at least [minLines] text lines plus the default cell
+  // padding; serving as the fixed height in wrap mode and the floor in the auto modes. Read from the row's cells,
+  // since what a cell draws is decided where the grid is built: the cells of one column all draw the same kind of
+  // content, so every row gets the same floor.
+  double _minRowHeight(TrinaRow row, List<_WrapColumn> columns, CellMeasurement measurement, int minLines) {
+    var height = measurement.preferredLineHeight * minLines + configuration.style.defaultCellPadding.vertical;
+    for (final column in columns) {
+      final cell = row.cells[column.col.field];
+      height = max(height, column.spec.minContentHeight(minLines, measurement, cell: cell) + column.verticalPadding);
+    }
     return height;
   }
 
-  // Sizes every row for [mode], flooring at [minLines] text lines: wrap fixes all
+  // Sizes every row for [mode], flooring at [minLines] lines ([_minRowHeight]): wrap fixes all
   // rows at the floor, autoPerRow grows each to its own text, autoUniform grows
   // all to the tallest row's text. trina's setRowHeight rebuilds the row, dropping
   // its attached record and notifying per row, so rows are replaced here in one
@@ -1241,24 +1345,28 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       return false;
     }
     final style = DefaultTextStyle.of(context).style;
-    final minHeight = _minRowHeight(context, style, minLines);
+    final textScaler = MediaQuery.textScalerOf(context);
+    final columns = _wrappingColumns();
+    final floorMeasurement = CellMeasurement(style: style, textScaler: textScaler);
+    double floor(TrinaRow row) => _minRowHeight(row, columns, floorMeasurement, minLines);
     // The auto modes measure wrapped text; wrap fills the floor without measuring.
     final measurer = mode == RowHeightMode.wrap
         ? null
-        : _RowHeightMeasurer(columns: _wrappingColumns(), style: style, textScaler: MediaQuery.textScalerOf(context));
+        : _RowHeightMeasurer(columns: columns, style: style, textScaler: textScaler);
     final List<double> targets;
     try {
       switch (mode) {
         case RowHeightMode.wrap:
-          targets = List.filled(refRows.length, minHeight);
+          targets = [for (final row in refRows) floor(row)];
         case RowHeightMode.autoPerRow:
-          targets = [for (final row in refRows) max(minHeight, measurer!.contentHeight(row))];
+          targets = [for (final row in refRows) max(floor(row), measurer!.contentHeight(row))];
         case RowHeightMode.autoUniform:
-          final tallest = refRows.fold<double>(minHeight, (h, row) => max(h, measurer!.contentHeight(row)));
+          final tallest = refRows.fold<double>(0, (h, row) => max(h, max(floor(row), measurer!.contentHeight(row))));
           targets = List.filled(refRows.length, tallest);
       }
     } finally {
       measurer?.dispose();
+      floorMeasurement.dispose();
     }
     var changed = false;
     for (var i = 0; i < refRows.length; i++) {
@@ -1439,6 +1547,11 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// Cell-driven columns (e.g. memo, which reads the cell's user data) are
   /// refreshed by [reconcileRows] replacing their row instead; copying their
   /// stateless renderer here is harmless.
+  ///
+  /// Swapping a renderer alone does not repaint a row whose cell values are
+  /// unchanged: [reconcileRows] keeps that row as it is. A cell whose rendering
+  /// depends on more than its value carries [RenderedCellData], whose
+  /// [RenderedCellData.paintState] [reconcileRows] compares to replace the row.
   void refreshColumnRenderers(List<TrinaColumn> nextColumns) {
     final nextByField = {for (final column in nextColumns) column.field: column};
     for (final live in columns) {
@@ -1454,19 +1567,33 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
   }
 
-  /// Whether two rows for the same record render identically: same pinned state
-  /// and same value in every cell. Drives [reconcileRows]'s decision to leave a
-  /// row untouched (preserving scroll and identity) or replace it.
+  /// Whether two rows for the same record render identically: same pinned state,
+  /// same value in every cell, and, for a cell carrying [RenderedCellData] on
+  /// either side, the same [RenderedCellData.paintState]. Drives
+  /// [reconcileRows]'s decision to leave a row untouched (keeping its identity)
+  /// or replace it.
   bool _rowContentEquals(TrinaRow a, TrinaRow b) {
     if (a.frozen != b.frozen || a.cells.length != b.cells.length) {
       return false;
     }
     for (final entry in b.cells.entries) {
-      if (a.cells[entry.key]?.value != entry.value.value) {
+      final live = a.cells[entry.key];
+      if (live?.value != entry.value.value || !_paintStateEquals(live, entry.value)) {
         return false;
       }
     }
     return true;
+  }
+
+  // Cells whose user data is not [RenderedCellData] on either side paint from
+  // their value alone, so they compare equal here.
+  bool _paintStateEquals(TrinaCell? a, TrinaCell b) {
+    final aData = a?.getUserData<Object>();
+    final bData = b.getUserData<Object>();
+    if (aData is! RenderedCellData && bData is! RenderedCellData) {
+      return true;
+    }
+    return aData is RenderedCellData && bData is RenderedCellData && aData.paintState == bData.paintState;
   }
 
   /// Reapplies the canonical [TrinaRow.sortIdx] captured in [sortIdxById]
@@ -1514,14 +1641,13 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   ///
   /// Rows whose record vanished or whose content/pinned state changed are
   /// removed and the fresh row is reinserted at its position in [nextRows];
-  /// unchanged rows keep their identity so the scroll offset and current cell
-  /// survive a single cell edit. Assumes the column set is unchanged (the caller
-  /// handles structural column changes with a full rebuild).
+  /// unchanged rows keep their identity. Assumes the column set is unchanged
+  /// (the caller handles structural column changes with a full rebuild).
   ///
   /// When the diff is large (more than [_bulkReconcileThreshold] rows to
-  /// reinsert) the per-row insert would be O(n^2), so it falls back to a
-  /// wholesale replace: cheaper, at the cost of resetting scroll and selection
-  /// (the caller restores the selection by record afterwards).
+  /// reinsert) the per-row insert would be O(n^2), so it falls back to
+  /// [replaceAllRows]: every row object is replaced and the current cell is
+  /// cleared; the caller restores the selection by record afterwards.
   ///
   /// Returns whether any row was actually added, removed, or replaced, so the
   /// caller can skip a column re-fit on a selection/sort-only reconcile.
@@ -1641,4 +1767,13 @@ typedef CellSelectedCallback = bool Function(RefBase ref, TrinaGridOnSelectedEve
 
 abstract class CellData implements Exportable {
   CellSelectedCallback? get onSelected;
+}
+
+/// Cell data whose rendering depends on more than [TrinaCell.value].
+///
+/// [TrinaGridStateManagerExtension.reconcileRows] replaces a row when the
+/// [paintState] of such a cell changes, even if every value is unchanged.
+abstract interface class RenderedCellData implements CellData {
+  /// A value-comparable snapshot of everything the cell paints beyond its value.
+  Object get paintState;
 }

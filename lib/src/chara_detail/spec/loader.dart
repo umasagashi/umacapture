@@ -10,6 +10,8 @@ import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell.dart';
+import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/mapper_init.dart';
@@ -98,6 +100,12 @@ final skillInfoProvider = Provider<List<SkillInfo>>((ref) {
   return ref.watch(_skillInfoLoader).value!;
 });
 
+/// Skill sid to its position in [skillInfoProvider] (the master's `sortKey` order). The position, not the stored
+/// key, so it is only ever an order: the key of one skill changes between module versions.
+final skillMasterRankProvider = Provider<Map<int, int>>((ref) {
+  return {for (final (i, info) in ref.watch(skillInfoProvider).indexed) info.sid: i};
+});
+
 final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
   final records = ref.watch(charaDetailRecordStorageProvider);
   final ids = records.map((r) => r.skills.map((s) => s.id)).flattened.toSet();
@@ -125,6 +133,11 @@ final factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
 
 final factorInfoProvider = Provider<List<FactorInfo>>((ref) {
   return ref.watch(factorInfoLoader).value!;
+});
+
+/// Factor sid to its position in [factorInfoProvider] (the master's `sortKey` order); see [skillMasterRankProvider].
+final factorMasterRankProvider = Provider<Map<int, int>>((ref) {
+  return {for (final (i, info) in ref.watch(factorInfoProvider).indexed) info.sid: i};
 });
 
 final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
@@ -910,6 +923,43 @@ Widget _selectAllCheckboxRenderer(TrinaColumnTitleRendererContext rendererContex
   );
 }
 
+/// Ids of the root columns that annotate their cells instead of filtering rows:
+/// item columns in a non-normal display mode. Only [roots] are consulted, so a
+/// nested column keeps filtering through its container whatever mode it stores.
+Set<String> annotatingColumnIds(List<ColumnSpec> roots) => {
+  for (final spec in roots)
+    if (spec is ItemColumnSpec && spec.displayMode != ItemDisplayMode.normal) spec.id,
+};
+
+/// Row visibility and the per-column pass counts, from each spec's per-row
+/// condition in [conditionsById] (keyed by the id of every node of [roots]).
+///
+/// A row is visible only if every filtering ROOT spec passes. Nested specs
+/// influence visibility solely through their parent container column. An
+/// annotating root column (see [annotatingColumnIds]) neither hides rows nor
+/// has a pass count, so its chip shows no badge.
+({List<bool> rowConditions, Map<String, int> filteredCounts}) filterRows(
+  List<ColumnSpec> roots,
+  Map<String, List<bool>> conditionsById,
+  int rowCount,
+) {
+  final annotatingIds = annotatingColumnIds(roots);
+  final filteringRoots = roots.where((spec) => !annotatingIds.contains(spec.id)).toList();
+  return (
+    // Computed per record (not via transpose) so an empty root list yields one
+    // bool per record — all visible — instead of collapsing every record into a
+    // single phantom row.
+    rowConditions: List<bool>.generate(
+      rowCount,
+      (rowIndex) => filteringRoots.every((spec) => conditionsById[spec.id]![rowIndex]),
+    ),
+    filteredCounts: {
+      for (final spec in flattenForest(roots))
+        if (!annotatingIds.contains(spec.id)) spec.id: conditionsById[spec.id]!.countTrue(),
+    },
+  );
+}
+
 Grid _buildGrid(
   RefBase ref,
   List<CharaDetailRecord> recordList,
@@ -955,10 +1005,10 @@ Grid _buildGrid(
     resolve(spec);
   }
 
-  final filteredCounts = {for (final spec in displaySpecs) spec.id: conditionsById[spec.id]!.countTrue()};
+  final (:rowConditions, :filteredCounts) = filterRows(specList, conditionsById, recordList.length);
 
-  // Hidden columns are evaluated above (so they still filter rows and feed the
-  // pass-count badge) but contribute no visible column or cell. Everything below
+  // Hidden columns are evaluated above (so a filtering one still filters rows and
+  // feeds the pass-count badge) but contribute no visible column or cell. Everything below
   // that builds the rendered grid works from [visibleSpecs] instead.
   final visibleSpecs = displaySpecs.where((spec) => !spec.hidden).toList();
   final columns = visibleSpecs.map((spec) => spec.plutoColumn(ref)).toList();
@@ -984,23 +1034,35 @@ Grid _buildGrid(
     }
   }
 
-  // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
-  // visibility solely through their parent container column. Computed per record
-  // (not via transpose) so an empty specList yields one bool per record — all
-  // visible — instead of collapsing every record into a single phantom row.
-  final rowConditions = List<bool>.generate(
-    recordList.length,
-    (rowIndex) => specList.every((spec) => conditionsById[spec.id]![rowIndex]),
-  );
+  final visibleIndices = rowConditions.indexed.where((e) => e.$2).map((e) => e.$1).toList();
+
+  // A difference column compares each displayed row against the displayed rows of its own group: pinned rows
+  // against pinned rows, the rest against the rest. Each row's tally is built from the group the row is in.
+  final annotatingIds = annotatingColumnIds(specList);
+  bool isPinned(int rowIndex) => pinnedIds.contains(recordList[rowIndex].id);
+  final groups = visibleIndices.groupListsBy(isPinned);
+  final tallies = <String, Map<bool, ItemTally>>{
+    for (final spec in visibleSpecs)
+      if (spec is ItemColumnSpec && annotatingIds.contains(spec.id) && spec.displayMode == ItemDisplayMode.difference)
+        spec.id: {
+          for (final MapEntry(key: pinned, value: rowIndices) in groups.entries)
+            pinned: ItemTally.of(rowIndices.map((rowIndex) => spec.heldItemIds(ref, parsedById[spec.id]![rowIndex]))),
+        },
+  };
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
     if (spec is ContainerColumnSpec) {
       return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
     }
-    return spec.plutoCell(ref, parsedById[spec.id]![rowIndex]);
+    final value = parsedById[spec.id]![rowIndex];
+    if (spec is ItemColumnSpec && annotatingIds.contains(spec.id)) {
+      final ItemCellContext context = spec.displayMode == ItemDisplayMode.difference
+          ? ItemCellContext.difference(tallies[spec.id]![isPinned(rowIndex)]!)
+          : const ItemCellContext.absence();
+      return spec.itemCell(ref, value, context);
+    }
+    return spec.plutoCell(ref, value);
   }
-
-  final visibleIndices = rowConditions.indexed.where((e) => e.$2).map((e) => e.$1);
 
   final rows = visibleIndices
       .map((rowIndex) {

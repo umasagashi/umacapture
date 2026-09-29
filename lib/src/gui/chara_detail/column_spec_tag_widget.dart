@@ -6,6 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/reorder_slots.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
@@ -46,6 +47,21 @@ class _HitTarget {
   final ReorderSlot after;
 
   const _HitTarget(this.key, this.before, this.after);
+}
+
+/// The line a chip's tooltip carries for a root column shown in a non-normal
+/// display mode, or null when the column filters as usual — including a column
+/// nested under a logic column, whose stored mode is inert.
+String? itemDisplayMarker(RefBase ref, ColumnSpec spec) {
+  if (spec is! ItemColumnSpec) {
+    return null;
+  }
+  final mode = effectiveItemDisplayMode(ref, spec.id, spec.displayMode);
+  if (mode == ItemDisplayMode.normal) {
+    return null;
+  }
+  const prefix = "$tr_chara_detail.column_predicate.common.display";
+  return "$prefix.marker".tr(namedArgs: {"mode": "$prefix.mode.${mode.name}.label".tr()});
 }
 
 class ColumnSpecTagWidget extends ConsumerStatefulWidget {
@@ -217,10 +233,11 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       final composed = desc.isEmpty ? base : (base.isEmpty ? desc : "$desc\n──────────\n$base");
       text = composed.isEmpty ? "$tr_chara_detail.column_predicate.common.notation.tooltip_field.empty".tr() : composed;
     }
-    if (!spec.hidden) {
-      return text;
-    }
-    return "$text\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
+    final markers = [
+      ?itemDisplayMarker(ref.base, spec),
+      if (spec.hidden) "$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr(),
+    ];
+    return [text, ...markers].join("\n──────────\n");
   }
 
   // The logic column's operator name, rendered as plain text fused into the
