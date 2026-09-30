@@ -18,15 +18,13 @@ import '/src/core/utils.dart';
 /// cross-origin-restricted document), which is caught rather than left to
 /// unwind into a button callback where nothing would report it either.
 ///
-/// **WHAT COVERS THIS, AND WHAT DOES NOT.** Nothing executes these statements.
-/// The Windows body has `app_restart_io_test.dart`, which reaches the same
-/// failure exit through `IOOverrides`; there is no counterpart here, and the gap
-/// is structural rather than unwritten. A VM suite cannot compile this file at
+/// **WHAT COVERS THIS, AND WHAT DOES NOT.** Nothing executes these statements,
+/// and the gap is structural rather than unwritten. A VM suite cannot compile this file at
 /// all (`package:web` needs `dart:js_interop`), and the browser suites named in
 /// ci.yml's "Browser tests" job cannot either: they run under `dart test
 /// --platform chrome`, and this file's `logger` import reaches
 /// `package:flutter`, which dart2js cannot build without `dart:ui` — the same
-/// limit `fs_ranged_read_web_test.dart` records for `WebVfs`. So the only thing
+/// limit that keeps `WebVfs` out of those suites. So the only thing
 /// standing behind this body is `flutter analyze`'s type check, which proves the
 /// signature and not the behaviour. A regression that returned false without
 /// calling `reload()` — or called it and answered false — would go unnoticed by

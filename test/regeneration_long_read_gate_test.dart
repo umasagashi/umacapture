@@ -12,14 +12,11 @@
 // so a refusal written only on the three controls would leave the other two
 // rewriting `prediction.json` and the geometry files under a directory an
 // archive move is renaming away or a zip is reading. This is the same argument
-// the video-import refusal beside it makes, tested in
-// `regeneration_import_gate_test.dart`, and the two are asserted separately
-// because they are two conditions on one door.
+// the video-import refusal beside it makes; the two are two conditions on one
+// door, and only this one is asserted here.
 //
 // The control half — the row menu greying its entry, and the dialog saying why —
-// is `record_action_extraction_gate_test.dart`'s. Neither replaces the other:
-// this file cannot see a button, and that one cannot reach the two UI-less
-// entrances.
+// is out of reach here: this file cannot see a button.
 //
 // WHAT THIS SUITE DOES NOT REACH.
 //  * The two UI-less entrances themselves (`ModuleManualUpdateDialog`'s success
@@ -28,8 +25,7 @@
 //    and a Hive-backed store build respectively.
 //  * `RegenerateAllRecordsTile`. It asks the registry itself, over the same
 //    derivation this door claims, and resolves its own blocker enum to word the
-//    refusal; nothing here can see that. `regenerate_all_records_tile_test.dart`
-//    is where it is asserted.
+//    refusal; nothing here can see that.
 //  * The native side. Whether the worker would in fact damage a record it shares
 //    with a zip is not observable from a VM suite; the refusal exists so the
 //    overlap does not arise.

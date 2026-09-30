@@ -136,8 +136,7 @@ DirectoryPath _seedRecord(String id) {
 
 /// The app with nothing else going on, and both record stores faked.
 ///
-/// The capture and import blockers are pinned for the reason
-/// `storage_extraction_delete_gate_test.dart` states: the active record group is
+/// The capture and import blockers are pinned because the active record group is
 /// one a capture writes into, so an unpinned activity blocker would disable the
 /// very buttons these cases are about.
 ProviderContainer _container({_FakeRecordStorage? storage}) {

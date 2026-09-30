@@ -1,5 +1,4 @@
-// The stage-0 measurement the settings-group delete had to wait on: the web
-// counterpart of settings_box_deletion_windows_test.dart. What actually happens
+// The stage-0 measurement the settings-group delete had to wait on. What actually happens
 // when something tries to remove a settings box's backing storage while
 // `StorageBox.ensureOpened` still holds a connection to it, on the platform
 // where "a box" is not a file at all but an IndexedDB database
@@ -22,8 +21,8 @@
 // This suite deliberately does not import `storage_box.dart` (it pulls in
 // `package:hive_ce_flutter`, whose `HiveFlutterExtension.initFlutter` in turn
 // reaches `package:flutter`, which `dart test` cannot compile for the browser --
-// the same reason opfs_delete_failure_web_test.dart drives OPFS directly instead
-// of going through `WebVfs`). `package:hive_ce` (the non-Flutter base package
+// the same reason nothing under `dart test` can go through `WebVfs`).
+// `package:hive_ce` (the non-Flutter base package
 // storage_box.dart's `Hive` global comes from) has no Flutter dependency and is
 // usable here directly; `Hive.init(path)` ignores `path` on the web backend, so
 // the same `Hive.openBox`/`Hive.deleteBoxFromDisk` calls `StorageBox` makes are
@@ -153,8 +152,7 @@ void main() {
     // Hold `db` open -- do not close it. This is the raw analogue of the VM
     // test's "the box is still open" setup, except reached by driving
     // IndexedDB directly instead of through Hive's own (closes-first)
-    // deleteFromDisk, the same way opfs_delete_failure_web_test.dart drives
-    // OPFS directly instead of through WebVfs.
+    // deleteFromDisk.
 
     final deleteRequest = web.window.indexedDB.deleteDatabase(name);
     var blockedFired = false;

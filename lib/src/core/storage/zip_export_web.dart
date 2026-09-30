@@ -13,7 +13,7 @@
 /// byte of its content being allocated. A guard inside the runner would discover
 /// the problem after spending exactly the memory it exists to protect. What the
 /// preflight spends instead is one enumeration, which on OPFS carries every
-/// file's size with it (`fs_metadata_web_test.dart`) and reads no content.
+/// file's size with it and reads no content.
 ///
 /// **What is decided elsewhere.** The limit, the *shape* of the archive and the
 /// assembly of its bytes live in `zip_export_limit.dart` and `zip_bundle.dart`

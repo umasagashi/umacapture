@@ -69,7 +69,7 @@ import 'dart:io';
 // `analyzer` reaches this package transitively (through the codegen stack). Depended on here rather
 // than promoted to a direct dev_dependency because pinning it would freeze the version the codegen
 // packages resolve to, and this guard only ever needs the parser. Same arrangement as
-// `disabled_tooltip_visibility_test.dart` and `sentry_scrub_event_test.dart`.
+// `sentry_scrub_event_test.dart`.
 // ignore: depend_on_referenced_packages
 import 'package:analyzer/dart/analysis/utilities.dart';
 // ignore: depend_on_referenced_packages

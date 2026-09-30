@@ -11,8 +11,7 @@
 // three writers.
 //
 // WHAT THIS FILE OWNS. The view is a dialog: `storage_dialog_entry_test.dart`
-// owns the entry (it opens the dialog twice) and `app_route_test.dart` owns the
-// routes. This file owns the widget in the middle: **one mount of
+// owns the entry (it opens the dialog twice). This file owns the widget in the middle: **one mount of
 // `FreshStorageTree` is one visit**, whoever mounts it. That is asserted here by
 // mounting and unmounting it directly — which is what an entry causes rather
 // than the entry itself, so this stays true of a second entry nobody has written

@@ -3,8 +3,7 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/notification_sound_capture_origin_test.dart
 //
-// This is the desktop twin of notification_sound_harvest_boundary_test.dart, and it is the same
-// property reached over the other transport. Web relays an import's records in batches on
+// This is the desktop half of a property that web reaches over another transport. Web relays an import's records in batches on
 // `onLiveRecordsHarvested`; Windows announces them one at a time on `onCharaDetailFinished`,
 // because its recognizer writes each record straight into the live store instead of sweeping a
 // scratch root. Both carry the same `origin` marker, and both hand it to the merge as

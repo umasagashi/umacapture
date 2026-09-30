@@ -31,9 +31,9 @@ class AppRouter extends RootStackRouter {
         // means "the user came back", which is what its per-visit re-read hung
         // on. The dialog gives it that moment directly: `DialogController` builds
         // it only while it is open, so one open is one mount of
-        // `FreshStorageTree`. Every route here is therefore kept alive, and
-        // `app_route_test.dart` pins that: a route that turned the flag off again
-        // would be paying an unmount nothing asks for.
+        // `FreshStorageTree`. Every route here is therefore kept alive: a route
+        // that turned the flag off again would be paying an unmount nothing asks
+        // for.
         AutoRoute(path: 'settings', page: SettingsRoute.page),
       ],
     ),

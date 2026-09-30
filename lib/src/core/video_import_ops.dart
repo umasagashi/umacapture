@@ -95,10 +95,9 @@ enum VideoImportPhase {
 /// first of those two used to exist, and a scrim alone would have made this paragraph a claim about
 /// the pointer dressed up as a claim about everything: the card's exclusivity would then hold for a
 /// mouse and break for a keyboard. Their exclusivity is structural on both devices, and a state
-/// nothing can observe and nothing can read would only mislead the next reader.
-/// `test/capture_exclusive_features_test.dart` measures both halves — it drives a tap and a
-/// Tab-then-Enter at a control behind the dialog — because this paragraph is what keeps two of the
-/// twelve pairs out of the enum.
+/// nothing can observe and nothing can read would only mislead the next reader. Both halves — a tap
+/// and a Tab-then-Enter at a control behind the dialog — matter, because this paragraph is what
+/// keeps two of the twelve pairs out of the enum.
 ///
 /// Adding a fifth thing that can run means adding a value here, and every derivation is an
 /// exhaustive `switch`, so the compiler names each place that has to decide about it. That is the
@@ -376,8 +375,7 @@ enum VideoImportOutcomeKind {
 /// [wireName] is the discriminator as it crosses the boundary, and it is also the translation
 /// key — one vocabulary rather than two, because the blocker keys' camelCase/snake_case mismatch
 /// is what rendered a raw translation key at the user once already (see
-/// [videoImportBlockerKey]). Adding a case therefore means adding a line to `ja.json`, which
-/// `video_import_reason_test.dart` requires; a case that arrives from a *newer* worker than this
+/// [videoImportBlockerKey]). Adding a case therefore means adding a line to `ja.json`; a case that arrives from a *newer* worker than this
 /// build knows about parses as null and takes the generic line, never a blank or an enum name.
 enum VideoImportReason {
   // --- refused, by the decode driver, after the session opened (web/video_import.mjs) ---
@@ -797,19 +795,14 @@ class VideoImportOutcome {
   /// carry defaults: a field added to the class and forgotten in this list is silently zeroed on the
   /// one copy every settled import passes through, and the zero then reads as a measurement.
   ///
-  /// **So the list is checked by a machine that counts the fields for itself.**
-  /// `test/video_import_report_fields_test.dart` reads this file, enumerates the fields
-  /// [VideoImportOutcome] declares, and fails when any one of them is missing from the named
-  /// arguments below — and it fails again if it enumerates nothing, so a parser that stopped
-  /// matching cannot pass by finding no fields to check. A test rather than a compile error because
-  /// the two ways to make the compiler count are both closed here: making the parameters `required`
-  /// costs every call site its defaults (there are more than twenty, most of them naming one field),
+  /// **Nothing checks the list**, and the compiler cannot be made to count: both ways are closed
+  /// here. Making the parameters `required` costs every call site its defaults (there are more than twenty, most of them naming one field),
   /// and holding the wire fields in a nested object cannot be done from a `const` constructor —
   /// measured, `invalid_constant` on an object creation in a const initializer list — while
   /// `const VideoImportOutcome(...)` is what several call sites and fixtures use.
   ///
-  /// The same test also pins that every field reaches [buildImportErrorReportScope], or is named in
-  /// its exclusion list with a reason. Those are the two places a field can be silently lost.
+  /// The other place a field can be silently lost is [buildImportErrorReportScope], which has to
+  /// carry every field or name it in its exclusion list with a reason.
   VideoImportOutcome withSessions(VideoImportSessionCounts sessions) => VideoImportOutcome(
     kind: kind,
     decoded: decoded,
@@ -834,11 +827,9 @@ class VideoImportOutcome {
   /// `withoutSecrets`, which would drag the Sentry SDK into the one file here that is deliberately
   /// pure (its single import is `video_frame_grab_ops.dart`).
   ///
-  /// **Carries every field, for the same reason [withSessions] does and with the same machine
-  /// checking it**: every parameter is defaulted, so a field added to the class and forgotten here
-  /// is silently zeroed rather than rejected by the compiler. `video_import_report_fields_test.dart`
-  /// enumerates the copy methods off this source and checks each one, so this list is covered by
-  /// the same guard without being named in it.
+  /// **Carries every field, for the same reason [withSessions] does**: every parameter is defaulted,
+  /// so a field added to the class and forgotten here is silently zeroed rather than rejected by the
+  /// compiler.
   VideoImportOutcome withMessage(String message) => VideoImportOutcome(
     kind: kind,
     decoded: decoded,

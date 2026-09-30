@@ -621,10 +621,7 @@ void main() {
       // Literal, not derived: counted by hand against ja.json. It pins *which*
       // keys carry a placeholder, and that is all it can see — the set is
       // unchanged by renaming `{name}` to `{title}`, and nothing here looks at a
-      // call site. What holds the names to the code that fills them in is
-      // `storage_wording_test.dart`'s "no brace survives into the sentence the
-      // user is shown", which renders each of these through its own production
-      // function.
+      // call site.
       //
       //
       // `zip.too_large` is **not** here: the approved sentence names neither the
@@ -640,26 +637,19 @@ void main() {
       //    `storage_delete_action_test.dart` compares the *outcome* sentences —
       //    completed, partial, none — against the interpolated `ja.json`
       //    literal, so a missing namedArgs in those three is red there as well
-      //    as here. It never renders `delete.target`: that one, and the
-      //    placeholder *names* of all five, are held only by
-      //    `storage_wording_test.dart`'s "no brace survives into the sentence
-      //    the user is shown".
+      //    as here. It never renders `delete.target`, and nothing holds the
+      //    placeholder *names* of all five.
       //  * `{activity}` / `{action}` in blocked.template (the refusal shown while
       //    a capture or a video import is writing into the group),
       //    filled by `storageActionBlockedMessage` in
-      //    `storage_action_blocker.dart` from two further keys of its own. Both
-      //    of the enums that choose those keys are enumerated in
-      //    `storage_delete_capture_gate_test.dart`, which also asserts that no
-      //    `{` survives the substitution — so a missing namedArgs is red there
-      //    as well as here.
+      //    `storage_action_blocker.dart` from two further keys of its own.
       //  * `{record}` / `{reason}` in delete.recovery_incomplete and `{reason}` in
       //    delete.recovery_incomplete_unidentified (the survivor row for a
       //    transaction slot recovery could not empty, which the delete declines to
       //    remove), filled by `storageRecoveryIncompleteDetail` in
       //    `core/storage/storage_delete.dart`. Two keys and not one because the
       //    record id is absent whenever the sweep could not read the slot's
-      //    manifest; which is rendered is decided there, and both are rendered
-      //    through their production function by `storage_wording_test.dart`.
+      //    manifest; which is rendered is decided there.
       const expectedPlaceholderKeys = {
         'pages.storage.blocked.template',
         'pages.storage.delete.target',

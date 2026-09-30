@@ -2253,8 +2253,7 @@ test('a cancel is not delayed by an unresolved duration scan', { timeout: 10000 
 // asserted above is like that one: English, developer-worded, written for a log. What the user was shown was a
 // single Japanese line hedging between "an unsupported format" and "another operation is running" -- two
 // unrelated causes, neither of them the one that applied. The messages stay exactly as they are; a stable
-// discriminator now rides with them, and Dart maps it to one translated sentence per case
-// (test/video_import_reason_test.dart pins the other end of that vocabulary).
+// discriminator now rides with them, and Dart maps it to one translated sentence per case.
 //
 // These tests are the only place the JavaScript half can be caught getting it wrong, and the failure they guard
 // against is SILENT: a kind that is misspelt, dropped or routed to the wrong case does not throw anywhere. It
@@ -2550,10 +2549,9 @@ test('an import is refused on a core that predates the end-of-clip signal and th
 
 // --- the storage-path rule, executed ------------------------------------------------------------------------
 
-// THE SAME TABLE `test/worker_refusal_scope_path_guard_test.dart` feeds Dart's `isSafeRecordId`, so the two
-// sides of the rule are held to one list of verdicts instead of to each other's source text. Dart asserts the
-// store's verdict for every entry; this file asserts the worker's, by delivering an `updateRecord` and watching
-// what the handler does with it.
+// ONE TABLE of verdicts for the rule, the ones Dart's `isSafeRecordId` gives, so the worker is held to a list
+// of verdicts instead of to Dart's source text. This file asserts the worker's verdict for every entry, by
+// delivering an `updateRecord` and watching what the handler does with it.
 const pathSegmentCases = JSON.parse(
   readFileSync(new URL('../test/fixtures/safe_path_segment_cases.json', import.meta.url), 'utf8'));
 

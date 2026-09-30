@@ -6,10 +6,9 @@ the reasons live here. Three of these sentences are the only record that a parti
 taken at all.
 
 **Change an approved sentence only after confirming the change with the app's author.** No machine
-check enforces this. `test/storage_wording_test.dart` checks the `pages.storage.*` wording's
-*properties* (no implementation vocabulary, no remedy the view does not offer, two paragraphs in a
-delete warning, no unfilled placeholder), and a
-property holds through a reword that quietly drops a clause — a reword that drops a clause is still
+check enforces this, and a check of the wording's *properties* (no implementation vocabulary, no
+remedy the view does not offer, two paragraphs in a delete warning, no unfilled placeholder) would
+not either: a property holds through a reword that quietly drops a clause — a reword that drops a clause is still
 two paragraphs and still carries no jargon. That is why the clauses are written out below.
 
 ## Storage and quarantine
@@ -33,7 +32,6 @@ two paragraphs and still carries no jargon. That is why the clauses are written 
   distinguish "still checking" from "waiting for another job". These two sentences are the only
   record of the decision that the row makes that distinction. The second is shared by every page
   waiting on the module update (see below), which is why it lives under `module_update.activity`.
-  `test/module_version_deferred_display_test.dart` asserts that the right one reaches the row.
 
 ## Module update — what a waiting page is waiting for
 
@@ -45,7 +43,6 @@ two paragraphs and still carries no jargon. That is why the clauses are written 
   sends no length, the percentage is left out and only the megabytes received remain. **No
   qualifier such as "first time only" is added:** the download can run on any launch whose local
   module differs from the published one, so such a clause would be untrue.
-  `test/module_update_activity_test.dart` asserts which one reaches the page.
 
 ## Capture card — no recognition module
 

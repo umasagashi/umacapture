@@ -74,9 +74,8 @@ bool codeHighlightFitsBudget(String text, String language, {int budget = codeHig
 ///
 /// Mirrors that method arm for arm — a node with a value becomes one span, a
 /// node with children becomes one span plus its subtree — because a count taken
-/// any other way would be measuring a tree the field does not build.
-/// `code_highlight_field_test.dart` pins the two together against the rendered
-/// tree, so the mirror cannot drift silently.
+/// any other way would be measuring a tree the field does not build. Nothing
+/// compares the two, so a change to one has to be made to the other by hand.
 int _countSpans(List<Node> nodes) {
   var total = 0;
   for (final node in nodes) {

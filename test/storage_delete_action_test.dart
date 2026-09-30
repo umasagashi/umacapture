@@ -432,9 +432,8 @@ void main() {
         // against `group.deleteWarningKey?.tr()` would pass with the entry
         // deleted.
         expect(find.text(appSentenceAt(group.deleteWarningKey ?? '')), findsOneWidget);
-        // **Both paragraphs, on screen.** The shape is asserted over `ja.json` in
-        // `storage_wording_test.dart`; what is added here is that the card draws the whole of
-        // it. `quarantine` shipped with the shared first sentence and nothing else, so this
+        // **Both paragraphs, on screen.** What is asserted here is that the card draws the
+        // whole of the warning. `quarantine` shipped with the shared first sentence and nothing else, so this
         // box could be on screen saying only what the acknowledge checkbox beside it says.
         final drawn = tester.widget<Text>(find.text(appSentenceAt(group.deleteWarningKey ?? ''))).data ?? '';
         expect(drawn.split('\n\n'), hasLength(2), reason: '${group.id.name} draws a half warning');
@@ -1393,6 +1392,6 @@ void main() {
     // error only after the body *and* the tear-downs have run -- `takeException`
     // answers null in both (measured, twice). A test written around it would fail
     // on the very error it is asserting. What is pinned instead is the contract it
-    // rests on, in `storage_lock_scope_test.dart` and `storage_delete_test.dart`.
+    // rests on, in `storage_delete_test.dart`.
   });
 }

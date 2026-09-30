@@ -8,8 +8,8 @@
 // `AppNavigationDrawer` below that, where the rail is replaced by a drawer behind
 // the app bar. They are separate renderings — different widgets, different keys,
 // different tap gestures — so a destination hand-written into one of them would
-// be invisible to any test of the other, and asserting the list itself (which
-// `app_pages_test.dart` does) sees neither. Each is therefore pumped on its own.
+// be invisible to any test of the other, and asserting the list itself sees
+// neither. Each is therefore pumped on its own.
 //
 // Both are pumped directly rather than through `AutoTabsRouter`: they take the
 // active index and the selection callback as parameters precisely so that what

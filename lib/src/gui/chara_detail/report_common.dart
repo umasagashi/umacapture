@@ -68,8 +68,8 @@ class ReportDialogLoading extends StatelessWidget {
 /// looking at; the record report names its own, because what it uploads is not one image (see
 /// [message]).
 ///
-/// Sharing the widget is not merely tidier: `report_shared_strings_test` fails on any sentence
-/// written identically into two feature namespaces, so the two-dialog sentence has nowhere else it
+/// Sharing the widget is not merely tidier: a sentence written identically into two feature
+/// namespaces is two copies that nothing compares, so the two-dialog sentence has nowhere else it
 /// could correctly live.
 class ReportUploadWarning extends StatelessWidget {
   /// The already-translated sentence, or null for the shared one — the same shape (and the same

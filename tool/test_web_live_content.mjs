@@ -8,8 +8,8 @@
 // were arriving, the picture was moving, and the only wrong thing was which pixels were looked at. That is a
 // property to hold down off a browser, on exact pixels, which is what this file does.
 //
-// The verdict built ON these numbers is Dart's (`shouldNoticeLiveContentFreeze`, with its own truth table in
-// test/live_content_freeze_test.dart). Nothing here asserts about thresholds.
+// The verdict built ON these numbers is Dart's (`shouldNoticeLiveContentFreeze`). Nothing here asserts about
+// thresholds.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';

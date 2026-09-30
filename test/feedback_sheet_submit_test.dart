@@ -8,9 +8,8 @@
 // from a report whose text was lost -- and the user is answered with the success toast either way.
 //
 // Measured through the semantics flags and through an actual tap rather than through the widget's
-// `onPressed` field: a button that reports itself enabled while doing nothing is the defect this
-// repository already has a test file about (`blocked_button_disabled_semantics_test.dart`), so the
-// assertion has to be about what a user and an assistive technology are told, not about the
+// `onPressed` field: a button that reports itself enabled while doing nothing is the defect in
+// question, so the assertion has to be about what a user and an assistive technology are told, not about the
 // callback behind it. Each refusal is paired with the same tap succeeding once a note is typed.
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';

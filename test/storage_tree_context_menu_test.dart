@@ -104,8 +104,7 @@ void _write(String relative, int bytes) {
 /// Exposed so a test can start an activity blocker **while the menu is already
 /// open**, which is the only ordering that reaches an entry's own gate now that a
 /// blocked row opens no menu at all. An import is a `CaptureActivity` exactly as
-/// a capture is (`storage_delete_capture_gate_test` asserts the two resolve
-/// alike), and it is the half this suite can turn on mid-test: the capture half
+/// a capture is, and it is the half this suite can turn on mid-test: the capture half
 /// is a value override, fixed for the life of the container.
 late ValueNotifier<VideoImportState> _importNotifier;
 

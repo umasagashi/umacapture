@@ -78,9 +78,8 @@ Future<void> settleUntil(
 /// no tester to hand -- a helper that only has a `ProviderContainer`, say -- the caller can put it
 /// inside `tester.runAsync(...)`, where the real event loop is running and this behaves as written.
 ///
-/// `test/pump_loop_bound_guard_test.dart` enforces this: it rejects a call to [waitUntil] reached
-/// from a `testWidgets` body outside a `runAsync`. It matches on the name, so a copy of this loop
-/// under another name is not covered -- do not write one.
+/// Nothing enforces this, so a call to [waitUntil] from a `testWidgets` body outside a `runAsync`
+/// is caught only in review. Do not write a copy of this loop under another name either.
 Future<void> waitUntil(bool Function() ready, {required String describe, Duration timeout = _defaultTimeout}) async {
   final waited = Stopwatch()..start();
   while (!ready()) {

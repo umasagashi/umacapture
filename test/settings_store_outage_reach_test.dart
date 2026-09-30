@@ -24,7 +24,7 @@
 // backend reachable, so nothing here says anything about OPFS. It says nothing
 // about the storage view's contents (`storage_tree_test.dart`), about the
 // dialog's own behaviour (`storage_dialog_entry_test.dart`), or about how the
-// outage banner renders (`pathinfo_startup_outage_test.dart`).
+// outage banner renders.
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';

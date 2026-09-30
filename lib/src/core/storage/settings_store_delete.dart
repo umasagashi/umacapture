@@ -9,8 +9,8 @@
 /// counts, the sentence — so it answers in the same [StorageDeleteReport] and is
 /// finished by the same `runStorageDelete`.
 ///
-/// **Hive's own API, never the files.** Stage 0 measured both platforms
-/// (`settings_box_deletion_windows_test.dart`, `settings_box_deletion_web_test.dart`):
+/// **Hive's own API, never the files.** Measured on both platforms (on web,
+/// `settings_box_deletion_web_test.dart`):
 /// removing an open store's files directly fails with `ERROR_SHARING_VIOLATION`
 /// on Windows and hangs on `blocked` forever on web, while
 /// `Hive.deleteBoxFromDisk(name)` on that same still-open store succeeds on both,

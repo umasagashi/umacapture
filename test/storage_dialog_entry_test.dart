@@ -7,8 +7,8 @@
 // for "it broke, it will not delete, I want one file out" — so the way in is now
 // a row in the settings page's System card, and the view opens over it as a
 // `CardDialog`. The tab is gone — it is not in `Pages.labels` and has no route
-// (`app_pages_test.dart`, `app_navigation_surfaces_test.dart`,
-// `app_route_test.dart`) — so this is the only way in, and this suite owns it.
+// (`app_navigation_surfaces_test.dart`) — so this is the only way in, and this
+// suite owns it.
 //
 // THE THREE CLAIMS, AND WHY EACH NEEDS ITS OWN TEST.
 //

@@ -914,8 +914,8 @@ void main() {
     expect(storageBoxNames.length, 8);
 
     // Stage 4e: the row opens the store. Asserted as the row's own callback and
-    // not by driving a tap, because what the dialog then shows is
-    // `settings_box_preview_view_test.dart`'s subject; the fact worth pinning
+    // not by driving a tap, because what the dialog then shows is not this
+    // suite's subject; the fact worth pinning
     // here is that the row has a callback at all, which until stage 4e it did
     // not.
     final row = find

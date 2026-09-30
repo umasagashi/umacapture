@@ -71,8 +71,7 @@ final _unlockedGroup = storageGroupOf(StorageGroupId.unclassified);
 /// are, so it can take that group's lock (`runUnderStorageExclusion`). The value
 /// is irrelevant to every case
 /// in this file: `_unlockedGroup` owns no root and takes no lock, so nothing is
-/// matched against these paths. The suite that *is* about the exclusion is
-/// `storage_extraction_lock_test.dart`.
+/// matched against these paths.
 final _exclusionLayout = PathInfo(
   documentDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/documents'),
   supportDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/support'),
@@ -218,8 +217,7 @@ void main() {
 
       final refusal = await platformStorageZipPreflight(_ref(container), DirectoryPath(_at('big')));
       // Compared against the shipped sentence verbatim. It names neither figure,
-      // so there is nothing to interpolate here; `storage_wording_test.dart` is
-      // what holds the placeholder set and the call sites together.
+      // so there is nothing to interpolate here.
       expect(refusal, appSentenceAt('pages.storage.zip.too_large'));
     });
 

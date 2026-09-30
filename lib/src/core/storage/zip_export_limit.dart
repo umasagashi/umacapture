@@ -76,8 +76,7 @@ typedef StorageZipLimitDecision = ({StorageZipLimitVerdict verdict, int totalByt
 /// still works, not the first size that fails.
 ///
 /// [totalBytes] is what the enumeration measured, and on OPFS that is every
-/// file's size — the walk resolves it from the handle it already holds
-/// (`fs_metadata_web_test.dart`). An entry whose size the walk could *not*
+/// file's size — the walk resolves it from the handle it already holds. An entry whose size the walk could *not*
 /// resolve is one that vanished between the listing and the metadata read, and
 /// it contributes no bytes to the peak this limit protects, so a lower bound
 /// here is not an under-count of the memory at risk.

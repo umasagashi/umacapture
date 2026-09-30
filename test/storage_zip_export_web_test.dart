@@ -23,9 +23,7 @@
 //    `WebVfs`'s own walk and `aggregateDirectoryTotals` -- not a preference:
 //    `dart test` cannot compile them (`package:flutter` needs `dart:ui`). The
 //    walk here is written against the same OPFS API `web_vfs.dart` uses, so what
-//    is verified is the browser behaviour that code is written against. The
-//    sibling suites fs_metadata_web_test.dart and opfs_delete_failure_web_test.dart
-//    record the same limitation for the same reason.
+//    is verified is the browser behaviour that code is written against.
 //  * `FilePicker.saveFile`'s anchor click, which needs a user gesture and a real
 //    download directory.
 //  * The 256 MiB limit met by an actual folder. Writing that much into OPFS on

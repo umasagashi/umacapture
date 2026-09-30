@@ -484,8 +484,7 @@ void main() {
       }
       expect({any, delete, extract}, hasLength(3), reason: 'the three verbs collapsed into fewer sentences');
       // Composed, not merely present: the surface that still names deleting —
-      // `StorageDeleteConfirmDialog`, asserted as rendered text in
-      // `storage_delete_capture_gate_test.dart` — reaches its sentence through
+      // `StorageDeleteConfirmDialog` — reaches its sentence through
       // this composition, so a member wired to the wrong key reddens here.
       expect(storageActionBlockedMessage(StorageActionBlocker.capturing, StorageAction.delete), contains(delete));
       expect(storageActionBlockedMessage(StorageActionBlocker.capturing, StorageAction.extract), contains(extract));

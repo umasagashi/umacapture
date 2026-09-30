@@ -2,9 +2,9 @@
 //
 //   .fvm/flutter_sdk/bin/flutter test test/settings_store_delete_test.dart
 //
-// Stage 0 already measured *which API is safe* (`settings_box_deletion_windows_test.dart`
-// and `settings_box_deletion_web_test.dart`: raw file deletes fail on Windows and
-// hang on web, `Hive.deleteBoxFromDisk` on a still-open store succeeds on both).
+// Stage 0 already measured *which API is safe* (on web, `settings_box_deletion_web_test.dart`:
+// raw file deletes fail on Windows and hang on web, `Hive.deleteBoxFromDisk` on a
+// still-open store succeeds on both).
 // What is pinned here is the layer above that: that the app's own function
 // removes **every** store, reports what happened per store instead of throwing,
 // and leaves the process in the state the forced restart exists for -- every

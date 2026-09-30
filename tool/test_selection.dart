@@ -75,15 +75,11 @@ const Map<String, double> measuredExecutionSeconds = {
   "test/web_record_write_protocol_v2_active_to_archive_test.dart": 21.6,
   "test/web_record_write_protocol_v2_test.dart": 16.4,
   "test/enhancement_merge_ui_test.dart": 16.5,
-  "test/report_import_controls_test.dart": 15.0,
   "test/storage_file_preview_view_test.dart": 14.6,
   "test/storage_settings_store_menu_test.dart": 13.1,
-  "test/storage_long_read_extract_gate_test.dart": 11.3,
-  "test/report_import_frame_step_test.dart": 11.1,
   "test/storage_delete_action_test.dart": 10.5,
   "test/storage_dialog_entry_test.dart": 8.8,
   "test/storage_zip_export_test.dart": 8.1,
-  "test/storage_extract_capture_gate_test.dart": 8.0,
 };
 
 class Selection {

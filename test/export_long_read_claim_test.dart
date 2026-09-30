@@ -525,8 +525,8 @@ void main() {
   // standing between the two.
   //
   // The claim is registered by hand here rather than through `runModuleInstall`:
-  // what is under test is the export reading the registry, and that the installer
-  // registers itself is `record_action_extraction_gate_test.dart`'s to assert.
+  // what is under test is the export reading the registry, not that the installer
+  // registers itself.
   group('the picker window', () {
     /// A save dialog that returns [output], having let [duringPicker] happen while
     /// it was up.

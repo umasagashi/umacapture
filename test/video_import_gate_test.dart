@@ -142,8 +142,7 @@ void main() {
         // left in the translation file produces, and an empty line is a refusal that states no
         // reason — the failure this whole group exists to stop, reached by the other door.
         // `notReady` is the ordinary path, so an empty entry there blanks the tile and the tooltip
-        // on every web page load. The reason side (video_import_reason_test.dart) already checks
-        // this; the blocker side did not.
+        // on every web page load.
         expect(key.tr(), isNotEmpty, reason: '$blocker is refused without a word of explanation');
       }
     });
@@ -180,9 +179,8 @@ void main() {
     // widget test can reach this: pressing the button opens a native file dialog.
     //
     // That the exclusion does NOT also blind it to a regeneration -- the batch a module update can
-    // auto-start while the dialog is open, which is the whole reason for a second call -- is
-    // asserted one layer down, on the shape this passes: see `capture_exclusive_features_test.dart`,
-    // "only 動画取り込み may be operated while 動画取り込み is what is running".
+    // auto-start while the dialog is open, which is the whole reason for a second call -- is not
+    // asserted here.
     final container = ProviderContainer(
       overrides: [
         platformControllerProvider.overrideWith((ref) {
