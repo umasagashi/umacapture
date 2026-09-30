@@ -12,11 +12,11 @@ name: CI
 #
 # The two required checks are the job names "Native C++ tests (doctest)" and
 # "Flutter unit/widget tests". The second is an aggregate: the Flutter work is split
-# into parallel jobs (three test shards, static checks, the web build) because
-# `flutter test` compiles one test file at a time, so one job running every file
-# is bounded by that serial compile no matter how many cores it has. The aggregate
-# fails unless every one of those jobs succeeded. "Native C++ coverage" and
-# "Browser tests" are not required checks.
+# into parallel jobs (three test shards, static checks, the web build, the browser
+# suites) because `flutter test` compiles one test file at a time, so one job running
+# every file is bounded by that serial compile no matter how many cores it has. The
+# aggregate fails unless every one of those jobs succeeded, so "Browser tests" blocks
+# a merge through it. "Native C++ coverage" is not a required check.
 on:
   pull_request:
     branches: [develop]
@@ -216,7 +216,9 @@ jobs:
           if-no-files-found: warn
 
   # The required check "Flutter unit/widget tests". It runs no work of its own: it only decides
-  # whether the Flutter jobs it depends on all succeeded. `if: always()` is what makes it a gate.
+  # whether the Flutter jobs it depends on -- the browser suites included -- all succeeded. The
+  # browser job is gated here rather than as a required context of its own, so the gate is
+  # reviewed with the workflow and a skipped browser job fails it instead of passing. `if: always()` is what makes it a gate.
   # Without it, a failed, cancelled or skipped dependency would make GitHub skip this job, and a
   # skipped job reports Success to branch protection -- the required check would pass with the
   # tests never having passed. So it always runs, and fails on any result other than `success`
@@ -224,7 +226,7 @@ jobs:
   # no project code, and it is the runner that picks such a job up soonest.
   flutter-tests:
     name: Flutter unit/widget tests
-    needs: [flutter-test-shards, flutter-static, flutter-web]
+    needs: [flutter-test-shards, flutter-static, flutter-web, browser-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:

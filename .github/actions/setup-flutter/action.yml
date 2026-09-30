@@ -14,18 +14,20 @@ description: >-
 runs:
   using: composite
   steps:
-    # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK directly.
-    # Keep this version in sync with .fvmrc (currently 3.44.4).
+    # .fvm/ is gitignored, so CI cannot use the FVM path. flutter-action reads the pinned version
+    # from .fvmrc itself (`flutter-version-file`), so .fvmrc is the only place the version lives.
+    # It must not be combined with `flutter-version`: the action refuses both at once. The cache
+    # key and path are built from the resolved release, not from this input.
     #
     # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the cache
     # trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more than restoring
     # the pub cache -- a ~50 s net regression. The Windows tar/zstd extraction is slow, but
     # re-downloading every package is slower. `cache: true` caches both the SDK and the pub cache;
     # the pub key ends in hashFiles('**/pubspec.lock').
-    - name: Set up Flutter 3.44.4
+    - name: Set up Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: 3.44.4
+        flutter-version-file: .fvmrc
         channel: stable
         cache: true
 

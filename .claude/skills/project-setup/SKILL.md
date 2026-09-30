@@ -92,8 +92,8 @@ fvm install        # reads .fvmrc, installs 3.44.4, creates the .fvm/flutter_sdk
 
 Afterwards call the SDK through the pinned path the whole repo uses:
 `.fvm/flutter_sdk/bin/flutter` and `.fvm/flutter_sdk/bin/dart`. (CI can't use the
-FVM path — `.fvm/` is gitignored — so it installs the same 3.44.4 directly; keep
-that version in sync with `.fvmrc` if it ever changes.)
+FVM path — `.fvm/` is gitignored — so it installs the SDK directly, reading the
+version from `.fvmrc` itself; bumping `.fvmrc` is the whole change.)
 
 The Dart MCP server in `.mcp.json` points at `.fvm/flutter_sdk/bin/dart.bat`, so it
 only works after this step.
@@ -208,8 +208,8 @@ For the standalone native C++ CLI / doctest suite (a separate CMake project unde
 - **`.fvm/` and `windows/{opencv,onnxruntime,ffmpeg}` are gitignored** — FVM and
   `fetch_deps.py` populate them; they are never committed. `windows/clip` is the
   exception (committed source).
-- **Keep `.fvmrc` and the CI Flutter version in sync** — CI hardcodes 3.44.4 because
-  it can't read the gitignored `.fvm/`.
+- **`.fvmrc` is the one Flutter version pin** — CI can't read the gitignored `.fvm/`,
+  so `.github/actions/setup-flutter` passes `.fvmrc` to flutter-action as its version file.
 - **Order matters** for step 6: `pub get` before `build_runner`, and the native deps
   (step 4) before any `flutter build windows` / native CMake configure.
 - **`flutter build windows` fails at INSTALL with `file cannot create directory:
