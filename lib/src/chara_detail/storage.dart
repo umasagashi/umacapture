@@ -32,7 +32,6 @@ import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
-import '/src/gui/capture.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
@@ -1503,11 +1502,6 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
     _surfaceInheritance(plan.resolution!);
     _warnIfCandidateSetIncomplete();
-
-    final autoCopy = ref.read(autoCopyClipboardStateProvider);
-    if (autoCopy != CharaDetailRecordImageMode.none) {
-      copyToClipboard(plan.resolvedRecord!, autoCopy);
-    }
   }
 
   /// Asynchronous, web-safe counterpart of [addFromFile] for the video import.
@@ -2010,21 +2004,6 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   FilePath traineeIconPathOf(CharaDetailRecord record) {
     return rootDirectory.filePath(record.traineeIconPath);
-  }
-
-  void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
-    assert(image != CharaDetailRecordImageMode.none);
-    // A browser clipboard write needs transient user activation, which a
-    // post-capture callback does not have: pasteImage would refuse and toast
-    // "clipboard unavailable" after every capture. The setting that gets here is
-    // hidden on web for the same reason (see the capture settings group).
-    if (kIsWeb) {
-      return;
-    }
-    final imagePath = imagePathOf(record, image);
-    // Fire-and-forget: pasteImage reports its own outcome via a toast. unawaited
-    // makes the intent explicit so a future async failure isn't silently dropped.
-    unawaited(ClipboardAlt.pasteImage(ref.base, imagePath));
   }
 
   List<CharaDetailRecord> get records => _records;

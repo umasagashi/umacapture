@@ -390,8 +390,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // Ensure that the controller is created at app startup.
-    // If not, Auto Start option will not work.
+    // Start building the controller at app startup rather than when the capture page first asks for
+    // it, so capture is ready as early as it can be — and a launch-time `start_capture` addon task,
+    // which waits for this loader, waits no longer than it has to.
     ref.read(platformControllerLoader);
 
     // Also, start up loaders here.

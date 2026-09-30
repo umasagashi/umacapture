@@ -91,7 +91,8 @@ void main() {
   setUpAll(initializeMappers);
 
   group('TaskDefinitionsNotifier mutations', () {
-    useHiveForTest(['addon']);
+    // `settings` too: building the task list reads it for the retired capture settings.
+    useHiveForTest(['addon', 'settings']);
 
     setUp(() => Hive.box('addon').clear());
 

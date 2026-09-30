@@ -26,6 +26,8 @@ class TriggerEventMapper extends EnumMapper<TriggerEvent> {
   @override
   TriggerEvent decode(dynamic value) {
     switch (value) {
+      case r'appStarted':
+        return TriggerEvent.appStarted;
       case r'captureStarted':
         return TriggerEvent.captureStarted;
       case r'captureStopped':
@@ -46,6 +48,8 @@ class TriggerEventMapper extends EnumMapper<TriggerEvent> {
   @override
   dynamic encode(TriggerEvent self) {
     switch (self) {
+      case TriggerEvent.appStarted:
+        return r'appStarted';
       case TriggerEvent.captureStarted:
         return r'captureStarted';
       case TriggerEvent.captureStopped:

@@ -32,6 +32,10 @@ class ActionExecution {
   /// Elapsed time since the action started; valid both before and after [finish].
   Duration get elapsed => _stopwatch.elapsed;
 
+  /// Whether a result is already in — including a cancel that arrived while the runner was still
+  /// waiting to begin, which a runner checks before it starts acting.
+  bool get isFinished => _completer.isCompleted;
+
   /// Completes the result exactly once, stopping the clock and closing progress.
   /// Calls after the first are no-ops, so racing timeout/cancel/exit paths are safe.
   void finish(ExecutionResult Function(Duration elapsed) build) {

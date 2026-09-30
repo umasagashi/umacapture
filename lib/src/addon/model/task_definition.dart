@@ -6,10 +6,11 @@ part 'task_definition.mapper.dart';
 
 /// The app event (or `manual`) that fires an addon task.
 ///
-/// Limited to events that already have a Dart-side stream (see `trigger_catalog.dart`).
+/// Limited to events the app itself observes (see `trigger_catalog.dart`): a Dart-side stream, or —
+/// for `appStarted` — the launch of this process, which is held as data rather than streamed.
 /// `manual` is a sentinel meaning "no automatic trigger; run button only".
 @MappableEnum()
-enum TriggerEvent { captureStarted, captureStopped, recordCaptured, recordExported, taskExecuted, manual }
+enum TriggerEvent { appStarted, captureStarted, captureStopped, recordCaptured, recordExported, taskExecuted, manual }
 
 /// A user-registered addon task: an action bound to a trigger.
 @MappableClass(caseStyle: CaseStyle.snakeCase)

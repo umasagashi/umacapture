@@ -1529,7 +1529,9 @@
                 "run": "今すぐ実行",
                 "empty": "タスクが登録されていません。右上のボタンから追加してください。",
                 "load_broken": "読み込めないタスクがありました。一覧には表示されませんが、データは保持され、保存しても失われません。",
-                "chained_disabled": "削除したタスクに連鎖していたタスクを無効化しました。連鎖元を選び直してください。"
+                "chained_disabled": "削除したタスクに連鎖していたタスクを無効化しました。連鎖元を選び直してください。",
+                "migrated_auto_start": "オートスタート（旧設定から移行）",
+                "migrated_auto_copy": "オートコピー（旧設定から移行）"
             },
             "running": {
                 "cancel": "中止",
@@ -1540,8 +1542,10 @@
                 "empty": "実行履歴はありません。"
             },
             "trigger": {
+                "app_started": "アプリ起動時",
+                "app_started_description": "アプリを起動したときに1回だけ発火します（Web 版ではページを読み込むたびに1回）。起動した時点で有効なタスクだけが対象で、起動後に追加したり有効にしたりしたタスクは次回の起動から発火します。「キャプチャを開始」と組み合わせると、起動と同時にキャプチャを始められます。",
                 "capture_started": "キャプチャ開始時",
-                "capture_started_description": "画面キャプチャが開始されたとき（開始ボタン、または自動開始）に発火します。キャプチャ中に常駐させたい外部ツールの起動などに使えます。",
+                "capture_started_description": "画面キャプチャが開始されたとき（開始ボタン、またはアドオンの「キャプチャを開始」）に発火します。キャプチャ中に常駐させたい外部ツールの起動などに使えます。",
                 "capture_stopped": "キャプチャ停止時",
                 "capture_stopped_description": "画面キャプチャが停止したとき（停止ボタン、またはシーン終了）に発火します。キャプチャ中に起動したツールの後片付けなどに使えます。",
                 "record_captured": "レコード取得時",
@@ -1566,6 +1570,7 @@
                 "copy_file_to_path_destination": "コピー先パス（テンプレート）",
                 "play_sound": "サウンドを鳴らす",
                 "play_sound_argument": "サウンド種別",
+                "start_capture": "キャプチャを開始",
                 "options": {
                     "image_trainee": "アイコン",
                     "image_skill": "スキル画面",
@@ -1866,20 +1871,6 @@
             },
             "capture": {
                 "title": "キャプチャ設定",
-                "auto_start": {
-                    "title": "オートスタート",
-                    "description": "アプリ起動時にキャプチャを開始します。次回アプリ起動時から有効です。"
-                },
-                "auto_copy": {
-                    "title": "オートコピー",
-                    "description": "キャプチャ成功時にクリップボードに指定した画像をコピーします。",
-                    "choice": {
-                        "none": "オフ",
-                        "skill_plain": "スキル画面",
-                        "factor_plain": "因子画面",
-                        "campaign_plain": "育成情報画面"
-                    }
-                },
                 "detail_crop_calibration": {
                     "title": "キャプチャ範囲の自動補正",
                     "description": "実際のゲーム画面を使ってキャプチャ範囲のズレを自動で補正します。",

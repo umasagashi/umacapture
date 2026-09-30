@@ -86,14 +86,17 @@ class StorageBox {
     return value is T ? value : null;
   }
 
-  void push<T>(String key, T value) {
+  /// Stores [value]. The read side sees it at once; the returned future completes when the write
+  /// has reached the box's file, which is what a caller ordering writes across two boxes awaits.
+  Future<void> push<T>(String key, T value) async {
     if (_hiveClosed) return;
-    _box?.put(key, value);
+    await _box?.put(key, value);
   }
 
-  void delete(String key) {
+  /// Removes [key], with the same completion as [push].
+  Future<void> delete(String key) async {
     if (_hiveClosed) return;
-    _box?.delete(key);
+    await _box?.delete(key);
   }
 
   StorageEntry<T> entry<T>(String key) {
@@ -175,11 +178,11 @@ class StorageEntry<T> {
     return _box.pull<T>(_key);
   }
 
-  void push(T value) {
-    _box.push<T>(_key, value);
+  Future<void> push(T value) {
+    return _box.push<T>(_key, value);
   }
 
-  void delete() {
-    _box.delete(_key);
+  Future<void> delete() {
+    return _box.delete(_key);
   }
 }

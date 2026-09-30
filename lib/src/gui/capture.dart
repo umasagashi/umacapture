@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
@@ -37,23 +38,9 @@ import '/src/gui/storage_persistence_banner.dart';
 import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/video_import.dart';
-import '/src/preference/notifier.dart';
-import '/src/preference/settings_state.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
-
-final autoStartCaptureStateProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(entryKey: SettingsEntryKey.autoStartCapture.name, defaultValue: false);
-});
-
-final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider<CharaDetailRecordImageMode>(() {
-  return ExclusiveItemsNotifier<CharaDetailRecordImageMode>(
-    entryKey: SettingsEntryKey.autoCopyClipboard.name,
-    values: CharaDetailRecordImageMode.values,
-    defaultValue: CharaDetailRecordImageMode.none,
-  );
-});
 
 class StackedIndicator extends StatelessWidget {
   final double size;
@@ -1029,24 +1016,32 @@ CaptureToggleBlocker? resolveCaptureToggleBlocker({
 /// thing `longReadBusyMessage` deliberately does.
 @visibleForTesting
 CaptureToggleBlocker? liveCaptureStartPreflight(ProviderContainer container) {
-  final layout = container.read(pathLayoutProvider);
+  // Not re-asked from the capability probe: a browser that could not capture never opened a
+  // picker, so reaching here already answers it.
+  return liveCaptureStartBlocker(container.read, captureUnsupported: false);
+}
+
+/// The live-capture toggle's gate, asked by something that starts a session without pressing the
+/// toggle — the web picker's second evaluation ([liveCaptureStartPreflight]) and the addon's
+/// `start_capture` action — so each refuses on exactly the terms the toggle is withheld on.
+///
+/// [read] is the caller's reader (a container's or a ref's `read`); [captureUnsupported] is the
+/// caller's answer to the capability probe, which only it knows how to ask.
+CaptureToggleBlocker? liveCaptureStartBlocker(
+  T Function<T>(ProviderListenable<T> provider) read, {
+  required bool captureUnsupported,
+}) {
+  final layout = read(pathLayoutProvider);
   return resolveCaptureToggleBlocker(
-    controllerUnavailable: container.read(platformControllerProvider) == null,
-    // Not re-asked from the capability probe: a browser that could not capture never opened a
-    // picker, so reaching here already answers it. Passed as a constant rather than omitted
-    // because the resolver has no optional terms.
-    captureUnsupported: false,
+    controllerUnavailable: read(platformControllerProvider) == null,
+    captureUnsupported: captureUnsupported,
     // **THIS SESSION'S OWN ACTIVITY IS WHAT IS BEING ASKED ABOUT**, the same rule
     // `VideoImportButton.preflight` states: the start that is asking is not yet `capturing`, and an
     // import or a clip picker that began while the picker was open is a genuine refusal.
-    activity: resolveCaptureActivity(
-      capturing: container.read(capturingStateProvider),
-      importState: videoImportState.value,
-    ),
-    // The gate this function exists for. A null layout answers "nothing can be holding a path under
-    // a root the app has not resolved", which is `listenLiveCaptureLongRead`'s own reading of it.
-    heldByLongRead:
-        layout != null && liveCaptureBlockedBy(layout, container.read(longReadRegistryProvider).values) != null,
+    activity: resolveCaptureActivity(capturing: read(capturingStateProvider), importState: videoImportState.value),
+    // A null layout answers "nothing can be holding a path under a root the app has not resolved",
+    // which is `listenLiveCaptureLongRead`'s own reading of it.
+    heldByLongRead: layout != null && liveCaptureBlockedBy(layout, read(longReadRegistryProvider).values) != null,
   );
 }
 

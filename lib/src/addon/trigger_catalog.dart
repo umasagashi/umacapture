@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/execution/execution_controller.dart';
@@ -70,9 +71,10 @@ PayloadMap recordExportedPayload(ExportResult result) {
 }
 
 /// One triggerable event: its [TriggerEvent], a localized label, and a closure
-/// that wires the correct typed event provider via `ref.listen` and emits a
-/// normalized [PayloadMap]. The closure erases the differing provider payload
-/// types behind a uniform emit callback.
+/// that wires the event's source — a typed event provider via `ref.listen`, or
+/// [appLaunchDeliveryProvider] for the launch — and emits a normalized
+/// [PayloadMap]. The closure erases the differing sources behind a uniform emit
+/// callback. It runs on every dispatcher build.
 class TriggerCatalogEntry {
   final TriggerEvent event;
   final String labelKey;
@@ -81,9 +83,46 @@ class TriggerCatalogEntry {
   const TriggerCatalogEntry({required this.event, required this.labelKey, required this.subscribe});
 }
 
+/// Whether this process's launch has been handed to the addon dispatcher yet.
+///
+/// The launch is a fact about the process, not an event on a stream: it happens once, before anything
+/// can subscribe, so a broadcast of it would reach no one. It is held here as data instead. The
+/// container holding this provider lives exactly as long as the app — one per process on Windows, one
+/// per page load on web — so its initial `false` *is* "launched and not yet delivered", and [take] turns
+/// it true once, leaving nothing for a rebuilt dispatcher to deliver again.
+class AppLaunchDelivery extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  /// Marks the launch delivered and answers whether this call is the one that did.
+  bool take() {
+    if (state) return false;
+    state = true;
+    return true;
+  }
+}
+
+final appLaunchDeliveryProvider = NotifierProvider<AppLaunchDelivery, bool>(AppLaunchDelivery.new);
+
 /// All automatically-triggerable events. `manual` is intentionally absent: it is
 /// fired directly by the run button, not by an event stream.
 final triggerCatalog = <TriggerCatalogEntry>[
+  TriggerCatalogEntry(
+    event: TriggerEvent.appStarted,
+    labelKey: "$_trTrigger.app_started",
+    subscribe: (ref, emit) {
+      if (ref.read(appLaunchDeliveryProvider)) return;
+      // Taken after this frame rather than here: `subscribe` runs inside the dispatcher's build, and
+      // running a task writes the execution controller's state, which riverpod refuses while the tree
+      // is building. The flag and not the callback is what makes it once — every build before that
+      // frame schedules a callback, and only the first to take the launch emits it. An unmounted
+      // dispatcher takes nothing, so the launch waits for the next one.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!ref.context.mounted) return;
+        if (ref.read(appLaunchDeliveryProvider.notifier).take()) emit({"event": "app_started"});
+      });
+    },
+  ),
   TriggerCatalogEntry(
     event: TriggerEvent.captureStarted,
     labelKey: "$_trTrigger.capture_started",

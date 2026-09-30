@@ -4,11 +4,16 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/payload_enricher.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/capture_capability.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/clipboard_image_writer.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/sound_player.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
+import '/src/gui/capture.dart';
 import '/src/gui/toast.dart';
 
 /// A function performing a built-in action. Receives the long-lived dispatcher
@@ -91,8 +96,10 @@ class BuiltinActionDescriptor {
   /// Whether a browser offers any API at all for what this action does.
   ///
   /// False only where no browser counterpart exists in any circumstance: putting
-  /// a *file reference* on the clipboard (a page can only offer bytes) and
-  /// writing to an arbitrary host path (OPFS is origin-private). The task editor
+  /// a *file reference* on the clipboard (a page can only offer bytes),
+  /// writing to an arbitrary host path (OPFS is origin-private), and starting a
+  /// live capture (the source picker opens only inside a click's own task, which
+  /// no addon run reaches — the ▶ run awaits the controller first). The task editor
   /// keeps those visible but unselectable on web, and the runtime checks remain
   /// as a backstop for definitions saved by an older version.
   ///
@@ -110,6 +117,14 @@ class BuiltinActionDescriptor {
   /// click's own task. An automatic trigger there fails with an explicit reason
   /// (see [gestureRefusesRun]) instead of silently doing nothing.
   final bool requiresUserGesture;
+
+  /// What the action waits for before [run] starts, when it cannot act until the app itself is ready.
+  /// Receives the event payload, so a ▶ run (see [isManualRun]) can be answered at once instead.
+  ///
+  /// Awaited outside the builtin backstop timeout (`builtinTimeoutProvider`): the backstop bounds the
+  /// action, and this is the app's own readiness, which settles on its own schedule. A cancel that
+  /// arrives during the wait keeps [run] from starting at all.
+  final Future<void> Function(RefBase ref, PayloadMap payload)? waitUntilReady;
 
   final BuiltinFn run;
 
@@ -131,6 +146,7 @@ class BuiltinActionDescriptor {
     this.defaultSecondArgument = '',
     this.supportsWeb = true,
     this.requiresUserGesture = false,
+    this.waitUntilReady,
   });
 }
 
@@ -195,7 +211,7 @@ List<BuiltinArgumentOption> _imageKindOptions(String labelPrefix) => [
 /// Registry of built-in actions, keyed by [BuiltinActionDescriptor.key].
 ///
 /// Kept intentionally side-effect-light for the MVP. Each entry reaches existing
-/// app facilities (toast, clipboard); new entries only need to be added here.
+/// app facilities (toast, clipboard, sound, capture); new entries only need to be added here.
 final builtinActionRegistry = <String, BuiltinActionDescriptor>{
   "show_toast": BuiltinActionDescriptor(
     key: "show_toast",
@@ -323,6 +339,45 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
         _ => SoundType.success,
       };
       await ref.read(soundEffectProvider(type).future).playSafely();
+    },
+  ),
+  "start_capture": BuiltinActionDescriptor(
+    key: "start_capture",
+    labelKey: "$_trBuiltin.start_capture",
+    // Not offered on web: a browser starts a live capture only by opening its source picker
+    // (getDisplayMedia) inside the transient user activation of a click, and an addon run carries
+    // none — even the ▶ run reaches the start only after awaiting the controller.
+    supportsWeb: false,
+    waitUntilReady: (ref, payload) async {
+      // At launch the controller does not exist yet: it is built once the module check, which may
+      // download a module, has settled.
+      await ref.read(platformControllerLoader.future);
+      // Then the folders a session writes into. At launch the record store's own startup scan holds
+      // them, and a start issued under it would be refused by the gate below. An automatic trigger
+      // waits for the holder, as the automatic module install does; a ▶ run is a press, and a press
+      // is refused while busy, exactly as the capture button is withheld.
+      final layout = ref.read(pathLayoutProvider);
+      if (isManualRun(payload) || layout == null) return;
+      await ref.read(longReadRegistryProvider.notifier).untilFree(liveCaptureLongReadPaths(layout));
+    },
+    run: (ref, payload, argument, secondaryArgument) async {
+      // Backstop for the host the editor already keeps this off (see supportsWeb above).
+      if (liveCaptureNeedsSourcePicker) {
+        throw StateError("Live capture here starts from a source picker, which only a click can open.");
+      }
+      final controller = await ref.read(platformControllerLoader.future);
+      if (controller == null) {
+        throw StateError("No recognition module is loaded, so there is no capture to start.");
+      }
+      if (ref.read(capturingStateProvider)) {
+        throw StateError("Live capture is already running.");
+      }
+      // The capture button's own gate, so this refuses exactly when the button is withheld.
+      final blocker = liveCaptureStartBlocker(ref.read, captureUnsupported: !liveCaptureSupported);
+      if (blocker != null) {
+        throw StateError("Live capture cannot start now (blocked by: ${blocker.name}).");
+      }
+      await controller.startCapture();
     },
   ),
 };

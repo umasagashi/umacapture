@@ -1553,13 +1553,6 @@ final platformControllerLoader = FutureProvider<PlatformController?>((ref) async
     // life a session is nested inside. See `listenLiveCaptureLongRead` for what a rebuild does to
     // a claim that is already on.
     listenLiveCaptureLongRead(ref);
-
-    // Never autostart on web: live capture opens getDisplayMedia, which requires a user gesture, so a
-    // load-time start would only reject and play the error chime on every page load. The kIsWeb guard
-    // leaves the desktop autostart (a genuine gesture-free window capture) unchanged.
-    if (!kIsWeb && ref.read(autoStartCaptureStateProvider)) {
-      controller.startCapture();
-    }
     return controller;
   });
 });
