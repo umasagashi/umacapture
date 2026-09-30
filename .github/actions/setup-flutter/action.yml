@@ -28,7 +28,7 @@ runs:
     # Both caches are extracted onto D:, not into flutter-action's defaults on C: (the runner tool
     # cache and the user's Pub cache). On windows-2022 runners, extracting the ~18,000-file SDK
     # archive onto C: takes time in proportion to the file count, and on D: the same archive
-    # extracts far faster: with identical cache contents, Set up Flutter measured a median of
+    # extracts far faster: with the same Flutter version and `pubspec.lock`, Set up Flutter measured a median of
     # ~125 s with the C: defaults and ~49 s on D: (12 jobs each, 76.7 s shorter). Defender
     # real-time protection is already off on these runners, so it plays no part in that gap.
     # The paths are part of the cache version, so they live here with the rest of the definition.

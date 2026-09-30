@@ -74,12 +74,12 @@ user if any preflight check fails.
 All commands use the FVM-pinned toolchain. The global `flutter` on PATH already
 resolves to the FVM default, but verify rather than assume.
 
-1. **Flutter SDK is the pinned version** (`.fvmrc`, currently 3.44.4) —
+1. **Flutter SDK is the pinned version** (the version in `.fvmrc`) —
    `flutter_distributor` shells out to `flutter build windows`, so the PATH
    `flutter` must be the pinned one:
    ```bash
    cat .fvmrc           # the pinned version
-   flutter --version    # must match it (currently Flutter 3.44.4 / Dart 3.12)
+   flutter --version    # must match the version in .fvmrc
    ```
    If it does not match, prepend `.fvm/flutter_sdk/bin` to PATH for the session.
 
