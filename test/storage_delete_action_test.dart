@@ -63,6 +63,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
 import 'support/web_like_fs_backend.dart';
 import 'support/record_write_effects_fixture.dart';
@@ -100,8 +101,13 @@ class _DelayingFsBackend extends WebLikeFsBackend {
 
   final Future<void> until;
 
+  /// Whether a delete has reached the gate, so a test can wait for the held
+  /// state itself rather than for a number of pumps.
+  bool entered = false;
+
   @override
   Future<void> delete(String path, {bool recursive = false}) async {
+    entered = true;
     await until;
     return super.delete(path, recursive: recursive);
   }
@@ -1335,7 +1341,8 @@ void main() {
     ) async {
       final file = _seed('documents/temp/scratch.bin');
       final gate = Completer<void>();
-      fsBackend = _DelayingFsBackend(_realBackend, until: gate.future);
+      final backend = _DelayingFsBackend(_realBackend, until: gate.future);
+      fsBackend = backend;
       final container = _container();
       final toasts = <ToastData>[];
       final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
@@ -1359,7 +1366,7 @@ void main() {
       );
       await tester.pump();
       await tester.longPress(_confirmButton());
-      await _settle(tester);
+      await settleUntil(tester, () => backend.entered, describe: 'the delete to reach the gate');
       // The gate is what makes this a mid-flight state rather than a finished
       // one: without it the delete is over before the dismiss below.
       expect(find.byKey(storageDeleteConfirmRowKey), findsOneWidget, reason: 'the delete was not held open');
@@ -1370,7 +1377,7 @@ void main() {
       expect(find.byKey(storageDeleteConfirmRowKey), findsNothing, reason: 'the dismiss did not take');
 
       gate.complete();
-      await _settle(tester);
+      await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the paths delete to finish and announce itself');
 
       expect(_exists(file), isFalse, reason: 'the delete never finished');
       expect(toasts, hasLength(1), reason: 'the delete finished without saying so');
