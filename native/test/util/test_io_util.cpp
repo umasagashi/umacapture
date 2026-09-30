@@ -17,7 +17,7 @@
 // emscripten) text mode and binary mode are the same thing and these cases are tautologically
 // green -- they assert a real invariant there, but cannot fail. That costs no coverage today
 // because umacapture_tests is a Windows/MSVC-only target (native/CMakeLists.txt links OpenCV's
-// Windows prebuilt, and the suite is run on windows-latest in CI), so Windows is the only
+// Windows prebuilt, and the suite is run on Windows runners in CI), so Windows is the only
 // platform that ever compiles this file. If the suite is ever ported, this file is one of the
 // ones whose signal does not come along.
 

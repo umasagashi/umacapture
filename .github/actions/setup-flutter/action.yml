@@ -14,20 +14,32 @@ description: >-
 runs:
   using: composite
   steps:
-    # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK directly.
-    # Keep this version in sync with .fvmrc (currently 3.44.4).
+    # .fvm/ is gitignored, so CI cannot use the FVM path. flutter-action reads the pinned version
+    # from .fvmrc itself (`flutter-version-file`), so .fvmrc is the only place the version lives.
+    # It must not be combined with `flutter-version`: the action refuses both at once. The cache
+    # key and path are built from the resolved release, not from this input.
     #
     # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the cache
     # trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more than restoring
     # the pub cache -- a ~50 s net regression. The Windows tar/zstd extraction is slow, but
     # re-downloading every package is slower. `cache: true` caches both the SDK and the pub cache;
     # the pub key ends in hashFiles('**/pubspec.lock').
-    - name: Set up Flutter 3.44.4
+    #
+    # Both caches are extracted onto D:, not into flutter-action's defaults on C: (the runner tool
+    # cache and the user's Pub cache). On windows-2022 runners, extracting the ~18,000-file SDK
+    # archive onto C: takes time in proportion to the file count, and on D: the same archive
+    # extracts far faster: with the same Flutter version and `pubspec.lock`, Set up Flutter measured a median of
+    # ~125 s with the C: defaults and ~49 s on D: (12 jobs each, 76.7 s shorter). Defender
+    # real-time protection is already off on these runners, so it plays no part in that gap.
+    # The paths are part of the cache version, so they live here with the rest of the definition.
+    - name: Set up Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: 3.44.4
+        flutter-version-file: .fvmrc
         channel: stable
         cache: true
+        cache-path: 'D:/flutter/:channel:-:version:-:arch:'
+        pub-cache-path: 'D:/pub-cache'
 
     # Part of this action, not of each job, because it is what fills the pub cache that
     # flutter-action saves at the end of the job: a warming job that skipped it would save a pub
