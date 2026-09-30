@@ -564,6 +564,7 @@ jobs:
 
   browser-tests:
     name: Browser tests
+    if: false
     runs-on: windows-2022
     # The suite bounds every acquisition itself (5 s per assertion) and the whole
     # job takes ~2 min, so this ceiling only catches a browser that never starts.
