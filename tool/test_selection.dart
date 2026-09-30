@@ -60,13 +60,20 @@ const double defaultExecutionSeconds = 0.5;
 /// `961fe519` with `flutter test -j 4 --reporter json test` on a 24-thread Windows machine: the
 /// mean of two full runs of the sum of each file's visible test durations plus its
 /// `setUpAll`/`tearDownAll`. A stale or missing entry only makes the shards less even; it never
-/// changes which files run.
+/// changes which files run. The `web_record_write_protocol_v2*` entries were measured the same way
+/// but one file at a time (`flutter test --reporter json <file>`), on the same machine, when that
+/// suite was split into them.
 const Map<String, double> measuredExecutionSeconds = {
-  "test/web_record_write_protocol_v2_test.dart": 195.8,
   "test/storage_tree_context_menu_test.dart": 55.4,
   "test/enhancement_merge_test.dart": 31.8,
   "test/storage_row_menu_gate_test.dart": 27.9,
+  "test/web_record_write_protocol_v2_update_test.dart": 24.9,
   "test/storage_tree_test.dart": 23.3,
+  "test/web_record_write_protocol_v2_same_store_test.dart": 22.9,
+  "test/web_record_write_protocol_v2_single_stops_test.dart": 21.9,
+  "test/web_record_write_protocol_v2_archive_to_active_test.dart": 21.7,
+  "test/web_record_write_protocol_v2_active_to_archive_test.dart": 21.6,
+  "test/web_record_write_protocol_v2_test.dart": 16.4,
   "test/enhancement_merge_ui_test.dart": 16.5,
   "test/report_import_controls_test.dart": 15.0,
   "test/storage_file_preview_view_test.dart": 14.6,
