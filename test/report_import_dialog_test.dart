@@ -147,12 +147,7 @@ Future<void> _pumpApp(WidgetTester tester, ProviderContainer container) {
 /// that waits for something to ARRIVE uses [settleUntil] on that thing instead: `_startGrab` awaits
 /// `RecordImage.preload` (a file read plus a PNG decode) and the frame it replaces is removed by an
 /// `unawaited` `File.delete`, neither of which is bounded by any number of milliseconds spent here.
-Future<void> _settleIo(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
+Future<void> _settleIo(WidgetTester tester) => pumpRealTimeWindow(tester, rounds: 8);
 
 /// The frame-time line the dialog prints under the preview for a frame stamped [mediaTsMs].
 String _frameTimeLine(int mediaTsMs) => appSentenceAt(

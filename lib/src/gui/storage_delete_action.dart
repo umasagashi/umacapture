@@ -747,9 +747,7 @@ Future<StorageDeleteReport> _deleteAndForget(
 /// A named function rather than an inline `.tr(...)` inside `build`, so the
 /// substitution has a seam a test can call: the placeholder *name* in `ja.json`
 /// is otherwise checked by nothing, and a rename there ships literal `{...}`
-/// braces to the user. `storage_wording_test.dart` renders every
-/// placeholder-carrying sentence through its own production function and asserts
-/// no `{` survives.
+/// braces to the user.
 String storageDeleteTargetSentence(String subject) {
   return 'pages.storage.delete.target'.tr(namedArgs: {'name': subject});
 }

@@ -1127,9 +1127,7 @@ RegenerateAllBlocker? resolveRegenerateAllBlocker({
 ///
 /// Full keys rather than two leaves under one `blocked` map, because the two sentences deliberately
 /// do not live in one namespace: `blocks_regeneration` is the shared refusal line that
-/// [ModuleManualUpdateTile] and `RegenerateRecordDialog` also read, and
-/// `regenerate_all_records_tile_test.dart` pins that sharing by name ("says it in the same words the
-/// per-record dialog does"). Copying it into a local map would make one refusal grow three
+/// [ModuleManualUpdateTile] and `RegenerateRecordDialog` also read. Copying it into a local map would make one refusal grow three
 /// explanations that nothing compares — the very thing the sharing exists to prevent. Only the
 /// regeneration sentence is this control's own, and it is new.
 ///

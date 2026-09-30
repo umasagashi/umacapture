@@ -56,8 +56,7 @@ DirectoryPath get _activeDir => _layout.charaDetailActiveDir;
 /// Every root the storage view offers a delete over, split by whether the
 /// repair's claim is supposed to cover it.
 ///
-/// **A total function over the group table**, for the reason
-/// `record_scan_long_read_claim_test.dart` states about its own copy: the defect
+/// **A total function over the group table**, because the defect
 /// this kind of claim keeps arriving with is a *list* of directories, and a case
 /// that guards it with a second list of the roots somebody remembered is the same
 /// defect one level up. Every group that offers a delete lands in exactly one

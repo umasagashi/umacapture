@@ -174,17 +174,14 @@ class PathEntity {
     // retrying rescues. Getting it exactly backwards is available; getting it
     // right is not, for the reasons above.
     //
-    // What the measurements rest on: `test/opfs_delete_failure_web_test.dart`
-    // drives the OPFS API directly, one layer below this `catch`, so read it as
-    // evidence about the browser rather than about this boundary. It pins the
-    // identical-on-three-attempts result for `NotFoundError` and
-    // `InvalidModificationError`, and pins that no refusal is selectable by
-    // `dart:io`'s `FileSystemException`. It does *not* pin the
-    // `NoModificationAllowedError` name: that is a recorded observation, and
-    // what the test asserts is the shape behind it -- whatever the browser
-    // refuses a held entry with, the same delete succeeds once the writable
-    // closes. A browser that stopped refusing at all would leave that case
-    // green, so the name above is worth re-measuring rather than trusting.
+    // What the measurements rest on: they drove the OPFS API directly, one
+    // layer below this `catch`, so they are evidence about the browser rather
+    // than about this boundary: the identical-on-three-attempts result for
+    // `NotFoundError` and `InvalidModificationError`, that no refusal is
+    // selectable by `dart:io`'s `FileSystemException`, and that whatever the
+    // browser refuses a held entry with, the same delete succeeds once the
+    // writable closes. The `NoModificationAllowedError` name is a recorded
+    // observation, worth re-measuring rather than trusting.
     int attempts = 0;
     while (true) {
       try {

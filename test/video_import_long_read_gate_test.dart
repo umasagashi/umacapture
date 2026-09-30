@@ -127,7 +127,7 @@ void main() {
     expect(_isInert(tester), isFalse, reason: 'the arrangement itself must not withhold the control');
 
     // A kind that is not `videoImport`, so "a long reader holds the store" and "an import of my own
-    // is running" stay separable -- the precedence between those two is `video_import_ops_test`'s.
+    // is running" stay separable; the precedence between those two is not this suite's.
     container
         .read(longReadRegistryProvider.notifier)
         .claimUntilReleased(kind: LongReadKind.zip, paths: [_layout.charaDetailDir]);

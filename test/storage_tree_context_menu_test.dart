@@ -63,6 +63,8 @@ import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -104,8 +106,7 @@ void _write(String relative, int bytes) {
 /// Exposed so a test can start an activity blocker **while the menu is already
 /// open**, which is the only ordering that reaches an entry's own gate now that a
 /// blocked row opens no menu at all. An import is a `CaptureActivity` exactly as
-/// a capture is (`storage_delete_capture_gate_test` asserts the two resolve
-/// alike), and it is the half this suite can turn on mid-test: the capture half
+/// a capture is, and it is the half this suite can turn on mid-test: the capture half
 /// is a value override, fixed for the life of the container.
 late ValueNotifier<VideoImportState> _importNotifier;
 
@@ -147,14 +148,6 @@ Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) {
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   return pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 40; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 /// Presses [target] with the secondary button and lets the menu route settle.
@@ -203,12 +196,12 @@ void main() {
   /// on screen as a directory row and `record.json` under it as a file row.
   Future<void> openToTheFile(WidgetTester tester, ProviderContainer container) async {
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     final expansion = container.read(storageTreeExpansionProvider.notifier);
     expansion.toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expansion.toggle((group: StorageGroupId.activeRecords, path: (_info.charaDetailActiveDir / 'rec1').path));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('record.json'), findsOneWidget);
   }
 
@@ -289,7 +282,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('record.json'));
     await tester.tap(find.text(_label('open_in_explorer')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(shellCalls, hasLength(1));
     expect(shellCalls.single.method, 'launch');
@@ -306,7 +299,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('rec1'));
     await tester.tap(find.text(_label('open_in_explorer')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(shellCalls, hasLength(1));
     final url = Uri.parse((shellCalls.single.arguments as Map)['url'] as String);
@@ -323,7 +316,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('record.json'));
     await tester.tap(find.text(_label('open_in_explorer')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(shellCalls, hasLength(1));
     expect(toasts, hasLength(1));
@@ -343,7 +336,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('record.json'));
     await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_saved, ['record.json']);
   }, variant: _desktop);
@@ -364,11 +357,11 @@ void main() {
     expect(_entryEnabled(tester, _label('download_file')), isTrue, reason: 'the entry has to start live');
 
     _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('download_file')), isFalse);
     await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     // Withheld while the import writes, not withdrawn. The entry is still listed — the press
     // simply does nothing — so this is not the "entry is missing" state.
@@ -382,7 +375,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('record.json'));
     _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     // Reading a path out to the file manager writes nothing and copies nothing,
     // so it is not one of the actions the per-group exclusion covers. The save
@@ -391,7 +384,7 @@ void main() {
     expect(_entryEnabled(tester, _label('download_file')), isFalse);
     expect(_entryEnabled(tester, _label('open_in_explorer')), isTrue);
     await tester.tap(find.text(_label('open_in_explorer')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(shellCalls, hasLength(1));
   }, variant: _desktop);
@@ -426,7 +419,7 @@ void main() {
     _write('documents/umacapture/storage/chara_detail/active/rec1/huge.png', imagePreviewByteLimit + 1);
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The refusal is asserted, not assumed. Without this the test would still be
     // green against a bound that had been raised past the fixture, and would then
@@ -441,14 +434,14 @@ void main() {
 
     final expansion = container.read(storageTreeExpansionProvider.notifier);
     expansion.toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expansion.toggle((group: StorageGroupId.activeRecords, path: (_info.charaDetailActiveDir / 'rec1').path));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     await _secondaryPress(tester, find.text('huge.png'));
     expect(find.text(_label('download_file')), findsOneWidget);
     await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_saved, ['huge.png']);
   }, variant: _desktop);
@@ -519,12 +512,12 @@ void main() {
     expect(_entryEnabled(tester, _label('download_file')), isTrue, reason: 'the entry has to start live');
 
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('download_file')), isFalse);
     expect(_entryLooksDisabled(tester, _label('download_file')), isTrue);
     await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     expect(_saved, isEmpty, reason: 'the press reached the save with a long reader holding the folder');
   }, variant: _desktop);
 
@@ -538,7 +531,7 @@ void main() {
     await openToTheFile(tester, container);
 
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     await _secondaryPress(tester, find.text('record.json'));
 
     expect(find.text(_label('download_file')), findsNothing);
@@ -554,12 +547,12 @@ void main() {
     expect(_entryEnabled(tester, _label('zip_directory')), isTrue, reason: 'the entry has to start live');
 
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('zip_directory')), isFalse);
     expect(_entryLooksDisabled(tester, _label('zip_directory')), isTrue);
     await tester.tap(find.text(_label('zip_directory')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     expect(zipped, isEmpty, reason: 'the export started over a folder a long reader is holding');
   }, variant: _desktop);
 
@@ -572,7 +565,7 @@ void main() {
 
     await _secondaryPress(tester, find.text('rec1'));
     await tester.tap(find.text(_label('zip_directory')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(zipped, [(_info.charaDetailActiveDir / 'rec1').path]);
   }, variant: _desktop);
@@ -586,7 +579,7 @@ void main() {
     expect(_entryEnabled(tester, _label('copy_file')), isTrue, reason: 'the entry has to start live');
 
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('copy_file')), isFalse);
     expect(_entryLooksDisabled(tester, _label('copy_file')), isTrue);
@@ -601,16 +594,16 @@ void main() {
     await _secondaryPress(tester, find.text('record.json'));
 
     final token = claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     expect(_entryEnabled(tester, _label('download_file')), isFalse);
 
     container.read(longReadRegistryProvider.notifier).release(token);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('download_file')), isTrue);
     expect(_entryLooksDisabled(tester, _label('download_file')), isFalse);
     await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     expect(_saved, ['record.json']);
   }, variant: _desktop);
 
@@ -627,7 +620,7 @@ void main() {
     expect(_entryEnabled(tester, _label('copy_file')), isTrue, reason: 'the entry has to start live');
 
     _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_entryEnabled(tester, _label('copy_file')), isFalse);
     expect(_entryLooksDisabled(tester, _label('copy_file')), isTrue);

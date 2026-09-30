@@ -72,12 +72,7 @@ Widget recordImageScreen(List<Widget> children) {
 /// and so has no arrival to wait for. A picture that has to appear or change is
 /// awaited with [settleUntilPainted], [settleUntilRepainted] or
 /// [settleUntilUnavailable] instead.
-Future<void> pumpRecordImageWindow(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
+Future<void> pumpRecordImageWindow(WidgetTester tester) => pumpRealTimeWindow(tester, rounds: 20);
 
 /// The decoded picture the tile keyed [id] currently paints, or null while it has none.
 ui.Image? paintedImageOf(WidgetTester tester, String id) {

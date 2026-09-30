@@ -1,7 +1,6 @@
 // A rating or memo whose WRITE did not reach its file has to say so, and keep saying so.
 //
-// The refusal path (a storage whose *load* failed) is covered by
-// rating_memo_storage_failure_notice_test.dart. This file is the other end: the load worked, the
+// The refusal path (a storage whose *load* failed) is not this file's. This file is the other end: the load worked, the
 // change was accepted, the controller holds it -- and the write behind it threw. The user is told,
 // and goes on being told, because the condition it leaves behind persists: the edit lives
 // in this process only and is gone at the next start, and the enhancement merge goes on refusing

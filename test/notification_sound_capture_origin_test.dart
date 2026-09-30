@@ -3,8 +3,7 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/notification_sound_capture_origin_test.dart
 //
-// This is the desktop twin of notification_sound_harvest_boundary_test.dart, and it is the same
-// property reached over the other transport. Web relays an import's records in batches on
+// This is the desktop half of a property that web reaches over another transport. Web relays an import's records in batches on
 // `onLiveRecordsHarvested`; Windows announces them one at a time on `onCharaDetailFinished`,
 // because its recognizer writes each record straight into the live store instead of sweeping a
 // scratch root. Both carry the same `origin` marker, and both hand it to the merge as
@@ -37,6 +36,7 @@ import 'package:umacapture/src/core/video_import_ops.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
+import 'support/settling.dart';
 
 /// An import that has already ended, so the state-derived mute is off for every case below.
 const _finished = VideoImportState(
@@ -147,11 +147,24 @@ void main() {
   ///
   /// [origin] is omitted from the payload when null, which is what a live capture sends. The session
   /// is announced first, as the core does: a duplicate verdict sounds only for the attempt on screen.
-  Future<void> capture(WidgetTester tester, PlatformController controller, String id, {String? origin}) async {
+  /// Every record captured here duplicates one already in [activeDir], so the merge has landed once
+  /// its directory is gone; the twenty turns after that are the window a cue that must not sound
+  /// would have to show up in.
+  Future<void> capture(
+    WidgetTester tester,
+    PlatformController controller,
+    DirectoryPath activeDir,
+    String id, {
+    String? origin,
+  }) async {
     await tester.runAsync(() async {
       controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': id}));
       controller.handleNativeMessage(
         jsonEncode({'type': 'onCharaDetailFinished', 'success': true, 'id': id, 'origin': ?origin}),
+      );
+      await waitUntil(
+        () => !Directory((activeDir / id).path).existsSync(),
+        describe: 'the duplicate $id to be merged away',
       );
       await pumpEventQueue(times: 20);
     });
@@ -165,7 +178,7 @@ void main() {
     env.imports.value = _finished;
     writeRecord(env.activeDir, makeRecord(id: 'import-record', card: 1));
 
-    await capture(tester, env.controller, 'import-record', origin: harvestOriginVideoImport);
+    await capture(tester, env.controller, env.activeDir, 'import-record', origin: harvestOriginVideoImport);
 
     expect(env.played, isEmpty, reason: 'an import merges its records without asking anyone to come and look');
     // The record really was rejected as a duplicate -- otherwise "silent" would be vacuous.
@@ -180,7 +193,7 @@ void main() {
     env.imports.value = _finished;
     writeRecord(env.activeDir, makeRecord(id: 'live-record', card: 1));
 
-    await capture(tester, env.controller, 'live-record');
+    await capture(tester, env.controller, env.activeDir, 'live-record');
 
     expect(env.played, [SoundType.error], reason: 'live capture must not lose a single chime');
     expect(Directory((env.activeDir / 'live-record').path).existsSync(), isFalse);
@@ -194,7 +207,7 @@ void main() {
     env.imports.value = _finished;
     writeRecord(env.activeDir, makeRecord(id: 'unlabelled', card: 1));
 
-    await capture(tester, env.controller, 'unlabelled');
+    await capture(tester, env.controller, env.activeDir, 'unlabelled');
 
     expect(env.played, [SoundType.error]);
   });
@@ -207,7 +220,7 @@ void main() {
     env.imports.value = _finished;
     writeRecord(env.activeDir, makeRecord(id: 'unknown-origin', card: 1));
 
-    await capture(tester, env.controller, 'unknown-origin', origin: 'some_future_session_kind');
+    await capture(tester, env.controller, env.activeDir, 'unknown-origin', origin: 'some_future_session_kind');
 
     expect(env.played, [SoundType.error]);
   });
@@ -220,7 +233,7 @@ void main() {
     env.imports.value = const VideoImportState(phase: VideoImportPhase.importing, fileName: 'clip.mkv');
     writeRecord(env.activeDir, makeRecord(id: 'import-body', card: 1));
 
-    await capture(tester, env.controller, 'import-body', origin: harvestOriginVideoImport);
+    await capture(tester, env.controller, env.activeDir, 'import-body', origin: harvestOriginVideoImport);
 
     expect(env.played, isEmpty);
     // The merge really ran. Without this the case cannot tell "merged in silence" from "not merged
@@ -266,6 +279,13 @@ void main() {
     await tester.runAsync(() async {
       env.container.invalidate(charaDetailRecordStorageLoaderProvider);
       await env.container.read(charaDetailRecordStorageLoaderProvider.future);
+      await waitUntil(
+        () =>
+            capturedRecordRetention.pending.isEmpty &&
+            !Directory((env.activeDir / 'r-a').path).existsSync() &&
+            !Directory((env.activeDir / 'r-b').path).existsSync(),
+        describe: 'the retained records to be drained and merged away',
+      );
       await pumpEventQueue(times: 20);
     });
     await tester.pump();

@@ -1712,8 +1712,8 @@ void main() {
       },
     );
 
-    test('every retry, from either screen, leaves the memo and rating maps as an uninterrupted first run '
-        'does', () async {
+    group('every retry, from either screen, leaves the memo and rating maps as an uninterrupted first run '
+        'does', () {
       // An interruption after the publication leaves some key files re-keyed and the rest as they
       // were. A retry, and the retry of a retry, finishes the rest with the defaults the first run
       // resolved and leaves the finished ones alone, whichever screen it is opened from: a default
@@ -1758,49 +1758,51 @@ void main() {
         return outcome;
       }
 
-      final failures = <String>[];
       for (final MapEntry(key: direction, value: (:seed, :kept, expected: _)) in directions.entries) {
         for (final first in EnhancementMergeRoute.values) {
-          useFreshRoot();
-          seed();
-          seedMetadata();
-          final uninterrupted = await loadedContainer();
-          expect(await attempt(uninterrupted, kept: kept, route: first), EnhancementMergeOutcome.merged);
-          uninterrupted.dispose();
-          final expectedMaps = metadataMaps();
-          final expectedBytes = metadataBytes();
+          test('$direction / first run on ${first.name}', () async {
+            final failures = <String>[];
+            useFreshRoot();
+            seed();
+            seedMetadata();
+            final uninterrupted = await loadedContainer();
+            expect(await attempt(uninterrupted, kept: kept, route: first), EnhancementMergeOutcome.merged);
+            uninterrupted.dispose();
+            final expectedMaps = metadataMaps();
+            final expectedBytes = metadataBytes();
 
-          for (final MapEntry(key: interruption, value: crashes) in interruptions.entries) {
-            for (final retryRoute in EnhancementMergeRoute.values) {
-              final label = '$direction / first run on ${first.name} / $interruption / retried on ${retryRoute.name}';
-              useFreshRoot();
-              seed();
-              seedMetadata();
-              for (final (index, crash) in crashes.indexed) {
-                final crashing = await loadedContainer(seams: crash());
-                final outcome = index == 0
-                    ? await attempt(crashing, kept: kept, route: first)
-                    : await attempt(crashing, route: retryRoute);
-                crashing.dispose();
-                expect(
-                  outcome,
-                  isNot(EnhancementMergeOutcome.merged),
-                  reason: '$label: attempt $index was interrupted',
-                );
-              }
-              final restarted = await loadedContainer();
-              expect(await attempt(restarted, route: retryRoute), EnhancementMergeOutcome.merged, reason: label);
-              restarted.dispose();
-              if (!equals(expectedMaps).matches(metadataMaps(), {})) {
-                failures.add('$label: ${metadataMaps()} instead of $expectedMaps');
-              } else if (!equals(expectedBytes).matches(metadataBytes(), {})) {
-                failures.add('$label: the same maps in other bytes');
+            for (final MapEntry(key: interruption, value: crashes) in interruptions.entries) {
+              for (final retryRoute in EnhancementMergeRoute.values) {
+                final label = '$direction / first run on ${first.name} / $interruption / retried on ${retryRoute.name}';
+                useFreshRoot();
+                seed();
+                seedMetadata();
+                for (final (index, crash) in crashes.indexed) {
+                  final crashing = await loadedContainer(seams: crash());
+                  final outcome = index == 0
+                      ? await attempt(crashing, kept: kept, route: first)
+                      : await attempt(crashing, route: retryRoute);
+                  crashing.dispose();
+                  expect(
+                    outcome,
+                    isNot(EnhancementMergeOutcome.merged),
+                    reason: '$label: attempt $index was interrupted',
+                  );
+                }
+                final restarted = await loadedContainer();
+                expect(await attempt(restarted, route: retryRoute), EnhancementMergeOutcome.merged, reason: label);
+                restarted.dispose();
+                if (!equals(expectedMaps).matches(metadataMaps(), {})) {
+                  failures.add('$label: ${metadataMaps()} instead of $expectedMaps');
+                } else if (!equals(expectedBytes).matches(metadataBytes(), {})) {
+                  failures.add('$label: the same maps in other bytes');
+                }
               }
             }
-          }
+            expect(failures, isEmpty);
+          });
         }
       }
-      expect(failures, isEmpty);
     });
 
     test('a merge started on the capture card and retried from settings keeps the older record\'s memo and '

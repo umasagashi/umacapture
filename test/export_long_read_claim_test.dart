@@ -61,6 +61,7 @@ import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 late Directory _tempRoot;
@@ -226,14 +227,6 @@ List<ToastData> _observedToasts(ProviderContainer container) {
   );
   addTearDown(subscription.close);
   return toasts;
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 class _ShowSingle extends ConsumerWidget {
@@ -484,7 +477,7 @@ void main() {
       addTearDown(tester.view.reset);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
       await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'a')), isTrue);
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'b')), isTrue);
@@ -525,8 +518,8 @@ void main() {
   // standing between the two.
   //
   // The claim is registered by hand here rather than through `runModuleInstall`:
-  // what is under test is the export reading the registry, and that the installer
-  // registers itself is `record_action_extraction_gate_test.dart`'s to assert.
+  // what is under test is the export reading the registry, not that the installer
+  // registers itself.
   group('the picker window', () {
     /// A save dialog that returns [output], having let [duringPicker] happen while
     /// it was up.

@@ -49,8 +49,7 @@ late DirectoryPath _target;
 /// Every root the storage view offers a delete over, split by whether the
 /// relocation's claim is supposed to cover it.
 ///
-/// **A total function over the group table**, for the reason
-/// `record_scan_long_read_claim_test.dart` gives for its own: the failure mode of
+/// **A total function over the group table**, because the failure mode of
 /// a claim like this one is naming some of what it moves, and a case that guards
 /// it with a second hand-written list fails in the same way. Classified against
 /// [DataRootMigrationController.movedRoots] — the same enumeration `pairs` copies

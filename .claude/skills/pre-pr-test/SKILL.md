@@ -76,7 +76,8 @@ Write the selection down before running anything: stage, R/r/skip, and the path 
 ## 2. Stage 1 — what CI runs
 
 Run the Flutter and Dart commands from the **PowerShell** tool, not Git Bash (§7, trap 1).
-Measured on 2026-09-27 with the stages run one after another and nothing else of the run alongside.
+Measured with the stages run one after another and nothing else of the run alongside: 1.3, 1.5 and 1.6 on
+2026-09-30 (median of three runs; 1.3 with a warm analyzer cache), every other row on 2026-09-27.
 A run in which another native build and ctest shared the CPU took up to about five times as long
 on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 
@@ -84,10 +85,10 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | --- | --- | --- | --- |
 | 1.1 | `.fvm/flutter_sdk/bin/dart run build_runner build --force-jit` | exit 0 | 12 s |
 | 1.2 | `git status --short` right after 1.1 | no generated file changed and no new generated file appeared (codegen is fresh). CI's `Check generated outputs are committed` step fails on either under `lib/` and `test/` | — |
-| 1.3 | `.fvm/flutter_sdk/bin/flutter analyze --no-fatal-infos` | exit 0, no error or warning | 45 s |
+| 1.3 | `.fvm/flutter_sdk/bin/flutter analyze --no-fatal-infos` | exit 0, no error or warning | 31 s |
 | 1.4 | `.fvm/flutter_sdk/bin/dart format --output=none --set-exit-if-changed lib test tool` | exit 0 | 3 s |
-| 1.5 | `.fvm/flutter_sdk/bin/flutter test -j 4 --reporter github test` | exit 0, 0 failed | 409 s |
-| 1.6 | `.fvm/flutter_sdk/bin/dart test --platform chrome --reporter expanded $files` (Git Bash, `$files` from the note below) | exit 0, 0 failed, and the number of distinct test files the log names equals the number extracted | 18 s |
+| 1.5 | `.fvm/flutter_sdk/bin/flutter test -j 4 --reporter github test` | exit 0, 0 failed | 207 s |
+| 1.6 | `.fvm/flutter_sdk/bin/dart test --platform chrome --reporter expanded $files` (Git Bash, `$files` from the note below) | exit 0, 0 failed, and the number of distinct test files the log names equals the number extracted | 12 s |
 | 1.7 | `.fvm/flutter_sdk/bin/flutter build web --release --pwa-strategy=none` | exit 0, `Built build\web`, and `build/web/main.dart.js`'s mtime is after the step started | 127 s |
 | 1.8 | `bash tool/hooks/test_pre_commit.sh` | exit 0 | 6 s |
 | 1.9 | `node tool/test_web_frame_shaping.mjs`, `test_web_live_content.mjs`, `test_web_capture_session.mjs`, `test_web_video_import.mjs`, `test_web_video_frame_grab.mjs`, `test_web_video_demux.mjs` (all under `tool/`) | each exits 0 | 6 s for all six |

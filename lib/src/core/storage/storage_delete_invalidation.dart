@@ -347,8 +347,7 @@ void refreshStorageTabAfterDelete(RefBase ref, {required List<PathEntity> touche
 /// What the race used to cost was a `logger.e` and a Sentry event per delete,
 /// because `_readStorageFile` read "the file I was about to read is gone" as a
 /// load failure. It no longer does: absence answers empty and only absence does,
-/// so a corrupt store still reports. See that function, and
-/// `metadata_absent_file_test.dart` for the pair of cases that hold the two apart.
+/// so a corrupt store still reports. See that function.
 Future<void> runStorageDeleteSerialized(RefBase ref, PathEntity target, Future<void> Function() action) async {
   // The layout, not `pathInfoProvider`: this runs inside a storage-view delete,
   // which must keep working while the record store is unopenable — repairing

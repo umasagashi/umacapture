@@ -6,8 +6,7 @@
 // other shape of the same thing is then absent from what it finds rather than reported. The formatter
 // alone produces several shapes of one call (it breaks a method chain before the dot), so a guard
 // written as a pattern ends up constraining how `lib/` may be formatted. A syntax tree has one node
-// for a call however it is laid out. `video_import_report_fields_test.dart` states the same rule for
-// its own enumeration.
+// for a call however it is laid out.
 //
 // WHAT A SYNTAX TREE STILL CANNOT SAY. The parse is unresolved: an identifier is a name, not the
 // declaration it resolves to. `archiver.archive(…)` is a call of *some* `archive`, and whether
@@ -23,7 +22,7 @@ import 'dart:io';
 // `analyzer` reaches this package transitively (through the codegen stack). Depended on here rather
 // than promoted to a direct dev_dependency because pinning it would freeze the version the codegen
 // packages resolve to, and these helpers only ever need the parser. Same arrangement as
-// `pump_loop_bound_guard_test.dart` and `video_import_report_fields_test.dart`.
+// `sentry_scrub_event_test.dart`.
 // ignore: depend_on_referenced_packages
 import 'package:analyzer/dart/analysis/utilities.dart';
 // ignore: depend_on_referenced_packages

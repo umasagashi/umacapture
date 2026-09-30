@@ -40,7 +40,7 @@
 // `native/test/chara_detail/test_scene_scraper.cpp` ("a tab that begins capturing without a cue…").
 //
 // The status ranking itself is asserted in `switch_safety_test.dart`, with the rest of the status
-// derivation, and the wording keys in `capture_wording_test.dart`.
+// derivation.
 import 'dart:convert';
 
 import 'package:flex_color_scheme/flex_color_scheme.dart';
@@ -655,6 +655,5 @@ class _ProbeRecordingStorage extends CharaDetailRecordStorage {
   }
 }
 
-/// Exposes a [Ref] so a [PlatformController] can be built against a bare container, exactly as
-/// `tab_refusal_test.dart` does.
+/// Exposes a [Ref] so a [PlatformController] can be built against a bare container.
 final _refProvider = Provider<Ref>((ref) => ref);

@@ -271,7 +271,7 @@ void main() {
       final controller = _previewController();
       expect(controller.text, prettyPrintJson(source));
       expect(controller.text, isNot(source), reason: 'the raw bytes would not be re-indented');
-      // The language is the half `code_highlight_field_test` cannot see from
+      // The language is the half a rendered field cannot show from
       // here: with `'dart'` (the controller's default) the field still colours
       // something, so only the parameter itself distinguishes the two.
       expect(controller.language, 'json');

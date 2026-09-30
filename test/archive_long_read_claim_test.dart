@@ -60,6 +60,7 @@ import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -136,8 +137,7 @@ DirectoryPath _seedRecord(String id) {
 
 /// The app with nothing else going on, and both record stores faked.
 ///
-/// The capture and import blockers are pinned for the reason
-/// `storage_extraction_delete_gate_test.dart` states: the active record group is
+/// The capture and import blockers are pinned because the active record group is
 /// one a capture writes into, so an unpinned activity blocker would disable the
 /// very buttons these cases are about.
 ProviderContainer _container({_FakeRecordStorage? storage}) {
@@ -195,21 +195,13 @@ bool _confirmLive(WidgetTester tester) {
   return button.onLongPress != null && button.onPressed != null;
 }
 
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
-
 Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1000, 2400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
   await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-  await _settle(tester);
+  await settleStorageRows(tester);
 }
 
 class _ShowSingle extends ConsumerWidget {
@@ -601,7 +593,7 @@ void main() {
       // Settled rather than pumped: the end of a batch also announces the record
       // tree to the storage view (`record_write_invalidation.dart`), so the rows
       // are being walked again and a single frame finds none of them.
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
 
       // What the returned control leads to is still the delete: the claim above

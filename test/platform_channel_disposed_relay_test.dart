@@ -142,12 +142,7 @@ Future<ProviderContainer> _containerWithStore() async {
   return container;
 }
 
-Future<void> _settleIo(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
+Future<void> _settleIo(WidgetTester tester) => pumpRealTimeWindow(tester, rounds: 8);
 
 Future<SentryRateLimit?> _readyRateLimit() async => SentryRateLimit(true, 100);
 
@@ -309,7 +304,11 @@ void main() {
       );
 
       _successorChannelRegisters(controller);
-      await _settleIo(tester);
+      await settleUntil(
+        tester,
+        () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+        describe: 'the dialog to settle once the successor channel registers',
+      );
 
       expect(find.byType(CircularProgressIndicator), findsNothing, reason: 'the dialog reached its settled state');
       expect(find.text('$tr_report_screen.dialog.screenshot_error'.tr()), findsOneWidget);

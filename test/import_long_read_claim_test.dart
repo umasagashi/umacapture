@@ -270,9 +270,7 @@ void main() {
   /// than another guess about the host: it is spent inside a window this helper
   /// opened and has not yet closed, not aimed at one it hopes is still open.
   ///
-  /// The start edge is latched on a landed toast as well, the way
-  /// `chara_detail_import_button_test.dart` and `import_refusal_surface_test.dart`
-  /// latch theirs: every run this helper drives ends in one, and a toast that has
+  /// The start edge is latched on a landed toast as well: every run this helper drives ends in one, and a toast that has
   /// landed stays landed. That is a diagnosability net — a run that never raised
   /// the spinner reaches the claim wait and names it, instead of hanging here.
   ///

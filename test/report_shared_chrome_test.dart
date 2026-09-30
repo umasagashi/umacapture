@@ -1,8 +1,7 @@
 // ONE WIDGET FOR ONE STATE, ACROSS THE THREE BUG-REPORT DIALOGS.
 // Run: .fvm/flutter_sdk/bin/flutter test test/report_shared_chrome_test.dart
 //
-// The sibling `report_shared_strings_test.dart` pins the *text* the three report dialogs share.
-// This file pins the *widgets*: the "still checking the quota" spinner and the close-only notice
+// This file pins the *widgets* the three report dialogs share: the "still checking the quota" spinner and the close-only notice
 // used to be written out once per dialog, structurally identical each time, and sharing the strings
 // alone left the same drift one level up.
 //
@@ -103,8 +102,7 @@ void main() {
 
   setUp(() async {
     await Hive.box('settings').clear();
-    // Seeded outside the widget test's zone, for the reason `report_shared_strings_test.dart`
-    // states: a Hive write issued inside a widget test's fake-async zone never completes.
+    // Seeded outside the widget test's zone: a Hive write issued inside a widget test's fake-async zone never completes.
     final box = StorageBox(StorageBoxKey.settings);
     box.entry<DateTime>(SettingsEntryKey.sentryReportLastMonth.name).push(DateTime.now());
     box.entry<int>(SettingsEntryKey.sentryReportTotalCount.name).push(0);

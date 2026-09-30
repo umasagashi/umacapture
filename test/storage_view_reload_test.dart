@@ -11,8 +11,7 @@
 // three writers.
 //
 // WHAT THIS FILE OWNS. The view is a dialog: `storage_dialog_entry_test.dart`
-// owns the entry (it opens the dialog twice) and `app_route_test.dart` owns the
-// routes. This file owns the widget in the middle: **one mount of
+// owns the entry (it opens the dialog twice). This file owns the widget in the middle: **one mount of
 // `FreshStorageTree` is one visit**, whoever mounts it. That is asserted here by
 // mounting and unmounting it directly — which is what an entry causes rather
 // than the entry itself, so this stays true of a second entry nobody has written
@@ -49,6 +48,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -107,23 +107,6 @@ Future<void> _leaveAndReturn(WidgetTester tester) async {
   await tester.pump();
 }
 
-/// Pumps until nothing in the tree is pending. Copied in spirit from
-/// `storage_tree_test.dart`: `dart:io` futures need `runAsync`, and the pending
-/// rows schedule a frame per tick so `pumpAndSettle` would never return.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 60; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-    final pending =
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
-        find.text(appSentenceAt('pages.storage.status.calculating')).evaluate().isNotEmpty;
-    if (!pending) {
-      return;
-    }
-  }
-  fail('the storage tree still had a pending row after 60 rounds');
-}
-
 String _cellText(Key key) {
   final text = find.descendant(of: find.byKey(key), matching: find.byType(Text), matchRoot: true);
   return (text.evaluate().single.widget as Text).data ?? '';
@@ -154,10 +137,10 @@ void main() {
       _write('documents/umacapture/temp/a.bin', 4);
       final container = _container();
       await _pumpView(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
       expect(find.text('a.bin'), findsOneWidget);
 
@@ -169,12 +152,12 @@ void main() {
       // it is the gesture the "do not re-walk while the user is here" rule is
       // about — and the figures must not move.
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.quarantine, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
       expect(find.text('b.bin'), findsNothing);
 
       await _leaveAndReturn(tester);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       // 8 and not 4 is what says the totals cache went with the providers: the
       // group total is answered by `DirectoryTotalsCache`, and a provider rebuilt
@@ -188,9 +171,9 @@ void main() {
       _write('documents/umacapture/temp/a.bin', 4);
       final container = _container();
       await _pumpView(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
 
       await _leaveAndReturn(tester);
@@ -205,7 +188,7 @@ void main() {
       expect(find.text(appSentenceAt('pages.storage.status.loading')), findsWidgets);
       expect(find.text(formatByteSize(4)), findsNothing);
 
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
     });
   });

@@ -2,8 +2,8 @@
 // longer matches the requested T (a key repurposed across app versions) must
 // degrade to null instead of throwing a TypeError inside a notifier's build().
 //
-// This is separate from storage_box_test.dart because that file flips the
-// one-way markHiveClosed global; keeping this here avoids that flag.
+// This is kept apart from any suite that flips the one-way markHiveClosed
+// global, so that flag is never set here.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/storage_box_pull_test.dart
 import 'package:flutter_test/flutter_test.dart';

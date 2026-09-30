@@ -52,8 +52,7 @@ final _unlockedGroup = storageGroupOf(StorageGroupId.unclassified);
 /// are, so it can take that group's lock (`runUnderStorageExclusion`). The value
 /// is irrelevant to every case
 /// in this file: `_unlockedGroup` owns no root and takes no lock, so nothing is
-/// matched against these paths. The suite that *is* about the exclusion is
-/// `storage_extraction_lock_test.dart`.
+/// matched against these paths.
 final _exclusionLayout = PathInfo(
   documentDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/documents'),
   supportDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/support'),

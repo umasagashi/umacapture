@@ -11,8 +11,7 @@
 ///
 /// The worker therefore compares every pixel of each frame with the previous frame's
 /// and measures the real-time length of each run of identical content; the verdict is
-/// taken here, in Dart, where the thresholds are covered by a truth-table test
-/// (`test/live_content_freeze_test.dart`). The worker branches on none of it.
+/// taken here, in Dart. The worker branches on none of it.
 ///
 /// WHAT THIS CANNOT DO is tell a frozen share from a screen that is merely still.
 /// Both are byte-identical frames, and no measurement over the pixels can separate

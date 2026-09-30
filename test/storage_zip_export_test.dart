@@ -50,6 +50,7 @@ import 'package:umacapture/src/core/clipboard_alt.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/file_download.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -57,7 +58,9 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 /// A group whose [StorageLockScope] is `unlocked`, for the cases that are not
 /// about the per-group exclusion. Named rather than inlined so a case that *is* about
@@ -70,8 +73,7 @@ final _unlockedGroup = storageGroupOf(StorageGroupId.unclassified);
 /// are, so it can take that group's lock (`runUnderStorageExclusion`). The value
 /// is irrelevant to every case
 /// in this file: `_unlockedGroup` owns no root and takes no lock, so nothing is
-/// matched against these paths. The suite that *is* about the exclusion is
-/// `storage_extraction_lock_test.dart`.
+/// matched against these paths.
 final _exclusionLayout = PathInfo(
   documentDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/documents'),
   supportDir: DirectoryPath('${Directory.systemTemp.path}/uma-unused-layout/support'),
@@ -203,32 +205,14 @@ StorageGroup _group(StorageGroupId id) => storageGroups.firstWhere((group) => gr
 
 Widget _tree() => const MaterialApp(home: Scaffold(body: StorageTreeView()));
 
-/// Pumps the view and lets its real `dart:io` futures resolve.
-///
-/// `runAsync` for the reason `storage_tree_test.dart` states: `testWidgets` runs
-/// under a fake clock and a filesystem future completes on the real event loop.
-/// A fixed number of rounds rather than "until no spinner is left", because this
-/// suite deliberately puts a `CircularProgressIndicator` on screen -- the zip
-/// progress -- and a settle written that way would wait for the thing under test
-/// to go away.
-/// Lets the real event loop run without re-pumping the widget, which would take
-/// an open menu route with it.
-Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
-  for (var round = 0; round < rounds; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
-}
-
-Future<void> _pumpTree(WidgetTester tester, ProviderContainer container, {int rounds = 30}) async {
+/// Pumps the view and waits for its rows to be read. The zip progress this suite puts on screen is
+/// a determinate indicator, which `settleStorageRows` does not count as a pending row.
+Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1200, 1800);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await pumpWithContainer(tester, container, _tree());
-  for (var round = 0; round < rounds; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
+  await settleStorageRows(tester);
 }
 
 void main() {
@@ -839,7 +823,11 @@ void main() {
       await dismissStorageMenu(tester);
 
       gate.complete(StorageZipDelivery.written);
-      await _settle(tester);
+      await settleUntil(
+        tester,
+        () => container.read(longReadRegistryProvider).isEmpty,
+        describe: 'the finished zip to release its claim',
+      );
 
       await pressStorageRowMenuButton(tester, other);
       expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);

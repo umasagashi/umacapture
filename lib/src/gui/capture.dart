@@ -715,9 +715,7 @@ Color captureToneColor(ThemeData theme, CaptureStatusTone tone) => switch (tone)
 /// means "a key that should be there is not", still resolves through `tr()`, and so is still logged
 /// by easy_localization and still shown as a raw key exactly as a missing *mandatory* line is. Only
 /// `""` means "there is nothing to say here". Which lines are optional is therefore a property of
-/// the shipped translations, not of a list kept in code that could omit an entry silently — and
-/// `test/capture_optional_line_test.dart` enumerates the states out of `ja.json` and fails on the
-/// first one that does not carry both of its keys.
+/// the shipped translations, not of a list kept in code that could omit an entry silently.
 @visibleForTesting
 String? optionalMessageLine(String key) {
   if (!key.trExists()) {
@@ -1202,8 +1200,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
 /// depart on their own — a regeneration starting or ending is enough — and the rule the control row
 /// above states at length is that nothing which can appear or vanish by itself may sit above a
 /// control the user is aiming at. These links are controls, and one of them opens a screen-share
-/// permission request, so putting them under the notices would re-create the very displacement
-/// `capture_control_layout_test.dart` exists to forbid.
+/// permission request, so putting them under the notices would re-create that very displacement.
 class _ErrorReportLinks extends ConsumerWidget {
   /// What is running, resolved once by [CaptureControlGroup] and passed down for the same reason
   /// [CharaDetailStateWidget] is handed the import snapshot: both links gate on it, and resolving it
@@ -1802,7 +1799,7 @@ class CaptureControlGroup extends ConsumerWidget {
   /// `video_import_io.dart` (the Dart VM has `dart.library.io`), where [videoImportAvailable] tracks
   /// `Platform.isWindows` rather than the notifier actually driving an import — so without these
   /// seams no test can lay this card out with an import running, and the import→idle transition
-  /// that moved the control row is unreachable (see `capture_control_layout_test.dart`).
+  /// that moves the control row is unreachable.
   @visibleForTesting
   final ValueListenable<VideoImportState>? importState;
 

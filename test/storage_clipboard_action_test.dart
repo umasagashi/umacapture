@@ -50,7 +50,9 @@ import 'package:umacapture/src/gui/theme_extensions.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 /// The channel `pasteboard` talks to on the native host.
 const _pasteboardChannel = MethodChannel('pasteboard');
@@ -105,27 +107,6 @@ Future<void> _pumpPreview(WidgetTester tester, ProviderContainer container, File
   );
 }
 
-/// Pumps until nothing in the tree is pending, stepping outside the fake clock so
-/// the `dart:io` listings can actually complete. Bounded, and fails naming the
-/// condition — see `support/settling.dart` for why this is not `pumpAndSettle`.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 60; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-    // Both signals, because stage 7 turned the totals' spinners into the word
-    // 「計算中…」: a settle that watched only the indicator would return while the
-    // group totals were still being walked, and every byte-count assertion after
-    // it would read that word instead of a size.
-    final pending =
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
-        find.text(appSentenceAt('pages.storage.status.calculating')).evaluate().isNotEmpty;
-    if (!pending) {
-      return;
-    }
-  }
-  fail('the storage surface still had a pending row after 60 rounds');
-}
-
 /// Waits for a clipboard write that was started by a tap.
 ///
 /// The write awaits `exists()`, a real `dart:io` stat, so it makes no progress
@@ -133,13 +114,8 @@ Future<void> _settle(WidgetTester tester) async {
 /// fixed number of rounds, for the reason `support/settling.dart` states, and
 /// bounded so a write that never happens is named as that instead of surfacing
 /// as an empty list three lines later.
-Future<void> _awaitWrite(WidgetTester tester) async {
-  for (var round = 0; round < 200; round++) {
-    if (_written.isNotEmpty) return;
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
-  fail('the tap started no clipboard write');
+Future<void> _awaitWrite(WidgetTester tester) {
+  return settleUntil(tester, () => _written.isNotEmpty, describe: 'the tap to start a clipboard write');
 }
 
 /// Presses [target] with the secondary button and lets the menu route settle.
@@ -158,15 +134,15 @@ Future<void> _secondaryPress(WidgetTester tester, Finder target) async {
 /// as a file row.
 Future<void> _openToTheFile(WidgetTester tester, ProviderContainer container) async {
   await _pumpTree(tester, container);
-  await _settle(tester);
+  await settleStorageRows(tester);
   final expansion = container.read(storageTreeExpansionProvider.notifier);
   expansion.toggle((group: StorageGroupId.activeRecords, path: null));
-  await _settle(tester);
+  await settleStorageRows(tester);
   expansion.toggle((
     group: StorageGroupId.activeRecords,
     path: _abs('documents/umacapture/storage/chara_detail/active/rec1'),
   ));
-  await _settle(tester);
+  await settleStorageRows(tester);
   expect(find.text('record.json'), findsOneWidget, reason: 'the file row has to be on screen to be pressed');
 }
 
@@ -254,9 +230,9 @@ void main() {
     testWidgets("a directory row's menu copies that directory", (tester) async {
       final container = _container(fileReferences: true);
       await _pumpTree(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       final directory = DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1'));
       await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(directory));
@@ -277,15 +253,15 @@ void main() {
     testWidgets('a file row carries one trailing control, and it is the menu', (tester) async {
       final container = _container(fileReferences: true);
       await _pumpTree(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       final expansion = container.read(storageTreeExpansionProvider.notifier);
       expansion.toggle((group: StorageGroupId.activeRecords, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expansion.toggle((
         group: StorageGroupId.activeRecords,
         path: _abs('documents/umacapture/storage/chara_detail/active/rec1'),
       ));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(find.text('record.json'), findsOneWidget, reason: 'the file row has to be on screen to be judged');
       final file = FilePath(_abs('documents/umacapture/storage/chara_detail/active/rec1/record.json'));
@@ -322,7 +298,7 @@ void main() {
       final container = _container(fileReferences: true);
       final file = FilePath(_abs('documents/umacapture/storage/chara_detail/active/rec1/record.json'));
       await _pumpPreview(tester, container, file);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       final footer = find.byKey(storageFilePreviewFooterKey);
       expect(footer, findsOneWidget, reason: 'every assertion below is only meaningful inside the footer');
@@ -380,9 +356,9 @@ void main() {
     testWidgets('no directory row offers a copy entry', (tester) async {
       final container = _container(fileReferences: false);
       await _pumpTree(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(find.text('rec1'), findsOneWidget, reason: 'the directory row has to be on screen to be judged');
       final directory = DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1'));

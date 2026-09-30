@@ -7,8 +7,8 @@
 // for "it broke, it will not delete, I want one file out" — so the way in is now
 // a row in the settings page's System card, and the view opens over it as a
 // `CardDialog`. The tab is gone — it is not in `Pages.labels` and has no route
-// (`app_pages_test.dart`, `app_navigation_surfaces_test.dart`,
-// `app_route_test.dart`) — so this is the only way in, and this suite owns it.
+// (`app_navigation_surfaces_test.dart`) — so this is the only way in, and this
+// suite owns it.
 //
 // THE THREE CLAIMS, AND WHY EACH NEEDS ITS OWN TEST.
 //
@@ -67,6 +67,7 @@ import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -135,23 +136,6 @@ Finder _closeButton() {
 Future<void> _close(WidgetTester tester, ProviderContainer container) async {
   CardDialog.dismiss(container.read(containerRefProvider));
   await tester.pump();
-}
-
-/// Pumps until nothing in the tree is pending. Copied in spirit from
-/// `storage_tree_test.dart`: `dart:io` futures need `runAsync`, and the pending
-/// rows schedule a frame per tick so `pumpAndSettle` would never return.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 60; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-    final pending =
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
-        find.text(appSentenceAt('pages.storage.status.calculating')).evaluate().isNotEmpty;
-    if (!pending) {
-      return;
-    }
-  }
-  fail('the storage tree still had a pending row after 60 rounds');
 }
 
 String _cellText(Key key) {
@@ -239,7 +223,7 @@ void main() {
       final container = _container();
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(find.byType(StorageTreeView), findsOneWidget);
       // `CardDialog`'s default wraps the content in one of these. The tree does
@@ -258,7 +242,7 @@ void main() {
       final container = _container();
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
       final dialog = tester.getSize(find.byType(StorageManagerDialog));
@@ -274,9 +258,9 @@ void main() {
       await _pump(tester, container, const SizedBox.shrink());
 
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
       expect(find.text('a.bin'), findsOneWidget);
 
@@ -288,7 +272,7 @@ void main() {
       // the gesture the "do not re-walk while the user is here" rule is about —
       // and the figures must not move.
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.quarantine, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
       expect(find.text('b.bin'), findsNothing);
 
@@ -301,7 +285,7 @@ void main() {
       // storage once, at the first open, would also redraw `4 B` — which is why
       // this suite opens twice rather than asserting the first open's figures.
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(8));
       expect(find.text('b.bin'), findsOneWidget);
       expect(find.text('a.bin'), findsOneWidget);
@@ -313,9 +297,9 @@ void main() {
       await _pump(tester, container, const SizedBox.shrink());
 
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
 
       await _close(tester, container);
@@ -328,7 +312,7 @@ void main() {
       expect(_cellText(storageAppDataTotalKey), appSentenceAt('pages.storage.status.calculating'));
       expect(find.text(formatByteSize(4)), findsNothing);
 
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(_cellText(storageGroupSizeKey(StorageGroupId.temp)), formatByteSize(4));
     });
   });
@@ -351,9 +335,9 @@ void main() {
       _write('documents/umacapture/temp/a.bin', 4);
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(find.text('a.bin'), findsOneWidget);
       return (_info.documentDir / 'temp').filePath('a.bin');
     }
@@ -394,7 +378,7 @@ void main() {
       final container = _container();
       final file = await openWithAFile(tester, container);
       container.read(longReadRegistryProvider.notifier).claimUntilReleased(kind: LongReadKind.scan, paths: [file]);
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(
         storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)),
         isFalse,
@@ -465,9 +449,9 @@ void main() {
       final container = _container();
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       await tester.tap(find.byKey(storageBoxRowKey('column_spec')));
       await tester.pump();
@@ -500,7 +484,7 @@ void main() {
       addTearDown(container.dispose);
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.settings));
       await tester.tap(find.text(storageActionLabel('delete')));
@@ -517,7 +501,7 @@ void main() {
           matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton && widget is! OutlinedButton),
         ),
       );
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(find.byKey(storageDeleteResultKey), findsOneWidget);
       expect(find.byType(StorageTreeView), findsOneWidget);
@@ -550,7 +534,7 @@ void main() {
       final container = _container();
       await _pump(tester, container, const SizedBox.shrink());
       await _open(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       CardDialog.show(
         container.read(containerRefProvider),

@@ -1007,10 +1007,10 @@ first divider, inside the capability-chip row, where a notice's toggle *did* shi
 opens a screen-share permission request, so a click aimed at 「中止」 could land on 「キャプチャエラー
 報告」 instead the instant an import ended and the layout above it collapsed by that same 52 px. Moving
 the links above the notices, in `CaptureControlGroup.build` (`lib/src/gui/capture.dart`), closed that
-the same way the control row's own position closes it for itself, and
-`test/capture_report_link_order_test.dart` now measures it directly:
-both links stay within the band between the control row's bottom and the first divider's top, checked
-at two viewports including a 400 px / 200 %-text-scale case that also asserts nothing overflows.
+the same way the control row's own position closes it for itself:
+both links stay within the band between the control row's bottom and the first divider's top. No test
+measures that placement, at any viewport or text scale; it rests on the order of the children in
+`CaptureControlGroup.build`.
 
 **One status display for both session kinds.** The three progress rings, the status banner and the
 import's own lines (clip name, progress bar, inline cancel, and the gates that refuse a new import)
@@ -1103,7 +1103,7 @@ shared plus Windows' own `file_unreadable` — and its
 `wireName` is *also* the translation key (`…video_import.result.reason.<wireName>`) — one vocabulary
 rather than two, because the blocker keys' camelCase/snake_case mismatch is what once rendered a raw
 translation key at the user. Adding a case means adding a line to `assets/translations/ja.json`,
-which `test/video_import_reason_test.dart` requires. A kind that arrives from a **newer** worker than
+and nothing checks that the line exists. A kind that arrives from a **newer** worker than
 this build knows about parses as null, and a kind this build knows but `ja.json` does not carry is
 caught by comparing the lookup against its own key; both fall back to the outcome kind's generic
 line, never to a blank and never to a raw enum name.
@@ -1126,14 +1126,14 @@ off the logs; do not assume it.
 | the flow-gate arithmetic | Node, pure integer code against a stubbed `Module` |
 | the `VideoDecoder` step and `sample.copyTo` | **browser only** |
 | the session-kind verdicts | `native/test/core/test_native_api_capture_session.cpp`, no pipeline needed |
-| web-only Dart (the **web** facade: the file dialog, the worker client) | `@TestOn('browser')` + `dart test --platform chrome`. CI's browser job runs **an explicit list of file names**, not a glob or an `@TestOn` sweep, so adding a test means editing that line — and a `@TestOn('browser')` file that nobody adds there is simply never run. Today the two files carrying the annotation (`record_mutation_lock_web_test.dart`, `storage_persistence_web_test.dart`) are both named on it, so there is no such gap open. Do **not** try to close one by adding `record_loader_web_test.dart`: it dropped its annotation as unnecessary, `import 'dart:io'`, and runs on the VM with everything else under `flutter test` — moving it to the browser job would fail to compile |
+| web-only Dart (the **web** facade: the file dialog, the worker client) | `@TestOn('browser')` + `dart test --platform chrome`. CI's browser job runs whatever `tool/test_selection.dart browser` prints: every `test/**/*_test.dart` whose library carries `@TestOn('browser')`, found by parsing the annotation the way the test runner does. Adding the annotation is what routes a file to the browser job, and no CI file needs editing; a file with any other `@TestOn` selector fails the selection rather than being run by neither job. A file without the annotation runs on the VM shards, so `record_loader_web_test.dart` (no annotation, `import 'dart:io'`) is not browser-only, and moving it to the browser job would fail to compile |
 | the **Windows** Dart facade — the wire format going out, the three notifications coming back, the terminal-outcome rule | ordinary `flutter test`, because the io leg is VM-compilable: `video_import_io_test.dart` drives it against a mock method-channel handler through the picker seam (`videoImportPathPicker`; the real dialog would open a modal window on the machine running the suite), and `video_import_native_routing_test.dart` proves the three types are routed by the real `handleNativeMessage` dispatch. **Nothing below the method channel exists on the VM** — that the runner decodes the argument, and that it sends those notifications, is not covered here |
 | the desktop origin marker and the synchronous merge it backstops | `notification_sound_capture_origin_test.dart` (an import-origin duplicate is silent, a live-origin one still chimes, an absent field reads as live) and `capture_merge_synchrony_test.dart`, which asserts the merge-inside-the-microtask invariant directly instead of leaving it as prose |
 | `VideoLoader`'s cancel predicate and progress/duration hooks | `native/test/cv/test_video_loader.cpp` |
 | the notify payload shapes, including the optional `origin` field, the `records` count, the discarded-session payload and the `completed` + `records: 0` → `refused` / `no_records` rewrite | `native/test/core/test_native_api_messages.cpp` |
 | the "ran to the end and produced nothing" ending, end to end through the CLI | the three `expect_records: 0` cases in `native/test/integration/cases.json` (`player_standard_factor_only_1`, `player_standard_factor_tiny_scroll_switch`, `_2`), which assert the record count, the announced error tags and the discard count off the CLI's run summary. Conditional on their clips like every other case, and **they are `video` runs of the CLI, so they say nothing about either import driver** |
 | the Windows import session itself — refusals, drain, teardown, the DLL actually loading | **nothing automated.** `windows/runner/` is not reached by any suite, and the golden suite drives the CLI, not the app. Hand verification only |
-| the import's UI — layout, banner, per-character tile, sound mute, reason lines | ordinary `flutter test`, through the injected seams (`importState` / `available` / `supported`, `NotificationLayer.debugVideoImportState` / `debugPlaySound`) — `capture_control_layout_test.dart`, `capture_status_display_test.dart`, `notification_sound_import_mute_test.dart`, `video_import_reason_test.dart`. The seams are still what makes the UI addressable: they pin one state per case instead of whatever the host platform's facade happens to answer, and on a non-Windows VM the facade is the stub's constant `false` and constant idle, which renders nothing. The tail merge above needs more than a seam, so `notification_sound_harvest_boundary_test.dart` drives the real `handleNativeMessage` dispatch over a real record store and asserts on the real sound sink with the import state already settled |
+| the import's UI — layout, banner, per-character tile, sound mute, reason lines | ordinary `flutter test`, through the injected seams (`importState` / `available` / `supported`, `NotificationLayer.debugVideoImportState` / `debugPlaySound`) — `capture_status_display_test.dart`. The seams are still what makes the UI addressable: they pin one state per case instead of whatever the host platform's facade happens to answer, and on a non-Windows VM the facade is the stub's constant `false` and constant idle, which renders nothing. The tail merge above needs more than a seam, and no suite drives it through the real `handleNativeMessage` dispatch |
 | recognition under a second YUV → RGB matrix | `integration_dual_decode.<case>` (`native/test/integration/run_dual_decode.py`), one ctest per case |
 | one browser's actual pixels | `integration_golden.firefox_landscape_2pane_ps5`, a `replay` case over a lossless recording |
 

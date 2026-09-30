@@ -4,12 +4,8 @@
 // **What these cases are and are not.** They are the registry's own algebra —
 // what a claim puts on it, what a release takes off, and that the two delete
 // predicates quantify over *every* hold of *every* claim rather than over the
-// first one. The wiring from those answers to a real button is asserted by
-// `storage_extraction_delete_gate_test.dart` and
-// `record_delete_extraction_gate_test.dart`, which drive the actual widgets and
-// which this change deliberately left untouched: they were green before the
-// registry existed and are green after it, which is what says the swap moved no
-// behaviour.
+// first one. The wiring from those answers to a real button is not asserted
+// here.
 //
 // Not covered here, and stated so it is not mistaken for covered:
 //  * The web leg. The registry is platform-agnostic Dart with no branch in it,

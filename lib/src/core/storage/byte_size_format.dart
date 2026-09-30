@@ -3,8 +3,8 @@
 ///
 /// [formatStorageTimestamp] lives in this file rather than in the view for the
 /// same reason as [formatByteSize]: it needs nothing but the Dart VM, which lets
-/// `storage_timestamp_format_test.dart` exercise it in a child process with a
-/// non-zero `TZ` to observe the UTC-to-local conversion. See that function's own
+/// a test exercise it in a child process with a non-zero `TZ` to observe the
+/// UTC-to-local conversion. See that function's own
 /// doc for the detail. A widget-library import anywhere in this file's chain
 /// would put that invariant back out of reach of anything but the host's own
 /// zone, so no such import belongs here even for a future addition.
@@ -100,9 +100,8 @@ String formatByteSize(int? bytes) {
 /// the field getters, which on a UTC-flagged `DateTime` return UTC fields, so
 /// dropping the conversion shifts every row by the host's offset — a silent
 /// error that still looks like a plausible timestamp. Whether that conversion
-/// happens cannot be observed at all on a host whose own offset is zero, so
-/// `storage_timestamp_format_test.dart` renders this in a **child process with a
-/// non-zero `TZ`**. This function lives here, beside [unknownSizeLabel] and
+/// happens cannot be observed at all on a host whose own offset is zero; only a
+/// **child process with a non-zero `TZ`** can see it. This function lives here, beside [unknownSizeLabel] and
 /// [formatByteSize] rather than in the view, so that child needs nothing but the
 /// Dart VM: a widget library in its imports would put the invariant back out of
 /// reach of anything but the host's own zone.

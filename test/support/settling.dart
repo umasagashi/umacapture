@@ -78,9 +78,8 @@ Future<void> settleUntil(
 /// no tester to hand -- a helper that only has a `ProviderContainer`, say -- the caller can put it
 /// inside `tester.runAsync(...)`, where the real event loop is running and this behaves as written.
 ///
-/// `test/pump_loop_bound_guard_test.dart` enforces this: it rejects a call to [waitUntil] reached
-/// from a `testWidgets` body outside a `runAsync`. It matches on the name, so a copy of this loop
-/// under another name is not covered -- do not write one.
+/// Nothing enforces this, so a call to [waitUntil] from a `testWidgets` body outside a `runAsync`
+/// is caught only in review. Do not write a copy of this loop under another name either.
 Future<void> waitUntil(bool Function() ready, {required String describe, Duration timeout = _defaultTimeout}) async {
   final waited = Stopwatch()..start();
   while (!ready()) {
@@ -88,5 +87,22 @@ Future<void> waitUntil(bool Function() ready, {required String describe, Duratio
       fail('waited ${waited.elapsed.inSeconds}s for $describe, which never happened');
     }
     await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
+
+/// Pumps a fixed window of real time: [rounds] turns of `runAsync(Future.delayed(step))` followed by a
+/// `pump`, for an assertion that something must *not* happen, or must happen no more than once.
+/// Neither has an arrival to poll for, so the window is the claim's reach: shortening [rounds] or
+/// [step] weakens it, and a call site passes the window its assertion was written against.
+///
+/// Not for an arrival -- the file header says why; use [settleUntil] there.
+Future<void> pumpRealTimeWindow(
+  WidgetTester tester, {
+  required int rounds,
+  Duration step = const Duration(milliseconds: 10),
+}) async {
+  for (var round = 0; round < rounds; round++) {
+    await tester.runAsync(() => Future<void>.delayed(step));
+    await tester.pump();
   }
 }

@@ -40,6 +40,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
+import 'support/storage_tree_settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// A backend that additionally counts the listings that asked for a *recursive*
@@ -219,36 +220,6 @@ String _cellText(Key key) {
   return (text.evaluate().single.widget as Text).data ?? '';
 }
 
-/// Pumps until nothing in the tree is pending.
-///
-/// Not `pumpAndSettle`, for two independent reasons. `testWidgets` runs its body
-/// under a fake clock, and a `dart:io` future completes on the *real* event
-/// loop, so a listing never resolves without stepping outside it — that is what
-/// `runAsync` does. And the tree's pending row is a `CircularProgressIndicator`,
-/// which schedules a frame on every tick, so `pumpAndSettle` would spin until
-/// its own timeout even if the clock were real.
-///
-/// Bounded, and fails loudly at the bound rather than returning quietly: a
-/// silent give-up would turn "the listing never completed" into "the rows were
-/// not found", which points at the wrong thing.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 60; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-    // Both signals, because stage 7 turned the totals' spinners into the word
-    // 「計算中…」: a settle that watched only the indicator would return while the
-    // group totals were still being walked, and every byte-count assertion after
-    // it would read that word instead of a size.
-    final pending =
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
-        find.text(appSentenceAt('pages.storage.status.calculating')).evaluate().isNotEmpty;
-    if (!pending) {
-      return;
-    }
-  }
-  fail('the storage tree still had a pending row after 60 rounds');
-}
-
 /// Opens every group root without going through the rows, so the assertion does
 /// not depend on which rows happen to fit the 800x600 test viewport.
 void _expandEveryGroup(ProviderContainer container) {
@@ -302,7 +273,7 @@ void main() {
 
   testWidgets('the twelve logical groups are the roots, under their shipped labels', (tester) async {
     await _pumpTree(tester, _container());
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     for (final key in _groupLabelKeys) {
       expect(find.text(appSentenceAt(key)), findsOneWidget, reason: key);
@@ -313,7 +284,7 @@ void main() {
   testWidgets('every group explains itself with nothing expanded', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The state the view opens in. Asserted rather than assumed, because every
     // expectation below is about what is readable *without* opening anything: if
@@ -375,7 +346,7 @@ void main() {
     // per-group special case is exactly what a single-group assertion would miss.
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     final warnings = {
       for (final group in storageGroups)
@@ -394,7 +365,7 @@ void main() {
     for (final id in warnings.keys) {
       expansion.toggle((group: id, path: null));
     }
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     for (final entry in warnings.entries) {
       expect(find.text(entry.value), findsNothing, reason: entry.key.name);
@@ -415,7 +386,7 @@ void main() {
     // empty one".
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Closed: the summary row plus one row per group, and nothing else.
     int rowCount() => tester.widget<ListView>(find.byType(ListView)).semanticChildCount ?? -1;
@@ -424,13 +395,13 @@ void main() {
     // `active_records` delegates nothing, and its level here is the single record
     // the fixture wrote, so opening it may add exactly one row.
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(rowCount(), 1 + 12 + 1);
 
     // `data_root_config` does delegate, so its button *is* a row — the one row
     // this assertion must not forbid.
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.dataRootConfig, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(rowCount(), 1 + 12 + 1 + 1 + 1);
   });
 
@@ -443,9 +414,9 @@ void main() {
     // `pages.storage.group.custom_sound.note` to the user.
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.customSound, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     expect(find.text('pages.storage.group.custom_sound.note'), findsNothing);
     // And the key really is gone from the shipped file, so the line above is not
@@ -455,14 +426,14 @@ void main() {
 
   testWidgets('expanding reaches the files at the leaves, one level per open node', (tester) async {
     await _pumpTree(tester, _container());
-    await _settle(tester);
+    await settleStorageRows(tester);
     _backend.resetAllCounts();
 
     // Closed: nothing below the group is on screen.
     expect(find.text('rec1'), findsNothing);
 
     await tester.tap(find.text(appSentenceAt('pages.storage.group.active_records.label')));
-    await _settle(tester);
+    await settleStorageRows(tester);
     // The entries come with the level it opened, and nothing is inserted above
     // them: the group's own paragraph belongs to the delete confirmation now.
     expect(find.text('rec1'), findsOneWidget);
@@ -470,7 +441,7 @@ void main() {
     expect(find.text('record.json'), findsNothing);
 
     await tester.tap(find.text('rec1'));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('record.json'), findsOneWidget);
     expect(find.text('skill.png'), findsOneWidget);
     // Both sizes came out of the enumerations, not from a probe per row: every
@@ -484,10 +455,10 @@ void main() {
   testWidgets('the residual bucket shows what no other group named', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.unclassified, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     expect(find.text('modules.zip'), findsOneWidget);
     expect(find.text('leftover.txt'), findsOneWidget);
@@ -500,11 +471,11 @@ void main() {
   testWidgets('opening every root issues no recursive enumeration', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     _backend.resetAllCounts();
 
     _expandEveryGroup(container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The listings did happen -- otherwise "zero recursive listings" would be
     // the trivially true statement that nothing was listed at all.
@@ -516,7 +487,7 @@ void main() {
     final outage = RecordStoreUnavailable(StateError('the store could not be opened'), transient: false);
     final container = _container(outage: outage);
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The outage is real in this container: the path every other screen reads is
     // dead. Without this, the test could pass against a healthy app.
@@ -534,7 +505,7 @@ void main() {
     final label = appSentenceAt('pages.storage.group.active_records.label');
     expect(find.text(label), findsOneWidget);
     await tester.tap(find.text(label));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('rec1'), findsOneWidget);
   });
 
@@ -548,18 +519,18 @@ void main() {
     // Total the record directory through the container's cache, before the tree
     // has drawn a single row.
     final recordDir = _info.charaDetailActiveDir / 'rec1';
-    // `runAsync` for the same reason `_settle` uses it: the walk is real file
+    // `runAsync` for the same reason `settleStorageRows` uses it: the walk is real file
     // I/O and would never complete under the test's fake clock.
     final totals = await tester.runAsync(() => container.read(directoryTotalsCacheProvider).totalsOf(recordDir));
     expect(totals?.knownBytes, 300);
     expect(_backend.recursiveListCalls, 1);
 
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     _backend.resetAllCounts();
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The row shows a total it never computed. Were the cache built per row (or
     // per widget), `peek` would miss and the cell would still read as unknown.
@@ -577,21 +548,21 @@ void main() {
     _write('documents/umacapture/storage/chara_detail/metadata/memo/main.json', 70);
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Two directories, one group.
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.metadata, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('rating'), findsOneWidget);
     expect(find.text('memo'), findsOneWidget);
     await tester.tap(find.text('rating'));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('main.json'), findsOneWidget);
 
     // A group that is a single file.
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.metadata, path: null));
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.dataRootConfig, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('data_root.json'), findsOneWidget);
     expect(_cellText(storageSizeCellKey(_info.supportDir.filePath('data_root.json'))), '50 B');
   });
@@ -606,11 +577,11 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.metadata, path: null));
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.dataRootConfig, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The present sibling is on screen, so "no row" below is not the trivially
     // true statement that nothing was listed at all.
@@ -661,9 +632,9 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Before the walk there is no value to show, and the directory's own mtime
     // -- which this row used to print -- does not exist on this backend.
@@ -672,7 +643,7 @@ void main() {
     // One tap, one walk, two cells: the timestamp arrives with the size because
     // it is the same `DirectoryTotals`.
     await tester.tap(find.byKey(storageSizeCellKey(recordDir)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(recordDir)), '300 B');
     expect(_cellText(storageModifiedCellKey(recordDir)), formatStorageTimestamp(newest));
     // The *newest*, not whichever the enumeration happened to reach last.
@@ -689,12 +660,12 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     await tester.tap(find.byKey(storageSizeCellKey(empty)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     // Walked -- the size proves the cell was answered rather than left alone.
     expect(_cellText(storageSizeCellKey(empty)), '0 B');
     expect(_cellText(storageModifiedCellKey(empty)), unknownSizeLabel);
@@ -715,20 +686,20 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     final expansion = container.read(storageTreeExpansionProvider.notifier);
     expansion.toggle((group: StorageGroupId.activeRecords, path: null));
     expansion.toggle((group: StorageGroupId.activeRecords, path: (_info.charaDetailActiveDir / 'rec1').path));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     await tester.tap(find.byKey(storageSizeCellKey(inner)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(inner)), '7 B');
 
     // Collapse `rec1`, which takes `aaa`'s row away and moves `rec2` up into the
     // index it had.
     expansion.toggle((group: StorageGroupId.activeRecords, path: (_info.charaDetailActiveDir / 'rec1').path));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('aaa'), findsNothing);
     expect(find.text('rec2'), findsOneWidget);
 
@@ -742,7 +713,7 @@ void main() {
     // ...and asking it directly still answers with its own bytes, so the fix is
     // not "the cell stopped working".
     await tester.tap(find.byKey(storageSizeCellKey(sibling)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(sibling)), '500 B');
   });
 
@@ -761,23 +732,23 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     final expansion = container.read(storageTreeExpansionProvider.notifier);
     expansion.toggle((group: StorageGroupId.activeRecords, path: null));
     // Open `rec1` and close it again, which is what warms its listing without
     // leaving its children on screen.
     expansion.toggle((group: StorageGroupId.activeRecords, path: rec1.path));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expansion.toggle((group: StorageGroupId.activeRecords, path: rec1.path));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // `rec2` now sits at the index `aaa` will take back.
     await tester.tap(find.byKey(storageSizeCellKey(sibling)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(sibling)), '500 B');
 
     expansion.toggle((group: StorageGroupId.activeRecords, path: rec1.path));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('aaa'), findsOneWidget);
 
     // `aaa` was never asked for a total. It is 7 B, and it is certainly not the
@@ -785,7 +756,7 @@ void main() {
     expect(_cellText(storageSizeCellKey(inner)), unknownSizeLabel);
     expect(_cellText(storageSizeCellKey(inner)), isNot('500 B'));
     await tester.tap(find.byKey(storageSizeCellKey(inner)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(inner)), '7 B');
   });
 
@@ -812,9 +783,9 @@ void main() {
 
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Shown before anything is walked: the value came with the listing.
     expect(_cellText(storageModifiedCellKey(recordDir)), formatStorageTimestamp(own));
@@ -823,7 +794,7 @@ void main() {
     // the folder itself here, which is the ordinary case on Windows and the one
     // a fallback applied unconditionally would get wrong.
     await tester.tap(find.byKey(storageSizeCellKey(recordDir)));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(_cellText(storageSizeCellKey(recordDir)), '300 B');
     expect(_cellText(storageModifiedCellKey(recordDir)), formatStorageTimestamp(own));
     expect(_cellText(storageModifiedCellKey(recordDir)), isNot(formatStorageTimestamp(descendant)));
@@ -832,10 +803,10 @@ void main() {
   testWidgets('the font cache takes only its own files out of a directory it shares', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.fontCache, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     expect(find.text('MPLUS1Code_regular_x.ttf'), findsOneWidget);
     // The support directory's other children belong to other groups.
@@ -847,10 +818,10 @@ void main() {
   testWidgets('the settings group keeps its Hive files off the screen', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The group opened -- its stores are on screen, which the two tests below
     // assert -- and still shows no `.hive`. This one is only about the file names
@@ -895,9 +866,9 @@ void main() {
 
     final container = _container(onWeb: false);
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Every store, by the name it is stored under. Enumerated from
     // `StorageBoxKey` rather than written out: the claim is that the view shows
@@ -914,8 +885,8 @@ void main() {
     expect(storageBoxNames.length, 8);
 
     // Stage 4e: the row opens the store. Asserted as the row's own callback and
-    // not by driving a tap, because what the dialog then shows is
-    // `settings_box_preview_view_test.dart`'s subject; the fact worth pinning
+    // not by driving a tap, because what the dialog then shows is not this
+    // suite's subject; the fact worth pinning
     // here is that the row has a callback at all, which until stage 4e it did
     // not.
     final row = find
@@ -953,9 +924,9 @@ void main() {
 
     final container = _container(onWeb: false);
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Each store's own `.hive` date. Reading the locks would give both rows
     // `2022/11/12 13:14` -- one date for eight stores, which is when the app
@@ -978,9 +949,9 @@ void main() {
 
     final container = _container(onWeb: true, originUsage: 4096);
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // The actual check point for the settings group being a synthetic node --
     // a list of Hive stores rather than part of the filesystem tree -- on both
@@ -1030,10 +1001,10 @@ void main() {
   testWidgets('a directory total is computed only when its own cell is asked for one', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     _backend.resetAllCounts();
 
     final sizeCell = find.byKey(storageSizeCellKey(_info.charaDetailActiveDir / 'rec1'));
@@ -1043,7 +1014,7 @@ void main() {
     expect(_backend.recursiveListCalls, 0);
 
     await tester.tap(sizeCell);
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.descendant(of: sizeCell, matching: find.text('300 B')), findsOneWidget);
     expect(_backend.recursiveListCalls, 1);
   });
@@ -1051,9 +1022,9 @@ void main() {
   testWidgets('every settings store is named in Japanese, not by the name it is kept under', (tester) async {
     final container = _container(onWeb: false);
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Enumerated from `StorageBoxKey`, so a ninth store is a red row here rather
     // than a row nobody wrote an expectation for; the sentences come out of the
@@ -1072,9 +1043,9 @@ void main() {
   testWidgets('a total being walked says so in words, not only by spinning', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     final sizeCell = find.byKey(storageSizeCellKey(_info.charaDetailActiveDir / 'rec1'));
     await tester.tap(sizeCell);
@@ -1088,14 +1059,14 @@ void main() {
       findsOneWidget,
     );
 
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.descendant(of: sizeCell, matching: find.text('300 B')), findsOneWidget);
   });
 
   testWidgets('a level that has not been read yet says it is being read', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
     await tester.pump();
@@ -1103,7 +1074,7 @@ void main() {
 
     // And the word goes away once the level is there, so this is a state and not
     // a permanent caption.
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text(appSentenceAt('pages.storage.status.loading')), findsNothing);
     expect(find.text('rec1'), findsOneWidget);
   });
@@ -1113,7 +1084,7 @@ void main() {
     final container = _container(retryOnError: false);
     await _pumpTree(tester, container);
 
-    // Not `_settle`, here or below: riverpod 3 retries a provider that threw, so
+    // Not `settleStorageRows`, here or below: riverpod 3 retries a provider that threw, so
     // a tab holding a directory it cannot list never reaches a frame with nothing
     // pending on it — the group's own total cycles error → loading → error for as
     // long as the refusal lasts. Each wait names the condition it is actually
@@ -1141,7 +1112,7 @@ void main() {
 
   testWidgets('off web the root carries one total, and it is the sum of the groups', (tester) async {
     await _pumpTree(tester, _container(onWeb: false));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     expect(find.text(appSentenceAt('pages.storage.summary.app_total')), findsOneWidget);
     // 300 (the record) + 60 (rating) + 40 (modules) + 30 (the Hive box)
@@ -1159,7 +1130,7 @@ void main() {
 
   testWidgets('on web the root carries a second total, the browser\'s own', (tester) async {
     await _pumpTree(tester, _container(onWeb: true, originUsage: 4096));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     expect(find.text(appSentenceAt('pages.storage.summary.app_total')), findsOneWidget);
     expect(find.text(appSentenceAt('pages.storage.summary.browser_total')), findsOneWidget);
@@ -1179,7 +1150,7 @@ void main() {
 
   testWidgets('every group carries its own total with nothing tapped', (tester) async {
     await _pumpTree(tester, _container());
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     // Nothing was expanded and no size cell was tapped: this is the state the view
     // is in the moment it opens.
@@ -1216,7 +1187,7 @@ void main() {
   testWidgets('a web build shows only the groups web has', (tester) async {
     const webAbsent = ['pages.storage.group.font_cache.label', 'pages.storage.group.data_root_config.label'];
     await _pumpTree(tester, _container(onWeb: true));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     for (final key in _groupLabelKeys) {
       expect(
@@ -1229,7 +1200,7 @@ void main() {
 
   testWidgets('an off-web build shows all twelve, including the two web lacks', (tester) async {
     await _pumpTree(tester, _container(onWeb: false));
-    await _settle(tester);
+    await settleStorageRows(tester);
 
     for (final key in _groupLabelKeys) {
       expect(find.text(appSentenceAt(key)), findsOneWidget, reason: 'off web: $key');

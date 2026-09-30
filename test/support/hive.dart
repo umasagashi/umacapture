@@ -134,7 +134,7 @@ Future<Future<void> Function()> _openStorageBoxForTest() {
 /// and JSON strings and read them back within the same process, so Hive is
 /// their fixture and not their subject. A suite that wants to assert Hive's
 /// serialization or its on-disk reset must open a disk box itself, as
-/// `storage_box_reset_test.dart` and `storage_box_test.dart` do.
+/// `storage_box_reset_test.dart` does.
 Future<void> _openInMemory(List<String> boxes) async {
   for (final box in boxes) {
     await Hive.openBox(box, bytes: Uint8List(0));
