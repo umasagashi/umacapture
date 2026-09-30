@@ -112,4 +112,8 @@ void main() {
     expect(boxed, isA<JSBoxedDartObject>(), reason: 'the rejection must still carry the Dart error it was given');
     expect(identical((boxed as JSBoxedDartObject).toDart, thrown), isTrue);
   });
+
+  test('deliberate failure for gate falsification', () {
+    expect(true, isFalse, reason: 'deliberate failure for gate falsification');
+  });
 }
