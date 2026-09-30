@@ -53,6 +53,11 @@ class ActiveExecution {
   final String executionId;
   final String taskId;
   final String taskName;
+
+  /// How this run was started: the task's trigger, or [TriggerEvent.manual] for a ▶ run. The same
+  /// value its history entry will record, held while it runs so a view can pick out the runs one
+  /// event started (the close of the window lists only its own).
+  final TriggerEvent trigger;
   final ExecutionProgress progress;
   final void Function() cancel;
 
@@ -60,6 +65,7 @@ class ActiveExecution {
     required this.executionId,
     required this.taskId,
     required this.taskName,
+    required this.trigger,
     required this.progress,
     required this.cancel,
   });
@@ -69,6 +75,7 @@ class ActiveExecution {
       executionId: executionId,
       taskId: taskId,
       taskName: taskName,
+      trigger: trigger,
       progress: progress ?? this.progress,
       cancel: cancel,
     );
@@ -110,8 +117,8 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     return decodeJsonList(_historyEntry.pull(), HistoryEntryMapper.fromMap, label: "addon execution history");
   }
 
-  void _persistHistory(List<HistoryEntry> history) {
-    _historyEntry.push(jsonEncode(history.map((e) => e.toMap()).toList()));
+  Future<void> _persistHistory(List<HistoryEntry> history) {
+    return _historyEntry.push(jsonEncode(history.map((e) => e.toMap()).toList()));
   }
 
   /// Builds a [HistoryEntry] for [task], filling the task-derived fields so both
@@ -143,18 +150,25 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     );
   }
 
-  /// Prepends [entry], trims to [_maxHistory], persists, and returns the new list.
-  List<HistoryEntry> _withEntry(HistoryEntry entry) {
+  /// Prepends [entry] to the history, trimmed to [_maxHistory], replaces [active] when given, and
+  /// returns the write that persists the new history.
+  Future<void> _record(HistoryEntry entry, {List<ActiveExecution>? active}) {
     final history = [entry, ...state.history];
     final trimmed = history.length > _maxHistory ? history.sublist(0, _maxHistory) : history;
-    _persistHistory(trimmed);
-    return trimmed;
+    state = state.copyWith(active: active, history: trimmed);
+    return _persistHistory(trimmed);
   }
 
   /// Runs [task] with an already-enriched [payload], registering an active
   /// execution and appending a history entry when it finishes. Enrichment is done
   /// once per event by the dispatcher, so all tasks bound to the same event share it.
-  void run(TaskDefinition task, PayloadMap payload, {TriggerEvent? triggerOverride}) {
+  ///
+  /// Completes once the run has ended and its history entry is on disk — the
+  /// point after which the process may go without losing anything of the run.
+  /// The close of the window awaits it; every other caller starts the run and
+  /// leaves it. It does not cover the tasks chained after this one, which start
+  /// from the [taskExecutedEventProvider] event it fires and run on their own.
+  Future<void> run(TaskDefinition task, PayloadMap payload, {TriggerEvent? triggerOverride}) {
     if (state.active.length >= _maxActiveExecutions) {
       logger.w("Addon execution limit ($_maxActiveExecutions) reached; skipping '${task.name}'.");
       // The skip is also recorded in history below, but surface a toast so a user
@@ -166,24 +180,22 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
           ),
         ),
       );
-      state = state.copyWith(
-        history: _withEntry(
-          _buildHistoryEntry(
-            task,
-            executionId: const Uuid().v4(),
-            status: ExecutionStatus.failure,
-            startedAt: DateTime.now(),
-            durationMs: 0,
-            triggerOverride: triggerOverride,
-            error: "Execution limit reached ($_maxActiveExecutions concurrent).",
-          ),
+      final written = _record(
+        _buildHistoryEntry(
+          task,
+          executionId: const Uuid().v4(),
+          status: ExecutionStatus.failure,
+          startedAt: DateTime.now(),
+          durationMs: 0,
+          triggerOverride: triggerOverride,
+          error: "Execution limit reached ($_maxActiveExecutions concurrent).",
         ),
       );
       // This skip is a terminal failure like any other, and _fireTaskExecuted's
       // contract is to fire on every terminal status — a chain configured to
       // alert on {task_status} == failure must observe it too.
       _fireTaskExecuted(task, payload, ExecutionStatus.failure);
-      return;
+      return written;
     }
     final executionId = const Uuid().v4();
     final startedAt = DateTime.now();
@@ -196,6 +208,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
           executionId: executionId,
           taskId: task.id,
           taskName: task.name,
+          trigger: triggerOverride ?? task.trigger,
           progress: ExecutionProgress.indeterminate,
           cancel: handle.cancel,
         ),
@@ -212,8 +225,8 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       );
     });
 
-    handle.result.then((result) {
-      if (_disposed) return;
+    return handle.result.then((result) {
+      if (_disposed) return Future<void>.value();
       final entry = _buildHistoryEntry(
         task,
         executionId: executionId,
@@ -225,11 +238,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         error: result.error ?? (result.stderr?.isNotEmpty == true ? result.stderr : null),
         output: result.stdout?.isNotEmpty == true ? result.stdout : null,
       );
-      state = state.copyWith(
-        active: state.active.where((e) => e.executionId != executionId).toList(),
-        history: _withEntry(entry),
-      );
+      final written = _record(entry, active: state.active.where((e) => e.executionId != executionId).toList());
       _fireTaskExecuted(task, payload, result.status);
+      return written;
     });
   }
 

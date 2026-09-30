@@ -142,6 +142,7 @@ class _ActionFields {
             timeoutErrorKey(webhookTimeout.text, required: true) == null,
       _ActionKind.builtin =>
         !builtinNeedsUnavailableRecord(builtinKey, trigger) &&
+            !builtinEndsBeforeEffect(builtinKey, trigger) &&
             (builtinActionRegistry[builtinKey]?.usesSecondArgument != true || builtinArg2.text.trim().isNotEmpty),
     };
   }
@@ -190,6 +191,16 @@ class _ActionFields {
 bool builtinNeedsUnavailableRecord(String builtinKey, TriggerEvent trigger) {
   final descriptor = builtinActionRegistry[builtinKey];
   return descriptor?.requiresRecord == true && !placeholdersForTrigger(trigger).contains("record_id");
+}
+
+/// Whether [builtinKey]'s action does something that lives only as long as the app
+/// (`BuiltinActionDescriptor.endsWithApp`) and [trigger] is the close of the
+/// window, after which the app goes, so the run could never show its effect.
+/// Shared by the save gate and the inline warning, like
+/// [builtinNeedsUnavailableRecord].
+@visibleForTesting
+bool builtinEndsBeforeEffect(String builtinKey, TriggerEvent trigger) {
+  return trigger == TriggerEvent.appExiting && builtinActionRegistry[builtinKey]?.endsWithApp == true;
 }
 
 /// Whether [builtinKey]'s action needs the transient user activation of a click
@@ -345,7 +356,7 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
-          _TriggerDropdown(value: _trigger, onChanged: (v) => setState(() => _trigger = v)),
+          _TriggerDropdown(value: _trigger, onWeb: widget.onWeb, onChanged: (v) => setState(() => _trigger = v)),
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 12, right: 12),
             child: Text(
@@ -614,7 +625,10 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, bool onWeb, V
       enabled: (key) => !onWeb || builtinActionRegistry[key]?.supportsWeb != false,
       onChanged: onBuiltinChanged,
     ),
-    if (builtinNeedsUnavailableRecord(f.builtinKey, trigger)) _BuiltinRecordWarning(),
+    if (builtinNeedsUnavailableRecord(f.builtinKey, trigger))
+      const _BuiltinTriggerWarning("$tr_addon.dialog.builtin.requires_record"),
+    if (builtinEndsBeforeEffect(f.builtinKey, trigger))
+      const _BuiltinTriggerWarning("$tr_addon.dialog.builtin.ends_with_app"),
     if (builtinNeedsManualRun(f.builtinKey, trigger)) const _BuiltinManualRunNote(),
     if (descriptor?.usesArgument == true) ...[
       const SizedBox(height: 16),
@@ -768,7 +782,7 @@ class _BuiltinManualRunNote extends StatelessWidget {
 /// all, explaining why save is blocked and naming the way out (pick another
 /// kind).
 ///
-/// Same shape and same styling as [_BuiltinRecordWarning] on purpose: both mark
+/// Same shape and same styling as [_BuiltinTriggerWarning] on purpose: both mark
 /// the same state — the form is otherwise fine and the save button is inert — and
 /// a user who has met one should recognise the other. It is not a
 /// [_BuiltinManualRunNote], which marks a pairing that *does* save.
@@ -797,9 +811,15 @@ class _UnavailableOnHostWarning extends StatelessWidget {
   }
 }
 
-/// Inline warning shown when a record-requiring builtin is paired with a trigger
-/// that never supplies a `record_id`, explaining why save is blocked.
-class _BuiltinRecordWarning extends StatelessWidget {
+/// Inline warning shown when the selected builtin cannot work with the selected
+/// trigger, explaining why save is blocked: a record-requiring builtin paired with
+/// a trigger that never supplies a `record_id`, or a builtin whose effect ends
+/// with the app paired with the close of the window.
+class _BuiltinTriggerWarning extends StatelessWidget {
+  final String messageKey;
+
+  const _BuiltinTriggerWarning(this.messageKey);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -811,10 +831,7 @@ class _BuiltinRecordWarning extends StatelessWidget {
           Icon(Symbols.warning_rounded, size: 18, color: theme.colorScheme.error),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              "$tr_addon.dialog.builtin.requires_record".tr(),
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-            ),
+            child: Text(messageKey.tr(), style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
           ),
         ],
       ),
@@ -842,6 +859,9 @@ class _DescribedDropdown<T> extends StatelessWidget {
   final Widget? hint;
   final ValueChanged<T?> onChanged;
 
+  /// Whether [item] may be chosen; an unselectable item is still listed, as in [_SimpleDropdown].
+  final bool Function(T item)? enabled;
+
   const _DescribedDropdown({
     super.key,
     required this.label,
@@ -852,6 +872,7 @@ class _DescribedDropdown<T> extends StatelessWidget {
     required this.collapsedBuilder,
     required this.onChanged,
     this.hint,
+    this.enabled,
   });
 
   @override
@@ -871,6 +892,7 @@ class _DescribedDropdown<T> extends StatelessWidget {
         for (final item in items)
           DropdownMenuItem(
             value: item,
+            enabled: enabled?.call(item) ?? true,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Column(
@@ -923,9 +945,10 @@ class _SimpleDropdown extends StatelessWidget {
 
 class _TriggerDropdown extends StatelessWidget {
   final TriggerEvent value;
+  final bool onWeb;
   final ValueChanged<TriggerEvent> onChanged;
 
-  const _TriggerDropdown({required this.value, required this.onChanged});
+  const _TriggerDropdown({required this.value, required this.onWeb, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -933,6 +956,7 @@ class _TriggerDropdown extends StatelessWidget {
       label: "$tr_addon.dialog.trigger".tr(),
       value: value,
       items: TriggerEvent.values,
+      enabled: (event) => !onWeb || triggerSupportsWeb(event),
       titleOf: (event) => triggerLabelKey(event).tr(),
       descriptionOf: (event) => triggerDescriptionKey(event).tr(),
       collapsedBuilder: (event) => Align(alignment: Alignment.centerLeft, child: Text(triggerLabelKey(event).tr())),

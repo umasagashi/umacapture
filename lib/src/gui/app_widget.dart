@@ -15,6 +15,7 @@ import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/gui/addon.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
@@ -198,6 +199,9 @@ class _ResponsiveScaffold extends StatelessWidget {
               // Invisible sibling that runs addon tasks on app events. Mounted
               // here so it lives for the whole session, like NotificationLayer.
               const AddonDispatcher(),
+              // Its counterpart for the close of the window, which the tasks
+              // bound to it hold open until they end.
+              const AddonExitGate(),
             ],
           ),
         );

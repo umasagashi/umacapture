@@ -378,7 +378,8 @@ private:
     // GUARDED HERE RATHER THAN BY DISABLING A BUTTON. "A video import owns the pipeline" is a fact this process
     // holds, so the refusal belongs where the fact lives; a UI gate renders a past state and defends only the
     // paths that go through the UI (this handler is also reachable from an external driver, a replayed method
-    // call, and the autostart wiring). Same value judgement as the kinded release the comment below describes.
+    // call, and the data-folder move, which stops a capture without the capture button). Same value judgement as
+    // the kinded release the comment below describes.
     //
     // WEB ANSWERS THIS DIFFERENTLY, AND NEITHER SIDE CAN TAKE THE OTHER'S ANSWER. web/worker.js's handleStopLive
     // ABORTS a running import -- stopVideoImportProducer('stopLive') -- and lets it end through its ordinary

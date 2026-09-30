@@ -118,6 +118,14 @@ class BuiltinActionDescriptor {
   /// (see [gestureRefusesRun]) instead of silently doing nothing.
   final bool requiresUserGesture;
 
+  /// Whether what the action does lives only as long as this app: a toast in its window, a sound its
+  /// process plays (playback returns once it has started, so the exit cuts it off), a capture it runs.
+  ///
+  /// Such an action has no effect left once the app has gone, so the edit dialog refuses to pair it
+  /// with the close of the window (`TriggerEvent.appExiting`), the one trigger after which the app
+  /// goes. Copying text to the clipboard is not one: Windows keeps the text after the process exits.
+  final bool endsWithApp;
+
   /// What the action waits for before [run] starts, when it cannot act until the app itself is ready.
   /// Receives the event payload, so a ▶ run (see [isManualRun]) can be answered at once instead.
   ///
@@ -146,6 +154,7 @@ class BuiltinActionDescriptor {
     this.defaultSecondArgument = '',
     this.supportsWeb = true,
     this.requiresUserGesture = false,
+    this.endsWithApp = false,
     this.waitUntilReady,
   });
 }
@@ -219,6 +228,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.show_toast_argument",
     defaultArgument: "{event}",
+    endsWithApp: true,
     run: (ref, payload, argument, secondaryArgument) async {
       final text = substitutePayload(argument ?? "{event}", payload);
       Toaster.show(ToastData.info(description: text));
@@ -330,6 +340,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       BuiltinArgumentOption("error", "$_trBuiltin.options.sound_error"),
     ],
     defaultArgument: "success",
+    endsWithApp: true,
     run: (ref, payload, argument, secondaryArgument) async {
       // Accept the pre-rename argument strings ("attention_weak"/"attention_normal") as aliases so
       // addon definitions authored before the role rename keep working.
@@ -348,6 +359,9 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     // (getDisplayMedia) inside the transient user activation of a click, and an addon run carries
     // none — even the ▶ run reaches the start only after awaiting the controller.
     supportsWeb: false,
+    // Also the one builtin whose wait below runs outside any timeout, so on the close of the window
+    // it could hold the app open for as long as another job keeps the data folders.
+    endsWithApp: true,
     waitUntilReady: (ref, payload) async {
       // At launch the controller does not exist yet: it is built once the module check, which may
       // download a module, has settled.
