@@ -372,8 +372,10 @@ final class ProtocolSuite {
   ///
   /// The first-level chains run concurrently. Each seeds its own scenes in its
   /// own directory, `fsBackend` is fixed for the whole test, and the
-  /// transaction keeps no mutable static state, so the chains share nothing;
-  /// inside a chain, the order (first death, recovery, second death, recovery)
+  /// transaction keeps no mutable static state. The chains do share the scene
+  /// counter, which hands out each directory synchronously, and the backend's
+  /// call counters, which no verdict here reads; no scenario state is shared.
+  /// Inside a chain, the order (first death, recovery, second death, recovery)
   /// is kept. `Future.wait` waits for every chain before reporting a failure,
   /// so no chain is still writing when `tearDown` removes the root.
   void doubleInterruptions(PublicationLayout layout) {

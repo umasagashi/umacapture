@@ -425,8 +425,8 @@ void main() {
         // deleted.
         expect(find.text(appSentenceAt(group.deleteWarningKey ?? '')), findsOneWidget);
         // **Both paragraphs, on screen.** What is asserted here is that the card draws the
-        // whole of the warning. `quarantine` shipped with the shared first sentence and nothing else, so this
-        // box could be on screen saying only what the acknowledge checkbox beside it says.
+        // whole of the warning. A group whose warning were only the shared first sentence would leave this
+        // box saying only what the acknowledge checkbox beside it says.
         final drawn = tester.widget<Text>(find.text(appSentenceAt(group.deleteWarningKey ?? ''))).data ?? '';
         expect(drawn.split('\n\n'), hasLength(2), reason: '${group.id.name} draws a half warning');
       });

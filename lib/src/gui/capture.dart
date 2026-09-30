@@ -1799,7 +1799,7 @@ class CaptureControlGroup extends ConsumerWidget {
   /// `video_import_io.dart` (the Dart VM has `dart.library.io`), where [videoImportAvailable] tracks
   /// `Platform.isWindows` rather than the notifier actually driving an import — so without these
   /// seams no test can lay this card out with an import running, and the import→idle transition
-  /// that moved the control row is unreachable.
+  /// that moves the control row is unreachable.
   @visibleForTesting
   final ValueListenable<VideoImportState>? importState;
 

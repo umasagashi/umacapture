@@ -1,5 +1,4 @@
-// The stage-0 measurement the settings-group delete had to wait on. What actually happens
-// when something tries to remove a settings box's backing storage while
+// Measures what actually happens when something tries to remove a settings box's backing storage while
 // `StorageBox.ensureOpened` still holds a connection to it, on the platform
 // where "a box" is not a file at all but an IndexedDB database
 // (`hive_ce-2.19.3`'s JS backend -- pub-cache

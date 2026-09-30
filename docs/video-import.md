@@ -1008,8 +1008,9 @@ opens a screen-share permission request, so a click aimed at 「中止」 could 
 報告」 instead the instant an import ended and the layout above it collapsed by that same 52 px. Moving
 the links above the notices, in `CaptureControlGroup.build` (`lib/src/gui/capture.dart`), closed that
 the same way the control row's own position closes it for itself:
-both links stay within the band between the control row's bottom and the first divider's top, checked
-at two viewports including a 400 px / 200 %-text-scale case that also asserts nothing overflows.
+both links stay within the band between the control row's bottom and the first divider's top. No test
+measures that placement, at any viewport or text scale; it rests on the order of the children in
+`CaptureControlGroup.build`.
 
 **One status display for both session kinds.** The three progress rings, the status banner and the
 import's own lines (clip name, progress bar, inline cancel, and the gates that refuse a new import)
