@@ -48,7 +48,9 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -91,14 +93,6 @@ Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) {
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   return pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 40; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 Future<void> _secondaryPress(WidgetTester tester, Finder target) async {
@@ -195,9 +189,9 @@ void main() {
   /// Opens the active-records group so `rec1` is on screen as a directory row.
   Future<void> openToTheRecord(WidgetTester tester, ProviderContainer container) async {
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.text('rec1'), findsOneWidget);
   }
 
@@ -274,7 +268,7 @@ void main() {
     expect(_menuButton(tester, storageRowMenuEntityKey(_recordDir)).onPressed, isNotNull);
 
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     final button = _menuButton(tester, storageRowMenuEntityKey(_recordDir));
     expect(button.onPressed, isNull);
@@ -285,7 +279,7 @@ void main() {
     final container = _container();
     await openToTheRecord(tester, container);
     claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     await _secondaryPress(tester, find.text('rec1'));
     expect(find.text(_label('open_in_explorer')), findsNothing);
@@ -300,11 +294,11 @@ void main() {
     final container = _container();
     await openToTheRecord(tester, container);
     final token = claimRecordDir(container);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
     expect(_menuButton(tester, storageRowMenuEntityKey(_recordDir)).onPressed, isNull);
 
     container.read(longReadRegistryProvider.notifier).release(token);
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(_menuButton(tester, storageRowMenuEntityKey(_recordDir)).onPressed, isNotNull);
     await _secondaryPress(tester, find.text('rec1'));
@@ -381,7 +375,7 @@ void main() {
       expect(find.text('record.json'), findsNothing);
 
       await _pressDeadButton(tester, find.byKey(storageRowMenuEntityKey(_recordDir)));
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 40);
 
       expect(find.text('record.json'), findsNothing, reason: 'the press reached the row and expanded it');
     }, variant: _desktop);

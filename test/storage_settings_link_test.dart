@@ -40,6 +40,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -88,21 +89,6 @@ Future<void> _pumpDialog(WidgetTester tester, ProviderContainer container) async
   await tester.pump();
 }
 
-/// Pumps until the tree has nothing pending, the way the other storage suites do.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 60; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-    final pending =
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
-        find.text(appSentenceAt('pages.storage.status.calculating')).evaluate().isNotEmpty;
-    if (!pending) {
-      return;
-    }
-  }
-  fail('the storage tree still had a pending row after 60 rounds');
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadAppTranslations);
@@ -149,7 +135,7 @@ void main() {
     testWidgets('opening the data-root group offers the button, and only the button', (tester) async {
       final container = _container();
       await _pumpTree(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       final button = find.byKey(storageDelegatedActionKey(StorageDelegatedAction.dataRootReset));
       // Absent until the group is opened: a button sitting on the closed row
@@ -160,7 +146,7 @@ void main() {
       expect(button, findsNothing);
 
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.dataRootConfig, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(button, findsOneWidget);
       // The shipped sentence, read out of `ja.json` as a literal. `.tr()` renders
@@ -172,11 +158,11 @@ void main() {
     testWidgets('pressing it closes the view, uncovering the page that owns the operation', (tester) async {
       final container = _container();
       await _pumpDialog(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       expect(find.byType(StorageTreeView), findsOneWidget);
 
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.dataRootConfig, path: null));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       await tester.tap(find.byKey(storageDelegatedActionKey(StorageDelegatedAction.dataRootReset)));
       await tester.pump();
@@ -190,12 +176,12 @@ void main() {
     testWidgets('no other group carries the button', (tester) async {
       final container = _container();
       await _pumpTree(tester, container);
-      await _settle(tester);
+      await settleStorageRows(tester);
       final expansion = container.read(storageTreeExpansionProvider.notifier);
       for (final group in storageGroups) {
         expansion.toggle((group: group.id, path: null));
       }
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       // One button on a screen with every group open, paired with the data-level
       // assertion above that exactly one group delegates. A second group that

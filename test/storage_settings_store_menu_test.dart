@@ -40,6 +40,8 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
+import 'support/storage_tree_settling.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -82,14 +84,6 @@ Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) {
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   return pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 40; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 Future<void> _secondaryPress(WidgetTester tester, Finder target) async {
@@ -145,9 +139,9 @@ void main() {
   /// Expands the settings group so its store rows are on screen.
   Future<void> openTheStores(WidgetTester tester, ProviderContainer container) async {
     await _pumpTree(tester, container);
-    await _settle(tester);
+    await settleStorageRows(tester);
     container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.settings, path: null));
-    await _settle(tester);
+    await settleStorageRows(tester);
     expect(find.byKey(storageBoxRowKey('trainer_id')), findsOneWidget);
   }
 
@@ -184,7 +178,7 @@ void main() {
 
     await _secondaryPress(tester, find.byKey(storageBoxRowKey('column_spec')));
     await tester.tap(find.text(_copyLabel()));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     // What arrived is the *rendering*, spelled out rather than recomputed here.
     // Comparing only against `renderSettingsStoreAsText` would agree with that
@@ -223,7 +217,7 @@ void main() {
 
     await _secondaryPress(tester, find.byKey(storageBoxRowKey('trainer_id')));
     await tester.tap(find.text(_copyLabel()));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(copiedText(platformCalls), isNull);
     expect(toasts.single.type, ToastType.error);
@@ -240,7 +234,7 @@ void main() {
 
     await _secondaryPress(tester, find.byKey(storageBoxRowKey('trainer_id')));
     await tester.tap(find.text(_copyLabel()));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     expect(copiedText(platformCalls), isNull);
     expect(toasts.single.type, ToastType.error);
@@ -253,7 +247,7 @@ void main() {
 
     await _secondaryPress(tester, find.byKey(storageBoxRowKey('trainer_id')));
     await tester.tap(find.text(_copyLabel()));
-    await _settle(tester);
+    await pumpRealTimeWindow(tester, rounds: 40);
 
     // The capture-activity withholding is asked here exactly as it is on an entry row, and
     // it answers "proceed": `StorageGroup.writtenByLiveCapture` is false for the

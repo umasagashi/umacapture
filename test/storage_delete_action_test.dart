@@ -65,6 +65,7 @@ import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 import 'support/web_like_fs_backend.dart';
 import 'support/record_write_effects_fixture.dart';
 
@@ -205,15 +206,6 @@ Future<void> _pumpDialog(WidgetTester tester, ProviderContainer container, Widge
   return pumpWithContainer(tester, container, MaterialApp(home: Scaffold(body: dialog)));
 }
 
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does
-/// not: an io delete completes off it.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
-
 /// The confirmation's cancel button, matched the way [_confirmButton] is.
 ///
 /// `find.byType(OutlinedButton)` would match nothing: `OutlinedButton.icon`
@@ -298,7 +290,7 @@ Future<_HeldDelete> _startHeldSettingsDelete(WidgetTester tester) async {
 /// its delete would satisfy the first assertion alone.
 Future<void> _expectHeldDeleteFinished(WidgetTester tester, _HeldDelete held) async {
   held.gate.complete();
-  await _settle(tester);
+  await pumpRealTimeWindow(tester, rounds: 20);
   expect(held.toasts, hasLength(1), reason: 'the delete finished without saying so');
   expect(held.toasts.single.type, ToastType.success, reason: 'the delete that ran was reported as a failure');
   expect(find.byKey(storageDeleteResultKey), findsOneWidget, reason: 'the restart panel never opened');
@@ -364,7 +356,7 @@ void main() {
       // the disk. A gate that existed only as a greyed-out style would delete
       // here.
       await tester.longPress(_confirmButton());
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
       expect(_exists(file), isTrue, reason: 'the delete ran without the acknowledgement');
 
       await tester.tap(find.byKey(storageDeleteAcknowledgeKey));
@@ -372,7 +364,7 @@ void main() {
       expect(_confirmEnabled(tester), isTrue);
 
       await tester.longPress(_confirmButton());
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
       expect(_exists(file), isFalse, reason: 'the acknowledged delete did not run');
     });
 
@@ -393,7 +385,7 @@ void main() {
       expect(_confirmEnabled(tester), isTrue);
 
       await tester.longPress(_confirmButton());
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
       expect(_exists(file), isFalse);
     });
 
@@ -812,7 +804,7 @@ void main() {
         ),
       );
       await tester.tap(find.byKey(storageDeleteRestartKey));
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
 
       // The button did run: without this, a panel that had stopped calling
       // `onRestart` at all would satisfy every assertion below by never
@@ -860,7 +852,7 @@ void main() {
         ),
       );
       await tester.tap(find.byKey(storageDeleteRestartKey));
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
 
       expect(toasts, isEmpty, reason: 'a restart that was scheduled was announced as a failure');
     });
@@ -945,7 +937,7 @@ void main() {
       addTearDown(container.dispose);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.temp, path: null));
       await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       // Absent: `data_root.json` offers no delete of its own -- it delegates to
       // the settings page's reset -- and no zip either, so its group row has
@@ -1040,7 +1032,7 @@ void main() {
       await tester.pump();
       expect(_confirmEnabled(tester), isTrue);
       await tester.longPress(_confirmButton());
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
 
       // The removal, which does not survive the defect either: the ref is
       // already gone when the exclusion is resolved, one step before the file
@@ -1121,7 +1113,7 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget, reason: 'the delete runs with nothing shown');
       expect(_confirmEnabled(tester), isFalse, reason: 'the confirm is pressable while the delete runs');
       gate.complete();
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
 
       expect(toasts, hasLength(1), reason: 'the settings delete finished without saying so');
       expect(toasts.single.type, ToastType.success);
@@ -1168,7 +1160,7 @@ void main() {
         ),
       );
       StorageManagerDialog.show(container.read(containerRefProvider));
-      await _settle(tester);
+      await settleStorageRows(tester);
       final dialogs = container.read(dialogBuilderProvider.notifier);
       final treeToken = dialogs.currentToken;
       expect(dialogs.entries, hasLength(1));
@@ -1190,7 +1182,7 @@ void main() {
       await tester.longPress(_confirmButton());
       await tester.pump();
       gate.complete();
-      await _settle(tester);
+      await pumpRealTimeWindow(tester, rounds: 20);
 
       expect(find.byKey(storageDeleteResultKey), findsOneWidget, reason: 'the restart panel never opened');
       // The whole of the claim: the storage view is still the bottom entry, and the

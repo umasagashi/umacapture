@@ -61,6 +61,7 @@ import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 late Directory _tempRoot;
@@ -226,14 +227,6 @@ List<ToastData> _observedToasts(ProviderContainer container) {
   );
   addTearDown(subscription.close);
   return toasts;
-}
-
-/// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
-Future<void> _settle(WidgetTester tester) async {
-  for (var round = 0; round < 20; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
 }
 
 class _ShowSingle extends ConsumerWidget {
@@ -484,7 +477,7 @@ void main() {
       addTearDown(tester.view.reset);
       container.read(storageTreeExpansionProvider.notifier).toggle((group: StorageGroupId.activeRecords, path: null));
       await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
-      await _settle(tester);
+      await settleStorageRows(tester);
 
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'a')), isTrue);
       expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'b')), isTrue);

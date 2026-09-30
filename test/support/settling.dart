@@ -89,3 +89,20 @@ Future<void> waitUntil(bool Function() ready, {required String describe, Duratio
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
 }
+
+/// Pumps a fixed window of real time: [rounds] turns of `runAsync(Future.delayed(step))` followed by a
+/// `pump`, for an assertion that something must *not* happen, or must happen no more than once.
+/// Neither has an arrival to poll for, so the window is the claim's reach: shortening [rounds] or
+/// [step] weakens it, and a call site passes the window its assertion was written against.
+///
+/// Not for an arrival -- the file header says why; use [settleUntil] there.
+Future<void> pumpRealTimeWindow(
+  WidgetTester tester, {
+  required int rounds,
+  Duration step = const Duration(milliseconds: 10),
+}) async {
+  for (var round = 0; round < rounds; round++) {
+    await tester.runAsync(() => Future<void>.delayed(step));
+    await tester.pump();
+  }
+}

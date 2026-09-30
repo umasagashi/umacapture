@@ -58,6 +58,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/storage_row_menu.dart';
+import 'support/storage_tree_settling.dart';
 
 /// A group whose [StorageLockScope] is `unlocked`, for the cases that are not
 /// about the per-group exclusion. Named rather than inlined so a case that *is* about
@@ -202,14 +203,6 @@ StorageGroup _group(StorageGroupId id) => storageGroups.firstWhere((group) => gr
 
 Widget _tree() => const MaterialApp(home: Scaffold(body: StorageTreeView()));
 
-/// Pumps the view and lets its real `dart:io` futures resolve.
-///
-/// `runAsync` for the reason `storage_tree_test.dart` states: `testWidgets` runs
-/// under a fake clock and a filesystem future completes on the real event loop.
-/// A fixed number of rounds rather than "until no spinner is left", because this
-/// suite deliberately puts a `CircularProgressIndicator` on screen -- the zip
-/// progress -- and a settle written that way would wait for the thing under test
-/// to go away.
 /// Lets the real event loop run without re-pumping the widget, which would take
 /// an open menu route with it.
 Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
@@ -219,15 +212,14 @@ Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
   }
 }
 
-Future<void> _pumpTree(WidgetTester tester, ProviderContainer container, {int rounds = 30}) async {
+/// Pumps the view and waits for its rows to be read. The zip progress this suite puts on screen is
+/// a determinate indicator, which `settleStorageRows` does not count as a pending row.
+Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1200, 1800);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await pumpWithContainer(tester, container, _tree());
-  for (var round = 0; round < rounds; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
+  await settleStorageRows(tester);
 }
 
 void main() {
