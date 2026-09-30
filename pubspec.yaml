@@ -90,6 +90,10 @@ dev_dependencies:
   # can be told apart from "one tick before it". Resolves transitively through
   # flutter_test; declared here so a dependency bump cannot drop it.
   fake_async: ^1.3.3
+  # Tool-only: tool/test_selection.dart parses each test file's library annotations to route
+  # `@TestOn('browser')` suites, the same way the test runner reads them. Resolves transitively
+  # through flutter_test; declared here because the tool imports it directly.
+  analyzer: ^8.4.1
   # Build-time only: lib/distribution_info.dart walks the asset graph with a glob. Declared
   # directly rather than leaning on build_runner's transitive resolution, so a dependency
   # bump cannot drop it.

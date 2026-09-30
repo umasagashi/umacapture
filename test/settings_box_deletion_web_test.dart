@@ -15,8 +15,9 @@
 // `dart:js_interop` semantics only exist there, and the flutter runner would
 // compile the whole framework first (observed to sit at "loading" for 40+ min
 // locally -- see the comment on the `browser-tests` job in
-// .github/workflows/ci.yml). CI runs this in that `Browser tests` job; a file
-// not named on its command line is run by nothing.
+// .github/workflows/ci.yml). CI runs this in that `Browser tests` job, which
+// runs every test file whose library carries `@TestOn('browser')`
+// (tool/test_selection.dart picks them).
 //
 // This suite deliberately does not import `storage_box.dart` (it pulls in
 // `package:hive_ce_flutter`, whose `HiveFlutterExtension.initFlutter` in turn

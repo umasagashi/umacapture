@@ -1,0 +1,57 @@
+name: Warm caches
+
+# Runs on pushes to develop and does nothing but refresh the dependency caches that ci.yml's
+# pull-request runs restore. No test runs here: ci.yml runs on pull requests only.
+#
+# WHY NO TESTS ON PUSH. develop is protected with strict required checks and merges only by merge
+# commit, so a pull request cannot be merged until its head contains develop, and the merge commit's
+# tree is then the tree the pull request's run already tested. Testing it again on push would test
+# the same tree twice.
+#
+# WHY THE CACHES STILL NEED A RUN ON develop. A run can restore caches created on its own branch or
+# on the default branch, and a pull request's run also those of its base branch; a cache a pull
+# request's run creates is scoped to that pull request's merge ref and no other pull request can
+# restore it. Caches unused for 7 days are evicted. So without a run on develop, each pull request's
+# first run would miss and rebuild every cache (the Flutter SDK alone is ~1.8 GB), and a pubspec.lock
+# change would leave every later pull request missing the pub cache. A push that finds a cache
+# already saved restores it, which is what keeps it from being evicted, and saves nothing.
+#
+# WHAT IS WARMED, AND HOW IT STAYS THE SAME CACHE. A restore matches only when both the key and the
+# cache version agree, and the version is a hash of the cached paths and the compression method.
+# Every cache warmed here is defined once, in an action under .github/actions/, and ci.yml's jobs
+# restore it through that same action -- so the key and the path cannot differ between the two
+# workflows. The compression method is the runner's (and Windows caches are additionally marked
+# Windows-only), so this job runs on the same image as the ci.yml jobs that restore them:
+# windows-2022. Change both together.
+#
+# NOT WARMED: build_runner's incremental state (.dart_tool/build, restored only by ci.yml's
+# flutter-static job). Filling it means running the whole code generation step, and measured PR runs
+# showed no difference in that step's time between a hit and a miss. uv's own cache (native-tests'
+# `Set up uv`) holds nothing, because the scripts it runs are stdlib-only.
+on:
+  push:
+    branches: [develop]
+
+# One in-flight run per ref; a newer push warms the same caches from a newer tree.
+concurrency:
+  group: warm-caches-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: Warm dependency caches
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Flutter SDK and pub cache
+        uses: ./.github/actions/setup-flutter
+
+      - name: OpenCV
+        uses: ./.github/actions/provision-opencv
+
+      - name: FFmpeg
+        uses: ./.github/actions/provision-ffmpeg
+
+      - name: Web dependencies
+        uses: ./.github/actions/provision-web-deps

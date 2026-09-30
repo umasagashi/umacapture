@@ -78,11 +78,11 @@ Future<void> startVideoImport({
     // the report's correlation check.
     //
     // NOT COVERED BY A TEST THAT RUNS THIS CODE, unlike the io twin. A browser suite does exist —
-    // three `@TestOn('browser')` files, two of which CI runs under "Run browser tests" — but it is
+    // CI's "Browser tests" job runs every test file carrying `@TestOn('browser')` — but it is
     // a `dart test --platform chrome` job, and that runner compiles no `package:flutter`; this file
     // reaches the framework through `foundation.dart` and through `app_logger.dart`. So the reason
     // this leg is read rather than run is the framework dependency, not an absent suite, and
-    // putting it in that job is a larger change than adding a file name to that command. The guard
+    // putting it in that job is a larger change than annotating a test file for it. The guard
     // that reaches it reads this file as text — see `test/video_import_breadcrumb_privacy_test.dart`.
     final container = reportClipContainer(fileName);
     // THE GATE THE CORE CANNOT HOLD. A regeneration that started while the dialog was open would be

@@ -154,13 +154,13 @@ prebuilt encodes the version and MSVC toolset in its layout (`build/x64/vc16/bin
   (e.g. `455`/`vc15` → `4130`/`vc16` — the runtime folder changed from `vc15` to
   `vc16` after OpenCV 4.6, and the release asset was renamed from
   `opencv-<ver>-vc14_vc15.exe` to `opencv-<ver>-windows.exe` at 4.7.0);
-- the `key:` of the **Cache OpenCV** step in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)
+- the `key:` of the **Cache OpenCV** step in [`.github/actions/provision-opencv/action.yml`](../../../.github/actions/provision-opencv/action.yml)
   — it pins the version, so a stale key would restore the old tree and break the build.
 
 CI provisions OpenCV and FFmpeg with the same script (`--only opencv|ffmpeg
 --slim`, cached; ONNX Runtime is deliberately not provisioned there — the test
 targets never link it). When bumping the FFmpeg pin, also bump the
-`ffmpeg-…-slim` cache key in `ci.yml`.
+`ffmpeg-…-slim` cache key in `.github/actions/provision-ffmpeg/action.yml`.
 
 ### 5. Resolve Dart packages
 

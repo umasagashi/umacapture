@@ -1,13 +1,24 @@
 name: CI
 
 # Runs the native C++ (doctest) suite, the Flutter unit/widget suite and the
-# browser-only Dart suites on every PR to develop and on pushes to develop. All
-# three jobs run on GitHub-hosted windows-2022: the native tests need MSVC (and a
-# downloaded OpenCV, see below), and the app is Windows-only.
+# browser-only Dart suites on every PR to develop. Pushes to develop run no tests:
+# they run warm-caches.yml, which keeps the develop-scoped caches these jobs
+# restore (see the top of that file for why the merge commit needs no second run).
+# The jobs that build or test run on GitHub-hosted windows-2022: the native tests
+# need MSVC (and a downloaded OpenCV, see below), and the app is Windows-only.
+#
+# Every cache warm-caches.yml warms is defined once, in an action under
+# .github/actions/ that the jobs here use too; do not inline one of them here.
+#
+# The two required checks are the job names "Native C++ tests (doctest)" and
+# "Flutter unit/widget tests". The second is an aggregate: the Flutter work is split
+# into parallel jobs (three test shards, static checks, the web build) because
+# `flutter test` compiles one test file at a time, so one job running every file
+# is bounded by that serial compile no matter how many cores it has. The aggregate
+# fails unless every one of those jobs succeeded. "Native C++ coverage" and
+# "Browser tests" are not required checks.
 on:
   pull_request:
-    branches: [develop]
-  push:
     branches: [develop]
 
 # One in-flight run per ref; a new push cancels the previous run.
@@ -29,39 +40,9 @@ jobs:
         with:
           arch: x64
 
-      # OpenCV 4.13.0 (vc16) is a gitignored, manually-placed third-party dependency
-      # (windows/.gitignore) that native/CMakeLists.txt references at
-      # windows/opencv/build. Restore it from cache, or provision it on a cache miss
-      # with the same tool/fetch_deps.py a local dev runs -- one source of truth for
-      # the pinned URL + SHA-256 (no inline download logic to drift). onnxruntime/clip
-      # are deliberately NOT provisioned: the umacapture_tests target links only OpenCV
-      # (the cli/app targets that need ONNX are never built here). The cache key pins
-      # the version, so bumping OpenCV in fetch_deps.py must bump the key here too.
-      # --slim (below) prunes the ~915 MB tree to ~230 MB before it is cached, keeping the
-      # OpenCV parts umacapture_tests actually links (Debug DLL + import libs + headers);
-      # the "-slim" key suffix keeps that pruned layout from colliding with a full-tree cache.
-      - name: Cache OpenCV 4.13.0
-        id: cache-opencv
-        uses: actions/cache@v4
-        with:
-          path: windows/opencv
-          key: opencv-4.13.0-windows-slim
-
-      # FFmpeg (BtbN n7.1.5 LGPL shared) is linked only by umacapture_ffv1_tests (the FFV1 recorder/reader
-      # round-trip); umacapture_tests stays opencv-only. Cached like OpenCV; the "-slim" key matches the
-      # pruned layout. Bump this key when the ffmpeg pin in tool/fetch_deps.py changes -- and note that
-      # the FFmpeg version alone is not enough to key on: BtbN re-hosts the same build under several
-      # autobuild tags with differing archive bytes, so a re-pin can leave "n7.1.5" unchanged. The date
-      # suffix is the pinned tag's, which is what actually distinguishes one archive from the next.
-      - name: Cache FFmpeg n7.1.5
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: windows/ffmpeg
-          key: ffmpeg-n7.1.5-lgpl-shared-slim-20260630
-
-      # uv runs tool/fetch_deps.py (stdlib-only) and native/wasm/check_sources.py.
-      # Unconditional: the wasm drift gate below runs on every job, cache hit or not.
+      # uv runs native/wasm/check_sources.py (stdlib-only). Unconditional: the wasm drift gate
+      # below runs on every job, cache hit or not. The provisioning actions further down set uv up
+      # for themselves on a cache miss, since other jobs use them without this step.
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
 
@@ -75,18 +56,18 @@ jobs:
       # sources, right next to where they are compiled for Windows.
       #
       # This is a DRIFT gate, not a compile gate: it never invokes em++. See the
-      # comment on "Flutter web release build" in the other job for why no emsdk
+      # comment on "Flutter web release build" in the flutter-web job for why no emsdk
       # compile job exists yet.
       - name: Check wasm source drift
         run: uv run native/wasm/check_sources.py
 
-      - name: Provision OpenCV 4.13.0
-        if: steps.cache-opencv.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_deps.py --only opencv --slim
+      # Restored from cache, or provisioned on a miss with tool/fetch_deps.py; the key, the path
+      # and the reasoning behind each live in the action (shared with warm-caches.yml).
+      - name: OpenCV
+        uses: ./.github/actions/provision-opencv
 
-      - name: Provision FFmpeg n7.1.5
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_deps.py --only ffmpeg --slim
+      - name: FFmpeg
+        uses: ./.github/actions/provision-ffmpeg
 
       # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
       - name: Configure (CMake + Ninja, Debug)
@@ -140,27 +121,65 @@ jobs:
       # is the shape, not a count: none of the cli-driven ones may say Passed, because a passing
       # integration test that drives the cli would mean the cli had somehow been built.
       #
-      # ctest counts the doctest binary as one test, so its output hides the doctest case count on
-      # success -- the next step surfaces it.
+      # umacapture_tests is excluded here and run by the next step instead: ctest counts the doctest
+      # binary as one test and hides its case count on success.
       - name: Run ctest
-        run: ctest --test-dir native/cmake-build-tests --output-on-failure
+        run: ctest --test-dir native/cmake-build-tests --output-on-failure -E '^umacapture_tests$'
 
-      # ctest is the gate; this re-runs the binary only to echo doctest's own summary
-      # (the "test cases: N | N passed" line) into the log, filtered so the tests'
-      # intentional error-path spdlog lines don't look like real failures.
-      - name: Report doctest case count
+      # The gate for umacapture_tests, and the one place its own summary (the "test cases: N | N
+      # passed" line) reaches the log, filtered so the tests' intentional error-path spdlog lines
+      # don't look like real failures. On a failure the whole output is printed and the step fails
+      # with the binary's exit code. The working directory is the build tree because that is where
+      # ctest runs a test registered without WORKING_DIRECTORY, which is how native/CMakeLists.txt
+      # registers this one (no test properties at all) -- so the binary runs as ctest would run it.
+      - name: Run doctest (umacapture_tests)
         shell: pwsh
+        working-directory: native/cmake-build-tests
         run: |
-          & native\cmake-build-tests\umacapture_tests.exe 2>&1 |
-            Select-String -Pattern 'test cases:|assertions:|Status:'
+          $out = & .\umacapture_tests.exe 2>&1
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $out
+            exit $code
+          }
+          $out | Select-String -Pattern 'test cases:|assertions:|Status:'
 
-      # ---- P2: coverage visibility ----
+  # ---- P2: coverage visibility ----
+  # A separate job and deliberately NOT a required check. Coverage is a view, not a gate: no
+  # threshold is compared and nothing reads the report automatically; it exists for a person to
+  # open the `native-coverage` artifact (native/test/README.md, "Coverage"). It re-runs the Debug
+  # test binary under instrumentation, several times slower than the plain run in native-tests,
+  # so keeping it inside that required job put the slowest run of the binary on every PR's path
+  # to merge. The price is stated rather than hidden: a failure here -- including the install
+  # retries below giving up -- shows red on the PR but does not block the merge.
+  native-coverage:
+    name: Native C++ coverage
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # The same action, and so the same cache, as native-tests. FFmpeg is not provisioned:
+      # only umacapture_tests is built here, and it links OpenCV alone.
+      - name: OpenCV
+        uses: ./.github/actions/provision-opencv
+
+      - name: Configure (CMake + Ninja, Debug)
+        run: cmake -G Ninja -S native -B native/cmake-build-tests -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build umacapture_tests
+        run: cmake --build native/cmake-build-tests --target umacapture_tests
+
       # The chocolatey community feed intermittently 504s, and `choco install`
       # exits 0 even when it fetched 0 packages, so a transient outage would
       # otherwise sail past this step and only surface as a confusing "exe not
       # found" in "Measure coverage". Retry until the binary actually exists, and
       # fail loudly if it never appears -- coverage is never silently skipped: a
-      # persistent feed outage gates the job (red) rather than passing green.
+      # persistent feed outage turns this job red rather than passing green.
       - name: Install OpenCppCoverage
         shell: pwsh
         run: |
@@ -175,7 +194,7 @@ jobs:
           Write-Error "OpenCppCoverage could not be installed after 5 attempts; failing so coverage is not silently skipped."
           exit 1
 
-      # Re-runs the Debug test binary under instrumentation and exports HTML + Cobertura.
+      # Runs the Debug test binary under instrumentation and exports HTML + Cobertura.
       # --sources native\src keeps the report to backend code (substring match excludes
       # vendored headers and the test TUs). Uses the full exe path because choco's PATH
       # update is not visible to this step.
@@ -196,28 +215,91 @@ jobs:
           path: native/coverage
           if-no-files-found: warn
 
+  # The required check "Flutter unit/widget tests". It runs no work of its own: it only decides
+  # whether the Flutter jobs it depends on all succeeded. `if: always()` is what makes it a gate.
+  # Without it, a failed, cancelled or skipped dependency would make GitHub skip this job, and a
+  # skipped job reports Success to branch protection -- the required check would pass with the
+  # tests never having passed. So it always runs, and fails on any result other than `success`
+  # (a matrix job's result is the combined result of its shards). ubuntu-latest because it runs
+  # no project code, and it is the runner that picks such a job up soonest.
   flutter-tests:
     name: Flutter unit/widget tests
+    needs: [flutter-test-shards, flutter-static, flutter-web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Flutter job to have succeeded
+        shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+
+  # The Dart VM test suite, split by FILE across three jobs. Unit/widget only: the
+  # Windows-desktop integration_test (needs a full app build + uv) is intentionally excluded.
+  #
+  # WHY BY FILE, and not `flutter test --total-shards`: flutter_tools compiles test files one at a
+  # time, and that serial compile is what bounds this suite (new suites start at a steady ~1.3 s
+  # each whatever the core count). --total-shards is handed to package:test, which slices the
+  # test cases *inside* each suite after loading it, so every shard would still compile every
+  # file. Giving each job a third of the files is what divides the compile.
+  #
+  # WHICH FILES: tool/test_selection.dart decides from a scan of test/, so there is no list here
+  # to keep up to date and a new test file is picked up without an edit. Before printing anything
+  # it checks that every *_test.dart is routed to exactly one of these shards or the browser job,
+  # and it fails the step if not (see the top of that file). It hands the files out longest-first
+  # and each shard names its longest suite first, because flutter_tools starts suites in the order
+  # they are named: a single long suite placed last would run on alone after everything else.
+  #
+  # NO build_runner here. The tests compile against the committed generated outputs, which is
+  # what ships; the flutter-static job fails when those are out of date.
+  #
+  # Coverage is deliberately not collected: --coverage roughly doubles the wall-clock
+  # (VM-service instrumentation) for a report that has no enforced threshold and only served as a
+  # visibility artifact. -j 4 raises the suite-level parallelism from the default (cores/2 = 2 on
+  # the 4-vCPU Windows runner); flutter's own issue tracker reports the speedup plateaus around 4.
+  # --reporter github emits GitHub Actions annotations for failures and a more compact log.
+  flutter-test-shards:
+    name: Flutter tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+    runs-on: windows-2022
+    strategy:
+      # Every shard reports its own failures instead of being cancelled by a sibling's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pinned SDK and `flutter pub get`, both restored from cache. Every Flutter job in
+      # this workflow uses this action, and so does warm-caches.yml; the pin and the cache
+      # settings live there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
+
+      # The selection is checked before it is used: if tool/test_selection.dart exits non-zero,
+      # this step fails without running anything. That check is explicit because pwsh does not
+      # stop on a native command's non-zero exit, and an empty file list would make
+      # `flutter test` run the whole test/ directory instead.
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $files = & dart tool/test_selection.dart vm ${{ strategy.job-index }} ${{ strategy.job-total }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "::group::Test files in this shard, in the order they are handed to flutter test"
+          $files | ForEach-Object { Write-Host $_ }
+          Write-Host "::endgroup::"
+          flutter test -j 4 --reporter github @files
+
+  flutter-static:
+    name: Flutter static checks
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
-      # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
-      # directly. Keep this version in sync with .fvmrc (currently 3.44.4).
-      #
-      # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the
-      # cache trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more
-      # than restoring the pub cache -- a ~50 s net regression. The Windows tar/zstd
-      # extraction is slow, but re-downloading every package is slower.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
-
-      - name: Resolve dependencies
-        run: flutter pub get
+      # The same action as flutter-test-shards; see the comment there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       # Persist build_runner's incremental state (.dart_tool/build holds the asset graph
       # of input content digests) so codegen only regenerates changed outputs instead of
@@ -225,7 +307,8 @@ jobs:
       # restored: build_runner re-validates every tracked input by digest on each run, and
       # discards the whole graph on a builder/dependency/SDK version change. The key busts
       # on pubspec.lock/build.yaml changes as a belt-and-suspenders; restore-keys keeps the
-      # incremental benefit across unrelated commits.
+      # incremental benefit across unrelated commits. The one cache here that warm-caches.yml does
+      # not warm (see the note there), which is why it is defined inline and not in an action.
       - name: Cache build_runner
         uses: actions/cache@v4
         with:
@@ -235,13 +318,9 @@ jobs:
             build-runner-${{ runner.os }}-
 
       # --force-jit is required in this repo (a transitive native build hook is
-      # incompatible with build_runner's default AOT). Generated outputs are committed, and this
-      # step simply OVERWRITES them: nothing compares the fresh output against what was committed
-      # (there is no `git diff --exit-code` anywhere in this workflow), so Analyze, Format check and
-      # Run tests below all run against freshly generated files rather than the committed ones.
-      # What that buys is that a BROKEN generator fails the build. What it does NOT do is catch a
-      # stale or forgotten regeneration: that is silently replaced here, goes green, and stays stale
-      # on develop. Do not read this step as a staleness gate.
+      # incompatible with build_runner's default AOT). Generated outputs are committed; this
+      # step regenerates them so the next step can compare the result against what was
+      # committed. A BROKEN generator fails here; a STALE or forgotten regeneration fails there.
       #
       # The build filter restricts codegen to the lib/ and test/ outputs (mappers,
       # routes) that the tests compile against, and skips DistributionInfoBuilder --
@@ -252,18 +331,20 @@ jobs:
       # DELETES the committed generated outputs that fall outside the filter -- the same hazard the
       # "Verify web license disclosure" step below is ordered around, only there it is stated for the
       # lib/** outputs. Here it takes out DistributionInfoBuilder's four build_to: source outputs
-      # (assets/{version,license,additional_license,web_license}_info.json), and "Run tests" then
-      # cannot even LOAD test/licence_disclosure_windows_test.dart. The graph is cold whenever the
-      # cache above misses, which any change to pubspec.lock or build.yaml causes, so this is the
-      # normal case on such a branch and not an edge one.
-      # NOT fixed by widening the filter to assets/**: that test exists to catch a committed
-      # disclosure that no longer describes windows/runner/CMakeLists.txt, and a disclosure
-      # regenerated moments earlier always agrees with it -- the check would still look like a check
-      # while having become incapable of failing. The tests must read the COMMITTED bytes, so the
-      # committed bytes are what is restored. The whole directory is snapshotted rather than a list of
-      # four names: nothing else in assets/ changes during this step, and a list would go stale the
-      # first time a fifth generated output lands there.
-      # shell: bash so a failing command fails the step (see "Run JavaScript tests" below).
+      # (assets/{version,license,additional_license,web_license}_info.json). The graph is cold
+      # whenever the cache above misses, which any change to pubspec.lock or build.yaml causes, so
+      # this is the normal case on such a branch and not an edge one. Putting them back keeps every
+      # later step of this job on the committed tree rather than on one with four committed files
+      # missing.
+      # NOT fixed by widening the filter to assets/**: test/licence_disclosure_windows_test.dart
+      # exists to catch a committed disclosure that no longer describes windows/runner/CMakeLists.txt,
+      # and a disclosure regenerated moments earlier always agrees with it -- the check would still
+      # look like a check while having become incapable of failing. The test shards read the
+      # COMMITTED bytes straight from the checkout, and so must anything here that reads assets/. The
+      # whole directory is snapshotted rather than a list of four names: nothing else in assets/
+      # changes during this step, and a list would go stale the first time a fifth generated output
+      # lands there.
+      # shell: bash so a failing command fails the step (see "Run JavaScript tests" in flutter-web).
       - name: Code generation (build_runner)
         shell: bash
         run: |
@@ -271,6 +352,27 @@ jobs:
           cp -r assets "$committed_assets/assets"
           dart run build_runner build --force-jit --build-filter "lib/**" --build-filter "test/**"
           cp -r "$committed_assets/assets/." assets/
+
+      # THE STALENESS GATE. The test shards and the web build compile against the committed
+      # generated outputs without running build_runner, so a regeneration someone forgot has to fail
+      # here, or it ships green. `git status`, not `git diff`: diff does not see a NEW untracked
+      # output (the *.mapper.dart of a newly annotated class), which is exactly what a forgotten
+      # regeneration can leave behind. The scope is the build filter above. assets/ is outside it:
+      # the step above restored it from the committed bytes, and the license step below deliberately
+      # generates a smaller CI artifact there (see its comment).
+      # This relies on the outputs being byte-stable on this runner: .gitattributes pins them to
+      # eol=lf, which is what build_runner writes, so an unchanged output compares clean under the
+      # runner's core.autocrlf.
+      - name: Check generated outputs are committed
+        shell: bash
+        run: |
+          drift="$(git status --porcelain --untracked-files=all -- lib test)"
+          if [ -n "$drift" ]; then
+            echo "::error::build_runner output differs from the committed files. Run 'dart run build_runner build --force-jit' and commit the result."
+            echo "$drift"
+            git --no-pager diff --stat -- lib test
+            exit 1
+          fi
 
       # --no-fatal-infos keeps errors and warnings fatal but tolerates pre-existing
       # info-level lints (e.g. annotate_overrides) that also exist on develop.
@@ -309,112 +411,21 @@ jobs:
       #  * The web-pin gate, for the same reason: it is the first thing the hook
       #    shells out to $DART for.
       #
-      # shell: bash for the reason the JavaScript step below spells out at length --
+      # shell: bash for the reason the JavaScript step in flutter-web spells out at length --
       # the runner's default pwsh would not fail the step on a non-zero exit.
       - name: Pre-commit hook gates
         shell: bash
         run: bash tool/hooks/test_pre_commit.sh
 
-      # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
-      # is intentionally excluded. Coverage is deliberately not collected here: --coverage
-      # roughly doubles the wall-clock (VM-service instrumentation) for a report that has no
-      # enforced threshold and only served as a visibility artifact.
-      # -j 4 raises the suite-level parallelism from the default (cores/2 = 2 on the
-      # 4-vCPU Windows runner); flutter's own issue tracker reports the speedup plateaus
-      # around 4. --reporter github emits GitHub Actions annotations for failures and a
-      # more compact log.
-      - name: Run tests
-        run: flutter test -j 4 --reporter github test
-
-      # The focused web-worker tests use only Node's built-in test runner, so no package install is needed.
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      # shell: bash for the same reason the license step below declares it. The runner's default
-      # shell on windows-2022 is pwsh, which does not abort on a native command's non-zero exit
-      # ($PSNativeCommandUseErrorActionPreference is $false by default, on every pwsh version this
-      # image has carried), and GitHub's wrapper only appends `exit $LASTEXITCODE` -- so in a
-      # multi-line pwsh step ONLY THE LAST command can fail the step, and a broken
-      # test_web_frame_shaping.mjs would ship green. GitHub invokes bash as
-      # `bash --noprofile --norc -eo pipefail`, so -e fails the step on the first non-zero exit.
-      - name: Run JavaScript tests
-        shell: bash
-        run: |
-          node tool/test_web_frame_shaping.mjs
-          node tool/test_web_live_content.mjs
-          node tool/test_web_capture_session.mjs
-          node tool/test_web_video_import.mjs
-          node tool/test_web_video_frame_grab.mjs
-
       # ---- web dependency / license gate ----
       # web/wasm is gitignored and provisioned from the pins in tool/web_deps.json, exactly
       # like windows/opencv is in the native job above. Only the `upstream` entries can be
-      # restored here; the recognition core is built by native/wasm/build.sh (emsdk), so it
+      # restored; the recognition core is built by native/wasm/build.sh (emsdk), so it
       # stays absent -- DistributionInfoBuilder discloses what is on disk and lists the rest
-      # under "absent" (asserted below). Keying the cache on the
-      # manifest hash busts it whenever a pin, a version or an entry changes, so no separate
-      # version bump is needed here (unlike the OpenCV/FFmpeg keys).
-      - name: Cache web dependencies
-        id: cache-web-deps
-        uses: actions/cache@v4
-        with:
-          path: web/wasm
-          key: web-deps-${{ hashFiles('tool/web_deps.json') }}
-
-      - name: Set up uv
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v6
-
-      # Verifies every downloaded byte against tool/web_deps.json and fails on a mismatch.
-      # Not --strict: the in-tree entries above are legitimately missing here and would
-      # otherwise turn their "cannot be downloaded" warning into a failure.
-      - name: Provision web dependencies
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_web_deps.py
-
-      # The video-import DEMUX tests, split out of the JavaScript step above because they need the pinned
-      # mediabunny bundle, which only exists under web/wasm/ once the step above has run (or the cache was hit).
-      # They mux a clip with mediabunny and read it back through a real Blob + BlobSource, with a registered
-      # custom decoder standing in for the WebCodecs VideoDecoder Node does not have.
-      #
-      # THEY SKIP THEMSELVES when the bundle is absent, so a fresh clone is not red -- which means that HERE a
-      # skip is a provisioning failure, not a pass. Read it off the log rather than off the exit code.
-      - name: Run video-import demux tests
-        shell: bash
-        run: node tool/test_web_video_demux.mjs
-
-      # Compiles the web target. The Windows app is built nowhere in CI either, so
-      # this is not a packaging step -- it is the only thing that type-checks the
-      # web halves of every conditional import (platform_channel_web.dart,
-      # fs_backend_web.dart, web_vfs.dart, wasm_worker_client.dart, ...). `flutter
-      # test` compiles the *io* halves, so without this a web-only compile error
-      # ships green.
-      #
-      # NOT tool/build_web.sh: that wrapper passes --require-verified, and a CI
-      # tree can never reach `verified` -- the origin:in-tree recognition core is
-      # built by emsdk and is legitimately absent here (see the block above). The
-      # wrapper's other job, --pwa-strategy=none, is passed explicitly instead, so
-      # the unreferenced flutter_service_worker.js is not emitted; a Flutter service
-      # worker at scope "/" would replay responses without coi-serviceworker.js's
-      # COOP/COEP headers and kill cross-origin isolation (and SharedArrayBuffer).
-      #
-      # Runs after provisioning so the bundle is assembled from the same web/ tree
-      # a real build sees. The output is not uploaded: this step is a compile gate.
-      #
-      # NO EMSDK COMPILE JOB, deliberately, and this is not it. Building
-      # native/wasm requires a *Wasm-target* OpenCV static build (SIMD + pthreads);
-      # native/wasm/README.md states both prerequisites live outside the repository
-      # and are not provisioned by fetch_deps, and nothing in the repo can produce
-      # that OpenCV. Adding the job therefore means first adding a wasm-OpenCV
-      # supply-chain entry -- a from-source Emscripten OpenCV build (tens of
-      # minutes per run, or a cached artifact) plus its own pin/license disclosure
-      # under tool/web_deps.json. Until that exists, the C++ side is guarded by the
-      # "Check wasm source drift" gate in the native job, which catches the failure
-      # mode that actually recurs (a pipeline source nobody added to build.sh).
-      - name: Flutter web release build
-        run: flutter build web --release --pwa-strategy=none
+      # under "absent" (asserted below). The cache key, the path and the provisioning are in
+      # the action; flutter-web uses the same action, and so the same cache.
+      - name: Web dependencies
+        uses: ./.github/actions/provision-web-deps
 
       # Exercises the closed-world check behind assets/web_license_info.json: every pinned
       # file present under web/ must hash to its pin, nothing unpinned and unlisted may sit
@@ -453,19 +464,101 @@ jobs:
       # the builder falls back to the committed license texts instead of copying fresh ones.
       #
       # Runs LAST for two reasons. It rewrites a committed file (the builder is
-      # build_to: source), which is easiest to reason about once "Analyze", "Format check"
-      # and "Run tests" have already run against the committed tree; and it must not be the
-      # first build_runner invocation of the job. A --build-filter run against an *empty*
-      # asset graph deletes the committed generated outputs that fall outside the filter
+      # build_to: source), which is easiest to reason about once the staleness gate,
+      # "Analyze" and "Format check" have already run against the committed tree; and it must
+      # not be the first build_runner invocation of the job. A --build-filter run against an
+      # *empty* asset graph deletes the committed generated outputs that fall outside the filter
       # (reproduced in a fresh checkout: the lib/** *.mapper.dart / *.gr.dart vanished),
       # whereas one against the warm graph the "Code generation" step above leaves behind
-      # does not touch them. Keep this step after that one.
+      # does not touch them. Keep this step after that one, and in the same job.
       - name: Verify web license disclosure (build_runner)
         shell: bash
         run: |
           dart run build_runner build --force-jit --build-filter "assets/web_license_info.json"
           dart run tool/check_web_pins.dart --licenses --ci-artifact
           git checkout -- assets
+
+  flutter-web:
+    name: Flutter web build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same action as flutter-test-shards; see the comment there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
+
+      # The focused web-worker tests use only Node's built-in test runner, so no package install is needed.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # shell: bash for the same reason the license step in flutter-static declares it. The runner's
+      # default shell on windows-2022 is pwsh, which does not abort on a native command's non-zero exit
+      # ($PSNativeCommandUseErrorActionPreference is $false by default, on every pwsh version this
+      # image has carried), and GitHub's wrapper only appends `exit $LASTEXITCODE` -- so in a
+      # multi-line pwsh step ONLY THE LAST command can fail the step, and a broken
+      # test_web_frame_shaping.mjs would ship green. GitHub invokes bash as
+      # `bash --noprofile --norc -eo pipefail`, so -e fails the step on the first non-zero exit.
+      - name: Run JavaScript tests
+        shell: bash
+        run: |
+          node tool/test_web_frame_shaping.mjs
+          node tool/test_web_live_content.mjs
+          node tool/test_web_capture_session.mjs
+          node tool/test_web_video_import.mjs
+          node tool/test_web_video_frame_grab.mjs
+
+      # web/wasm is provisioned from the pins through the same action as in flutter-static; see
+      # the comment there.
+      - name: Web dependencies
+        uses: ./.github/actions/provision-web-deps
+
+      # The video-import DEMUX tests, split out of the JavaScript step above because they need the pinned
+      # mediabunny bundle, which only exists under web/wasm/ once the step above has run (or the cache was hit).
+      # They mux a clip with mediabunny and read it back through a real Blob + BlobSource, with a registered
+      # custom decoder standing in for the WebCodecs VideoDecoder Node does not have.
+      #
+      # THEY SKIP THEMSELVES when the bundle is absent, so a fresh clone is not red -- which means that HERE a
+      # skip is a provisioning failure, not a pass. Read it off the log rather than off the exit code.
+      - name: Run video-import demux tests
+        shell: bash
+        run: node tool/test_web_video_demux.mjs
+
+      # Compiles the web target. The Windows app is built nowhere in CI either, so
+      # this is not a packaging step -- it is the only thing that type-checks the
+      # web halves of every conditional import (platform_channel_web.dart,
+      # fs_backend_web.dart, web_vfs.dart, wasm_worker_client.dart, ...). `flutter
+      # test` compiles the *io* halves, so without this a web-only compile error
+      # ships green.
+      #
+      # No build_runner in this job: the build compiles against the committed generated
+      # outputs, which flutter-static checks are up to date.
+      #
+      # NOT tool/build_web.sh: that wrapper passes --require-verified, and a CI
+      # tree can never reach `verified` -- the origin:in-tree recognition core is
+      # built by emsdk and is legitimately absent here (see flutter-static). The
+      # wrapper's other job, --pwa-strategy=none, is passed explicitly instead, so
+      # the unreferenced flutter_service_worker.js is not emitted; a Flutter service
+      # worker at scope "/" would replay responses without coi-serviceworker.js's
+      # COOP/COEP headers and kill cross-origin isolation (and SharedArrayBuffer).
+      #
+      # Runs after provisioning so the bundle is assembled from the same web/ tree
+      # a real build sees. The output is not uploaded: this step is a compile gate.
+      #
+      # NO EMSDK COMPILE JOB, deliberately, and this is not it. Building
+      # native/wasm requires a *Wasm-target* OpenCV static build (SIMD + pthreads);
+      # native/wasm/README.md states both prerequisites live outside the repository
+      # and are not provisioned by fetch_deps, and nothing in the repo can produce
+      # that OpenCV. Adding the job therefore means first adding a wasm-OpenCV
+      # supply-chain entry -- a from-source Emscripten OpenCV build (tens of
+      # minutes per run, or a cached artifact) plus its own pin/license disclosure
+      # under tool/web_deps.json. Until that exists, the C++ side is guarded by the
+      # "Check wasm source drift" gate in the native job, which catches the failure
+      # mode that actually recurs (a pipeline source nobody added to build.sh).
+      - name: Flutter web release build
+        run: flutter build web --release --pwa-strategy=none
 
   browser-tests:
     name: Browser tests
@@ -476,22 +569,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same pinned SDK and the same action as the flutter-tests job; keep the
-      # version in sync with .fvmrc (currently 3.44.4). Only `dart` is used below,
-      # but flutter-action is what this workflow already uses to obtain it, and
+      # The same action as the other Flutter jobs. Only `dart` is used below, but
+      # that action is what this workflow already uses to obtain it, and its
       # `flutter pub get` is what resolves the Flutter SDK dependencies the
       # package's pubspec declares.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
-      - name: Resolve dependencies
-        run: flutter pub get
-
-      # Every suite below is `@TestOn('browser')`, so `flutter test` (the VM
+      # Every suite this job runs is `@TestOn('browser')`, so `flutter test` (the VM
       # platform) skips them entirely, and each covers a defect no other job can
       # observe -- `dart:js_interop` semantics that only exist in a real browser
       # and that the analyzer accepts:
@@ -554,8 +639,11 @@ jobs:
       #   arrays the browser handed over, and neither of those is what the VM
       #   suite runs even though it runs the same production functions.
       #
-      # Add browser-only coverage as another suite here; a file not named on the
-      # command below is not run by anything.
+      # WHICH FILES: tool/test_selection.dart picks every test/**/*_test.dart whose library
+      # carries `@TestOn('browser')`, so a new browser-only suite runs here without an edit to the
+      # command below (and a file with any other @TestOn selector fails the selection until
+      # someone decides which job owns it). Add a line for a new suite to the list above all the
+      # same: the list is why each suite exists, not what makes it run.
       #
       # `dart test`, not `flutter test --platform chrome`: the suite has no
       # Flutter dependency, and the flutter runner has to compile the whole
@@ -575,8 +663,8 @@ jobs:
       # directly, which is stated at the top of each of those files.) None of that
       # is generated, and the committed generated outputs cover the rest. Keep it
       # that way: a suite that reaches package:flutter cannot be compiled by
-      # `dart test`. When a suite is added to the command below, re-derive this
-      # list from its imports rather than assuming it changed nothing.
+      # `dart test`. When a browser suite is added, re-derive this list from its
+      # imports rather than assuming it changed nothing.
       #
       # Chrome comes from the windows-2022 image; package:test finds it via
       # CHROME_EXECUTABLE / CHROME_PATH, else %LOCALAPPDATA%/%PROGRAMFILES%
@@ -586,20 +674,13 @@ jobs:
       # ("No tests ran"). Do not add `|| true`, and do not make this step
       # conditional on Chrome being detected.
       #
-      # shell: bash for the reason spelled out on "Run JavaScript tests" above --
+      # shell: bash for the reason spelled out on "Run JavaScript tests" in flutter-web --
       # the runner's default pwsh does not abort on a native command's non-zero
-      # exit, so a failing suite could ship green.
+      # exit, so a failing suite could ship green. Under bash -e the assignment below also fails
+      # the step when the selection does, before `dart test` could run with no file arguments
+      # (which would mean the whole test/ directory).
       - name: Run browser tests
         shell: bash
-        run: >-
-          dart test --platform chrome
-          test/record_mutation_lock_web_test.dart
-          test/storage_persistence_web_test.dart
-          test/bounded_js_answer_web_test.dart
-          test/origin_storage_estimate_web_test.dart
-          test/opfs_delete_failure_web_test.dart
-          test/settings_box_deletion_web_test.dart
-          test/fs_metadata_web_test.dart
-          test/fs_ranged_read_web_test.dart
-          test/settings_value_render_web_test.dart
-          test/storage_zip_export_web_test.dart
+        run: |
+          files="$(dart tool/test_selection.dart browser)"
+          dart test --platform chrome $files

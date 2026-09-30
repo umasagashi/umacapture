@@ -20,7 +20,8 @@ to rather than repeated:
 | what "verified" means for a `native/src` change, reading ctest per case, a changed golden | `.claude/skills/native-change-verification/SKILL.md` |
 | first-time toolchain and dependency setup | `.claude/skills/project-setup/SKILL.md` |
 | the live capture harness: parts, prerequisites, exit codes, reason codes, scenarios | `docs/live-capture-harness.md` |
-| what CI runs, and the browser-test file list | `.github/workflows/ci.yml` |
+| what CI runs | `.github/workflows/ci.yml` |
+| which test files CI runs, and where (the VM shards and the browser suites) | `tool/test_selection.dart` |
 | which platforms, capture forms and inputs the product promises | `.claude/rules/supported-scope.md` |
 
 Rules that hold across every stage:
@@ -53,7 +54,7 @@ Then take the union of the rows every changed path hits. **R** = required, **r**
 
 | changed path | 1 | 2 | 3 | 4 | 5 | why |
 | --- | --- | --- | --- | --- | --- | --- |
-| anything | R | R¹ | r | | | stage 1 is what CI will run anyway, and it is cheaper to fail here than on the PR. ¹ The always-required part of stage 2 is `flutter build windows`, codegen freshness and `check_web_pins --require-verified`: CI never builds the Windows runner (no `build windows` in `.github/workflows/`), and the other two take seconds |
+| anything | R | R¹ | r | | | stage 1 is what CI will run anyway, and it is cheaper to fail here than on the PR. ¹ The always-required part of stage 2 is `flutter build windows` and `check_web_pins --require-verified`: CI never builds the Windows runner (no `build windows` in `.github/workflows/`), and the other takes seconds |
 | `native/src/`, `native/vendor/`, `native/wasm/` | R | R (+ wasm rebuild) | R | R | r | CI skips every golden case (it never builds `umacapture_cli`, and has no clips), so stage 3 is the only place a recognition change is judged. `tool/web_deps.json` digests these three roots, so the recognition core must be rebuilt and compared against its pin. The same core runs in the live Windows path, which stage 3 cannot reach (`docs/live-capture-harness.md`, *The gap it fills*). Stage 5 becomes R when the change can move the factor tab, the duplicate probe (`Factor probe:` lines) or record identity |
 | `native/test/integration/`, `native/CMakeLists.txt`, `assets/config/`, a new model set | R | R | R | r | | the golden suite's inputs and registration. `assets/config/` is also what the app loads, so stage 4 is recommended |
 | `windows/runner/` | R | R | | R | r | the Windows capture producer and the method channel exist only in the live path |
@@ -82,7 +83,7 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | # | command | pass | measured |
 | --- | --- | --- | --- |
 | 1.1 | `.fvm/flutter_sdk/bin/dart run build_runner build --force-jit` | exit 0 | 12 s |
-| 1.2 | `git status --short` right after 1.1 | no tracked generated file changed (codegen is fresh) | — |
+| 1.2 | `git status --short` right after 1.1 | no generated file changed and no new generated file appeared (codegen is fresh). CI's `Check generated outputs are committed` step fails on either under `lib/` and `test/` | — |
 | 1.3 | `.fvm/flutter_sdk/bin/flutter analyze --no-fatal-infos` | exit 0, no error or warning | 45 s |
 | 1.4 | `.fvm/flutter_sdk/bin/dart format --output=none --set-exit-if-changed lib test tool` | exit 0 | 3 s |
 | 1.5 | `.fvm/flutter_sdk/bin/flutter test -j 4 --reporter github test` | exit 0, 0 failed | 409 s |
@@ -91,17 +92,18 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | 1.8 | `bash tool/hooks/test_pre_commit.sh` | exit 0 | 6 s |
 | 1.9 | `node tool/test_web_frame_shaping.mjs`, `test_web_live_content.mjs`, `test_web_capture_session.mjs`, `test_web_video_import.mjs`, `test_web_video_frame_grab.mjs`, `test_web_video_demux.mjs` (all under `tool/`) | each exits 0 | 6 s for all six |
 
-* **1.6 `$files`**: extract the list from the `Run browser tests` step of `.github/workflows/ci.yml`
-  — that list is the only definition of which suites run in a browser, and a `*_web_test.dart`
-  not named there is deliberately not a browser suite (`test/record_loader_web_test.dart` runs on
-  the VM). `package:test` launches Chrome headless, so this step opens no window. Do not copy the
-  list by hand: on 2026-09-27 a hand copy dropped one of ten files and the run reported 41 tests
-  instead of 50 with exit 0, which nothing flagged. Extract it and count both ends:
+* **1.6 `$files`**: take the list from `tool/test_selection.dart browser`, the same command CI's
+  `Run browser tests` step runs. It selects every test file whose library carries
+  `@TestOn('browser')`, so a `*_web_test.dart` without that annotation is not a browser suite
+  (`test/record_loader_web_test.dart` runs on the VM). A non-zero exit means the selection's own
+  check failed, which is a finding. `package:test` launches Chrome headless, so this step opens no
+  window. Do not copy the list by hand: on 2026-09-27 a hand copy dropped one of ten files and the
+  run reported 41 tests instead of 50 with exit 0, which nothing flagged. Take it and count both
+  ends:
 
   ```bash
-  files=$(awk '/- name: Run browser tests/{f=1;next} f&&/- name:/{f=0} f' .github/workflows/ci.yml \
-    | grep -oE 'test/[A-Za-z0-9_/]+_test\.dart')
-  echo "$files" | wc -l                                   # extracted: 10 on 2026-09-27
+  files=$(.fvm/flutter_sdk/bin/dart tool/test_selection.dart browser) || echo "selection failed"
+  echo "$files" | wc -l                                   # 10 on 2026-09-30
   .fvm/flutter_sdk/bin/dart test --platform chrome --reporter expanded $files > browser.log 2>&1
   grep -oE 'test/[A-Za-z0-9_/]+_test\.dart' browser.log | sort -u | wc -l   # must equal the line above
   ```
@@ -131,7 +133,6 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | # | command | pass | measured |
 | --- | --- | --- | --- |
 | 2.1 | `.fvm/flutter_sdk/bin/flutter build windows --release` (PowerShell) | exit 0, `Built build\windows\x64\runner\Release\umacapture.exe`, and the exe's mtime is after the step started | 125 s |
-| 2.2 | codegen freshness | the result of 1.2 | — |
 | 2.3a | `uv run native/wasm/check_sources.py` | exit 0, `in sync` | < 1 s |
 | 2.3b | `SKIP_SOURCE_CHECK=1 bash native/wasm/build.sh` (Git Bash) | exit 0 | 115 s |
 | 2.3c | `sha256sum` of `umacapture_core.js` and `umacapture_core.wasm` in the directory `build.sh` names on its `Done. Artifacts in <dir>:` line (`$BUILD_DIR` in the script, whose default lies outside the repository), against `grep -A1 '^    "wasm/umacapture_core' tool/web_deps.json`. That line is near the end, not the last: an `ls -la` of the two artifacts follows it | both hashes equal their pin | — |

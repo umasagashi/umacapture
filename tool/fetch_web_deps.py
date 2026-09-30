@@ -11,7 +11,8 @@ verifying every byte against ``tool/web_deps.json``.
 
 It is the web-side counterpart of ``tool/fetch_deps.py``, and deliberately a
 *separate* script: ``fetch_deps.py``'s CLI is pinned by CI
-(``.github/workflows/ci.yml``), so its ``--only`` choices must not grow.
+(``.github/actions/provision-opencv`` and ``provision-ffmpeg``), so its
+``--only`` choices must not grow.
 
 Unlike ``fetch_deps.py``, the pins do not live in constants here -- they live in
 ``tool/web_deps.json``, which is also the source of truth for the license
