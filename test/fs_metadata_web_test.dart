@@ -35,8 +35,9 @@
 // review; what is verified here is the browser behaviour those branches are
 // written against.
 //
-// CI runs this in the `Browser tests` job in .github/workflows/ci.yml; a file
-// not named on that command line is run by nothing.
+// CI runs this in the `Browser tests` job in .github/workflows/ci.yml, which
+// runs every test file whose library carries `@TestOn('browser')`
+// (tool/test_selection.dart picks them).
 @TestOn('browser')
 library;
 

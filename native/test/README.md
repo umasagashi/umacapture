@@ -514,10 +514,14 @@ POST_BUILD step copies the matching `opencv_world4130[d].dll` next to it.
 ## Coverage
 
 Coverage is measured with [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage)
-(gcov/lcov do not apply to MSVC). It is not wired into CMake, but the CI
-`native-tests` job (`.github/workflows/ci.yml`) runs it after `ctest` and uploads
-the HTML + Cobertura report as the `native-coverage` artifact on every PR — a
-non-gating, always-on view of which linked `.cpp` lines no test reaches. To run it
+(gcov/lcov do not apply to MSVC). It is not wired into CMake, but CI runs it in
+its own `native-coverage` job (`.github/workflows/ci.yml`, "Native C++ coverage"),
+which builds the Debug test binary, runs it under OpenCppCoverage and uploads the
+HTML + Cobertura report as the `native-coverage` artifact on every PR — a
+non-gating, always-on view of which linked `.cpp` lines no test reaches. The job is
+not a required check: a coverage failure shows red on the PR but does not block the
+merge, and the required `native-tests` job runs the binary only once, uninstrumented.
+To run it
 locally on the built Debug binary, install it once (e.g.
 `choco install opencppcoverage`), then from the `native/` directory:
 

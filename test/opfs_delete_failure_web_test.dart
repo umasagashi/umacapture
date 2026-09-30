@@ -21,8 +21,9 @@
 // observing io semantics for everything the async surface decides: which
 // exception type a failure throws".
 //
-// CI runs this in the `Browser tests` job in .github/workflows/ci.yml; a file
-// not named on that command line is run by nothing.
+// CI runs this in the `Browser tests` job in .github/workflows/ci.yml, which
+// runs every test file whose library carries `@TestOn('browser')`
+// (tool/test_selection.dart picks them).
 //
 // What this suite deliberately does NOT cover, and why: it drives the OPFS API
 // directly instead of going through `WebVfs` (lib/src/core/fs/web_vfs.dart).

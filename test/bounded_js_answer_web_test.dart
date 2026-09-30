@@ -14,8 +14,8 @@
 // It must run in a real browser and under `dart test` for the same reasons as its
 // siblings: `JSPromise.toDart` exists nowhere else, and the flutter runner would
 // compile the whole framework first. CI runs it in the `Browser tests` job in
-// .github/workflows/ci.yml; a file not named on that command line is run by
-// nothing.
+// .github/workflows/ci.yml, which runs every test file whose library carries
+// `@TestOn('browser')` (tool/test_selection.dart picks them).
 @TestOn('browser')
 library;
 

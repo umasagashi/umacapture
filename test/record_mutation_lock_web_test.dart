@@ -14,9 +14,10 @@
 // `platformRecordMutationLock` is the io runner anyway. CI therefore runs it in
 // its own job -- `Browser tests` in .github/workflows/ci.yml -- on windows-2022
 // with the pinned Flutter 3.44.4, as exactly the command above against the
-// image's Chrome. That job runs only the suites its command names, so a test
-// added here is covered automatically and a test moved out of it is covered only
-// if its file is named there too.
+// image's Chrome. That job runs every test file whose library carries
+// `@TestOn('browser')` (tool/test_selection.dart picks them), so a test added
+// here is covered automatically and a test moved out of it is covered only if
+// the file it moves to carries that annotation too.
 //
 // What it pins, and what it caught:
 //
