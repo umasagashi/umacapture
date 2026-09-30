@@ -18,6 +18,7 @@ enum SettingsEntryKey {
   autoRowHeight,
   rowHeightMode,
   minRowLines,
+  strongRowBorders,
   sentryReportLastMonth,
   sentryReportTotalCount,
   capturePreview,

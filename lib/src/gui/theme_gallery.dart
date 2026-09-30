@@ -367,6 +367,15 @@ class _BlendSection extends StatelessWidget {
           'Hover highlight on the window-control buttons (M3 state opacity).',
         ),
         _SwatchRow(
+          _BlendSwatch(
+            'strong row border',
+            overlay: cs.onSurface.withValues(alpha: 0.32),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Record table row borders (and column-title dividers) when "strong row borders" is on.',
+        ),
+        _SwatchRow(
           _BlendSwatch('modal scrim', overlay: cs.scrim.withValues(alpha: 0.5), base: cs.surface, baseLabel: 'surface'),
           'Dim backdrop behind modal dialogs (scrim role).',
         ),

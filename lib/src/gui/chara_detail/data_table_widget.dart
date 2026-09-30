@@ -803,6 +803,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // Drives the per-row overlay's color/label so a checked row reads as either
     // "archive" or "export". Non-null whenever the checkbox column is present.
     final purpose = ref.watch(selectionModeProvider);
+    // Watched rather than listened to: the rebuild hands TrinaGrid a new
+    // configuration, which its didUpdateWidget applies to the live stateManager.
+    final strongRowBorders = ref.watch(charaDetailStrongRowBordersProvider);
     // Mirror the latest theme/purpose so the grid's long-lived row callbacks read
     // current values. A theme change won't touch currentGridProvider, so nudge the
     // live grid to repaint the rows with the new colors.
@@ -828,6 +831,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // here on change.
     ref.listen(charaDetailRowHeightModeProvider, (_, _) => _afterFrame(_applyRowHeights));
     ref.listen(charaDetailMinRowLinesProvider, (_, _) => _afterFrame(_applyRowHeights));
+    // The new border colour reaches the stateManager in the rebuild above, but the
+    // rows (and the pinned-row separators in rowWrapper) repaint only when it
+    // notifies, as with a theme change.
+    ref.listen(charaDetailStrongRowBordersProvider, (_, _) {
+      if (_loaded) _afterFrame(stateManager.notifyListeners);
+    });
     // A focus request set while this table is already alive (e.g. from the capture screen on a
     // duplicate). A request that arrives before load is picked up by onLoaded instead.
     ref.listen(charaDetailFocusRecordProvider, (_, next) {
@@ -948,7 +957,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         final separator = isLast
                             ? BorderSide(color: theme.colorScheme.outline, width: 3)
                             : BorderSide(
-                                color: theme.focusColor,
+                                color: stateManager.configuration.style.borderColor,
                                 width: stateManager.configuration.style.cellHorizontalBorderWidth,
                               );
                         final bordered = DecoratedBox(
@@ -1022,7 +1031,15 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       frozenRowColor: Colors.transparent,
                       frozenRowBorderColor: Colors.transparent,
                       gridBorderColor: theme.colorScheme.outline,
-                      borderColor: theme.focusColor,
+                      // Row separators (and, through trina, the column-title
+                      // dividers). The pinned-row separators in rowWrapper read
+                      // this same value back from the configuration.
+                      // The strong variant stays below the outline role that marks
+                      // the pinned-block boundary, so that boundary still reads as
+                      // distinct by colour as well as by width.
+                      borderColor: strongRowBorders
+                          ? theme.colorScheme.onSurface.withValues(alpha: 0.32)
+                          : theme.focusColor,
                       activatedBorderColor: theme.focusColor,
                       inactivatedBorderColor: theme.focusColor,
                       columnTextStyle: theme.textTheme.titleSmall!,

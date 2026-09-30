@@ -2,7 +2,7 @@
     "name": "umacapture",
     "short_name": "umacapture",
     "start_url": ".",
-    "display": "standalone",
+    "display": "browser",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
     "description": "Application for the game Umamusume players.",

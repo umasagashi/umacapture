@@ -77,6 +77,12 @@ final charaDetailMinRowLinesProvider = IntNotifierProvider(() {
   return IntNotifier(entryKey: SettingsEntryKey.minRowLines.name, defaultValue: 2, min: 1, max: 20);
 });
 
+/// Whether the table draws its row borders in a stronger colour (default off).
+/// Only the colour changes; the border width stays the same.
+final charaDetailStrongRowBordersProvider = BooleanNotifierProvider(() {
+  return BooleanNotifier(entryKey: SettingsEntryKey.strongRowBorders.name, defaultValue: false);
+});
+
 /// Renders a text-based cell, capping the line count only in
 /// [RowHeightMode.wrap] (minimum lines + ellipsis) and otherwise wrapping
 /// freely so the row-height pass can grow the row to fit.

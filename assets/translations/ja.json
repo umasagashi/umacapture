@@ -369,6 +369,10 @@
                     "min_row_lines": {
                         "title": "行高さ下限",
                         "description": "すべての行の高さの下限とする行数を指定します。"
+                    },
+                    "strong_row_borders": {
+                        "title": "行の境界線を濃くする",
+                        "description": "行と行の間の境界線を濃い色で表示します。"
                     }
                 }
             },

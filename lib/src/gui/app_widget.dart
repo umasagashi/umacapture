@@ -94,7 +94,7 @@ class AppNavigationRail extends ConsumerWidget {
           bottom: 0,
           left: 0,
           right: 0,
-          child: TextButton(
+          child: FilledButton.tonal(
             style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
             child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
             onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
