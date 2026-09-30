@@ -1,0 +1,303 @@
+name: EXP setup-flutter extraction
+
+# EXPERIMENT BRANCH ONLY (exp/setup-flutter-extract). NEVER MERGE.
+#
+# Measures how much each of three levers shortens "Set up Flutter" on windows-2022 when the caches
+# are warm, against the unchanged production action in the same run:
+#
+#   control  - ./.github/actions/setup-flutter exactly as ci.yml uses it (SDK and pub cache on C:).
+#   ddrive   - the same flutter-action inputs, plus cache-path / pub-cache-path under D:\exp.
+#   defender - the production action, preceded by turning off Defender real-time monitoring.
+#   refs     - the same as ddrive, but under a ReFS VHDX (samypr100/setup-dev-drive) mounted at
+#              D:\ddmnt and backed by D:\dev_drive.vhdx. windows-2022 (build 20348) has no native
+#              Dev Drive (the action needs build 22621+), so this is a plain ReFS VHDX. Since both
+#              ddrive and refs sit on D:, refs vs ddrive isolates the ReFS/VHDX layer.
+#
+# One variable per arm. The timed window is from the "EXP T0" step's output to the start of the
+# "EXP T1" step, so an arm's own preparation (the Defender call, the VHDX mount) is part of its cost.
+# Everything after EXP T1 is untimed verification: it fails the job when an arm did not take effect,
+# so a lever that could not be applied never shows up as "no effect".
+#
+# WHY A SEED JOB. A cache's version hashes its path, so ddrive and refs cannot restore develop's
+# caches. If they built their own caches cold, the archives would hold different content from
+# develop's (whichever job saved develop's cache decided what it holds), and the comparison would
+# measure the content as well as the path. The seed job restores develop's exact caches at the
+# production paths, moves them to the arm's path, and saves them there under the same keys, so
+# every arm extracts the same files and only the destination differs. It does nothing once the
+# arm's caches exist, so on a rerun it only looks them up.
+#
+# Attempt 1 of a run seeds; measurement uses attempts 2 and later (see the design note that goes
+# with this branch).
+on:
+  pull_request:
+    branches: [develop]
+
+concurrency:
+  group: exp-setup-flutter-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Roots of the moved caches, one per moving arm. Read by both jobs through
+  # env[format('EXP_ROOT_{0}', matrix.arm)], so the seed and the measurement resolve the same paths.
+  EXP_ROOT_ddrive: D:/exp
+  EXP_ROOT_refs: D:/ddmnt
+
+jobs:
+  seed:
+    name: seed (${{ matrix.arm }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [ddrive, refs]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mount ReFS VHDX
+        if: matrix.arm == 'refs'
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        with:
+          drive-size: 16GB
+          drive-format: ReFS
+          drive-path: D:/dev_drive.vhdx
+          mount-path: ${{ env.EXP_ROOT_refs }}
+
+      - name: Resolve production keys and paths (dry run)
+        id: src
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+          dry-run: true
+
+      - name: Resolve this arm's paths (dry run)
+        id: dst
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+          dry-run: true
+          cache-path: ${{ format('{0}/flutter/:channel:-:version:-:arch:', env[format('EXP_ROOT_{0}', matrix.arm)]) }}
+          pub-cache-path: ${{ format('{0}/pub-cache', env[format('EXP_ROOT_{0}', matrix.arm)]) }}
+
+      - name: Show resolved keys and paths
+        shell: pwsh
+        run: |
+          "EXP_SEED arm=${{ matrix.arm }} src_sdk=${{ steps.src.outputs.CACHE-PATH }} src_pub=${{ steps.src.outputs.PUB-CACHE-PATH }}"
+          "EXP_SEED arm=${{ matrix.arm }} dst_sdk=${{ steps.dst.outputs.CACHE-PATH }} dst_pub=${{ steps.dst.outputs.PUB-CACHE-PATH }}"
+          "EXP_SEED sdk_key=${{ steps.dst.outputs.CACHE-KEY }} pub_key=${{ steps.dst.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}"
+
+      - name: Look up this arm's SDK cache
+        id: have_sdk
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.dst.outputs.CACHE-PATH }}
+          key: ${{ steps.dst.outputs.CACHE-KEY }}
+          lookup-only: true
+
+      - name: Look up this arm's pub cache
+        id: have_pub
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.dst.outputs.PUB-CACHE-PATH }}
+          key: ${{ steps.dst.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+          lookup-only: true
+
+      # fail-on-cache-miss: seeding from anything but develop's own caches would defeat the point.
+      - name: Restore develop's SDK cache at the production path
+        if: steps.have_sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.src.outputs.CACHE-PATH }}
+          key: ${{ steps.src.outputs.CACHE-KEY }}
+          fail-on-cache-miss: true
+
+      - name: Restore develop's pub cache at the production path
+        if: steps.have_pub.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.src.outputs.PUB-CACHE-PATH }}
+          key: ${{ steps.src.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+          fail-on-cache-miss: true
+
+      - name: Move the restored caches to this arm's paths
+        if: steps.have_sdk.outputs.cache-hit != 'true' || steps.have_pub.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          MOVE_SDK: ${{ steps.have_sdk.outputs.cache-hit != 'true' }}
+          MOVE_PUB: ${{ steps.have_pub.outputs.cache-hit != 'true' }}
+        run: |
+          function Move-Tree($name, $src, $dst) {
+            $before = (Get-ChildItem -LiteralPath $src -Recurse -File -Force | Measure-Object -Property Length -Sum)
+            robocopy $src $dst /E /MOVE /MT:32 /R:0 /W:0 /NFL /NDL /NP /NJH
+            if ($LASTEXITCODE -ge 8) { throw "robocopy failed for $name (exit $LASTEXITCODE)" }
+            $after = (Get-ChildItem -LiteralPath $dst -Recurse -File -Force | Measure-Object -Property Length -Sum)
+            "EXP_SEED_MOVED $name files=$($before.Count)->$($after.Count) bytes=$($before.Sum)->$($after.Sum)"
+            if ($before.Count -ne $after.Count -or $before.Sum -ne $after.Sum) { throw "$name moved incompletely" }
+          }
+          if ($env:MOVE_SDK -eq 'true') { Move-Tree sdk '${{ steps.src.outputs.CACHE-PATH }}' '${{ steps.dst.outputs.CACHE-PATH }}' }
+          if ($env:MOVE_PUB -eq 'true') { Move-Tree pub '${{ steps.src.outputs.PUB-CACHE-PATH }}' '${{ steps.dst.outputs.PUB-CACHE-PATH }}' }
+          exit 0
+
+      - name: Save the SDK cache at this arm's path
+        if: steps.have_sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.dst.outputs.CACHE-PATH }}
+          key: ${{ steps.dst.outputs.CACHE-KEY }}
+
+      - name: Save the pub cache at this arm's path
+        if: steps.have_pub.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.dst.outputs.PUB-CACHE-PATH }}
+          key: ${{ steps.dst.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+
+  measure:
+    name: measure (${{ matrix.arm }}, ${{ matrix.rep }})
+    # Every arm waits for the seed, so all arms of an attempt start together and share the same
+    # cache-service load.
+    needs: seed
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [control, ddrive, defender, refs]
+        rep: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe the runner (untimed)
+        shell: pwsh
+        run: |
+          "EXP_ARM arm=${{ matrix.arm }} rep=${{ matrix.rep }} attempt=${{ github.run_attempt }}"
+          $os = Get-CimInstance Win32_OperatingSystem
+          "EXP_OS caption=$($os.Caption) build=$($os.BuildNumber)"
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          "EXP_CPU name=$($cpu.Name.Trim()) cores=$($cpu.NumberOfCores) lp=$($cpu.NumberOfLogicalProcessors)"
+          Get-Volume | Where-Object DriveLetter | ForEach-Object {
+            "EXP_VOLUME letter=$($_.DriveLetter) fs=$($_.FileSystem) size=$($_.Size) free=$($_.SizeRemaining)"
+          }
+          try {
+            $s = Get-MpComputerStatus -ErrorAction Stop
+            "EXP_DEFENDER mode=$($s.AMRunningMode) service=$($s.AMServiceEnabled) rtp=$($s.RealTimeProtectionEnabled) onaccess=$($s.OnAccessProtectionEnabled) tamper=$($s.IsTamperProtected)"
+            $p = Get-MpPreference -ErrorAction Stop
+            "EXP_DEFENDER_PREF disable_rtm=$($p.DisableRealtimeMonitoring) exclusion_path=$($p.ExclusionPath -join ';') exclusion_process=$($p.ExclusionProcess -join ';')"
+          } catch {
+            "EXP_DEFENDER unavailable error=$($_.Exception.Message)"
+          }
+
+      - name: EXP T0
+        shell: pwsh
+        run: echo EXP_T0
+
+      # ---- timed from the EXP_T0 output line ----
+
+      # Set-MpPreference returns success even when tamper protection ignores it, so the effect is
+      # read back and the job fails if protection is still on.
+      - name: Turn off Defender real-time monitoring
+        if: matrix.arm == 'defender'
+        shell: pwsh
+        run: |
+          try { $before = (Get-MpComputerStatus -ErrorAction Stop).RealTimeProtectionEnabled }
+          catch { "EXP_ARM_NOOP arm=defender reason=Get-MpComputerStatus failed: $($_.Exception.Message)"; exit 0 }
+          if (-not $before) { "EXP_ARM_NOOP arm=defender reason=real-time protection already off"; exit 0 }
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          $deadline = (Get-Date).AddSeconds(15)
+          do {
+            $after = (Get-MpComputerStatus).RealTimeProtectionEnabled
+            if (-not $after) { break }
+            Start-Sleep -Milliseconds 200
+          } while ((Get-Date) -lt $deadline)
+          "EXP_ARM_APPLIED arm=defender rtp_before=$before rtp_after=$after pref=$((Get-MpPreference).DisableRealtimeMonitoring)"
+          if ($after) { throw "Set-MpPreference returned but real-time protection is still on" }
+
+      - name: Mount ReFS VHDX
+        if: matrix.arm == 'refs'
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        with:
+          drive-size: 16GB
+          drive-format: ReFS
+          drive-path: D:/dev_drive.vhdx
+          mount-path: ${{ env.EXP_ROOT_refs }}
+
+      - name: Set up Flutter (production action)
+        if: matrix.arm == 'control' || matrix.arm == 'defender'
+        uses: ./.github/actions/setup-flutter
+
+      # The production action's inputs plus the two paths; nothing else differs.
+      - name: Set up Flutter (moved caches)
+        id: setup_moved
+        if: matrix.arm == 'ddrive' || matrix.arm == 'refs'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+          cache: true
+          cache-path: ${{ format('{0}/flutter/:channel:-:version:-:arch:', env[format('EXP_ROOT_{0}', matrix.arm)]) }}
+          pub-cache-path: ${{ format('{0}/pub-cache', env[format('EXP_ROOT_{0}', matrix.arm)]) }}
+
+      - name: Resolve dependencies (moved caches)
+        if: matrix.arm == 'ddrive' || matrix.arm == 'refs'
+        shell: pwsh
+        run: flutter pub get
+
+      - name: EXP T1
+        shell: pwsh
+        run: echo EXP_T1
+
+      # ---- untimed from here ----
+
+      # A cache miss on a moving arm means the seed did not take; failing here also keeps the
+      # post step from saving a cold cache (actions/cache saves only on success).
+      - name: Verify the arm took effect (untimed)
+        shell: pwsh
+        env:
+          EXP_ARM: ${{ matrix.arm }}
+          EXP_EXPECT_ROOT: ${{ env[format('EXP_ROOT_{0}', matrix.arm)] || 'C:/' }}
+          EXP_SDK_HIT: ${{ steps.setup_moved.outputs.CACHE-HIT }}
+          EXP_PUB_HIT: ${{ steps.setup_moved.outputs.PUB-CACHE-HIT }}
+        run: |
+          $root = $env:FLUTTER_ROOT -replace '/', '\'
+          $pub = $env:PUB_CACHE -replace '/', '\'
+          $expect = ($env:EXP_EXPECT_ROOT -replace '/', '\').TrimEnd('\') + '\'
+          "EXP_PATHS flutter_root=$root pub_cache=$pub flutter=$((Get-Command flutter).Source) expect=$expect"
+          dart --version
+          $bad = @()
+          if (-not $root.StartsWith($expect, 'OrdinalIgnoreCase')) { $bad += "FLUTTER_ROOT not under $expect" }
+          if (-not $pub.StartsWith($expect, 'OrdinalIgnoreCase')) { $bad += "PUB_CACHE not under $expect" }
+          if (($env:EXP_ARM -in @('ddrive', 'refs')) -and ($env:EXP_SDK_HIT -ne 'true' -or $env:EXP_PUB_HIT -ne 'true')) {
+            $bad += "cache miss on a moving arm (sdk=$($env:EXP_SDK_HIT) pub=$($env:EXP_PUB_HIT))"
+          }
+          function Get-Fs($p) {
+            try { (Get-Volume -FilePath $p -ErrorAction Stop).FileSystem } catch { "error:$($_.Exception.Message)" }
+          }
+          $fs = Get-Fs $root
+          "EXP_VERIFY arm=$($env:EXP_ARM) sdk_fs=$fs pub_fs=$(Get-Fs $pub)"
+          if ($env:EXP_ARM -eq 'refs') {
+            if ($fs -ne 'ReFS') { $bad += "SDK volume is $fs, not ReFS" }
+            try { "EXP_DEVDRV $((fsutil devdrv query $expect 2>&1) -join ' | ')" } catch { "EXP_DEVDRV error:$($_.Exception.Message)" }
+          }
+          try {
+            $s = Get-MpComputerStatus -ErrorAction Stop
+            "EXP_DEFENDER_AFTER rtp=$($s.RealTimeProtectionEnabled)"
+          } catch { "EXP_DEFENDER_AFTER unavailable" }
+          $sdk = Get-ChildItem -LiteralPath $root -Recurse -File -Force | Measure-Object -Property Length -Sum
+          $pc = Get-ChildItem -LiteralPath $pub -Recurse -File -Force | Measure-Object -Property Length -Sum
+          "EXP_CONTENT sdk_files=$($sdk.Count) sdk_bytes=$($sdk.Sum) pub_files=$($pc.Count) pub_bytes=$($pc.Sum)"
+          if ($bad) { throw ($bad -join '; ') }
+          "EXP_VERIFY_OK"
+          # dart and fsutil leave $LASTEXITCODE behind, and the runner exits with it.
+          exit 0
+
+      # Negative control: in-memory hashing does no file I/O, so no lever can move it. If it
+      # differs between arms, the VMs differed and a setup-time difference is not the lever's.
+      - name: CPU probe (negative control, untimed)
+        shell: pwsh
+        run: |
+          $buf = [byte[]]::new(64MB)
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          for ($i = 0; $i -lt 48; $i++) { [void]$sha.ComputeHash($buf) }
+          $sw.Stop()
+          "EXP_CPU_PROBE seconds=$($sw.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture))"
