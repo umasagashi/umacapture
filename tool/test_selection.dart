@@ -6,8 +6,7 @@
 ///
 /// Each mode prints one repository-relative path per line on stdout; diagnostics go to stderr.
 /// `<shard-index>` is zero-based, matching `strategy.job-index` in `.github/workflows/ci.yml`. Run
-/// it as `dart <file>`, not `dart run`: it imports only `dart:io`, and `dart run` would first run
-/// the package's native build hooks.
+/// it as `dart <file>`, not `dart run`: `dart run` would first run the package's native build hooks.
 ///
 /// WHY A SCAN AND NOT A LIST. A test file that is not named on any command line is run by
 /// nothing, and a hand-kept list says nothing when a new file is left off it. Every file this
@@ -21,6 +20,11 @@
 /// `@TestOn` selector is refused rather than guessed at: routing it would take a decision about
 /// which job owns that platform, and until someone makes it, a silent default could leave the file
 /// run by neither.
+///
+/// The annotation is read the way the test runner reads it (`parseMetadata` in `package:test_core`):
+/// parsed, from the metadata of the file's first directive, with a `TestOn` under an import prefix
+/// (`@t.TestOn(...)`) counted as `TestOn`. Text that only looks like an annotation, in a comment or
+/// a string, is therefore not one, and an annotation the runner honours is never missed.
 ///
 /// WHAT IS CHECKED ON EVERY INVOCATION, before anything is printed, so a broken selection fails
 /// the job that asked for it instead of quietly shrinking what runs:
@@ -37,6 +41,9 @@
 library;
 
 import "dart:io";
+
+import "package:analyzer/dart/analysis/utilities.dart";
+import "package:analyzer/dart/ast/ast.dart";
 
 /// Serial compile cost of one test file, in seconds: the interval at which new suites started
 /// reporting in the CI `Run tests` step (1.2-1.4 s on the 4-vCPU windows-2022 runner).
@@ -71,9 +78,6 @@ const Map<String, double> measuredExecutionSeconds = {
   "test/storage_zip_export_test.dart": 8.1,
   "test/storage_extract_capture_gate_test.dart": 8.0,
 };
-
-final RegExp _testOnLine = RegExp(r"^@TestOn\(", multiLine: true);
-final RegExp _testOnAnnotation = RegExp(r"""^@TestOn\(\s*(?:'([^']*)'|"([^"]*)")\s*\)""", multiLine: true);
 
 class Selection {
   Selection(this.vm, this.browser);
@@ -138,24 +142,53 @@ Selection _scan(Directory root, List<String> problems) {
   final vm = <String>[];
   final browser = <String>[];
   for (final path in files) {
-    final source = File(path).readAsStringSync();
-    final lines = _testOnLine.allMatches(source).length;
-    final annotations = _testOnAnnotation.allMatches(source).toList();
-    if (lines == 0) {
+    final testOn = _testOnAnnotations(File(path).readAsStringSync(), path);
+    if (testOn.isEmpty) {
       vm.add(path);
-    } else if (lines > 1 || annotations.length != lines) {
-      problems.add("$path: cannot read its @TestOn annotation as a single string literal");
-    } else if ((annotations.single.group(1) ?? annotations.single.group(2)) == "browser") {
+    } else if (testOn.length > 1) {
+      problems.add("$path: more than one @TestOn annotation");
+    } else if (_singleStringArgument(testOn.single) == "browser") {
       browser.add(path);
     } else {
       problems.add(
-        "$path: ${annotations.single.group(0)} is not routed to any job; only 'browser' is "
+        "$path: ${testOn.single.toSource()} is not routed to any job; only 'browser' is "
         "(extend tool/test_selection.dart and the workflow together)",
       );
     }
   }
   return Selection(vm, browser);
 }
+
+/// The `TestOn` annotations on the file's library, found where the test runner looks: on the first
+/// directive. `p.TestOn` counts when `p` is an import prefix; otherwise the runner reads `p.TestOn`
+/// as the named constructor `TestOn` of a class `p`, which does not count.
+List<Annotation> _testOnAnnotations(String source, String path) {
+  final directives = parseString(content: source, path: path, throwIfDiagnostics: false).unit.directives;
+  if (directives.isEmpty) return const [];
+  final prefixes = {
+    for (final directive in directives.whereType<ImportDirective>())
+      if (directive.prefix case final prefix?) prefix.name,
+  };
+  return [
+    for (final annotation in directives.first.metadata)
+      if (_className(annotation, prefixes) == "TestOn") annotation,
+  ];
+}
+
+String _className(Annotation annotation, Set<String> prefixes) => switch (annotation.name) {
+  PrefixedIdentifier(:final prefix, :final identifier)
+      when prefixes.contains(prefix.name) || annotation.constructorName != null =>
+    identifier.name,
+  PrefixedIdentifier(:final prefix) => prefix.name,
+  final name => name.name,
+};
+
+/// The value of the annotation's only argument when it is a string literal without interpolation;
+/// null otherwise, which the caller refuses.
+String? _singleStringArgument(Annotation annotation) => switch (annotation.arguments?.arguments) {
+  [StringLiteral(:final stringValue)] => stringValue,
+  _ => null,
+};
 
 double _weight(String path) =>
     compileSeconds + (measuredExecutionSeconds[path] ?? defaultExecutionSeconds) / concurrency;
