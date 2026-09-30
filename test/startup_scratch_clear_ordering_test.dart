@@ -160,11 +160,20 @@ void main() {
     final yielded = <String>[];
     final loaded = container.read(pathInfoLoader.future).then((info) => yielded.add(info.tempDir.path));
 
-    await pumpEventQueue();
-
     // Not vacuous: if the sweep never ran from inside the loader, the rest of
     // this test would be observing an enumeration that was never requested.
-    expect(held.reached.isCompleted, isTrue, reason: 'the loader must run the scratch sweep itself');
+    // Awaited rather than polled after a fixed number of turns: the sweep does
+    // real I/O (`exists`) before it lists, and that can outlast any turn budget
+    // on a loaded machine. The bound turns a sweep that never starts into a
+    // failure instead of a hang.
+    await held.reached.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => fail('the loader must run the scratch sweep itself'),
+    );
+    // The listing is held, so a loader that awaits the sweep cannot advance no
+    // matter how long this waits; these turns only give a loader that does not
+    // await it the chance to hand out its layout.
+    await pumpEventQueue();
     expect(
       yielded,
       isEmpty,
