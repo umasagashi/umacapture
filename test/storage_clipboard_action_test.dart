@@ -50,6 +50,7 @@ import 'package:umacapture/src/gui/theme_extensions.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
 import 'support/storage_tree_settling.dart';
 
@@ -113,13 +114,8 @@ Future<void> _pumpPreview(WidgetTester tester, ProviderContainer container, File
 /// fixed number of rounds, for the reason `support/settling.dart` states, and
 /// bounded so a write that never happens is named as that instead of surfacing
 /// as an empty list three lines later.
-Future<void> _awaitWrite(WidgetTester tester) async {
-  for (var round = 0; round < 200; round++) {
-    if (_written.isNotEmpty) return;
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
-  fail('the tap started no clipboard write');
+Future<void> _awaitWrite(WidgetTester tester) {
+  return settleUntil(tester, () => _written.isNotEmpty, describe: 'the tap to start a clipboard write');
 }
 
 /// Presses [target] with the secondary button and lets the menu route settle.

@@ -96,12 +96,7 @@ Future<void> _settleUntilGone(WidgetTester tester, FilePath path) => settleUntil
 /// Lets the real (non-fake-async) file I/O the deletes issue actually run, for the steps that have no
 /// arrival to wait for -- a shot that must NOT be deleted, a dialog that must stay on screen. A fixed
 /// window can only weaken such a negative, never invert it.
-Future<void> _settleIo(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
+Future<void> _settleIo(WidgetTester tester) => pumpRealTimeWindow(tester, rounds: 8);
 
 /// The host the dialogs are shown in.
 Future<void> _pumpApp(WidgetTester tester, ProviderContainer container) {

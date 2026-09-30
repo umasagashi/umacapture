@@ -290,7 +290,7 @@ Future<_HeldDelete> _startHeldSettingsDelete(WidgetTester tester) async {
 /// its delete would satisfy the first assertion alone.
 Future<void> _expectHeldDeleteFinished(WidgetTester tester, _HeldDelete held) async {
   held.gate.complete();
-  await pumpRealTimeWindow(tester, rounds: 20);
+  await settleUntil(tester, () => held.toasts.isNotEmpty, describe: 'the held delete to finish and announce itself');
   expect(held.toasts, hasLength(1), reason: 'the delete finished without saying so');
   expect(held.toasts.single.type, ToastType.success, reason: 'the delete that ran was reported as a failure');
   expect(find.byKey(storageDeleteResultKey), findsOneWidget, reason: 'the restart panel never opened');
@@ -364,7 +364,7 @@ void main() {
       expect(_confirmEnabled(tester), isTrue);
 
       await tester.longPress(_confirmButton());
-      await pumpRealTimeWindow(tester, rounds: 20);
+      await settleUntil(tester, () => !_exists(file), describe: 'the acknowledged delete to remove the file');
       expect(_exists(file), isFalse, reason: 'the acknowledged delete did not run');
     });
 
@@ -385,7 +385,7 @@ void main() {
       expect(_confirmEnabled(tester), isTrue);
 
       await tester.longPress(_confirmButton());
-      await pumpRealTimeWindow(tester, rounds: 20);
+      await settleUntil(tester, () => !_exists(file), describe: 'the confirmed delete to remove the file');
       expect(_exists(file), isFalse);
     });
 
@@ -1032,7 +1032,13 @@ void main() {
       await tester.pump();
       expect(_confirmEnabled(tester), isTrue);
       await tester.longPress(_confirmButton());
-      await pumpRealTimeWindow(tester, rounds: 20);
+      // The toast is shown after the delete has invalidated the listing, so once it is in, the
+      // re-read is under way; both have to land before the listing is read below.
+      await settleUntil(
+        tester,
+        () => toasts.isNotEmpty && !container.read(storageTreeChildrenProvider(node)).isLoading,
+        describe: 'the delete to finish, announce itself and have the folder re-read',
+      );
 
       // The removal, which does not survive the defect either: the ref is
       // already gone when the exclusion is resolved, one step before the file
@@ -1113,7 +1119,7 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget, reason: 'the delete runs with nothing shown');
       expect(_confirmEnabled(tester), isFalse, reason: 'the confirm is pressable while the delete runs');
       gate.complete();
-      await pumpRealTimeWindow(tester, rounds: 20);
+      await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the settings delete to finish and announce itself');
 
       expect(toasts, hasLength(1), reason: 'the settings delete finished without saying so');
       expect(toasts.single.type, ToastType.success);
@@ -1182,7 +1188,11 @@ void main() {
       await tester.longPress(_confirmButton());
       await tester.pump();
       gate.complete();
-      await pumpRealTimeWindow(tester, rounds: 20);
+      await settleUntil(
+        tester,
+        () => find.byKey(storageDeleteResultKey).evaluate().isNotEmpty,
+        describe: 'the restart panel to open',
+      );
 
       expect(find.byKey(storageDeleteResultKey), findsOneWidget, reason: 'the restart panel never opened');
       // The whole of the claim: the storage view is still the bottom entry, and the

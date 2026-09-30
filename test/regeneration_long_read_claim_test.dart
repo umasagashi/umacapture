@@ -36,6 +36,7 @@ import 'package:umacapture/src/core/version_check.dart';
 
 import 'support/localization.dart';
 import 'support/records.dart';
+import 'support/settling.dart';
 
 late Directory _tempRoot;
 
@@ -131,14 +132,6 @@ void main() {
 
   CharaDetailRecord record(String id) => makeRecord(id: id, card: 1);
 
-  /// Waits for the registry to empty, polling the thing being waited on rather
-  /// than sleeping for a length that would have to be guessed.
-  Future<void> untilEmpty(ProviderContainer container) async {
-    for (var i = 0; i < 400 && container.read(longReadRegistryProvider).isNotEmpty; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-    }
-  }
-
   test('a batch claims every record it was handed, for the whole batch, and gives them back when it ends', () async {
     final container = containerFor();
     final seen = _RegistrySeen(container);
@@ -200,7 +193,10 @@ void main() {
     controller.watchdogInactivityTimeout = const Duration(milliseconds: 1);
 
     await controller.start([record('r1')]);
-    await untilEmpty(container);
+    await waitUntil(
+      () => container.read(longReadRegistryProvider).isEmpty,
+      describe: 'the batch to give its claims back',
+    );
 
     expect(
       seen.everyClaim.map((claim) => claim.kind),
@@ -299,20 +295,16 @@ void main() {
   // window is real time, so these two cases wait it out on the clock rather than
   // shortening it: its length is what they are about.
 
-  /// Waits until the regeneration progress is cleared, polling it.
-  Future<void> untilProgressCleared(ProviderContainer container) async {
-    for (var i = 0; i < 400 && !container.read(charaDetailRecordRegenerationControllerProvider).isEmpty; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-    }
-  }
-
   test('a batch started after the previous batch\'s tail is counted and releases its claim', () async {
     final container = containerFor();
     final controller = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
 
     await controller.start([record('r1')]);
     controller.fail('r1');
-    await untilProgressCleared(container);
+    await waitUntil(
+      () => container.read(charaDetailRecordRegenerationControllerProvider).isEmpty,
+      describe: 'the regeneration progress to clear',
+    );
     expect(controller.state.isEmpty, isTrue, reason: 'the finished batch\'s tail no longer clears its progress');
 
     await controller.start([record('r2')]);

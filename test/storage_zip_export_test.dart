@@ -50,6 +50,7 @@ import 'package:umacapture/src/core/clipboard_alt.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/file_download.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/core/utils.dart';
@@ -57,6 +58,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
 import 'support/storage_tree_settling.dart';
 
@@ -202,15 +204,6 @@ Map<String, List<int>> _readArchiveDates(String path) {
 StorageGroup _group(StorageGroupId id) => storageGroups.firstWhere((group) => group.id == id);
 
 Widget _tree() => const MaterialApp(home: Scaffold(body: StorageTreeView()));
-
-/// Lets the real event loop run without re-pumping the widget, which would take
-/// an open menu route with it.
-Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
-  for (var round = 0; round < rounds; round++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
-    await tester.pump();
-  }
-}
 
 /// Pumps the view and waits for its rows to be read. The zip progress this suite puts on screen is
 /// a determinate indicator, which `settleStorageRows` does not count as a pending row.
@@ -830,7 +823,11 @@ void main() {
       await dismissStorageMenu(tester);
 
       gate.complete(StorageZipDelivery.written);
-      await _settle(tester);
+      await settleUntil(
+        tester,
+        () => container.read(longReadRegistryProvider).isEmpty,
+        describe: 'the finished zip to release its claim',
+      );
 
       await pressStorageRowMenuButton(tester, other);
       expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
