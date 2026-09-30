@@ -1,9 +1,14 @@
 name: CI
 
 # Runs the native C++ (doctest) suite, the Flutter unit/widget suite and the
-# browser-only Dart suites on every PR to develop and on pushes to develop. The
-# jobs that build or test run on GitHub-hosted windows-2022: the native tests need
-# MSVC (and a downloaded OpenCV, see below), and the app is Windows-only.
+# browser-only Dart suites on every PR to develop. Pushes to develop run no tests:
+# they run warm-caches.yml, which keeps the develop-scoped caches these jobs
+# restore (see the top of that file for why the merge commit needs no second run).
+# The jobs that build or test run on GitHub-hosted windows-2022: the native tests
+# need MSVC (and a downloaded OpenCV, see below), and the app is Windows-only.
+#
+# Every cache warm-caches.yml warms is defined once, in an action under
+# .github/actions/ that the jobs here use too; do not inline one of them here.
 #
 # The two required checks are the job names "Native C++ tests (doctest)" and
 # "Flutter unit/widget tests". The second is an aggregate: the Flutter work is split
@@ -14,8 +19,6 @@ name: CI
 # "Browser tests" are not required checks.
 on:
   pull_request:
-    branches: [develop]
-  push:
     branches: [develop]
 
 # One in-flight run per ref; a new push cancels the previous run.
@@ -37,40 +40,9 @@ jobs:
         with:
           arch: x64
 
-      # OpenCV 4.13.0 (vc16) is a gitignored, manually-placed third-party dependency
-      # (windows/.gitignore) that native/CMakeLists.txt references at
-      # windows/opencv/build. Restore it from cache, or provision it on a cache miss
-      # with the same tool/fetch_deps.py a local dev runs -- one source of truth for
-      # the pinned URL + SHA-256 (no inline download logic to drift). onnxruntime/clip
-      # are deliberately NOT provisioned: the umacapture_tests target links only OpenCV
-      # (the cli/app targets that need ONNX are never built here). The cache key pins
-      # the version, so bumping OpenCV in fetch_deps.py must bump the key here too
-      # (and in the native-coverage job, which shares this cache).
-      # --slim (below) prunes the ~915 MB tree to ~230 MB before it is cached, keeping the
-      # OpenCV parts umacapture_tests actually links (Debug DLL + import libs + headers);
-      # the "-slim" key suffix keeps that pruned layout from colliding with a full-tree cache.
-      - name: Cache OpenCV 4.13.0
-        id: cache-opencv
-        uses: actions/cache@v4
-        with:
-          path: windows/opencv
-          key: opencv-4.13.0-windows-slim
-
-      # FFmpeg (BtbN n7.1.5 LGPL shared) is linked only by umacapture_ffv1_tests (the FFV1 recorder/reader
-      # round-trip); umacapture_tests stays opencv-only. Cached like OpenCV; the "-slim" key matches the
-      # pruned layout. Bump this key when the ffmpeg pin in tool/fetch_deps.py changes -- and note that
-      # the FFmpeg version alone is not enough to key on: BtbN re-hosts the same build under several
-      # autobuild tags with differing archive bytes, so a re-pin can leave "n7.1.5" unchanged. The date
-      # suffix is the pinned tag's, which is what actually distinguishes one archive from the next.
-      - name: Cache FFmpeg n7.1.5
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: windows/ffmpeg
-          key: ffmpeg-n7.1.5-lgpl-shared-slim-20260630
-
-      # uv runs tool/fetch_deps.py (stdlib-only) and native/wasm/check_sources.py.
-      # Unconditional: the wasm drift gate below runs on every job, cache hit or not.
+      # uv runs native/wasm/check_sources.py (stdlib-only). Unconditional: the wasm drift gate
+      # below runs on every job, cache hit or not. The provisioning actions further down set uv up
+      # for themselves on a cache miss, since other jobs use them without this step.
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
 
@@ -89,13 +61,13 @@ jobs:
       - name: Check wasm source drift
         run: uv run native/wasm/check_sources.py
 
-      - name: Provision OpenCV 4.13.0
-        if: steps.cache-opencv.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_deps.py --only opencv --slim
+      # Restored from cache, or provisioned on a miss with tool/fetch_deps.py; the key, the path
+      # and the reasoning behind each live in the action (shared with warm-caches.yml).
+      - name: OpenCV
+        uses: ./.github/actions/provision-opencv
 
-      - name: Provision FFmpeg n7.1.5
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_deps.py --only ffmpeg --slim
+      - name: FFmpeg
+        uses: ./.github/actions/provision-ffmpeg
 
       # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
       - name: Configure (CMake + Ninja, Debug)
@@ -191,22 +163,10 @@ jobs:
         with:
           arch: x64
 
-      # The same cache as native-tests (same key, same --slim layout). FFmpeg is not restored:
+      # The same action, and so the same cache, as native-tests. FFmpeg is not provisioned:
       # only umacapture_tests is built here, and it links OpenCV alone.
-      - name: Cache OpenCV 4.13.0
-        id: cache-opencv
-        uses: actions/cache@v4
-        with:
-          path: windows/opencv
-          key: opencv-4.13.0-windows-slim
-
-      - name: Set up uv
-        if: steps.cache-opencv.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v6
-
-      - name: Provision OpenCV 4.13.0
-        if: steps.cache-opencv.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_deps.py --only opencv --slim
+      - name: OpenCV
+        uses: ./.github/actions/provision-opencv
 
       - name: Configure (CMake + Ninja, Debug)
         run: cmake -G Ninja -S native -B native/cmake-build-tests -DCMAKE_BUILD_TYPE=Debug
@@ -311,23 +271,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
-      # directly. Keep this version in sync with .fvmrc (currently 3.44.4); every Flutter
-      # job in this file pins it.
-      #
-      # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the
-      # cache trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more
-      # than restoring the pub cache -- a ~50 s net regression. The Windows tar/zstd
-      # extraction is slow, but re-downloading every package is slower.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
-
-      - name: Resolve dependencies
-        run: flutter pub get
+      # The pinned SDK and `flutter pub get`, both restored from cache. Every Flutter job in
+      # this workflow uses this action, and so does warm-caches.yml; the pin and the cache
+      # settings live there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       # The selection is checked before it is used: if tool/test_selection.dart exits non-zero,
       # this step fails without running anything. That check is explicit because pwsh does not
@@ -349,16 +297,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same pinned SDK and cache as flutter-test-shards; see the comment there.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
-
-      - name: Resolve dependencies
-        run: flutter pub get
+      # The same action as flutter-test-shards; see the comment there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       # Persist build_runner's incremental state (.dart_tool/build holds the asset graph
       # of input content digests) so codegen only regenerates changed outputs instead of
@@ -366,7 +307,8 @@ jobs:
       # restored: build_runner re-validates every tracked input by digest on each run, and
       # discards the whole graph on a builder/dependency/SDK version change. The key busts
       # on pubspec.lock/build.yaml changes as a belt-and-suspenders; restore-keys keeps the
-      # incremental benefit across unrelated commits.
+      # incremental benefit across unrelated commits. The one cache here that warm-caches.yml does
+      # not warm (see the note there), which is why it is defined inline and not in an action.
       - name: Cache build_runner
         uses: actions/cache@v4
         with:
@@ -478,29 +420,12 @@ jobs:
       # ---- web dependency / license gate ----
       # web/wasm is gitignored and provisioned from the pins in tool/web_deps.json, exactly
       # like windows/opencv is in the native job above. Only the `upstream` entries can be
-      # restored here; the recognition core is built by native/wasm/build.sh (emsdk), so it
+      # restored; the recognition core is built by native/wasm/build.sh (emsdk), so it
       # stays absent -- DistributionInfoBuilder discloses what is on disk and lists the rest
-      # under "absent" (asserted below). Keying the cache on the
-      # manifest hash busts it whenever a pin, a version or an entry changes, so no separate
-      # version bump is needed here (unlike the OpenCV/FFmpeg keys). flutter-web restores the
-      # same cache for its own steps.
-      - name: Cache web dependencies
-        id: cache-web-deps
-        uses: actions/cache@v4
-        with:
-          path: web/wasm
-          key: web-deps-${{ hashFiles('tool/web_deps.json') }}
-
-      - name: Set up uv
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v6
-
-      # Verifies every downloaded byte against tool/web_deps.json and fails on a mismatch.
-      # Not --strict: the in-tree entries above are legitimately missing here and would
-      # otherwise turn their "cannot be downloaded" warning into a failure.
-      - name: Provision web dependencies
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_web_deps.py
+      # under "absent" (asserted below). The cache key, the path and the provisioning are in
+      # the action; flutter-web uses the same action, and so the same cache.
+      - name: Web dependencies
+        uses: ./.github/actions/provision-web-deps
 
       # Exercises the closed-world check behind assets/web_license_info.json: every pinned
       # file present under web/ must hash to its pin, nothing unpinned and unlisted may sit
@@ -559,16 +484,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same pinned SDK and cache as flutter-test-shards; see the comment there.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
-
-      - name: Resolve dependencies
-        run: flutter pub get
+      # The same action as flutter-test-shards; see the comment there.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       # The focused web-worker tests use only Node's built-in test runner, so no package install is needed.
       - name: Set up Node.js
@@ -592,22 +510,10 @@ jobs:
           node tool/test_web_video_import.mjs
           node tool/test_web_video_frame_grab.mjs
 
-      # web/wasm is provisioned from the pins exactly as in flutter-static (same cache key); see
+      # web/wasm is provisioned from the pins through the same action as in flutter-static; see
       # the comment there.
-      - name: Cache web dependencies
-        id: cache-web-deps
-        uses: actions/cache@v4
-        with:
-          path: web/wasm
-          key: web-deps-${{ hashFiles('tool/web_deps.json') }}
-
-      - name: Set up uv
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v6
-
-      - name: Provision web dependencies
-        if: steps.cache-web-deps.outputs.cache-hit != 'true'
-        run: uv run tool/fetch_web_deps.py
+      - name: Web dependencies
+        uses: ./.github/actions/provision-web-deps
 
       # The video-import DEMUX tests, split out of the JavaScript step above because they need the pinned
       # mediabunny bundle, which only exists under web/wasm/ once the step above has run (or the cache was hit).
@@ -663,20 +569,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same pinned SDK and the same action as the other Flutter jobs; keep the
-      # version in sync with .fvmrc (currently 3.44.4). Only `dart` is used below,
-      # but flutter-action is what this workflow already uses to obtain it, and
+      # The same action as the other Flutter jobs. Only `dart` is used below, but
+      # that action is what this workflow already uses to obtain it, and its
       # `flutter pub get` is what resolves the Flutter SDK dependencies the
       # package's pubspec declares.
-      - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.44.4
-          channel: stable
-          cache: true
-
-      - name: Resolve dependencies
-        run: flutter pub get
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
 
       # Every suite this job runs is `@TestOn('browser')`, so `flutter test` (the VM
       # platform) skips them entirely, and each covers a defect no other job can

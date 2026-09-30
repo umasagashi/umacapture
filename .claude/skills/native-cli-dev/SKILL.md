@@ -63,7 +63,7 @@ the native build can configure (OpenCV is the hard requirement:
 `umacapture_ffv1_tests`; onnxruntime is only linked by the cli/app targets, not
 the test targets). The fourth native dependency, `windows/clip`, is committed to
 the repo, so no fetch is needed. CI provisions OpenCV and FFmpeg with the same
-script (see `.github/workflows/ci.yml`).
+script (see `.github/actions/provision-opencv` and `provision-ffmpeg`).
 
 ## Key fact: the MSVC environment is mandatory
 

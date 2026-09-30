@@ -1,0 +1,42 @@
+name: Provision OpenCV
+description: >-
+  Restores windows/opencv from the Actions cache, or provisions it with tool/fetch_deps.py on a
+  miss. Every job that needs OpenCV -- in ci.yml and in warm-caches.yml -- goes through this
+  action, so the cache key and path are defined here and nowhere else.
+
+# OpenCV 4.13.0 (vc16) is a gitignored, manually-placed third-party dependency (windows/.gitignore)
+# that native/CMakeLists.txt references at windows/opencv/build. It is provisioned with the same
+# tool/fetch_deps.py a local dev runs -- one source of truth for the pinned URL + SHA-256 (no inline
+# download logic to drift). onnxruntime/clip are deliberately NOT provisioned: the test targets
+# link only OpenCV (and FFmpeg, see provision-ffmpeg); the cli/app targets that need ONNX are never
+# built in CI.
+#
+# The key pins the version, so bumping OpenCV in fetch_deps.py must bump the key here too.
+# --slim prunes the ~915 MB tree to ~230 MB before it is cached, keeping the OpenCV parts the test
+# targets actually link (Debug DLL + import libs + headers); the "-slim" key suffix keeps that
+# pruned layout from colliding with a full-tree cache.
+#
+# The key and path are defined once because a pull request restores the copy warm-caches.yml saved
+# on develop only when both agree with it (see the comment at the top of setup-flutter/action.yml).
+runs:
+  using: composite
+  steps:
+    - name: Cache OpenCV 4.13.0
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: windows/opencv
+        key: opencv-4.13.0-windows-slim
+
+    # uv's own cache is off: fetch_deps.py is stdlib-only, so it would hold nothing, and a job that
+    # has already set uv up for itself (native-tests) would otherwise save it twice.
+    - name: Set up uv
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: false
+
+    - name: Provision OpenCV 4.13.0
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: uv run tool/fetch_deps.py --only opencv --slim

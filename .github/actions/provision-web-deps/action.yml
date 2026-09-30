@@ -1,0 +1,39 @@
+name: Provision web dependencies
+description: >-
+  Restores web/wasm from the Actions cache, or provisions it with tool/fetch_web_deps.py on a
+  miss. Every job that needs web/wasm -- in ci.yml and in warm-caches.yml -- goes through this
+  action, so the cache key and path are defined here and nowhere else.
+
+# web/wasm is gitignored and provisioned from the pins in tool/web_deps.json, exactly like
+# windows/opencv is by provision-opencv. Only the `upstream` entries can be restored here; the
+# recognition core is built by native/wasm/build.sh (emsdk), so it stays absent -- the web license
+# gate in ci.yml's flutter-static job lists it under "absent". Keying the cache on the manifest hash
+# busts it whenever a pin, a version or an entry changes, so no separate version bump is needed
+# (unlike the OpenCV/FFmpeg keys).
+#
+# The key and path are defined once because a pull request restores the copy warm-caches.yml saved
+# on develop only when both agree with it (see the comment at the top of setup-flutter/action.yml).
+runs:
+  using: composite
+  steps:
+    - name: Cache web dependencies
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: web/wasm
+        key: web-deps-${{ hashFiles('tool/web_deps.json') }}
+
+    # uv's own cache is off for the reason given in provision-opencv/action.yml.
+    - name: Set up uv
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: false
+
+    # Verifies every downloaded byte against tool/web_deps.json and fails on a mismatch.
+    # Not --strict: the in-tree entries above are legitimately missing here and would
+    # otherwise turn their "cannot be downloaded" warning into a failure.
+    - name: Provision web dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: uv run tool/fetch_web_deps.py

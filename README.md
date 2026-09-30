@@ -4,7 +4,6 @@
 
 <div align="center">
 
-[![CI](https://github.com/umasagashi/umacapture/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/umasagashi/umacapture/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/umasagashi/umacapture)](https://github.com/umasagashi/umacapture/releases/latest)
 [![License](https://img.shields.io/github/license/umasagashi/umacapture)](LICENSE)
 ![platform](https://img.shields.io/badge/platform-Windows-blue)

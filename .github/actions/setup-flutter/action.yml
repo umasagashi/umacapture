@@ -1,0 +1,37 @@
+name: Set up Flutter
+description: >-
+  Installs the pinned Flutter SDK and resolves the Dart packages, restoring both from the Actions
+  cache. Every job that needs Flutter -- in ci.yml and in warm-caches.yml -- sets it up through
+  this action, so the SDK and pub cache keys and paths are defined here and nowhere else.
+
+# WHY THIS IS AN ACTION AND NOT TWO STEPS PER JOB. A pull request can restore a cache from its
+# base branch, and the base branch's caches are made by warm-caches.yml on each push to develop.
+# A restore matches only when the key AND the cache version agree, and the version is a hash of
+# the cached paths and the compression method (see the actions/cache README, "Cache Version").
+# flutter-action derives the key and the path from its inputs, so the job that warms and the job
+# that restores agree exactly when they pass the same inputs -- which is what one definition
+# guarantees. The compression method is the runner's; see the runner comment in warm-caches.yml.
+runs:
+  using: composite
+  steps:
+    # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK directly.
+    # Keep this version in sync with .fvmrc (currently 3.44.4).
+    #
+    # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the cache
+    # trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more than restoring
+    # the pub cache -- a ~50 s net regression. The Windows tar/zstd extraction is slow, but
+    # re-downloading every package is slower. `cache: true` caches both the SDK and the pub cache;
+    # the pub key ends in hashFiles('**/pubspec.lock').
+    - name: Set up Flutter 3.44.4
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 3.44.4
+        channel: stable
+        cache: true
+
+    # Part of this action, not of each job, because it is what fills the pub cache that
+    # flutter-action saves at the end of the job: a warming job that skipped it would save a pub
+    # cache without the packages under the real key, and every restore of that key would hit it.
+    - name: Resolve dependencies
+      shell: pwsh
+      run: flutter pub get
