@@ -1386,7 +1386,7 @@ final class EnhancementMerge {
     final file = directory.filePath('record.json');
     try {
       final bytes = await file.readAsBytes();
-      final record = CharaDetailRecordMapper.fromJson(utf8.decode(bytes));
+      final record = CharaDetailRecord.fromRecordJson(utf8.decode(bytes));
       CharaDetailRecord.validateDirectoryId(directory, record);
       return (record: record, bytes: bytes);
     } on RecordIdMismatch catch (error) {

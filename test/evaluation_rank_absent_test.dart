@@ -31,7 +31,7 @@ Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 
 CharaDetailRecord _record({required RecordType type, required int evaluationValue}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId('id-${type.name}', null, null),
     'trainer',

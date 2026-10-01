@@ -133,13 +133,17 @@ class _ListFailingBackend implements FsBackend {
   Future<void> writeString(String path, String contents) => inner.writeString(path, contents);
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes) => inner.writeBytes(path, bytes);
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) =>
+      inner.writeBytes(path, bytes, flush: flush);
 
   @override
   Future<void> delete(String path, {bool recursive = false}) => inner.delete(path, recursive: recursive);
 
   @override
   Future<void> rename(String source, String destination) => inner.rename(source, destination);
+
+  @override
+  bool get renameReplacesFileAtomically => inner.renameReplacesFileAtomically;
 
   @override
   Future<void> createDir(String path, {bool recursive = false}) => inner.createDir(path, recursive: recursive);

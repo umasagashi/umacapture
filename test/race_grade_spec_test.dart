@@ -28,7 +28,7 @@ Race _race(int title, {required bool won}) => Race(title, won ? 1 : 2, 0, 0, 0, 
 
 CharaDetailRecord makeRecord({required String id, required List<Race> races}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId(id, null, null),
     'trainer',

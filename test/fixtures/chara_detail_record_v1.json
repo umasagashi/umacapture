@@ -1,6 +1,6 @@
 {
     "metadata": {
-        "format_version": "2.0.0",
+        "format_version": "1.0.0",
         "region": "JPN",
         "record_id": {
             "self": "9a1e0d66-0654-4416-aa11-5613e7a9f05e"
@@ -47,7 +47,7 @@
     "skills": [
         {
             "id": 1276,
-            "level": 5
+            "level": 6
         },
         {
             "id": 258
@@ -539,32 +539,32 @@
     "support_cards": [
         {
             "id": 99,
-            "rank": 4,
+            "rank": 5,
             "level": 0
         },
         {
             "id": 437,
-            "rank": 4,
+            "rank": 5,
             "level": 0
         },
         {
             "id": 519,
-            "rank": 2,
+            "rank": 3,
             "level": 0
         },
         {
             "id": 391,
-            "rank": 4,
+            "rank": 5,
             "level": 0
         },
         {
             "id": 522,
-            "rank": 4,
+            "rank": 5,
             "level": 0
         },
         {
             "id": 525,
-            "rank": 4,
+            "rank": 5,
             "level": 0
         }
     ],

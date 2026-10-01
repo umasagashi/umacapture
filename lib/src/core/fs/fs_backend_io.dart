@@ -77,7 +77,8 @@ class IoFsBackend implements FsBackend {
   Future<void> writeString(String path, String contents) => File(path).writeAsString(contents);
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes) => File(path).writeAsBytes(bytes);
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) =>
+      File(path).writeAsBytes(bytes, flush: flush);
 
   /// A listed entity plus the kind `FileSystemEntity` already resolved for it.
   ///
@@ -125,6 +126,9 @@ class IoFsBackend implements FsBackend {
 
   @override
   Future<void> rename(String source, String destination) => File(source).rename(destination);
+
+  @override
+  bool get renameReplacesFileAtomically => true;
 
   @override
   Future<void> createDir(String path, {bool recursive = false}) => Directory(path).create(recursive: recursive);

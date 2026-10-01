@@ -1008,6 +1008,7 @@
                         "parent1": "親1",
                         "parent2": "親2"
                     },
+                    "support_rank": "{count}凸",
                     "copy": {
                         "tooltip": "クリップボードにコピー",
                         "done": "クリップボードにコピーしました"
@@ -1032,7 +1033,7 @@
                             "strategy": "脚質",
                             "weather": "天候",
                             "record_type": "レコード種別",
-                            "support_rank": "サポカランク",
+                            "support_rank": "サポカの凸数",
                             "icon": "アイコン"
                         }
                     }

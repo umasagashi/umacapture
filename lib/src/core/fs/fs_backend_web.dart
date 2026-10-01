@@ -35,7 +35,7 @@ class WebFsBackend implements FsBackend {
   Future<void> writeString(String path, String contents) => _vfs.writeString(path, contents);
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes) => _vfs.writeBytes(path, bytes);
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) => _vfs.writeBytes(path, bytes);
 
   @override
   Future<List<FsEntry>> list(
@@ -52,6 +52,9 @@ class WebFsBackend implements FsBackend {
 
   @override
   Future<void> rename(String source, String destination) => _vfs.rename(source, destination);
+
+  @override
+  bool get renameReplacesFileAtomically => false;
 
   @override
   Future<void> createDir(String path, {bool recursive = false}) => _vfs.createDir(path, recursive: recursive);

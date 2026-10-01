@@ -97,7 +97,7 @@ Map<String, dynamic> sampleRecord() => {
     {
       'id': 30,
       'level': 50,
-      'rank': {'code': 2, 'name': 'SSR'},
+      'rank': {'code': 2, 'name': '2凸'},
     },
   ],
   'scenario': {'id': 7, 'name': 'アオハル杯'},

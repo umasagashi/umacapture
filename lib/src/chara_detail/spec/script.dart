@@ -202,15 +202,7 @@ class _Enricher {
 
   List<Map<String, dynamic>> _supportCards(List<SupportCard> cards) => [
     for (final c in cards)
-      {
-        'id': c.id,
-        'rank': _coded(
-          c.rank,
-          c.rank < _supportCardRanks.length ? _supportCardRanks[c.rank] : c.rank.toString(),
-          'support_rank',
-        ),
-        'level': c.level,
-      },
+      {'id': c.id, 'rank': _coded(c.rank, _supportCardRankName(c.rank), 'support_rank'), 'level': c.level},
   ];
 
   Map<String, dynamic> _metadata(CharaDetailRecord record) {
@@ -261,10 +253,11 @@ class _Enricher {
   }
 }
 
-/// Support-card rarity labels (ascending). The recognizer emits an index but the
-/// repository carries no label source, so this fixed map provides `.name` while
-/// `.code` exposes the raw, order-stable index.
-const _supportCardRanks = ['R', 'SR', 'SSR'];
+/// A support card rank is its number of limit breaks, 0 to 4 (see [recordFormatVersion]); `.code` is that
+/// number and `.name` says it the way the game does ("3凸"). The module carries no label for it.
+const _supportCardRankCount = 5;
+
+String _supportCardRankName(int rank) => "$tr_script.support_rank".tr(namedArgs: {"count": "$rank"});
 
 final _enricherProvider = Provider<_Enricher>((ref) {
   final labels = ref.watch(labelMapProvider);
@@ -1074,7 +1067,9 @@ List<_LookupCategory> _buildLookupCategories(LabelMap labels, List<String> chara
     coded('r.races[].strategy.name', 'strategy', 'raceStrategy', label(LabelKeys.raceStrategy)),
     coded('r.races[].weather.name', 'weather', 'weather', label('race_weather.name')),
     coded('r.metadata.recordType.name', 'record_type', 'record_type', label(LabelKeys.recordType)),
-    coded('r.supportCards[].rank.name', 'support_rank', 'support_rank', _supportCardRanks),
+    coded('r.supportCards[].rank.name', 'support_rank', 'support_rank', [
+      for (var rank = 0; rank < _supportCardRankCount; rank++) _supportCardRankName(rank),
+    ]),
     // Not an accessor: the keys a Cell's `icon` field accepts (see [_iconMap]).
     _LookupCategory('icon', 'icon', _iconMap.keys.toList(), showIcon: true),
   ];

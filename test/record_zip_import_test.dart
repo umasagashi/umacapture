@@ -4,8 +4,10 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
+import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
 import 'support/long_read_declarations.dart';
@@ -46,6 +48,20 @@ void main() {
     expect(result.skippedEntries, 0);
     expect(await (active / 'uuid-1').filePath('record.json').readAsBytes(), _recordJson('uuid-1'));
     expect(await (active / 'uuid-1').filePath('trainee.jpg').readAsBytes(), [1, 2, 3]);
+  });
+
+  test('upgrades a record an older build exported as it imports it', () async {
+    // The same capture as a major-1 recognizer wrote it, and in the current format.
+    initializeMappers();
+    const id = '9a1e0d66-0654-4416-aa11-5613e7a9f05e';
+    final v1 = File('test/fixtures/chara_detail_record_v1.json').readAsBytesSync();
+    final current = File('test/fixtures/chara_detail_record.json').readAsStringSync();
+
+    final result = await RecordZipService.import(_zip({'chara_detail/active/$id/record.json': v1}), storageDir);
+
+    expect(result.recordIds, {id});
+    final stored = await (_active(storageDir) / id).filePath('record.json').readAsString();
+    expect(CharaDetailRecordMapper.fromJson(stored), CharaDetailRecordMapper.fromJson(current));
   });
 
   test('counts skipped directory entries', () async {

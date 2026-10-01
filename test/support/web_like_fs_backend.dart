@@ -100,7 +100,8 @@ class WebLikeFsBackend implements FsBackend {
   Future<void> writeString(String path, String contents) => inner.writeString(path, contents);
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes) => inner.writeBytes(path, bytes);
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) =>
+      inner.writeBytes(path, bytes, flush: flush);
 
   @override
   Future<List<FsEntry>> list(
@@ -127,6 +128,11 @@ class WebLikeFsBackend implements FsBackend {
 
   @override
   Future<void> rename(String source, String destination) => inner.rename(source, destination);
+
+  /// `WebFsBackend`'s answer, not [inner]'s: a shared path that chooses how to replace a file by this
+  /// flag takes the web choice here, which is the one a suite on this backend exists to run.
+  @override
+  bool get renameReplacesFileAtomically => false;
 
   @override
   Future<void> createDir(String path, {bool recursive = false}) => inner.createDir(path, recursive: recursive);

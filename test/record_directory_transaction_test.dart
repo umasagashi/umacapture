@@ -720,9 +720,9 @@ final class _FailWriteBackend extends WebLikeFsBackend {
   final bool Function(String path) shouldFail;
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes) {
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) {
     if (shouldFail(path)) throw FileSystemException('synthetic write failure', path);
-    return super.writeBytes(path, bytes);
+    return super.writeBytes(path, bytes, flush: flush);
   }
 }
 

@@ -32,7 +32,7 @@ Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 // else is dummy. Mirrors the minimal builder in family_registration_test.dart.
 CharaDetailRecord makeRecord({required List<Factor> self}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     const RecordId('id', null, null),
     'trainer',

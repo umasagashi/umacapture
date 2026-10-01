@@ -25,7 +25,7 @@ Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 // lineage resolves to zero linked ancestors (an incomplete status).
 CharaDetailRecord makeRecord({required String id, required int? relationBonus}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId(id, null, null),
     'trainer',

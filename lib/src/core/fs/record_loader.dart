@@ -33,6 +33,13 @@
 /// written by shared code that the Windows zip import drives as well. Web has a
 /// second journal to recover under the same scope, the archive move's, because
 /// only web stages that move through a manifest.
+///
+/// Both scans also upgrade a record stored in an older format on disk
+/// (`CharaDetailRecord.upgradeFormat`), under the same acquisition that covers
+/// its decode: desktop in the worker, covered by the root scope, and web in the
+/// per-record acquisition. The single-record `loadRecord` upgrades on disk on
+/// web, where it holds that record's lock, and only in memory on desktop, where
+/// it holds nothing.
 library;
 
 export 'record_loader_io.dart' if (dart.library.js_interop) 'record_loader_web.dart';

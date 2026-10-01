@@ -87,8 +87,10 @@ abstract interface class FsBackend {
 
   /// Writes [bytes] to [path], replacing any existing file.
   ///
-  /// Same parent-directory contract as [writeString].
-  Future<void> writeBytes(String path, List<int> bytes);
+  /// Same parent-directory contract as [writeString]. With [flush] the io backend syncs the file to the
+  /// disk before the future completes; the web backend ignores it, because an OPFS write lands only at the
+  /// writable stream's `close()`, which every write already awaits.
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false});
 
   /// Lists the entries directly (or, with [recursive], transitively) under
   /// [path], with each entry's kind.
@@ -118,6 +120,13 @@ abstract interface class FsBackend {
   /// [DirectoryPath.moveSyncSafe] / [DirectoryPath.moveAsyncSafe], or
   /// `RecordDirectoryTransaction` when the move must be recoverable.
   Future<void> rename(String source, String destination);
+
+  /// Whether [rename] of a file onto an existing one replaces it atomically, so that a reader, or a
+  /// crash, finds either the old file or the new one and never neither nor a torn one.
+  ///
+  /// True on io, where a same-volume rename is the operating system's replace. False on web: OPFS has no
+  /// rename, and `WebVfs.rename` is a byte copy followed by a delete, interruptible between the two.
+  bool get renameReplacesFileAtomically;
 
   /// Creates the directory at [path].
   ///
