@@ -281,7 +281,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "da1f9dd705b4d4cd4f0de7a9f91e794530d824ef2d4c2e6192dc3e1305c188d9",
+          "digest": "f249c297d73c1f07a79fc58d2b2402b4486c192f8e102385f3c8e37cb449c600",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
@@ -303,8 +303,8 @@
       }
     },
     "wasm/umacapture_core.wasm": {
-      "sha256": "bf8e78e9da7a88ee4bf840e586bafde7bddba5bc605fe62faad67168c3636b04",
-      "bytes": 3708888,
+      "sha256": "3209dff61e627a826b2a55f3301d6af166401e62d43eb61b6b8fca3e90c84dcc",
+      "bytes": 3707895,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
@@ -314,7 +314,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "da1f9dd705b4d4cd4f0de7a9f91e794530d824ef2d4c2e6192dc3e1305c188d9",
+          "digest": "f249c297d73c1f07a79fc58d2b2402b4486c192f8e102385f3c8e37cb449c600",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [

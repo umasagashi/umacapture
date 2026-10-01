@@ -46,11 +46,11 @@ recognizer_config::SkillTabConfig skillConfig() {
     };
 }
 
-SkillTabRecognizer makeRecognizer(const recognizer_config::SkillTabConfig &config, int skill_id, int level_zero_based) {
+SkillTabRecognizer makeRecognizer(const recognizer_config::SkillTabConfig &config, int skill_id, int level) {
     return SkillTabRecognizer{
         config,
         constantPredictor<int>("skill", skill_id),
-        constantPredictor<int>("skill_level", level_zero_based),
+        constantPredictor<int>("skill_level", level),
     };
 }
 
@@ -73,10 +73,10 @@ TEST_CASE("SkillTabRecognizer returns no skills for an inheritance-only record")
 }
 
 TEST_CASE("SkillTabRecognizer reads a level only for the first skill in a left+right row") {
-    // One row at pixel 30 in both columns. The top-left skill carries a level (2 + 1 = 3); the right-column
+    // One row at pixel 30 in both columns. The top-left skill carries the level the model outputs (2); the right-column
     // skill in the same row does not.
     const auto config = skillConfig();
-    const auto recognizer = makeRecognizer(config, /*skill_id=*/5, /*level_zero_based=*/2);
+    const auto recognizer = makeRecognizer(config, /*skill_id=*/5, /*level=*/2);
 
     cv::Mat mat = solid(200, kWhite);
     band(mat, 15, 20, 30);  // left column (x=0.10 -> pixel 20)
@@ -91,7 +91,7 @@ TEST_CASE("SkillTabRecognizer reads a level only for the first skill in a left+r
     REQUIRE(record.skills.size() == 2);
     CHECK(record.skills[0].id == 5);
     REQUIRE(record.skills[0].level.has_value());
-    CHECK(record.skills[0].level.value() == 3);  // 1-based
+    CHECK(record.skills[0].level.value() == 2);  // stored as the model outputs it
     CHECK_FALSE(record.skills[1].level.has_value());
 }
 

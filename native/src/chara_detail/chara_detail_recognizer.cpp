@@ -167,7 +167,7 @@ void SkillTabRecognizer::recognize(
                     frame,
                     anchor.absolute(config.skill_level.rect) + current_column_offset,
                     history);
-                skills.push_back({skill_id, skill_level + 1});  // 1-based.
+                skills.push_back({skill_id, skill_level});  // The model outputs the level shown on screen.
             }
         }
 
@@ -489,7 +489,7 @@ void SupportCardRecognizer::recognize(
 
         support_cards[i] = {
             id[i],
-            rank[i] + 1,  // 1-based
+            rank[i],  // The limit-break count (0 to 4), as the model outputs it.
             level,
         };
     }
@@ -1054,6 +1054,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
 
         if (isUpdateMode) {
             record.metadata = loadOldRecord().metadata;
+            record.metadata.format_version = record::kRecordFormatVersion;
             record.metadata.recognizer_version = version_info.recognizer_version;
 
             std::filesystem::copy_file(
@@ -1066,7 +1067,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             const auto &owner_trainer_id =
                 record::isFriend(record_info.record_type.value()) ? record::kUnknownTrainerId : trainer_id;
             record.metadata = {
-                version_info.format_version,
+                record::kRecordFormatVersion,
                 version_info.region,
                 {record_info.record_id},
                 owner_trainer_id,
