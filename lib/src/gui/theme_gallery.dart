@@ -370,7 +370,7 @@ class _BlendSection extends StatelessWidget {
         _SwatchRow(
           _BlendSwatch(
             'strong row border',
-            overlay: cs.onSurface.withValues(alpha: 0.32),
+            overlay: cs.onSurface.withValues(alpha: 0.40),
             base: cs.surface,
             baseLabel: 'surface',
           ),

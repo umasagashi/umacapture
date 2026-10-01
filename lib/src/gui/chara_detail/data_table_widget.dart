@@ -1038,7 +1038,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // the pinned-block boundary, so that boundary still reads as
                       // distinct by colour as well as by width.
                       borderColor: strongRowBorders
-                          ? theme.colorScheme.onSurface.withValues(alpha: 0.32)
+                          ? theme.colorScheme.onSurface.withValues(alpha: 0.40)
                           : theme.focusColor,
                       activatedBorderColor: theme.focusColor,
                       inactivatedBorderColor: theme.focusColor,

@@ -91,16 +91,17 @@ class AppNavigationRail extends ConsumerWidget {
           ],
           onDestinationSelected: onSelected,
         ),
+        // Centred in the rail's collapsed width (the M3 default of 80 unless the theme sets one), which is
+        // the column the destination icons occupy in both states, so the button stays under them and does
+        // not move when the rail toggles.
         Positioned(
-          bottom: 0,
+          bottom: 8,
           left: 0,
-          right: 0,
-          // FilledButton takes no tooltip; the Tooltip also gives the icon-only button its semantic label.
-          child: Tooltip(
-            message: (isExtended ? "app.sidebar.collapse" : "app.sidebar.expand").tr(),
-            child: FilledButton.tonal(
-              style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
-              child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
+          width: theme.navigationRailTheme.minWidth ?? 80,
+          child: Center(
+            child: IconButton.filledTonal(
+              tooltip: (isExtended ? "app.sidebar.collapse" : "app.sidebar.expand").tr(),
+              icon: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
               onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
             ),
           ),
