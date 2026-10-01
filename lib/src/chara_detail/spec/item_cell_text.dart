@@ -14,14 +14,16 @@ const itemNormalAlpha = 0.3;
 /// Alpha of the red background ([ItemState.missing], [ItemState.short], [ItemState.partialMissing]).
 const itemMissingAlpha = 0.15;
 
-/// Alpha of the green background at the weakest [ItemState.partialHeld] strength (1).
+/// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the weakest strength (1).
 const itemPartialHeldAlphaMin = 0.1125;
 
-/// Alpha of the green background at the strongest [ItemState.partialHeld] strength (== strengthMax).
+/// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the strongest strength
+/// (== strengthMax, the strongest holding of the item among the compared rows).
 const itemPartialHeldAlphaMax = 0.375;
 
 /// Alpha of the green background for [strength] out of [strengthMax], linear between the two ends.
-/// A scale of a single step (strengthMax <= 1) takes the strongest shade.
+/// A scale of a single step (strengthMax <= 1, e.g. every compared row holds the item at the same strength 1)
+/// takes the strongest shade.
 double itemPartialHeldAlpha(int strength, int strengthMax) {
   if (strengthMax <= 1) {
     return itemPartialHeldAlphaMax;
@@ -30,14 +32,14 @@ double itemPartialHeldAlpha(int strength, int strengthMax) {
   return itemPartialHeldAlphaMin + (itemPartialHeldAlphaMax - itemPartialHeldAlphaMin) * t;
 }
 
-/// Background of one item, or null for an item drawn without highlight.
-Color? itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item) {
+/// Background of one item. Every state has one.
+Color itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item) {
   return switch (item.state) {
     ItemState.normal => scheme.outline.withValues(alpha: itemNormalAlpha),
-    ItemState.held || ItemState.common => null,
     ItemState.missing ||
     ItemState.short ||
     ItemState.partialMissing => colors.danger.withValues(alpha: itemMissingAlpha),
+    ItemState.common ||
     ItemState.partialHeld => colors.success.withValues(alpha: itemPartialHeldAlpha(item.strength, item.strengthMax)),
   };
 }
@@ -47,7 +49,7 @@ Color? itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem ite
 Color? itemForeground(ThemeData theme, CellItem item) {
   return switch (item.state) {
     ItemState.missing || ItemState.partialMissing => theme.disabledColor,
-    ItemState.normal || ItemState.held || ItemState.short || ItemState.common || ItemState.partialHeld => null,
+    ItemState.normal || ItemState.short || ItemState.common || ItemState.partialHeld => null,
   };
 }
 

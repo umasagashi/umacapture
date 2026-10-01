@@ -7,6 +7,7 @@ import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
+import '/src/chara_detail/spec/factor_difference.dart';
 import '/src/chara_detail/spec/family_registration.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
@@ -20,6 +21,7 @@ import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
+import '/src/chara_detail/spec/skill_difference.dart';
 import '/src/core/utils.dart';
 
 // ignore: constant_identifier_names
@@ -172,6 +174,17 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       builderId: "aptitude_long_range",
     ),
     SkillColumnBuilder(title: "$tr_columns.skill.title".tr(), category: ColumnCategory.skill, parser: SkillParser()),
+    SkillDifferenceColumnBuilder(
+      title: "$tr_columns.skill.difference.title".tr(),
+      category: ColumnCategory.skill,
+      parser: SkillParser(),
+    ),
+    SkillDifferenceColumnBuilder(
+      title: "$tr_columns.skill.difference.tag_driven.title".tr(),
+      category: ColumnCategory.skill,
+      parser: SkillParser(),
+      selectByTag: true,
+    ),
     TagDrivenSkillColumnBuilder(
       title: "$tr_columns.skill.shortcuts.status_up.title".tr(),
       category: ColumnCategory.skill,
@@ -202,6 +215,17 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.factor.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
+    ),
+    FactorDifferenceColumnBuilder(
+      title: "$tr_columns.factor.difference.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+    ),
+    FactorDifferenceColumnBuilder(
+      title: "$tr_columns.factor.difference.tag_driven.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      selectByTag: true,
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.status.title".tr(),

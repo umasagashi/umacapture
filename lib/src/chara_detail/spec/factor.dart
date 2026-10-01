@@ -314,8 +314,8 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   }
 
   /// Whether one factor passes the per-factor threshold of [element]: the test
-  /// [apply] runs per factor under anyOf / allOf, and the absence display runs to
-  /// mark a held factor short.
+  /// [apply] runs per factor under anyOf / allOf, and a column that marks missing
+  /// factors runs to mark a held factor short.
   bool acceptsItem(QueriedFactor factor) {
     switch (element.mode) {
       case FactorSearchElementMode.starOnly:
@@ -357,27 +357,134 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
 @MappableEnum()
 enum FactorDialogElements { selectionList, selectionTags, modeLogic }
 
+/// Capability of a column whose items are factors: the factor selection (hand-picked or by tag, on the factor
+/// and the linked skill axes), its resolution against the current factor master, the comparison scope
+/// ([subject]), the factors a record holds within them, and the text a factor is drawn with.
+mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
+  /// The hand-picked factors. Ignored while [selectByTag].
+  Set<int> get selectedFactorIds;
+
+  /// The factor tags that, with [skillTags], define the selection while [selectByTag].
+  Set<String> get factorTags;
+
+  /// The tags the factor's linked skill must carry while [selectByTag].
+  Set<String> get skillTags;
+
+  /// When true, the selection is defined by [factorTags] and [skillTags] rather than [selectedFactorIds]: it is
+  /// resolved live against the current factor master, so newly tagged factors are included automatically.
+  bool get selectByTag;
+
+  bool get showAvailableOnly;
+
+  /// Whether an empty selection shows every factor a record holds, rather than none.
+  bool get showAllWhenQueryIsEmpty;
+
+  Set<FactorDialogElements> get hiddenElements;
+
+  /// Whose factors are compared: the trainee's alone, or the whole family.
+  FactorSearchSubjectMode get subject;
+
+  String get labelKey;
+
+  /// This column with its hand-picked factors or either tag axis replaced.
+  FactorItemsColumnSpec withFactorSelection({Set<int>? ids, Set<String>? factorTags, Set<String>? skillTags});
+
+  FactorItemsColumnSpec withSubject(FactorSearchSubjectMode subject);
+
+  /// The selected factor ids: the two tag axes resolved against the current factor master while [selectByTag],
+  /// the hand-picked ones otherwise.
+  Set<int> resolvedFactorIds(RefBase ref) {
+    if (!selectByTag) {
+      return selectedFactorIds;
+    }
+    return ref.read(_factorTagQueryProvider(_factorTagsKey(factorTags, skillTags)));
+  }
+
+  /// The factors [factorSet] holds within the subject: the selected ones, or for an empty selection every factor
+  /// of the three slots when [showAllWhenQueryIsEmpty].
+  ///
+  /// Under the trainee subject a factor only a parent holds extracts as an all-zero entry; it is not held, so it
+  /// is dropped here, for every display alike.
+  List<QueriedFactor> heldFactors(RefBase ref, FactorSet factorSet) {
+    final query = resolvedFactorIds(ref);
+    final traineeOnly = subject == FactorSearchSubjectMode.trainee;
+    if (query.isEmpty && !showAllWhenQueryIsEmpty) {
+      return [];
+    }
+    final ids = query.isNotEmpty ? query : factorSet.uniqueIds;
+    return QueriedFactor.extract(ids, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
+  }
+
+  /// The order the cell lists factors in: the selection's order first, then the master's.
+  ItemOrder itemOrder(RefBase ref) =>
+      ItemOrder(query: resolvedFactorIds(ref), masterRank: ref.watch(factorMasterRankProvider));
+
+  /// The text of [factor] named [name] in [mode]: the name, followed by the value when [mode] shows one.
+  static String itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
+      mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
+
+  /// The text of a factor a record lacks: drawn in [mode] with every slot 0, so that it takes the shape of a held
+  /// factor.
+  String placeholderText(RefBase ref, int id, FactorNotationMode mode) {
+    final name = ref.watch(labelMapProvider)[labelKey]!.getOrNull(id) ?? id.toString();
+    return itemText(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), name, mode);
+  }
+
+  @override
+  bool hasQuerySelection(RefBase ref) => resolvedFactorIds(ref).isNotEmpty;
+
+  @override
+  Map<int, int> heldItemStrengths(RefBase ref, FactorSet value) => {
+    for (final factor in heldFactors(ref, value)) factor.id: factor.sum(),
+  };
+}
+
 @MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
-class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable, ItemColumnSpec<FactorSet> {
+class FactorColumnSpec extends ColumnSpec<FactorSet>
+    with FactorColumnSpecMappable, ItemColumnSpec<FactorSet>, FactorItemsColumnSpec, QueryItemColumnSpec<FactorSet> {
   final Parser parser;
+  @override
   final String labelKey = LabelKeys.factor;
   final AggregateFactorSetPredicate predicate;
 
+  @override
   final bool showAllWhenQueryIsEmpty;
+  @override
   final bool showAvailableOnly;
+  @override
   final Set<FactorDialogElements> hiddenElements;
 
   /// When true, the column is defined by its tags rather than hand-picked factors:
   /// the query is resolved live from `predicate.factorTags`/`skillTags` against the
   /// current factor master at evaluation time (so newly tagged factors are included
   /// automatically), and the individual factor list is hidden in the dialog.
+  @override
   final bool selectByTag;
 
   @override
-  final ItemDisplayMode displayMode;
+  Set<int> get selectedFactorIds => predicate.query;
 
   @override
-  final bool hideCommonItems;
+  Set<String> get factorTags => predicate.factorTags;
+
+  @override
+  Set<String> get skillTags => predicate.skillTags;
+
+  @override
+  FactorSearchSubjectMode get subject => predicate.subject;
+
+  @override
+  FactorColumnSpec withFactorSelection({Set<int>? ids, Set<String>? factorTags, Set<String>? skillTags}) => copyWith(
+    predicate: predicate.copyWith(query: ids, factorTags: factorTags, skillTags: skillTags),
+  );
+
+  // The predicate's copyWith re-checks the element mode against the new subject.
+  @override
+  FactorColumnSpec withSubject(FactorSearchSubjectMode subject) =>
+      copyWith(predicate: predicate.copyWith(subject: subject));
+
+  @override
+  final UnmetRows unmetRows;
 
   @override
   final String id;
@@ -409,8 +516,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
     this.selectByTag = false,
-    this.displayMode = ItemDisplayMode.normal,
-    this.hideCommonItems = false,
+    this.unmetRows = UnmetRows.filterOut,
     this.hidden = false,
     this.description,
     this.width,
@@ -427,13 +533,23 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   @override
-  bool get offersAbsenceDisplay => !selectByTag;
+  bool get offersMarkMissing => !selectByTag;
 
   @override
-  ColumnSpec withDisplayMode(ItemDisplayMode mode) => copyWith(displayMode: mode);
+  FactorColumnSpec withUnmetRows(UnmetRows value) => copyWith(unmetRows: value);
 
-  @override
-  ColumnSpec withHideCommonItems(bool hide) => copyWith(hideCommonItems: hide);
+  /// Whether the threshold (the element mode and the lower bounds) is judged per factor rather than against the
+  /// query as a whole, as it is under mixed.
+  bool get judgesEachItem => predicate.logic != FactorSetLogicMode.mixed;
+
+  /// Whether a marked cell judges each factor against the threshold. Under mixed the threshold applies to the query
+  /// as a whole, so no single factor is short of it; an empty query accepts every record, so no factor is short of
+  /// it either.
+  bool get marksShortItems => predicate.query.isNotEmpty && judgesEachItem;
+
+  /// Whether the element mode and the lower bounds apply: while marking missing factors they decide which factors
+  /// are short, which only [marksShortItems] does.
+  bool get usesPerItemThreshold => !marksMissing || marksShortItems;
 
   @override
   bool get hasFilter => true;
@@ -444,13 +560,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
               // Keep selectByTag consistent with the adopted predicate (see SkillColumnSpec).
               ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
               : copyWith(predicate: AggregateFactorSetPredicate.any(), selectByTag: false))
-          ._withOfferedDisplayMode();
+          ._withOfferedUnmetRows();
 
-  // Falls back to normal when the reset landed on a mode this column no longer
-  // offers (absence on a tag-driven column).
-  FactorColumnSpec _withOfferedDisplayMode() => !offersAbsenceDisplay && displayMode == ItemDisplayMode.absence
-      ? copyWith(displayMode: ItemDisplayMode.normal)
-      : this;
+  // Falls back to filtering when the reset landed on a column that no longer offers
+  // marking (a tag-driven column).
+  FactorColumnSpec _withOfferedUnmetRows() =>
+      !offersMarkMissing && marksMissing ? copyWith(unmetRows: UnmetRows.filterOut) : this;
 
   FactorColumnSpec copyWith({
     String? id,
@@ -461,8 +576,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
     bool? selectByTag,
-    ItemDisplayMode? displayMode,
-    bool? hideCommonItems,
+    UnmetRows? unmetRows,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
@@ -477,8 +591,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
       selectByTag: selectByTag ?? this.selectByTag,
-      displayMode: displayMode ?? this.displayMode,
-      hideCommonItems: hideCommonItems ?? this.hideCommonItems,
+      unmetRows: unmetRows ?? this.unmetRows,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
@@ -498,8 +611,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     if (!selectByTag) {
       return predicate;
     }
-    final query = ref.read(_factorTagQueryProvider(_factorTagsKey(predicate.factorTags, predicate.skillTags)));
-    return predicate.copyWith(query: query);
+    return predicate.copyWith(query: resolvedFactorIds(ref));
   }
 
   @override
@@ -515,122 +627,75 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     return values.map((e) => resolved.apply(e)).toList();
   }
 
-  /// The factors [factorSet] holds within the subject: the queried ones, or for an empty query every factor of
-  /// the three slots when [showAllWhenQueryIsEmpty].
-  ///
-  /// Under the trainee subject a factor only a parent holds extracts as an all-zero entry; it is not held, so it
-  /// is dropped here, for every display alike.
-  List<QueriedFactor> _heldFactors(AggregateFactorSetPredicate predicate, FactorSet factorSet) {
-    final traineeOnly = predicate.subject == FactorSearchSubjectMode.trainee;
-    if (predicate.query.isEmpty && !showAllWhenQueryIsEmpty) {
-      return [];
-    }
-    final ids = predicate.query.isNotEmpty ? predicate.query : factorSet.uniqueIds;
-    return QueriedFactor.extract(ids, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
-  }
-
-  @override
-  bool hasQuerySelection(RefBase ref) => _resolved(ref).query.isNotEmpty;
-
   @override
   bool get notatesValueOnly => !predicate.notation.mode.showsName;
 
   @override
-  Set<int> heldItemIds(RefBase ref, FactorSet value) => _heldFactors(_resolved(ref), value).map((e) => e.id).toSet();
-
-  @override
-  TrinaCell plutoCell(RefBase ref, FactorSet value) => itemCell(ref, value, const ItemCellContext.normal());
-
-  @override
-  TrinaCell itemCell(RefBase ref, FactorSet value, ItemCellContext context) {
+  TrinaCell plutoCell(RefBase ref, FactorSet value) {
     final predicate = _resolved(ref);
     final mode = predicate.notation.mode;
-    final order = _order(ref, predicate);
-    final factors = order.sort(_heldFactors(predicate, value), (e) => e.id);
+    final order = itemOrder(ref);
+    final factors = order.sort(heldFactors(ref, value), (e) => e.id);
 
     // Value-only modes render a single aggregate value across all factors, with
     // no factor names, so the display-count limit does not apply.
     if (notatesValueOnly) {
       final display = QueriedFactor.notationOf(factors, mode.metric, mode.granularity, width: 3);
       final summary = "(${QueriedFactor.notationOf(factors, mode.metric, mode.granularity)})";
-      if (drawsSummary(context.mode)) {
+      if (drawsSummary) {
         return TrinaCell(value: display)..setUserData(ItemCellData(items: const [], summary: summary, csv: summary));
       }
-      // Outside the normal display the factors are drawn named, since a highlight belongs to an item; the
-      // value (sorting) and the CSV stay those of the stored mode.
-      return TrinaCell(value: display)
-        ..setUserData(_annotatedCell(ref, predicate, order, value, context, csv: summary));
+      // While marking missing factors they are drawn named, since a red mark belongs to an item; the value
+      // (sorting) and the CSV stay those of the value-only notation.
+      return TrinaCell(value: display)..setUserData(_markedCell(ref, predicate, order, value, csv: summary));
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
-    final notations = factors.map((q) => _notation(q, labels.getOrNull(q.id) ?? q.id.toString(), mode)).toList();
+    final notations = factors
+        .map((q) => FactorItemsColumnSpec.itemText(q, labels.getOrNull(q.id) ?? q.id.toString(), mode))
+        .toList();
     final max = itemLimit(ref, predicate.notation.max);
     final desc = (max == null ? notations : notations.partial(0, max)).join(", ");
     final csv = const CsvEncoder().convert([notations]);
-    final data = context is NormalItemCellContext
-        ? ItemCellData.limited(
+    final data = marksMissing
+        ? _markedCell(ref, predicate, order, value, csv: csv)
+        : ItemCellData.limited(
             [for (final text in notations) CellItem(text, ItemState.normal)],
             max,
             hideCommon: false,
             csv: csv,
-          )
-        : _annotatedCell(ref, predicate, order, value, context, csv: csv);
+          );
     return TrinaCell(value: desc)..setUserData(data);
   }
 
-  static ItemOrder _order(RefBase ref, AggregateFactorSetPredicate predicate) =>
-      ItemOrder(query: predicate.query, masterRank: ref.watch(factorMasterRankProvider));
-
-  static String _notation(QueriedFactor factor, String name, FactorNotationMode mode) =>
-      mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
-
-  /// An absence or difference cell: the factors held within the subject, drawn in the named counterpart of the
-  /// stored notation, and the placeholders, drawn in the same notation with every slot 0 so that a placeholder
-  /// takes the shape of a held factor, cut to the display count.
-  ItemCellData _annotatedCell(
+  /// A cell that marks the missing factors: the factors held within the subject, drawn in the named counterpart
+  /// of the stored notation, and the placeholders of the queried factors the record lacks, drawn in the same
+  /// notation with every slot 0 so that a placeholder takes the shape of a held factor, cut to the display count.
+  ItemCellData _markedCell(
     RefBase ref,
     AggregateFactorSetPredicate predicate,
     ItemOrder order,
-    FactorSet factorSet,
-    ItemCellContext context, {
+    FactorSet factorSet, {
     required String csv,
   }) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = predicate.notation.mode.named;
-    String placeholderOf(int id) => _notation(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), nameOf(id), mode);
-    // Under mixed the threshold applies to the query as a whole, so no single factor is short of it; an empty
-    // query accepts every record, so no factor is short of it either.
-    final perItemThreshold = predicate.query.isNotEmpty && predicate.logic != FactorSetLogicMode.mixed;
+    String placeholderOf(int id) => placeholderText(ref, id, mode);
+    final perItemThreshold = marksShortItems;
     final own = [
-      for (final factor in _heldFactors(predicate, factorSet))
+      for (final factor in heldFactors(ref, factorSet))
         OwnItem(
           factor.id,
-          _notation(factor, nameOf(factor.id), mode),
+          FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode),
           meetsQuery: !perItemThreshold || predicate.acceptsItem(factor),
           strength: factor.sum(),
         ),
     ];
-    final items = switch (context) {
-      NormalItemCellContext() => throw ArgumentError.value(context, 'context', 'not an annotating display'),
-      AbsenceItemCellContext() => absenceItems(
-        own,
-        predicate.query,
-        placeholderOf,
-        order,
-        perItemThreshold: perItemThreshold,
-      ),
-      DifferenceItemCellContext(:final tally) => differenceItems(
-        own,
-        tally,
-        placeholderOf,
-        order,
-        strengthMax: predicate.subject == FactorSearchSubjectMode.trainee ? 3 : 9,
-      ),
-    };
-    return ItemCellData.limited(items, itemLimit(ref, predicate.notation.max), hideCommon: hideCommonItems, csv: csv);
+    final items = missingMarkedItems(own, predicate.query, placeholderOf, order, perItemThreshold: perItemThreshold);
+    return ItemCellData.limited(items, itemLimit(ref, predicate.notation.max), hideCommon: false, csv: csv);
   }
 
   @override
@@ -660,10 +725,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     const sep = "\n";
     String modeText = "$sep${"-" * 10}";
 
-    // Difference display compares by the subject alone; the logic, the element
-    // mode and the lower bounds are ignored, so their lines are left out.
-    final ignoresFilter = effectiveItemDisplayMode(ref, id, displayMode) == ItemDisplayMode.difference;
-    if (predicate.query.length >= 2 && !ignoresFilter) {
+    if (predicate.query.length >= 2) {
       final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.label".tr();
       modeText += "$sep${"$tr_factor.mode.logic.label".tr()}: $selection";
     }
@@ -671,7 +733,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.label".tr();
     modeText += "$sep${"$tr_factor.mode.subject.label".tr()}: $subject";
 
-    if (ignoresFilter) {
+    // While marking missing factors under mixed, the element mode and the lower bounds are not used, so their
+    // lines are left out.
+    if (!usesPerItemThreshold) {
       return "${_queryNames(ref, predicate)}$modeText";
     }
 
@@ -743,6 +807,7 @@ final _factorTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
 });
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
+final _selectionSpecProvider = SpecProviderAccessor<FactorItemsColumnSpec>();
 
 class _SelectedSkillTags extends TagSelectionNotifier {
   _SelectedSkillTags(this.specId);
@@ -751,14 +816,14 @@ class _SelectedSkillTags extends TagSelectionNotifier {
 
   @override
   Set<String> build() {
-    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-    return Set.from(spec.predicate.skillTags);
+    final spec = ref.read(specCloneProvider(specId)) as FactorItemsColumnSpec;
+    return Set.from(spec.skillTags);
   }
 
   @override
   void toggle(String tag, {bool? shouldExists}) {
     super.toggle(tag, shouldExists: shouldExists);
-    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    final spec = ref.read(specCloneProvider(specId)) as FactorItemsColumnSpec;
     if (!spec.selectByTag) {
       return;
     }
@@ -767,7 +832,7 @@ class _SelectedSkillTags extends TagSelectionNotifier {
     // [_resolved]). Only this axis is touched; the factor axis keeps its value.
     ref
         .read(specCloneProvider(specId).notifier)
-        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(skillTags: state)));
+        .update((s) => (s as FactorItemsColumnSpec).withFactorSelection(skillTags: state));
   }
 }
 
@@ -782,14 +847,14 @@ class _SelectedFactorTags extends TagSelectionNotifier {
 
   @override
   Set<String> build() {
-    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-    return Set.from(spec.predicate.factorTags);
+    final spec = ref.read(specCloneProvider(specId)) as FactorItemsColumnSpec;
+    return Set.from(spec.factorTags);
   }
 
   @override
   void toggle(String tag, {bool? shouldExists}) {
     super.toggle(tag, shouldExists: shouldExists);
-    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    final spec = ref.read(specCloneProvider(specId)) as FactorItemsColumnSpec;
     if (!spec.selectByTag) {
       return;
     }
@@ -798,7 +863,7 @@ class _SelectedFactorTags extends TagSelectionNotifier {
     // [_resolved]). Only this axis is touched; the skill axis keeps its value.
     ref
         .read(specCloneProvider(specId).notifier)
-        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(factorTags: state)));
+        .update((s) => (s as FactorItemsColumnSpec).withFactorSelection(factorTags: state));
   }
 }
 
@@ -806,20 +871,22 @@ final _selectedFactorTagsProvider = NotifierProvider.autoDispose.family<TagSelec
   _SelectedFactorTags.new,
 );
 
-class _SelectionSelector extends ConsumerStatefulWidget {
+/// The factor selection group of a column's dialog: the factor and skill tag chips and, unless hidden, the
+/// individual factor list. Reads and writes the column only through [FactorItemsColumnSpec].
+class FactorSelectionGroup extends ConsumerStatefulWidget {
   final String specId;
 
-  const _SelectionSelector({required this.specId});
+  const FactorSelectionGroup({super.key, required this.specId});
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
+  ConsumerState<ConsumerStatefulWidget> createState() => _FactorSelectionGroupState();
 }
 
-class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
+class _FactorSelectionGroupState extends ConsumerState<FactorSelectionGroup> {
   String textQuery = "";
 
   List<FactorInfo> _watchCandidateFactors(String specId) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+    final spec = _selectionSpecProvider.watch(ref, specId);
     final info = ref.watch(spec.showAvailableOnly ? availableFactorInfoProvider : factorInfoProvider);
     final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
     final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
@@ -856,7 +923,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
     // A tag-driven column shows the chips without the NoteCard frame, and its tags
     // define the column (so a dedicated description); a normal column keeps them
     // inside the bordered note alongside the individual factor list.
-    if (_clonedSpecProvider.watch(ref, widget.specId).selectByTag) {
+    if (_selectionSpecProvider.watch(ref, widget.specId).selectByTag) {
       return Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -879,16 +946,14 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
   }
 
   Widget selectorWidget(BuildContext context) {
-    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
+    final selected = _selectionSpecProvider.watch(ref, widget.specId).selectedFactorIds.toSet();
     final candidates = _watchCandidateFactors(widget.specId);
     return SelectorWidget<FactorInfo>(
       description: Text("$tr_factor.selection.description".tr()),
       candidates: candidates,
       selected: selected,
       onSelected: (newSelected) {
-        _clonedSpecProvider.update(ref, widget.specId, (spec) {
-          return spec.copyWith(predicate: spec.predicate.copyWith(query: newSelected));
-        });
+        _selectionSpecProvider.update(ref, widget.specId, (spec) => spec.withFactorSelection(ids: newSelected));
       },
       onTextQueryChanged: (query) => setState(() => textQuery = query),
     );
@@ -896,13 +961,33 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    final spec = _selectionSpecProvider.watch(ref, widget.specId);
     return FormGroup(
       title: Text("$tr_factor.selection.label".tr()),
       children: [
         if (!spec.hiddenElements.contains(FactorDialogElements.selectionTags)) tagsWidget(),
         if (!spec.hiddenElements.contains(FactorDialogElements.selectionList)) selectorWidget(context),
       ],
+    );
+  }
+}
+
+/// The choice of whose factors a column compares ([FactorItemsColumnSpec.subject]).
+class FactorSubjectChoice extends ConsumerWidget {
+  final String specId;
+
+  const FactorSubjectChoice({super.key, required this.specId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ChoiceFormLine<FactorSearchSubjectMode>(
+      title: Text("$tr_factor.mode.subject.label".tr()),
+      description: Text("$tr_factor.mode.subject.description".tr()),
+      prefix: "$tr_factor.mode.subject",
+      tooltip: false,
+      values: FactorSearchSubjectMode.values,
+      selected: _selectionSpecProvider.watch(ref, specId).subject,
+      onSelected: (value) => _selectionSpecProvider.update(ref, specId, (spec) => spec.withSubject(value)),
     );
   }
 }
@@ -939,23 +1024,6 @@ class _ModeSelector extends ConsumerWidget {
       onSelected: (value) {
         _clonedSpecProvider.update(ref, specId, (spec) {
           return spec.copyWith(predicate: spec.predicate.copyWith(logic: value));
-        });
-      },
-    );
-  }
-
-  Widget subjectChoiceWidget(BuildContext context, WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return ChoiceFormLine<FactorSearchSubjectMode>(
-      title: Text("$tr_factor.mode.subject.label".tr()),
-      description: Text("$tr_factor.mode.subject.description".tr()),
-      prefix: "$tr_factor.mode.subject",
-      tooltip: false,
-      values: FactorSearchSubjectMode.values,
-      selected: predicate.subject,
-      onSelected: (value) {
-        _clonedSpecProvider.update(ref, specId, (spec) {
-          return spec.copyWith(predicate: spec.predicate.copyWith(subject: value));
         });
       },
     );
@@ -1038,12 +1106,10 @@ class _ModeSelector extends ConsumerWidget {
       title: Text("$tr_factor.mode.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
-        if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic))
-          DifferenceIgnoredSetting(specId: specId, child: logicChoiceWidget(context, ref)),
-        // The subject stays editable: difference display compares within it.
-        subjectChoiceWidget(context, ref),
-        DifferenceIgnoredSetting(
-          specId: specId,
+        if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic)) logicChoiceWidget(context, ref),
+        FactorSubjectChoice(specId: specId),
+        UnusedWhileMarking(
+          unused: !spec.usesPerItemThreshold,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1090,12 +1156,8 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     super.dispose();
   }
 
-  /// Whether the column is in effect shown in a non-normal display mode, which
-  /// names every factor whatever notation mode is stored.
-  bool _namesItems(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    return effectiveItemDisplayMode(ref.base, widget.specId, spec.displayMode) != ItemDisplayMode.normal;
-  }
+  /// Whether the column marks missing factors, which names every factor whatever notation mode is stored.
+  bool _namesItems(WidgetRef ref) => _clonedSpecProvider.watch(ref, widget.specId).marksMissing;
 
   Widget notationChoiceWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
@@ -1120,7 +1182,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     final spec = _clonedSpecProvider.watch(ref, widget.specId);
     final predicate = spec.predicate;
     // Value-only modes render a single aggregate cell, so the per-cell factor limit
-    // has no effect. A non-normal display mode names the factors even under a
+    // has no effect. Marking missing factors names them even under a
     // value-only mode, and the limit applies again. When both reasons hold, the
     // value-only mode is named: it keeps the limit off whatever is selected.
     final valueOnly = !predicate.notation.mode.showsName && !_namesItems(ref);
@@ -1171,7 +1233,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
-        ItemDisplaySelector(specId: widget.specId),
+        UnmetRowsChoice(specId: widget.specId),
         notationChoiceWidget(context, ref),
         notationMaxWidget(ref),
         notationTitleWidget(ref),
@@ -1192,7 +1254,7 @@ class FactorColumnSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        _SelectionSelector(specId: specId),
+        FactorSelectionGroup(specId: specId),
         const SizedBox(height: 32),
         _ModeSelector(specId: specId),
         const SizedBox(height: 32),

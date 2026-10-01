@@ -79,7 +79,7 @@ class SpecProviderAccessor<T extends ColumnSpec> {
 /// a per-spec accessor. Like the title field, the change is committed to the
 /// clone on [onDecided] (the dialog's OK button); copyWith preserves the other
 /// edited fields regardless of listener order. Turning the switch off hides the
-/// column from the grid while it keeps filtering rows.
+/// column from the grid; a column that filters rows keeps filtering them.
 class ColumnVisibilitySwitch extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
@@ -124,88 +124,75 @@ class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch>
   }
 }
 
-/// The display-mode choice and the "hide common items" switch shared by the skill
-/// and factor notation (表示) groups.
+// ignore: constant_identifier_names
+const tr_unmet_rows = "$tr_chara_detail.column_predicate.common.unmet_rows";
+
+/// The choice of what a skill or factor column does with a row that does not meet its query
+/// ([QueryItemColumnSpec.unmetRows]), at the head of the notation (表示) group.
 ///
-/// Drawn only for a root column: a column nested under a logic column never
-/// honours a non-normal mode (see [effectiveItemDisplayMode]), so the choice would
-/// edit a value with no effect. Absence display is refused for a column whose
-/// items come from tags ([ItemColumnSpec.offersAbsenceDisplay]), and hiding common
-/// items only applies to difference display. Like the notation mode, a choice is
-/// written to the dialog's clone at once and committed by the dialog's OK button.
-class ItemDisplaySelector extends ConsumerWidget {
+/// Marking is refused for a column whose items come from tags ([QueryItemColumnSpec.offersMarkMissing]) and for a
+/// column nested under a logic column, which hands its parent only a row condition. Like the notation mode, a
+/// choice is written to the dialog's clone at once and committed by the dialog's OK button.
+class UnmetRowsChoice extends ConsumerWidget {
   final String specId;
 
-  const ItemDisplaySelector({super.key, required this.specId});
-
-  static const _tr = "$tr_chara_detail.column_predicate.common.display";
-
-  void _update(WidgetRef ref, ColumnSpec Function(ItemColumnSpec spec) apply) {
-    ref.read(specCloneProvider(specId).notifier).update((spec) => apply(spec as ItemColumnSpec));
-  }
+  const UnmetRowsChoice({super.key, required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final spec = ref.watch(specCloneProvider(specId));
-    if (spec is! ItemColumnSpec || !isRootColumn(ref.base, specId)) {
-      return const SizedBox.shrink();
-    }
-    final mode = spec.displayMode;
-    final hideCommon = spec.hideCommonItems;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ChoiceFormLine<ItemDisplayMode>(
-          title: Text("$_tr.label".tr()),
-          description: Text("$_tr.description".tr()),
-          prefix: "$_tr.mode",
-          values: ItemDisplayMode.values,
-          selected: mode,
-          disabled: spec.offersAbsenceDisplay ? const {} : const {ItemDisplayMode.absence},
-          onSelected: (value) => _update(ref, (spec) => spec.withDisplayMode(value)),
-        ),
-        Disabled(
-          disabled: mode != ItemDisplayMode.difference,
-          tooltip: "$_tr.hide_common.disabled_tooltip".tr(),
-          child: FormTile(
-            title: Text("$_tr.hide_common.label".tr()),
-            description: Text("$_tr.hide_common.description".tr()),
-            trailing: Switch(
-              value: hideCommon,
-              onChanged: (value) => _update(ref, (spec) => spec.withHideCommonItems(value)),
-            ),
-            onTap: () => _update(ref, (spec) => spec.withHideCommonItems(!hideCommon)),
-          ),
-        ),
-      ],
+    final spec = ref.watch(specCloneProvider(specId)) as QueryItemColumnSpec;
+    final offered = spec.offersMarkMissing && isRootColumn(ref.base, specId);
+    return ChoiceFormLine<UnmetRows>(
+      title: Text("$tr_unmet_rows.label".tr()),
+      description: Text("$tr_unmet_rows.description".tr()),
+      prefix: tr_unmet_rows,
+      values: UnmetRows.values,
+      selected: spec.unmetRows,
+      disabled: offered ? const {} : const {UnmetRows.markMissing},
+      onSelected: (value) => ref
+          .read(specCloneProvider(specId).notifier)
+          .update((spec) => (spec as QueryItemColumnSpec).withUnmetRows(value)),
     );
   }
 }
 
-/// Disables [child], a filter setting (logic, lower bounds) that difference display
-/// does not use, while the column [specId] is in effect shown in difference display.
-///
-/// Difference display compares only the selected items (and, for factors, the
-/// subject), so the setting keeps its value and applies again once the column
-/// returns to normal. The mode is the effective one ([effectiveItemDisplayMode]):
-/// a column nested under a logic column filters with these settings whatever mode
-/// it has stored.
-class DifferenceIgnoredSetting extends ConsumerWidget {
-  final String specId;
+/// Disables [child], a setting the column does not use while it marks missing items, keeping its value; it
+/// applies again once the column filters rows. [unused] is the column's own getter for the setting.
+class UnusedWhileMarking extends StatelessWidget {
+  final bool unused;
   final Widget child;
 
-  const DifferenceIgnoredSetting({super.key, required this.specId, required this.child});
+  const UnusedWhileMarking({super.key, required this.unused, required this.child});
+
+  @override
+  Widget build(BuildContext context) =>
+      Disabled(disabled: unused, tooltip: "$tr_unmet_rows.unused_while_marking".tr(), child: child);
+}
+
+// ignore: constant_identifier_names
+const tr_difference = "$tr_chara_detail.column_predicate.difference";
+
+/// The "hide common items" switch of a difference column's ([DifferenceItemColumnSpec]) display group. Like the
+/// notation mode, a change is written to the dialog's clone at once and committed by the dialog's OK button.
+class DifferenceCommonItemsSwitch extends ConsumerWidget {
+  final String specId;
+
+  const DifferenceCommonItemsSwitch({super.key, required this.specId});
+
+  void _update(WidgetRef ref, bool hide) {
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((spec) => (spec as DifferenceItemColumnSpec).withHideCommonItems(hide));
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final spec = ref.watch(specCloneProvider(specId));
-    final ignored =
-        spec is ItemColumnSpec &&
-        effectiveItemDisplayMode(ref.base, specId, spec.displayMode) == ItemDisplayMode.difference;
-    return Disabled(
-      disabled: ignored,
-      tooltip: "$tr_chara_detail.column_predicate.common.display.difference_ignores_filter".tr(),
-      child: child,
+    final hide = (ref.watch(specCloneProvider(specId)) as DifferenceItemColumnSpec).hideCommonItems;
+    return FormTile(
+      title: Text("$tr_difference.hide_common.label".tr()),
+      description: Text("$tr_difference.hide_common.description".tr()),
+      trailing: Switch(value: hide, onChanged: (value) => _update(ref, value)),
+      onTap: () => _update(ref, !hide),
     );
   }
 }

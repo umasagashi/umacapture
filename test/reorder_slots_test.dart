@@ -5,7 +5,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/logic.dart';
+import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/reorder_slots.dart';
+import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 void main() {
@@ -110,5 +112,32 @@ void main() {
 
     // No slot references the dragged container or its child b.
     expect(slots, const [ReorderSlot(null, 0), ReorderSlot(null, 1)]);
+  });
+
+  test('a column that does not filter rows gets no slot inside a container', () {
+    final specs = <ColumnSpec>[
+      logic('or', LogicMode.or, [leaf('b')]),
+      logic('and', LogicMode.and, const []),
+      SkillDifferenceColumnSpec(id: 'diff', title: 'DIFF', parser: SkillParser()),
+      leaf('d'),
+    ];
+
+    // A filtering column dragged over the same tree still gets the containers' inner slots.
+    expect(computeReorderSlots(specs, 'd'), const [
+      ReorderSlot(null, 0),
+      ReorderSlot('or', 0),
+      ReorderSlot('or', 1),
+      ReorderSlot(null, 1),
+      ReorderSlot('and', 0),
+      ReorderSlot(null, 2),
+      ReorderSlot(null, 3),
+    ]);
+    // The difference column has no row condition to give a container, so only the top-level gaps are offered.
+    expect(computeReorderSlots(specs, 'diff'), const [
+      ReorderSlot(null, 0),
+      ReorderSlot(null, 1),
+      ReorderSlot(null, 2),
+      ReorderSlot(null, 3),
+    ]);
   });
 }

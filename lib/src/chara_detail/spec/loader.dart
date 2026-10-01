@@ -923,28 +923,19 @@ Widget _selectAllCheckboxRenderer(TrinaColumnTitleRendererContext rendererContex
   );
 }
 
-/// Ids of the root columns that annotate their cells instead of filtering rows:
-/// item columns in a non-normal display mode. Only [roots] are consulted, so a
-/// nested column keeps filtering through its container whatever mode it stores.
-Set<String> annotatingColumnIds(List<ColumnSpec> roots) => {
-  for (final spec in roots)
-    if (spec is ItemColumnSpec && spec.displayMode != ItemDisplayMode.normal) spec.id,
-};
-
 /// Row visibility and the per-column pass counts, from each spec's per-row
 /// condition in [conditionsById] (keyed by the id of every node of [roots]).
 ///
 /// A row is visible only if every filtering ROOT spec passes. Nested specs
-/// influence visibility solely through their parent container column. An
-/// annotating root column (see [annotatingColumnIds]) neither hides rows nor
+/// influence visibility solely through their parent container column. A column
+/// that does not filter rows ([ColumnSpec.filtersRows]) neither hides rows nor
 /// has a pass count, so its chip shows no badge.
 ({List<bool> rowConditions, Map<String, int> filteredCounts}) filterRows(
   List<ColumnSpec> roots,
   Map<String, List<bool>> conditionsById,
   int rowCount,
 ) {
-  final annotatingIds = annotatingColumnIds(roots);
-  final filteringRoots = roots.where((spec) => !annotatingIds.contains(spec.id)).toList();
+  final filteringRoots = roots.where((spec) => spec.filtersRows).toList();
   return (
     // Computed per record (not via transpose) so an empty root list yields one
     // bool per record — all visible — instead of collapsing every record into a
@@ -955,7 +946,7 @@ Set<String> annotatingColumnIds(List<ColumnSpec> roots) => {
     ),
     filteredCounts: {
       for (final spec in flattenForest(roots))
-        if (!annotatingIds.contains(spec.id)) spec.id: conditionsById[spec.id]!.countTrue(),
+        if (spec.filtersRows) spec.id: conditionsById[spec.id]!.countTrue(),
     },
   );
 }
@@ -1038,15 +1029,16 @@ Grid _buildGrid(
 
   // A difference column compares each displayed row against the displayed rows of its own group: pinned rows
   // against pinned rows, the rest against the rest. Each row's tally is built from the group the row is in.
-  final annotatingIds = annotatingColumnIds(specList);
   bool isPinned(int rowIndex) => pinnedIds.contains(recordList[rowIndex].id);
   final groups = visibleIndices.groupListsBy(isPinned);
   final tallies = <String, Map<bool, ItemTally>>{
     for (final spec in visibleSpecs)
-      if (spec is ItemColumnSpec && annotatingIds.contains(spec.id) && spec.displayMode == ItemDisplayMode.difference)
+      if (spec is DifferenceItemColumnSpec)
         spec.id: {
           for (final MapEntry(key: pinned, value: rowIndices) in groups.entries)
-            pinned: ItemTally.of(rowIndices.map((rowIndex) => spec.heldItemIds(ref, parsedById[spec.id]![rowIndex]))),
+            pinned: ItemTally.of(
+              rowIndices.map((rowIndex) => spec.heldItemStrengths(ref, parsedById[spec.id]![rowIndex])),
+            ),
         },
   };
 
@@ -1055,11 +1047,8 @@ Grid _buildGrid(
       return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
     }
     final value = parsedById[spec.id]![rowIndex];
-    if (spec is ItemColumnSpec && annotatingIds.contains(spec.id)) {
-      final ItemCellContext context = spec.displayMode == ItemDisplayMode.difference
-          ? ItemCellContext.difference(tallies[spec.id]![isPinned(rowIndex)]!)
-          : const ItemCellContext.absence();
-      return spec.itemCell(ref, value, context);
+    if (spec is DifferenceItemColumnSpec) {
+      return spec.differenceCell(ref, value, tallies[spec.id]![isPinned(rowIndex)]!);
     }
     return spec.plutoCell(ref, value);
   }

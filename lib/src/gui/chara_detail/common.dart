@@ -549,7 +549,12 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
             enabled: !disabledSet.contains(value),
             child: SizedBox(
               width: double.infinity,
-              child: tooltip ? Tooltip(message: _tooltip(value), child: Text(_label(value))) : Text(_label(value)),
+              // A disabled option explains why it cannot be chosen instead of what it does.
+              child: disabledSet.contains(value)
+                  ? Tooltip(message: _disabledTooltip(value), child: Text(_label(value)))
+                  : tooltip
+                  ? Tooltip(message: _tooltip(value), child: Text(_label(value)))
+                  : Text(_label(value)),
             ),
           ),
       ],

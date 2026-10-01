@@ -112,6 +112,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   bool get acceptsMoreChildren => logic.isMultiInput || children.isEmpty;
 
   @override
+  bool acceptsChild(ColumnSpec child) => acceptsMoreChildren && child.filtersRows;
+
+  @override
   LogicColumnSpec withChildren(List<ColumnSpec> children) => copyWith(children: children);
 
   @override

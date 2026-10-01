@@ -49,19 +49,17 @@ class _HitTarget {
   const _HitTarget(this.key, this.before, this.after);
 }
 
-/// The line a chip's tooltip carries for a root column shown in a non-normal
-/// display mode, or null when the column filters as usual — including a column
-/// nested under a logic column, whose stored mode is inert.
-String? itemDisplayMarker(RefBase ref, ColumnSpec spec) {
-  if (spec is! ItemColumnSpec) {
-    return null;
+/// The line a chip's tooltip carries for a column that does not filter rows: a
+/// difference column, or a column that keeps its unmet rows and marks them red.
+/// Null for a column that filters.
+String? itemDisplayMarker(ColumnSpec spec) {
+  if (spec is DifferenceItemColumnSpec) {
+    return "$tr_chara_detail.column_predicate.difference.marker".tr();
   }
-  final mode = effectiveItemDisplayMode(ref, spec.id, spec.displayMode);
-  if (mode == ItemDisplayMode.normal) {
-    return null;
+  if (spec is QueryItemColumnSpec && spec.marksMissing) {
+    return "$tr_chara_detail.column_predicate.common.unmet_rows.marker".tr();
   }
-  const prefix = "$tr_chara_detail.column_predicate.common.display";
-  return "$prefix.marker".tr(namedArgs: {"mode": "$prefix.mode.${mode.name}.label".tr()});
+  return null;
 }
 
 class ColumnSpecTagWidget extends ConsumerStatefulWidget {
@@ -234,7 +232,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       text = composed.isEmpty ? "$tr_chara_detail.column_predicate.common.notation.tooltip_field.empty".tr() : composed;
     }
     final markers = [
-      ?itemDisplayMarker(ref.base, spec),
+      ?itemDisplayMarker(spec),
       if (spec.hidden) "$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr(),
     ];
     return [text, ...markers].join("\n──────────\n");

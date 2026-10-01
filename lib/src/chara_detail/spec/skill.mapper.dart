@@ -328,7 +328,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
       ParserMapper.ensureInitialized();
       AggregateSkillPredicateMapper.ensureInitialized();
       SkillDialogElementsMapper.ensureInitialized();
-      ItemDisplayModeMapper.ensureInitialized();
+      UnmetRowsMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -382,19 +382,12 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     opt: true,
     def: false,
   );
-  static ItemDisplayMode _$displayMode(SkillColumnSpec v) => v.displayMode;
-  static const Field<SkillColumnSpec, ItemDisplayMode> _f$displayMode = Field(
-    'displayMode',
-    _$displayMode,
+  static UnmetRows _$unmetRows(SkillColumnSpec v) => v.unmetRows;
+  static const Field<SkillColumnSpec, UnmetRows> _f$unmetRows = Field(
+    'unmetRows',
+    _$unmetRows,
     opt: true,
-    def: ItemDisplayMode.normal,
-  );
-  static bool _$hideCommonItems(SkillColumnSpec v) => v.hideCommonItems;
-  static const Field<SkillColumnSpec, bool> _f$hideCommonItems = Field(
-    'hideCommonItems',
-    _$hideCommonItems,
-    opt: true,
-    def: false,
+    def: UnmetRows.filterOut,
   );
   static bool _$hidden(SkillColumnSpec v) => v.hidden;
   static const Field<SkillColumnSpec, bool> _f$hidden = Field(
@@ -438,8 +431,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
     #selectByTag: _f$selectByTag,
-    #displayMode: _f$displayMode,
-    #hideCommonItems: _f$hideCommonItems,
+    #unmetRows: _f$unmetRows,
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
@@ -471,8 +463,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
       selectByTag: data.dec(_f$selectByTag),
-      displayMode: data.dec(_f$displayMode),
-      hideCommonItems: data.dec(_f$hideCommonItems),
+      unmetRows: data.dec(_f$unmetRows),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),

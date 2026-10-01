@@ -36,8 +36,7 @@ Map<String, dynamic> completeFactorMap() => <String, dynamic>{
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
   'selectByTag': false,
-  'displayMode': 'normal',
-  'hideCommonItems': false,
+  'unmetRows': 'filterOut',
   'hidden': false,
 };
 
@@ -71,6 +70,8 @@ void main() {
       'SimpleLabelColumnSpec',
       'SkillColumnSpec',
       'FactorColumnSpec',
+      'SkillDifferenceColumnSpec',
+      'FactorDifferenceColumnSpec',
       'CharacterCardColumnSpec',
       'DateTimeColumnSpec',
       'RatingColumnSpec',
@@ -108,22 +109,16 @@ void main() {
     expect(spec.predicate.skillTags, isEmpty);
   });
 
-  test('a legacy FactorColumnSpec without the display fields decodes to their defaults', () {
-    // A map without displayMode (enum) and hideCommonItems (bool).
-    final legacy = completeFactorMap()
-      ..remove('displayMode')
-      ..remove('hideCommonItems');
+  test('a legacy FactorColumnSpec without unmetRows decodes to filtering them out', () {
+    final legacy = completeFactorMap()..remove('unmetRows');
     final spec = ColumnSpecMapper.fromMap(legacy);
 
     expect(spec, isA<FactorColumnSpec>());
-    expect((spec as FactorColumnSpec).displayMode, ItemDisplayMode.normal);
-    expect(spec.hideCommonItems, isFalse);
-    // And the non-default values round-trip through the mapper.
+    expect((spec as FactorColumnSpec).unmetRows, UnmetRows.filterOut);
+    // And the non-default value round-trips through the mapper.
     final roundTripped =
-        ColumnSpecMapper.fromMap(spec.copyWith(displayMode: ItemDisplayMode.difference, hideCommonItems: true).toMap())
-            as FactorColumnSpec;
-    expect(roundTripped.displayMode, ItemDisplayMode.difference);
-    expect(roundTripped.hideCommonItems, isTrue);
+        ColumnSpecMapper.fromMap(spec.copyWith(unmetRows: UnmetRows.markMissing).toMap()) as FactorColumnSpec;
+    expect(roundTripped.unmetRows, UnmetRows.markMissing);
   });
 
   test('ScriptColumnSpec round-trips its source/title/apiVersion losslessly', () {

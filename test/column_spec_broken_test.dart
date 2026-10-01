@@ -117,15 +117,14 @@ void main() {
     expect(container.read(currentColumnSpecBrokenIdsProvider), isNot(contains('grandfathered')));
   });
 
-  group('a spec saved before the display mode existed loads healthy, not broken', () {
-    // Encoded from the current classes, then stripped of the two display fields
-    // (a non-null enum and a bool), leaving a map that lacks only those keys.
-    Map<String, dynamic> withoutDisplayFields(ColumnSpec spec) =>
-        spec.toMap()..removeWhere((key, _) => key == 'displayMode' || key == 'hideCommonItems');
-    final skill = withoutDisplayFields(
+  group('a spec saved before the unmet-rows choice existed loads healthy, not broken', () {
+    // Encoded from the current classes, then stripped of the unmet-rows choice
+    // (a non-null enum), leaving a map that lacks only that key.
+    Map<String, dynamic> withoutUnmetRows(ColumnSpec spec) => spec.toMap()..remove('unmetRows');
+    final skill = withoutUnmetRows(
       SkillColumnSpec(id: 'skill', title: 'skill', parser: SkillParser(), predicate: AggregateSkillPredicate.any()),
     );
-    final factor = withoutDisplayFields(
+    final factor = withoutUnmetRows(
       FactorColumnSpec(
         id: 'factor',
         title: 'factor',
@@ -135,13 +134,12 @@ void main() {
     );
 
     void expectDefaults(ColumnSpec spec) {
-      expect(spec, isA<ItemColumnSpec>());
-      expect((spec as ItemColumnSpec).displayMode, ItemDisplayMode.normal);
-      expect(spec.hideCommonItems, isFalse);
+      expect(spec, isA<QueryItemColumnSpec>());
+      expect((spec as QueryItemColumnSpec).unmetRows, UnmetRows.filterOut);
     }
 
     test('skill and factor root columns', () async {
-      expect(skill.containsKey('displayMode'), isFalse);
+      expect(skill.containsKey('unmetRows'), isFalse);
       seed([skill, factor]);
       final container = ProviderContainer.test();
       await container.read(currentColumnSpecsLoaderProvider.future);

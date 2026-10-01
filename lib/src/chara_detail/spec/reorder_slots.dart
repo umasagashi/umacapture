@@ -36,7 +36,8 @@ class ReorderSlot {
 /// At a group boundary two adjacent slots appear naturally — e.g. "inside the
 /// group, after its last child" and "top level, just after the group" — which
 /// is what lets a single drag move a column in and out of a logic column. A
-/// container that cannot take another child (a full NOT) contributes no inner
+/// container that does not accept the dragged column as another child (a full
+/// NOT, or a dragged column that does not filter rows) contributes no inner
 /// slot; the position right before a container's header is never a slot.
 List<ReorderSlot> computeReorderSlots(List<ColumnSpec> specs, String draggedId) {
   final (working, removed) = detachFromForest(specs, draggedId);
@@ -44,23 +45,23 @@ List<ReorderSlot> computeReorderSlots(List<ColumnSpec> specs, String draggedId) 
     return const [];
   }
   final slots = <ReorderSlot>[];
-  _walk(working, null, slots);
+  _walk(working, null, removed, slots);
   return slots;
 }
 
-void _walk(List<ColumnSpec> list, ColumnSpec? parent, List<ReorderSlot> slots) {
+void _walk(List<ColumnSpec> list, ColumnSpec? parent, ColumnSpec dragged, List<ReorderSlot> slots) {
   final parentId = parent?.id;
-  // The top level always accepts slots; a container only when it has room for
-  // another child (so a full NOT exposes none of its inner positions).
-  final canInsertHere = parent == null || (parent.acceptsChildren && parent.acceptsMoreChildren);
+  // The top level always accepts slots; a container only when it accepts [dragged] as another child (so a full
+  // NOT, or any container for a column that does not filter rows, exposes none of its inner positions).
+  final canInsertHere = parent == null || parent.acceptsChild(dragged);
   for (var i = 0; i < list.length; i++) {
     if (canInsertHere) {
       slots.add(ReorderSlot(parentId, i)); // gap before list[i]
     }
     final node = list[i];
     if (node.acceptsChildren && node.children.isNotEmpty) {
-      _walk(node.children, node, slots); // descend into the container's own gaps
-    } else if (node.acceptsChildren && node.acceptsMoreChildren) {
+      _walk(node.children, node, dragged, slots); // descend into the container's own gaps
+    } else if (node.acceptsChild(dragged)) {
       slots.add(ReorderSlot(node.id, 0)); // empty container: a single inner slot
     }
   }

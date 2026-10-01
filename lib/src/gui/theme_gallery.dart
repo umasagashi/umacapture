@@ -424,9 +424,9 @@ class _BlendSection extends StatelessWidget {
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Rounded background behind each skill or factor of the record table cell in normal display, in the '
-          'outline role. It is not painted for an item the absence display holds, nor for one every compared '
-          'record shares in difference display. See the item cell rows below.',
+          'Rounded background behind each skill or factor of the record table cell, in the '
+          'outline role, including a held item in a column that marks missing items. A difference column paints its '
+          'held items green instead (the item green rows below). See the item cell rows below.',
         ),
         _SwatchRow(
           _BlendSwatch(
@@ -436,41 +436,44 @@ class _BlendSection extends StatelessWidget {
             baseLabel: 'surface',
           ),
           'Background of an item the record table cell marks red: a queried skill or factor the record does not '
-          'have, a factor short of the required stars or count, and, in difference display, an item only some of '
+          'have, a factor short of the required stars or count, and, in a difference column, an item only some of '
           'the compared records have while this one does not. One fixed strength for every red item. Only the '
           'missing and partial-missing items also dim their text (disabledColor); a short factor keeps its '
           'normal text. See the item cell rows below.',
         ),
         _SwatchRow(
           _BlendSwatch(
-            'item partial (weakest)',
+            'item green (weakest)',
             overlay: s.success.withValues(alpha: itemPartialHeldAlphaMin),
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Weakest green of the record table cell in difference display: an item only some of the compared '
-          'records have while this one does, at the lowest factor-star total (one star).',
+          'Weakest green of the record table cell in a difference column: an item this record holds, whether '
+          'only some of the compared records have it, every one has it at differing star totals, or every one has '
+          'it at the same total (common, unless hidden), at the bottom of the scale (a star total of one).',
         ),
         _SwatchRow(
           _BlendSwatch(
-            'item partial (middle)',
-            // Strength 5 on the nine-step lineage scale (the trainee alone has three steps).
+            'item green (middle)',
+            // Strength 5 where the strongest compared row holds the factor at 9.
             overlay: s.success.withValues(alpha: itemPartialHeldAlpha(5, 9)),
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Mid-scale green of the same cell: a lineage factor whose star total across the trainee and its '
-          'parents is 5 of 9. The shade steps linearly between the weakest and strongest ends.',
+          'Mid-scale green of the same cell: a factor whose star total is 5 while the compared row holding it '
+          'most has 9. Each factor has its own scale, from a total of one up to the largest total among the '
+          'compared rows, and the shade steps linearly along it.',
         ),
         _SwatchRow(
           _BlendSwatch(
-            'item partial (strongest)',
+            'item green (strongest)',
             overlay: s.success.withValues(alpha: itemPartialHeldAlphaMax),
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Strongest green of the same cell: the top of the factor-star scale (9 across the lineage, 3 for the '
-          'trainee alone). A skill has no strength, so a skill always takes this shade.',
+          'Strongest green of the same cell: a factor held at the largest star total among the compared rows '
+          '(every row, when all hold it at the same total). A skill has no strength, so a skill always takes '
+          'this shade.',
         ),
         _SwatchRow(
           _BlendSwatch(
@@ -622,7 +625,7 @@ class _ItemCellSection extends ConsumerWidget {
       [
         _SwatchRow(
           _ItemCellSpecimen(
-            'normal display',
+            'filtering column',
             ItemCellData(
               items: const [
                 CellItem('Item A', ItemState.normal),
@@ -632,33 +635,33 @@ class _ItemCellSection extends ConsumerWidget {
               csv: '',
             ),
           ),
-          'The default display of a skill or factor cell: every item is its own box (text plus the padding '
+          'A skill or factor cell of a column that filters rows: every item is its own box (text plus the padding '
           'inside it) with a rounded outline background, and boxes sit a fixed gap apart. Check that the text '
           'stays legible on it in both themes.',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
-            'absence display',
+            'marking missing items',
             ItemCellData(
               items: const [
-                CellItem('Item A(3)', ItemState.held),
+                CellItem('Item A(3)', ItemState.normal),
                 CellItem('Item B(1)', ItemState.short),
                 CellItem('Item C(0)', ItemState.missing),
               ],
               csv: '',
             ),
           ),
-          'A queried list as the absence display shows it, in factor notation: an item the record has (no '
-          'background), a factor below the per-item threshold (red background, normal text), and a factor the '
+          'A queried list as a column that marks missing items shows it, in factor notation: an item the record '
+          'has (the same outline background as a filtering column), a factor below the per-item threshold (red background, normal text), and a factor the '
           'record lacks (red background, text dimmed to disabledColor, drawn with a value of 0 so every row '
           'lines its factors up alike). Check that the dimmed text stays legible on the red in both themes.',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
-            'difference display',
+            'difference column',
             ItemCellData(
               items: const [
-                CellItem('Item A', ItemState.common),
+                CellItem('Item A', ItemState.common, strength: 6, strengthMax: 6),
                 CellItem('Item B', ItemState.partialHeld, strength: 2, strengthMax: 9),
                 CellItem('Item C', ItemState.partialHeld, strength: 9, strengthMax: 9),
                 CellItem('Item D', ItemState.partialMissing),
@@ -666,9 +669,11 @@ class _ItemCellSection extends ConsumerWidget {
               csv: '',
             ),
           ),
-          'The same cell in difference display: an item every compared record has (no background), items only '
-          'some have and this one does (green, shaded by strength: weak then strong), and an item only others '
-          'have (red background, dimmed text).',
+          'The same cell in a difference column: a common item every compared record has with the same star '
+          'total (strongest green, being at the top of its own scale; hidden when the column hides common items), '
+          'items not every record has at that total and this one does (green, shaded against the largest total '
+          'any compared record holds: weak then strong), and an item only others have (red background, dimmed '
+          'text).',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
@@ -777,7 +782,7 @@ class _SemanticSection extends StatelessWidget {
         null,
         'Toast success, capture requirement OK, addon success, a finished tab\'s progress ring, the "safe to switch '
             'characters" arrows, every CaptureStatusTone.success line of the capture card, and the green '
-            'difference shades of the record table\'s skill and factor cells (see the item partial rows above).',
+            'difference shades of the record table\'s skill and factor cells (see the item green rows above).',
       ),
       (
         'warning',

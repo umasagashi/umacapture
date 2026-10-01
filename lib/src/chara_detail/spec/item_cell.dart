@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' hide mergeSort;
 
@@ -5,25 +7,25 @@ import '/src/chara_detail/spec/base.dart';
 
 /// How one item of a skill or factor cell is painted.
 enum ItemState {
-  /// The record has the item (outline background). Normal display.
+  /// The record has the item (outline background). Every item of a query column, missing-marked or not, that
+  /// the record holds and that meets the query.
   normal,
 
-  /// The record has the item and meets the query (no highlight). Absence display.
-  held,
-
-  /// The record lacks a queried item (red placeholder). Absence display.
+  /// The record lacks a queried item (red placeholder). A column that marks missing items.
   missing,
 
-  /// The record has a queried item but below the per-item threshold (red). Absence display, factors only.
+  /// The record has a queried item but below the per-item threshold (red). A column that marks missing items, factors only.
   short,
 
-  /// Every record of the group has the item (no highlight, may be hidden). Difference display.
+  /// Every record of the group has the item with the same strength (green, shaded by strength, may be hidden). A
+  /// difference column.
   common,
 
-  /// Some records of the group have the item, this one included (green, shaded by strength). Difference display.
+  /// Some records of the group have the item, or every record does at differing strengths, this one included
+  /// (green, shaded by strength). A difference column.
   partialHeld,
 
-  /// Some records of the group have the item, this one not (red placeholder). Difference display.
+  /// Some records of the group have the item, this one not (red placeholder). A difference column.
   partialMissing,
 }
 
@@ -34,10 +36,11 @@ class CellItem {
   final String text;
   final ItemState state;
 
-  /// Input to the [ItemState.partialHeld] shade; 0 for every other state.
+  /// Input to the green shade of [ItemState.common] and [ItemState.partialHeld]; 0 for every other state.
   final int strength;
 
-  /// Upper bound of [strength]; 0 for every other state.
+  /// Top of the shade scale for [strength]: the item's [ItemTally.maxStrengthOf] in the compared group; 0 for every
+  /// other state.
   final int strengthMax;
 
   const CellItem(this.text, this.state, {this.strength = 0, this.strengthMax = 0});
@@ -74,7 +77,8 @@ class OwnItem {
   const OwnItem(this.id, this.text, {this.meetsQuery = true, this.strength = 0});
 }
 
-/// How many rows of a group hold each item of one column.
+/// How many rows of a group hold each item of one column, the strongest holding of each, and which items the group
+/// has in common.
 @immutable
 class ItemTally {
   final int rowCount;
@@ -82,21 +86,44 @@ class ItemTally {
   /// Item id to the number of rows holding it, in the order the ids were first seen.
   final Map<int, int> holders;
 
-  const ItemTally._(this.rowCount, this.holders);
+  /// Ids of the items every row of the group holds with the same strength (for a factor, the same star sum).
+  /// An item every row holds at differing strengths is not common.
+  final Set<int> common;
 
-  factory ItemTally.of(Iterable<Set<int>> heldPerRow) {
+  /// Item id to the largest strength any row of the group holds it at (for a factor, the largest star sum).
+  final Map<int, int> maxStrengths;
+
+  const ItemTally._(this.rowCount, this.holders, this.common, this.maxStrengths);
+
+  /// [heldPerRow] gives each row's held items as item id to strength.
+  factory ItemTally.of(Iterable<Map<int, int>> heldPerRow) {
     var rowCount = 0;
     final holders = <int, int>{};
+    final strengths = <int, int>{};
+    final maxStrengths = <int, int>{};
+    final uneven = <int>{};
     for (final held in heldPerRow) {
       rowCount++;
-      for (final id in held) {
+      for (final MapEntry(key: id, value: strength) in held.entries) {
         holders[id] = (holders[id] ?? 0) + 1;
+        if (strengths.putIfAbsent(id, () => strength) != strength) {
+          uneven.add(id);
+        }
+        maxStrengths[id] = math.max(maxStrengths[id] ?? strength, strength);
       }
     }
-    return ItemTally._(rowCount, Map.unmodifiable(holders));
+    final common = {
+      for (final MapEntry(key: id, value: count) in holders.entries)
+        if (count >= rowCount && !uneven.contains(id)) id,
+    };
+    return ItemTally._(rowCount, Map.unmodifiable(holders), Set.unmodifiable(common), Map.unmodifiable(maxStrengths));
   }
 
   int holdersOf(int id) => holders[id] ?? 0;
+
+  bool isCommon(int id) => common.contains(id);
+
+  int maxStrengthOf(int id) => maxStrengths[id] ?? 0;
 }
 
 /// Cell data of a skill or factor column: the items to draw, each with its state.
@@ -194,11 +221,11 @@ class ItemOrder {
   }
 }
 
-/// Items of an absence-display cell: the record's own items and a [ItemState.missing] placeholder for each
+/// Items of a cell that marks missing items: the record's own items and a [ItemState.missing] placeholder for each
 /// queried item it lacks, together in [order]. [placeholderOf] gives a placeholder's text.
 ///
 /// With [perItemThreshold], an own item that fails its threshold is [ItemState.short].
-List<CellItem> absenceItems(
+List<CellItem> missingMarkedItems(
   List<OwnItem> own,
   Iterable<int> query,
   String Function(int) placeholderOf,
@@ -208,7 +235,7 @@ List<CellItem> absenceItems(
   final ownIds = {for (final item in own) item.id};
   final items = [
     for (final item in own)
-      (item.id, CellItem(item.text, perItemThreshold && !item.meetsQuery ? ItemState.short : ItemState.held)),
+      (item.id, CellItem(item.text, perItemThreshold && !item.meetsQuery ? ItemState.short : ItemState.normal)),
     for (final id in query)
       if (!ownIds.contains(id)) (id, CellItem(placeholderOf(id), ItemState.missing)),
   ];
@@ -216,23 +243,28 @@ List<CellItem> absenceItems(
 }
 
 /// Items of a difference-display cell against the group's [tally]: the record's own items as
-/// [ItemState.common] or [ItemState.partialHeld] and a [ItemState.partialMissing] placeholder for each item some
-/// but not all rows of the group hold, together in [order], so a row's cell does not depend on the row order.
-/// [placeholderOf] gives a placeholder's text.
+/// [ItemState.common] (the tally's [ItemTally.common]) or [ItemState.partialHeld], both shaded by the item's
+/// strength against the strongest holding of that item in the group ([ItemTally.maxStrengthOf]), and a
+/// [ItemState.partialMissing] placeholder for each item some but not all rows of the group hold, together in
+/// [order], so a row's cell does not depend on the row order. [placeholderOf] gives a placeholder's text.
 List<CellItem> differenceItems(
   List<OwnItem> own,
   ItemTally tally,
   String Function(int) placeholderOf,
-  ItemOrder order, {
-  required int strengthMax,
-}) {
+  ItemOrder order,
+) {
   final ownIds = {for (final item in own) item.id};
   final items = [
     for (final item in own)
-      if (tally.holdersOf(item.id) >= tally.rowCount)
-        (item.id, CellItem(item.text, ItemState.common))
-      else
-        (item.id, CellItem(item.text, ItemState.partialHeld, strength: item.strength, strengthMax: strengthMax)),
+      (
+        item.id,
+        CellItem(
+          item.text,
+          tally.isCommon(item.id) ? ItemState.common : ItemState.partialHeld,
+          strength: item.strength,
+          strengthMax: tally.maxStrengthOf(item.id),
+        ),
+      ),
     for (final id in tally.holders.keys)
       if (!ownIds.contains(id) && tally.holdersOf(id) < tally.rowCount)
         (id, CellItem(placeholderOf(id), ItemState.partialMissing)),

@@ -545,12 +545,12 @@
                         "trainee": "",
                         "status": "",
                         "aptitude": "",
-                        "skill": "",
-                        "factor": "",
+                        "skill": "差分の列は行を絞り込みません。",
+                        "factor": "差分の列は行を絞り込みません。",
                         "campaign": "",
                         "metadata": "",
                         "script": "",
-                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。"
+                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。差分の列と赤で示す列は入れられません。"
                     },
                     "add_all_button": {
                         "label": "全部",
@@ -576,6 +576,14 @@
                 "logic": "論理"
             },
             "column_predicate": {
+                "difference": {
+                    "description": "固定行は固定行どうし、他は他どうしで比べ、自分が持つ項目を緑、他の行だけが持つ項目を赤で示します。",
+                    "hide_common": {
+                        "label": "共通の項目を隠す",
+                        "description": "比べる行のすべてが持ち、因子は星の合計も同じ項目を出しません。"
+                    },
+                    "marker": "差分: 行を絞り込まない"
+                },
                 "broken": {
                     "tooltip": "この列は保存データを完全に読み込めませんでした。クリックして内容を確認・修正するか、右クリックで削除してください。",
                     "description": "この列の定義を読み込めませんでした。形式が古いか壊れている可能性があります。このまま閉じると現状のまま保持されます。不要であれば「列を削除」してください。"
@@ -629,36 +637,25 @@
                             "same_as_max": "無制限"
                         }
                     },
-                    "display": {
-                        "label": "表示方式",
-                        "description": "項目の持ち方をどう示すかを選びます。通常以外の表示方式では、この列は行を絞り込みません。",
-                        "mode": {
-                            "normal": {
-                                "label": "通常",
-                                "tooltip": "クエリに合う行だけを表示します（フィルタ）"
-                            },
-                            "absence": {
-                                "label": "非所持表示",
-                                "tooltip": "行を消さず、クエリの項目のうち持っていないもの（因子は不足も）を赤で示します",
-                                "disabled_tooltip": "タグで項目を選ぶ列では使えません"
-                            },
-                            "difference": {
-                                "label": "差分表示",
-                                "tooltip": "表示中の行どうしを比べ、一部の行だけが持つ項目を緑（自分も持つ）・赤（自分は持たない）で示します。固定行は固定行どうしで比べます"
-                            }
+                    "unmet_rows": {
+                        "label": "条件を満たさない行を",
+                        "description": "条件を満たさない行の扱いを選びます。",
+                        "filter_out": {
+                            "label": "絞り込む（表示しない）",
+                            "tooltip": "条件を満たす行だけを表示します"
                         },
-                        "hide_common": {
-                            "label": "共通の項目を隠す",
-                            "description": "表示中の全行が持つ項目をセルに出しません",
-                            "disabled_tooltip": "差分表示のときだけ使えます"
+                        "mark_missing": {
+                            "label": "残して、足りない項目を赤で示す",
+                            "tooltip": "持っていない項目と、条件に届かない因子を赤で示します",
+                            "disabled_tooltip": "タグ指定の列と論理列の中の列では使えません"
                         },
-                        "difference_ignores_filter": "差分表示では、選択した項目（因子は比較範囲も）だけを使って比べます。論理と下限の設定は使いません（通常に戻すと元の設定で絞り込みます）",
-                        "marker": "表示方式: {mode}"
+                        "unused_while_marking": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は使いません",
+                        "marker": "条件を満たさない行: 残して赤で示す"
                     },
                     "notation": {
                         "show": {
                             "label": "テーブルに表示",
-                            "tooltip": "オフにするとテーブルで列を非表示にします。表示方式が通常の列は、非表示にしてもフィルタが有効です。"
+                            "tooltip": "オフにするとテーブルで列を非表示にします。非表示でも絞り込みは効きます。"
                         },
                         "hidden_marker": "非表示",
                         "max_selected_tooltip": "項目を選択している列では、選択した項目をすべて表示します。",
@@ -718,15 +715,15 @@
                 "skill": {
                     "selection": {
                         "label": "選択",
-                        "description": "選択されているスキルを所持するウマ娘がテーブルに表示されます。",
+                        "description": "この列で扱うスキルを選びます。",
                         "tags": {
                             "description": "選択されている属性のスキルが下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）",
-                            "tag_driven_description": "選択した属性のスキルがテーブルに表示・フィルタされます。（注意：属性は不正確なことがあります）"
+                            "tag_driven_description": "選択した属性のスキルを扱います。（注意：属性は不正確なことがあります）"
                         }
                     },
                     "mode": {
                         "label": "対象",
-                        "template": "現在の条件：選択したスキルの{selection}を所持するウマ娘を表示",
+                        "template": "現在の条件：選択したスキルの{selection}を所持する",
                         "all_of": {
                             "label": "すべて",
                             "description": "すべて",
@@ -758,7 +755,8 @@
                             },
                             "count": {
                                 "label": "個数",
-                                "tooltip": "所持数"
+                                "tooltip": "所持数",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は選べません。"
                             },
                             "description": "セルにスキル名と個数のどちらを表示するかを指定します。"
                         },
@@ -775,10 +773,10 @@
                 "factor": {
                     "selection": {
                         "label": "選択",
-                        "description": "選択されている因子を所持するウマ娘がテーブルに表示されます。",
+                        "description": "この列で扱う因子を選びます。",
                         "tags": {
                             "description": "選択されている属性の因子が下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）",
-                            "tag_driven_description": "選択した属性の因子がテーブルに表示・フィルタされます。（注意：属性は不正確なことがあります）",
+                            "tag_driven_description": "選択した属性の因子を扱います。（注意：属性は不正確なことがあります）",
                             "skill_tags": {
                                 "label": "スキル属性（スキル因子のみ）"
                             }
@@ -786,7 +784,7 @@
                     },
                     "mode": {
                         "label": "モード",
-                        "template": "現在の条件：選択した因子{selection}、{subject}で{count}ウマ娘を表示",
+                        "template": "現在の条件：選択した因子{selection}、{subject}で{count}",
                         "logic": {
                             "label": "対象",
                             "all_of": {
@@ -874,19 +872,23 @@
                             },
                             "star_total": {
                                 "label": "星数（家系合計）",
-                                "tooltip": "( 星数の合計 )"
+                                "tooltip": "( 星数の合計 )",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は選べません。"
                             },
                             "star_each": {
                                 "label": "星数（家系個別）",
-                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の星数 )"
+                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の星数 )",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は選べません。"
                             },
                             "count_total": {
                                 "label": "個数（家系合計）",
-                                "tooltip": "( 所持数の合計 )"
+                                "tooltip": "( 所持数の合計 )",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は選べません。"
                             },
                             "count_each": {
                                 "label": "個数（家系個別）",
-                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の所持数 )"
+                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の所持数 )",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は選べません。"
                             },
                             "description": "セルに因子名・星数・個数のどれをどの粒度で表示するかを指定します。個数は星数を無視した所持数です。"
                         },
@@ -1156,6 +1158,12 @@
                     "tag_driven": {
                         "title": "タグ指定スキル"
                     },
+                    "difference": {
+                        "title": "スキル差分",
+                        "tag_driven": {
+                            "title": "タグ指定スキル差分"
+                        }
+                    },
                     "shortcuts": {
                         "status_up": {
                             "title": "緑スキル"
@@ -1169,6 +1177,12 @@
                     "title": "因子",
                     "tag_driven": {
                         "title": "タグ指定因子"
+                    },
+                    "difference": {
+                        "title": "因子差分",
+                        "tag_driven": {
+                            "title": "タグ指定因子差分"
+                        }
                     },
                     "shortcuts": {
                         "status": {

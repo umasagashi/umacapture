@@ -301,8 +301,7 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   bool get isObsolete => false;
 
   /// Whether this column is hidden from the grid. A hidden column contributes no
-  /// visible column, yet a column that filters (every column except a root item
-  /// column in a non-normal display mode, see [ItemColumnSpec]) still participates
+  /// visible column, yet a column that filters rows (see [ColumnSpec.filtersRows]) still participates
   /// in row filtering and the pass-count badge — so it acts as an invisible
   /// filter. Defaults to false (shown); legacy
   /// specs saved before this field existed therefore decode as shown.
@@ -436,6 +435,15 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// fixed arity (e.g. a NOT logic column) return false once full.
   bool get acceptsMoreChildren => false;
 
+  /// Whether this column's [evaluate] decides which rows are listed. A column that does not filter neither hides a
+  /// row nor carries a pass count, and no container accepts it as a child: a container combines its children's row
+  /// conditions, and this column has none to give. Unrelated to [hasFilter], which only offers the dialog's reset.
+  bool get filtersRows => true;
+
+  /// Whether [child] may be inserted among this column's children now. Only a container with room for another
+  /// child accepts one, and only a [child] that [filtersRows].
+  bool acceptsChild(ColumnSpec child) => false;
+
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
   List<bool> evaluate(RefBase ref, List<T> values);
@@ -506,6 +514,9 @@ bool isSpecMapIncomplete(Object? raw, Object? full) {
 // because base.dart cannot import factor.dart/skill.dart (they import it).
 const _factorSpecType = 'FactorColumnSpec';
 const _skillSpecType = 'SkillColumnSpec';
+
+// Serialized name of the unmet-rows choice ([UnmetRows]).
+const _unmetRowsKey = 'unmetRows';
 
 // Legacy factor notation `mode` values mapped to their current replacements, as
 // `[withName, valueOnly]` — the second is used when the legacy `max` was 0 (the
@@ -729,12 +740,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // merely for lacking it.
   static const _selectByTagKey = 'selectByTag';
 
-  // Serialized field names of the skill/factor display mode (enum, default
-  // normal) and "hide common items" flag (bool, default false). A stored map may
-  // lack them, like [_selectByTagKey], so they are excluded for the same reason.
-  static const _displayModeKey = 'displayMode';
-  static const _hideCommonItemsKey = 'hideCommonItems';
-
   Set<String> get brokenIds => {..._brokenIds};
 
   void _clearBroken(String id) {
@@ -825,9 +830,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       // 'selectByTag' was likewise added after specs existed on disk; its absence
       // decodes to the default (false) and must not flag a spec as broken.
       if (entry.key == _selectByTagKey) continue;
-      // The display mode and "hide common items" flag likewise decode to their
-      // defaults (normal, false) when absent.
-      if (entry.key == _displayModeKey || entry.key == _hideCommonItemsKey) continue;
+      // The skill/factor unmet-rows choice likewise decodes to its default
+      // (filter out) when absent.
+      if (entry.key == _unmetRowsKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }
@@ -879,13 +884,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     if (removed == null) {
       return;
     }
-    // Reject illegal targets (a full NOT, or a non-container) so the model never
-    // builds a tree the UI's slot suppression would have forbidden. Evaluated
-    // against the detached tree, so reordering a container's sole child within it
-    // (the container is momentarily empty) still passes.
+    // Reject illegal targets (a full NOT, a non-container, or a container that refuses this column) so the model
+    // never builds a tree the UI's slot suppression would have forbidden. Evaluated against the detached tree, so
+    // reordering a container's sole child within it (the container is momentarily empty) still passes.
     if (parentId != null) {
       final parent = findInForest(detached, parentId);
-      if (parent == null || !parent.acceptsChildren || !parent.acceptsMoreChildren) {
+      if (parent == null || !parent.acceptsChild(removed)) {
         return;
       }
     }
