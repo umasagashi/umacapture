@@ -1569,6 +1569,10 @@ class _PreviewGrid extends StatelessWidget {
             rowColor: theme.colorScheme.surface,
             evenRowColor: theme.colorScheme.surfaceContainer,
             gridBorderColor: theme.colorScheme.outline,
+            // The record table's separator colour; trina's defaults are light-theme literals.
+            borderColor: theme.focusColor,
+            activatedBorderColor: theme.focusColor,
+            inactivatedBorderColor: theme.focusColor,
             columnTextStyle: theme.textTheme.titleSmall!,
             cellTextStyle: theme.textTheme.bodyMedium!,
           ),

@@ -340,6 +340,7 @@ class _ThemeDataSection extends StatelessWidget {
       ('shadowColor', theme.shadowColor),
       ('disabledColor', theme.disabledColor),
       ('hintColor', theme.hintColor),
+      ('focusColor', theme.focusColor),
     ];
     return _Section('ThemeData colors (used)', [
       for (final (name, color) in entries) _SwatchRow(_Swatch(name, color), _themeDataUsages[name] ?? ''),
@@ -938,4 +939,7 @@ const Map<String, String> _themeDataUsages = {
       'rather than as danger. It also dims the text of a skill or factor the record table cell shows as missing, '
       'and its omission counter.',
   'hintColor': 'Input placeholders and hints (task dialog, column builder, script).',
+  'focusColor':
+      'Row separators of the record table and the script-column preview grid (unless the stronger row borders '
+      'setting is on), and the frame of their selected cell.',
 };

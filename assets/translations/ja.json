@@ -3,6 +3,10 @@
         "single_tab": {
             "waiting": "umacapture は別のタブですでに開かれています。このタブで使うには、もう一方のタブを閉じてください。閉じると自動的に続行します。"
         },
+        "sidebar": {
+            "expand": "メニューを展開",
+            "collapse": "メニューを折りたたむ"
+        },
         "feedback": {
             "tooltip": "フィードバックを作成",
             "drawer": "フィードバックを開く",
