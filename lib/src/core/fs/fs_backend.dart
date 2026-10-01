@@ -195,6 +195,9 @@ abstract interface class FsBackend {
   /// Synchronous counterpart of [writeString] (io backend only).
   void writeStringSync(String path, String contents);
 
+  /// Synchronous counterpart of [writeBytes], [flush] included (io backend only).
+  void writeBytesSync(String path, List<int> bytes, {bool flush = false});
+
   /// Synchronous counterpart of [list] (io backend only).
   List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false});
 

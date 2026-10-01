@@ -2,6 +2,7 @@
 
 #include <cassert>  // _wassert, used by the assert_ macro below
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +10,13 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
+
+#if defined(_WIN32)
+#include <io.h>  // _commit
+#elif !defined(__EMSCRIPTEN__)
+#include <unistd.h>  // fsync
+#endif
 
 namespace uma::chrono_util {
 
@@ -81,6 +89,64 @@ inline void write(const std::filesystem::path &path, const std::string &text) {
     file.flush();
     if (!file) {
         throw std::runtime_error("io_util::write: failed to write: " + path.string());
+    }
+}
+
+namespace detail {
+
+// Writes `text` to `path` in binary mode and has the operating system put it on the disk before returning.
+// std::ofstream::flush only hands the bytes to the OS, which can still lose them to a power cut; the file
+// descriptor that _commit (Windows: FlushFileBuffers) and fsync need is reachable only through a FILE*.
+inline void writeAndSync(const std::filesystem::path &path, const std::string &text) {
+#ifdef _WIN32
+    std::FILE *file = nullptr;
+    if (_wfopen_s(&file, path.c_str(), L"wb") != 0) {
+        file = nullptr;
+    }
+#else
+    std::FILE *file = std::fopen(path.c_str(), "wb");
+#endif
+    if (file == nullptr) {
+        throw std::runtime_error("io_util::replace: failed to open: " + path.string());
+    }
+    bool ok = std::fwrite(text.data(), 1, text.size(), file) == text.size() && std::fflush(file) == 0;
+#if defined(_WIN32)
+    ok = ok && _commit(_fileno(file)) == 0;
+#elif !defined(__EMSCRIPTEN__)
+    ok = ok && fsync(fileno(file)) == 0;
+#endif
+    // No sync under Emscripten. Its fsync is the one file call proxied to the main runtime thread
+    // asynchronously: the calling pthread waits until that thread returns to its event loop, so a
+    // recognizer writing here while the worker's main thread is blocked joining it (stop) would never
+    // return. The file is in MEMFS, which has nothing to sync and does not outlive the page.
+    ok = std::fclose(file) == 0 && ok;
+    if (!ok) {
+        throw std::runtime_error("io_util::replace: failed to write: " + path.string());
+    }
+}
+
+}  // namespace detail
+
+// Replaces the file at `path` with `text` so that a crash at any point leaves the old file or the new one whole,
+// never a torn one: the bytes go to `<path>.part` beside it, reach the disk, and that file is then renamed over
+// `path`. std::filesystem::rename replaces an existing target: POSIX rename does, and MSVC's implements it as
+// MoveFileExW with MOVEFILE_REPLACE_EXISTING; the staging file sits in the same directory, so the move is a
+// rename on one volume and never a copy. On failure the staging file is removed and `path` is left as it was.
+//
+// For record.json, which the app moves to quarantine when it cannot decode it, so a write torn by a crash would
+// take a listed record off the list. The wasm build writes into MEMFS, where nothing outlives the page and the
+// web app makes the result durable itself (it publishes the record directory it reads back); the staging and
+// the rename hold there too, and only the sync is skipped (see writeAndSync).
+inline void replace(const std::filesystem::path &path, const std::string &text) {
+    auto staging = path;
+    staging += ".part";
+    try {
+        detail::writeAndSync(staging, text);
+        std::filesystem::rename(staging, path);
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove(staging, ignored);
+        throw;
     }
 }
 

@@ -199,6 +199,10 @@ class IoFsBackend implements FsBackend {
   void writeStringSync(String path, String contents) => File(path).writeAsStringSync(contents);
 
   @override
+  void writeBytesSync(String path, List<int> bytes, {bool flush = false}) =>
+      File(path).writeAsBytesSync(bytes, flush: flush);
+
+  @override
   List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false}) {
     final entities = Directory(path).listSync(recursive: recursive, followLinks: followLinks);
     if (!withMetadata) {

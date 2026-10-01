@@ -87,6 +87,9 @@ class WebFsBackend implements FsBackend {
   void writeStringSync(String path, String contents) => throw _sync('writeStringSync');
 
   @override
+  void writeBytesSync(String path, List<int> bytes, {bool flush = false}) => throw _sync('writeBytesSync');
+
+  @override
   List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false}) =>
       throw _sync('listSync');
 

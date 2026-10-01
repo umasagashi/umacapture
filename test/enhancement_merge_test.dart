@@ -176,6 +176,10 @@ class _ListFailingBackend implements FsBackend {
   void writeStringSync(String path, String contents) => inner.writeStringSync(path, contents);
 
   @override
+  void writeBytesSync(String path, List<int> bytes, {bool flush = false}) =>
+      inner.writeBytesSync(path, bytes, flush: flush);
+
+  @override
   List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false}) =>
       inner.listSync(path, recursive: recursive, followLinks: followLinks, withMetadata: withMetadata);
 

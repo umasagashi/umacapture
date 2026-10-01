@@ -598,20 +598,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
       return RecordLoaded(upgraded);
     }
     try {
-      // Only `record.json` changes, and the rest of the directory is megabytes of images. Where a file
-      // rename is an atomic replace, that one file is replaced; OPFS has no rename, so web publishes the
-      // directory through the write transaction, which copies the whole tree to stay recoverable.
-      if (fsBackend.renameReplacesFileAtomically) {
-        await _replaceRecordJsonUnlocked(directory, upgraded.toRecordJsonBytes());
-      } else {
-        final result = await WebRecordWriteTransaction().publish(directory.parent.parent, directory.name, [
-          (relativeSegments: const ["record.json"], bytes: upgraded.toRecordJsonBytes()),
-        ], store: directory.parent.name);
-        if (!result.isCommitted) {
-          logger.e("Record ${directory.name} could not be upgraded on disk: the publication returned ${result.name}.");
-          return RecordLoaded(upgraded);
-        }
-      }
+      await replaceRecordJsonUnlocked(directory, upgraded.toRecordJsonBytes());
       logger.i("Record ${directory.name} was upgraded to format $recordFormatVersion.");
     } catch (error, stackTrace) {
       logger.e("Record ${directory.name} could not be upgraded on disk.", error, stackTrace);
@@ -619,19 +606,44 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     return RecordLoaded(upgraded);
   }
 
-  /// The file [_replaceRecordJsonUnlocked] writes before renaming it over `record.json`.
+  /// The file [replaceRecordJsonUnlocked] writes before renaming it over `record.json`.
   ///
   /// One fixed name, so a file an interrupted replacement left behind is overwritten and renamed away by
-  /// the next one, which the record still needs because its `record.json` was never replaced. Nothing
-  /// reads it as a record: a record is its directory's `record.json`.
+  /// the next one. Nothing reads it as a record: a record is its directory's `record.json`. The native
+  /// recognizer stages its own `record.json` write under the same name (`io_util::replace`).
   static const recordJsonReplacementName = "record.json.part";
 
-  /// Replaces [directory]'s `record.json` with [bytes]: written beside it, synced to the disk, then
-  /// renamed over it, so a crash at any point leaves the old file or the new one whole.
-  static Future<void> _replaceRecordJsonUnlocked(DirectoryPath directory, Uint8List bytes) async {
+  /// Replaces [directory]'s `record.json` with [bytes] so that a crash at any point leaves the old file or
+  /// the new one whole, never a torn one the next scan would quarantine. Every app write that changes a
+  /// stored record's `record.json` and nothing else goes through here or [replaceRecordJsonSyncUnlocked].
+  /// The caller holds [directory]'s record lock or the store's root scope, and the directory exists.
+  ///
+  /// Throws when the replacement did not happen; the stored `record.json` is then the one that was there.
+  static Future<void> replaceRecordJsonUnlocked(DirectoryPath directory, Uint8List bytes) async {
+    // Only `record.json` changes, and the rest of the directory is megabytes of images. Where a file
+    // rename is an atomic replace, that one file is replaced; OPFS has no rename, so web publishes the
+    // directory through the write transaction, which copies the whole tree to stay recoverable.
+    if (fsBackend.renameReplacesFileAtomically) {
+      final staging = directory.filePath(recordJsonReplacementName);
+      await staging.writeAsBytes(bytes, flush: true);
+      await staging.rename(directory.filePath("record.json"));
+      return;
+    }
+    final result = await WebRecordWriteTransaction().publish(directory.parent.parent, directory.name, [
+      (relativeSegments: const ["record.json"], bytes: bytes),
+    ], store: directory.parent.name);
+    if (!result.isCommitted) {
+      throw StateError("record.json of ${directory.name} was not replaced: the publication returned ${result.name}.");
+    }
+  }
+
+  /// Synchronous counterpart of [replaceRecordJsonUnlocked], for the desktop capture path that has to stay
+  /// synchronous. Sync file access exists on the io backend only, where a rename is the atomic replace, so
+  /// this has no publication arm to fall back on and throws wherever the sync API does.
+  static void replaceRecordJsonSyncUnlocked(DirectoryPath directory, Uint8List bytes) {
     final staging = directory.filePath(recordJsonReplacementName);
-    await staging.writeAsBytes(bytes, flush: true);
-    await staging.rename(directory.filePath("record.json"));
+    staging.writeAsBytesSync(bytes, flush: true);
+    staging.renameSync(directory.filePath("record.json"));
   }
 
   /// Throws [RecordIdMismatch] unless [record] claims the id of the [directory]

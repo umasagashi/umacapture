@@ -1104,9 +1104,10 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         }
 
         // Write record.json last so its presence implies the sidecars (prediction.json, trainee.jpg) are
-        // already on disk. Writing it first would leave a valid record.json without its sidecars on any throw
-        // in between, which the loader treats as a decode failure and deletes.
-        json_util::write(record_path, record, 4);
+        // already on disk; a throw in between leaves no new record.json behind. Replaced rather than
+        // overwritten: in update mode the file is a listed record's, and the app quarantines a record.json it
+        // cannot decode, so a crash mid-write would take the record off the list.
+        json_util::replace(record_path, record, 4);
 
         if (isUpdateMode) {
             on_update_completed->send(record_info);

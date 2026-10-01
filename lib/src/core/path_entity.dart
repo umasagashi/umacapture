@@ -369,6 +369,9 @@ class FilePath extends PathEntity {
   /// See [FsBackend.writeBytes] for what [flush] does on each backend.
   Future<void> writeAsBytes(List<int> bytes, {bool flush = false}) => fsBackend.writeBytes(path, bytes, flush: flush);
 
+  /// Synchronous counterpart of [writeAsBytes] (io backend only).
+  void writeAsBytesSync(List<int> bytes, {bool flush = false}) => fsBackend.writeBytesSync(path, bytes, flush: flush);
+
   /// The size of this file in bytes. Throws when it does not exist.
   Future<int> length() => fsBackend.length(path);
 
