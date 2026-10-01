@@ -32,6 +32,7 @@
 ///   is deferred until web operation actually starts.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -55,6 +56,7 @@ class WebhookRunner implements ActionRunner {
     final exec = ActionExecution();
     final cancelToken = CancelToken();
     var cancelled = false;
+    var timedOut = false;
 
     // Percent-encode substituted values so spaces / & / # inside a placeholder
     // value can't break the URL structure or inject extra query parameters.
@@ -103,14 +105,15 @@ class WebhookRunner implements ActionRunner {
       validateStatus: (_) => true,
     );
     // Always bound the request: an explicit timeout when set, otherwise the
-    // default. connectTimeout is essential: send/receive timeouts do NOT bound
-    // the TCP connect phase, so a host that blackholes packets would otherwise
-    // hang the request forever, never finishing this execution and permanently
-    // consuming one of the bounded concurrent-execution slots.
-    final duration = Duration(seconds: resolveWebhookTimeoutSeconds(action.timeoutSeconds));
-    options.connectTimeout = duration;
-    options.sendTimeout = duration;
-    options.receiveTimeout = duration;
+    // default. The timeout is a deadline for the whole request, from connecting
+    // to the last byte of the response. Dio's own connect/send/receive timeouts
+    // are not: the receive timeout restarts on every chunk, so a server that
+    // keeps trickling a response would hold this execution — and a close of the
+    // window waiting on it — past the time the user set.
+    final deadline = Timer(Duration(seconds: resolveWebhookTimeoutSeconds(action.timeoutSeconds)), () {
+      timedOut = true;
+      cancelToken.cancel();
+    });
 
     // A fresh client per fire (this runs once per matching event); close it once
     // the request settles so its keep-alive HttpClient doesn't leak connections
@@ -146,7 +149,7 @@ class WebhookRunner implements ActionRunner {
           logger.w("Webhook request failed: target=${action.describe()}, error=$e");
           exec.finish(
             (elapsed) => ExecutionResult(
-              status: webhookErrorStatus(e, cancelled: cancelled),
+              status: webhookErrorStatus(e, cancelled: cancelled, timedOut: timedOut),
               // Never swallow the failure: it is persisted as a failed history
               // entry whose error text the detail dialog shows verbatim.
               error: describeWebhookError(e, onWeb: kIsWeb),
@@ -154,7 +157,10 @@ class WebhookRunner implements ActionRunner {
             ),
           );
         })
-        .whenComplete(dio.close);
+        .whenComplete(() {
+          deadline.cancel();
+          dio.close();
+        });
 
     return exec.handle(() {
       cancelled = true;
@@ -225,20 +231,14 @@ String describeWebhookError(Object error, {required bool onWeb}) {
 /// Maps a failed webhook request to a terminal [ExecutionStatus].
 ///
 /// A cancel (the [cancelled] flag, set by the handle's cancel hook, or a Dio
-/// [DioExceptionType.cancel]) is [ExecutionStatus.cancelled]; a connect/send/
-/// receive timeout is [ExecutionStatus.timeout] (distinct from a generic failure,
-/// matching the external-program runner); anything else is
-/// [ExecutionStatus.failure].
-ExecutionStatus webhookErrorStatus(Object error, {required bool cancelled}) {
-  if (cancelled || (error is DioException && error.type == DioExceptionType.cancel)) {
-    return ExecutionStatus.cancelled;
-  }
-  if (error is DioException &&
-      (error.type == DioExceptionType.connectionTimeout ||
-          error.type == DioExceptionType.sendTimeout ||
-          error.type == DioExceptionType.receiveTimeout)) {
-    return ExecutionStatus.timeout;
-  }
+/// [DioExceptionType.cancel]) is [ExecutionStatus.cancelled], unless the request
+/// deadline issued it ([timedOut]), which is [ExecutionStatus.timeout] (distinct
+/// from a generic failure, matching the external-program runner); anything else
+/// is [ExecutionStatus.failure].
+ExecutionStatus webhookErrorStatus(Object error, {required bool cancelled, required bool timedOut}) {
+  if (cancelled) return ExecutionStatus.cancelled;
+  if (timedOut) return ExecutionStatus.timeout;
+  if (error is DioException && error.type == DioExceptionType.cancel) return ExecutionStatus.cancelled;
   return ExecutionStatus.failure;
 }
 

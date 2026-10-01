@@ -689,8 +689,11 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
   /// defers it without this being edited. Returns at once when nothing holds
   /// them, and when the registry goes away — the caller then asks its own gate,
   /// which is where a refusal is worded.
-  Future<void> untilFree(List<PathEntity> paths) async {
-    while (ref.mounted && heldBy(paths) != null) {
+  ///
+  /// A claim whose kind is in [disregarding] is not waited on, as in [heldBy]:
+  /// the caller's gate refuses it rather than outlasting it.
+  Future<void> untilFree(List<PathEntity> paths, {Set<LongReadKind> disregarding = const {}}) async {
+    while (ref.mounted && heldBy(paths, disregarding: disregarding) != null) {
       final waiter = Completer<void>();
       _waiters.add(waiter);
       await waiter.future;

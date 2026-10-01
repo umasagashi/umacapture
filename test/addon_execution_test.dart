@@ -187,26 +187,32 @@ void main() {
     RequestOptions options() => RequestOptions(path: 'https://example.test/hook');
     DioException ofType(DioExceptionType type) => DioException(requestOptions: options(), type: type);
 
-    test('maps connect/send/receive timeouts to the timeout status', () {
-      for (final type in [
-        DioExceptionType.connectionTimeout,
-        DioExceptionType.sendTimeout,
-        DioExceptionType.receiveTimeout,
-      ]) {
-        expect(webhookErrorStatus(ofType(type), cancelled: false), ExecutionStatus.timeout);
-      }
+    test('maps the cancel issued by the request deadline to the timeout status', () {
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false, timedOut: true),
+        ExecutionStatus.timeout,
+      );
     });
 
     test('maps a Dio cancel and the cancelled flag to the cancelled status', () {
-      expect(webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false), ExecutionStatus.cancelled);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false, timedOut: false),
+        ExecutionStatus.cancelled,
+      );
       // A user-driven cancel can surface as a non-cancel error type but with the
       // flag set; it must still be classified as cancelled.
-      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: true), ExecutionStatus.cancelled);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: true, timedOut: false),
+        ExecutionStatus.cancelled,
+      );
     });
 
     test('maps other transport/HTTP errors to the failure status', () {
-      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: false), ExecutionStatus.failure);
-      expect(webhookErrorStatus(Exception('boom'), cancelled: false), ExecutionStatus.failure);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: false, timedOut: false),
+        ExecutionStatus.failure,
+      );
+      expect(webhookErrorStatus(Exception('boom'), cancelled: false, timedOut: false), ExecutionStatus.failure);
     });
   });
 

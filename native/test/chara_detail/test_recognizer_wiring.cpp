@@ -92,7 +92,7 @@ struct Wiring {
 
     std::unique_ptr<CharaDetailRecognizer> recognizer;
 
-    Wiring() {
+    explicit Wiring(const std::filesystem::path &record_root = missingRecordRoot()) {
         recognize_completed->listen([this](const RecordInfo &info) { recognized.push_back(info); });
         update_completed->listen([this](const RecordInfo &info) { updated.push_back(info); });
         factor_probe_completed->listen(
@@ -102,12 +102,12 @@ struct Wiring {
         error->listen([this](const std::string &message) { errors.push_back(message); });
 
         const auto config = shippedRecognizerConfig();
-        const auto module_root = missingRecordRoot() / "modules";
+        const auto module_root = record_root / "modules";
         const auto factor_rows =
             std::make_shared<const recognizer_impl::FactorRowReader>(module_root, config.factor_tab);
         recognizer = std::make_unique<CharaDetailRecognizer>(
             "wiring_test_trainer",
-            missingRecordRoot(),
+            record_root,
             module_root,
             factor_rows,
             recognize_ready_spy,
@@ -186,6 +186,41 @@ TEST_CASE("an update request for a record that cannot be read is reported on the
     CHECK(wiring.recognized.empty());
     CHECK(wiring.probes.empty());
     CHECK_FALSE(std::filesystem::exists(missingRecordRoot()));
+}
+
+TEST_CASE("a re-recognized record is saved with the app's record format, not the one it was read with") {
+    // A record written before the format change carries 1.0.0, and the loader corrects every record below 2.0.0
+    // once more; a re-recognition that kept the old value would have its fresh reading corrected a second time.
+    const auto root = std::filesystem::temp_directory_path()
+                      / ("uma_recognizer_wiring_update_" + std::to_string(std::random_device{}()));
+    const auto record_dir = root / "old_record";
+    std::filesystem::create_directories(record_dir);
+    std::filesystem::create_directories(root / "modules");
+    json_util::write(root / "modules" / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
+    // Each tab image with the sidecar Frame::open reads its intersection from: the whole image.
+    for (const auto *tab : {"skill", "factor", "campaign"}) {
+        Frame::fixed(factorTabFrame()).save(record_dir / (std::string(tab) + ".png"));
+        json_util::write(
+            record_dir / (std::string(tab) + ".json"),
+            {{"intersection", Rect<int>{Point<int>{0, 0}, Point<int>{kFrameWidth, kFrameHeight}}}});
+    }
+    record::CharaDetailRecord old_record{};
+    old_record.metadata.format_version = "1.0.0";
+    old_record.metadata.record_id.self = "old_record";
+    old_record.metadata.record_type = record::RecordType::Standard;
+    json_util::write(record_dir / "record.json", old_record, 4);
+
+    {
+        Wiring wiring(root);
+        wiring.update_ready->send(RecordInfo{"old_record"});
+        CHECK(wiring.errors.empty());
+        REQUIRE(wiring.updated.size() == 1);
+    }
+    const auto saved = json_util::read(record_dir / "record.json").get<record::CharaDetailRecord>();
+    CHECK(saved.metadata.format_version == "2.0.0");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }
 
 TEST_CASE("the capture input is subscribed once and a failed capture does not report an update error") {

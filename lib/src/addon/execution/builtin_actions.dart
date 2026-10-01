@@ -370,9 +370,19 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       // them, and a start issued under it would be refused by the gate below. An automatic trigger
       // waits for the holder, as the automatic module install does; a ▶ run is a press, and a press
       // is refused while busy, exactly as the capture button is withheld.
+      //
+      // What it waits out is another job's passing hold, never a capture session's own: a live
+      // capture or a video import holds the same folders for as long as the person keeps it
+      // running, and the action fails while either runs (the gate below, through the toggle's
+      // `activity`). Waiting on them would instead start a capture the moment the person stopped one.
       final layout = ref.read(pathLayoutProvider);
       if (isManualRun(payload) || layout == null) return;
-      await ref.read(longReadRegistryProvider.notifier).untilFree(liveCaptureLongReadPaths(layout));
+      await ref
+          .read(longReadRegistryProvider.notifier)
+          .untilFree(
+            liveCaptureLongReadPaths(layout),
+            disregarding: const {LongReadKind.liveCapture, LongReadKind.videoImport},
+          );
     },
     run: (ref, payload, argument, secondaryArgument) async {
       // Backstop for the host the editor already keeps this off (see supportsWeb above).
