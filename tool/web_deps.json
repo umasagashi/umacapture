@@ -281,7 +281,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "de49dd42fe67f306c3d40b2ec180c9c16e70307a9d1f124d5fb445c72f1baa2b",
+          "digest": "1dd685b45a890cbbb0dfe9b00f20e9a6ffbd3aca597f18acf9f1dcb3af067eab",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
@@ -314,7 +314,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "de49dd42fe67f306c3d40b2ec180c9c16e70307a9d1f124d5fb445c72f1baa2b",
+          "digest": "1dd685b45a890cbbb0dfe9b00f20e9a6ffbd3aca597f18acf9f1dcb3af067eab",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
