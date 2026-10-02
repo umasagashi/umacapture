@@ -10,7 +10,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/item_cell.dart';
-import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -194,23 +193,6 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
       csv: const CsvEncoder().convert([notations]),
     );
     return TrinaCell(value: notations.join(", "))..setUserData(data);
-  }
-
-  @override
-  TrinaColumn plutoColumn(RefBase ref) {
-    return TrinaColumn(
-      title: title,
-      field: id,
-      type: TrinaColumnType.text(),
-      width: width ?? TrinaGridSettings.columnWidth,
-      enableContextMenu: false,
-      enableDropToResize: true,
-      enableColumnDrag: false,
-      enableEditingMode: false,
-      renderer: (TrinaColumnRendererContext context) {
-        return ItemCellText(context.cell.getUserData<ItemCellData>()!);
-      },
-    )..setUserData(this);
   }
 
   @override

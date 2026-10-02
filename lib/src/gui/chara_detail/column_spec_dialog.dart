@@ -127,7 +127,7 @@ class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch>
 // ignore: constant_identifier_names
 const tr_unmet_rows = "$tr_chara_detail.column_predicate.common.unmet_rows";
 
-/// The mode (モード) group of a skill or factor column, between its condition and notation groups: what the
+/// The mode group of a skill or factor column, between its condition and notation groups: what the
 /// column does with a row that does not meet its query.
 class UnmetRowsGroup extends StatelessWidget {
   final String specId;

@@ -4,8 +4,9 @@
 // red marks of a column that keeps its unmet rows, the factors counted as held
 // under the trainee subject, a filtering column's value, CSV and measured text,
 // and the item order (query, then master) and every item a cell holds, whether it selects or not.
-// Two widget tests draw a cell: one shows the table's cell height cap and the omission counter, the other hovers
-// the counter for its tooltip naming the cause.
+// Three widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
+// counter alone in a cell too narrow for even a shortened first item, and one hovers the counter for its tooltip
+// naming the cause.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_grid_test.dart
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';

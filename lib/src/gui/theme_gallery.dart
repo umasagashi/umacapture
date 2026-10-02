@@ -540,6 +540,15 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
+            'dialog truth-table border',
+            overlay: Theme.of(context).hintColor.withValues(alpha: 0.4),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Inner grid lines of the logic truth-table in the column-customize dialog header, over hintColor text.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
             'menu entry icon',
             overlay: cs.onSurface.withValues(alpha: 0.7),
             base: cs.surface,
@@ -967,7 +976,9 @@ const Map<String, String> _themeDataUsages = {
       'view\'s row menus -- where it outranks the destructive red, so an entry that cannot act reads as dead '
       'rather than as danger. It also dims the text of a skill or factor the record table cell shows as missing, '
       'and its omission counter.',
-  'hintColor': 'Input placeholders and hints (task dialog, column builder, script).',
+  'hintColor':
+      'Input placeholders and hints (task dialog, column builder, script), and the truth-table in the '
+      'column-customize dialog header.',
   'focusColor':
       'Row separators of the record table and the script-column preview grid (unless the stronger row borders '
       'setting is on), and the frame of their selected cell.',

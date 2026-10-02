@@ -31,6 +31,24 @@ mixin ItemColumnSpec<T> on ColumnSpec<T> {
   @override
   bool get takesItemColumnBounds => true;
 
+  /// A text column whose cell draws the [ItemCellData] the grid build stored on it.
+  @override
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
+      title: title,
+      field: id,
+      type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
+      enableContextMenu: false,
+      enableDropToResize: true,
+      enableColumnDrag: false,
+      enableEditingMode: false,
+      renderer: (TrinaColumnRendererContext context) {
+        return ItemCellText(context.cell.getUserData<ItemCellData>()!);
+      },
+    )..setUserData(this);
+  }
+
   /// Measures the item boxes drawn, placeholders included, with the omission counter box the renderer adds when
   /// the items do not all fit the height the measurement is given (the table's cell height cap). A value-only
   /// summary is measured as the cell value, not as the summary text drawn.
