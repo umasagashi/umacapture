@@ -1,10 +1,9 @@
-// Tests that a root skill/factor column in a non-normal display mode annotates
-// its cells instead of filtering rows: it neither hides a row nor carries a
-// pass count (so its chip shows no badge), while the same column nested under a
-// logic column keeps filtering through its container. Also pins the effective
-// display mode (stored for a root column, normal for a nested one).
+// Tests that a root skill/factor column that does not filter rows — a difference
+// column, or a column that keeps its unmet rows and marks them red — neither
+// hides a row nor carries a pass count (so its chip shows no badge), while a
+// filtering column nested under a logic column keeps filtering through its
+// container and keeps its own pass count.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_row_filter_test.dart
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
@@ -13,23 +12,22 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/logic.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
+import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
 
-import 'support/riverpod.dart';
-
-SkillColumnSpec _skill(String id, ItemDisplayMode mode) => SkillColumnSpec(
+SkillColumnSpec _skill(String id, UnmetRows unmetRows) => SkillColumnSpec(
   id: id,
   title: 'skill',
   parser: SkillParser(),
   predicate: AggregateSkillPredicate.any(),
-  displayMode: mode,
+  unmetRows: unmetRows,
 );
 
-FactorColumnSpec _factor(String id, ItemDisplayMode mode) => FactorColumnSpec(
+FactorColumnSpec _factor(String id, UnmetRows unmetRows) => FactorColumnSpec(
   id: id,
   title: 'factor',
   parser: FactorSetParser(),
   predicate: AggregateFactorSetPredicate.any(),
-  displayMode: mode,
+  unmetRows: unmetRows,
 );
 
 void main() {
@@ -37,11 +35,15 @@ void main() {
   // column that filters is visible in rowConditions.
   const rowCount = 3;
 
-  group('a root item column in a non-normal mode does not filter rows', () {
-    for (final mode in [ItemDisplayMode.absence, ItemDisplayMode.difference]) {
-      test('skill column in $mode keeps every row and has no pass count', () {
+  group('a root item column that does not filter rows', () {
+    final columns = <String, ColumnSpec>{
+      'a skill column marking missing items': _skill('s', UnmetRows.markMissing),
+      'a skill difference column': SkillDifferenceColumnSpec(id: 's', title: 'skill', parser: SkillParser()),
+    };
+    for (final MapEntry(key: name, value: column) in columns.entries) {
+      test('$name keeps every row and has no pass count', () {
         final (:rowConditions, :filteredCounts) = filterRows(
-          [_skill('s', mode)],
+          [column],
           {
             's': [true, false, false],
           },
@@ -52,9 +54,9 @@ void main() {
       });
     }
 
-    test('factor column in absence stays out while a normal column still filters', () {
+    test('a factor column marking missing items stays out while a filtering column still filters', () {
       final (:rowConditions, :filteredCounts) = filterRows(
-        [_factor('f', ItemDisplayMode.absence), _skill('s', ItemDisplayMode.normal)],
+        [_factor('f', UnmetRows.markMissing), _skill('s', UnmetRows.filterOut)],
         {
           'f': [false, false, true],
           's': [true, true, false],
@@ -65,8 +67,8 @@ void main() {
       expect(filteredCounts, {'s': 2});
     });
 
-    test('the same column nested under a logic column keeps filtering', () {
-      final child = _skill('s', ItemDisplayMode.difference);
+    test('a filtering column nested under a logic column filters through it and keeps its pass count', () {
+      final child = _skill('s', UnmetRows.filterOut);
       final and = LogicColumnSpec(id: 'and', title: 'AND', logic: LogicMode.and, children: [child]);
       final (:rowConditions, :filteredCounts) = filterRows(
         [and],
@@ -78,29 +80,6 @@ void main() {
       );
       expect(rowConditions, [true, false, false]);
       expect(filteredCounts, {'and': 1, 's': 1});
-    });
-  });
-
-  group('effectiveItemDisplayMode', () {
-    final child = _factor('child', ItemDisplayMode.difference);
-    final root = _skill('root', ItemDisplayMode.absence);
-    final and = LogicColumnSpec(id: 'and', title: 'AND', logic: LogicMode.and, children: [child]);
-
-    ProviderContainer containerWith(List<ColumnSpec> specs) {
-      final container = ProviderContainer.test(overrides: [currentColumnSpecsProvider.overrideWithValue(specs)]);
-      addTearDown(container.dispose);
-      return container;
-    }
-
-    test('a root column gets its stored mode', () {
-      final ref = containerWith([root, and]).read(containerRefProvider);
-      expect(effectiveItemDisplayMode(ref, root.id, root.displayMode), ItemDisplayMode.absence);
-    });
-
-    test('a nested column gets normal while keeping its stored mode', () {
-      final ref = containerWith([root, and]).read(containerRefProvider);
-      expect(effectiveItemDisplayMode(ref, child.id, child.displayMode), ItemDisplayMode.normal);
-      expect(child.displayMode, ItemDisplayMode.difference);
     });
   });
 }

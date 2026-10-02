@@ -50,7 +50,7 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ConstrainedBox(
       // Mirror the column-customize dialog's chrome for a consistent look: the
-      // same width cap and the default page-view scroll (its always-visible
+      // same maximum width and the default page-view scroll (its always-visible
       // scrollbar and 8px content padding), so the content needs no padding of
       // its own. FormGroup fills the width on its own, so no stretch is needed.
       constraints: const BoxConstraints(maxWidth: 960),
@@ -66,7 +66,8 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
 }
 
 /// Display-related table preferences: the row-height mode, its minimum line
-/// count, and the row-border strength. Grouped under a [FormGroup] header, with each row in the same
+/// count, the row-border strength, and the bounds of the skill and factor columns
+/// (their default width, their maximum width and their cells' height cap). Grouped under a [FormGroup] header, with each row in the same
 /// list-tile style as the global settings page.
 class _DisplaySettingsGroup extends ConsumerWidget {
   const _DisplaySettingsGroup();
@@ -99,6 +100,39 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           title: Text("$tr_table_settings.display.strong_row_borders.title".tr()),
           description: Text("$tr_table_settings.display.strong_row_borders.description".tr()),
           provider: charaDetailStrongRowBordersProvider,
+        ),
+        const FormTileDivider(),
+        StepperWidget(
+          title: Text("$tr_table_settings.display.item_column_default_width.title".tr()),
+          description: Text("$tr_table_settings.display.item_column_default_width.description".tr()),
+          provider: charaDetailItemColumnDefaultWidthProvider,
+          min: itemColumnDefaultWidthMin,
+          max: itemColumnDefaultWidthMax,
+          step: 10,
+          fieldWidth: 68,
+          unit: "$tr_table_settings.display.item_column_default_width.unit".tr(),
+        ),
+        const FormTileDivider(),
+        StepperWidget(
+          title: Text("$tr_table_settings.display.item_column_max_width.title".tr()),
+          description: Text("$tr_table_settings.display.item_column_max_width.description".tr()),
+          provider: charaDetailItemColumnMaxWidthPercentProvider,
+          min: itemBoundPercentMin,
+          max: itemBoundPercentMax,
+          step: 5,
+          fieldWidth: 56,
+          unit: "$tr_table_settings.display.item_column_max_width.unit".tr(),
+        ),
+        const FormTileDivider(),
+        StepperWidget(
+          title: Text("$tr_table_settings.display.item_cell_max_height.title".tr()),
+          description: Text("$tr_table_settings.display.item_cell_max_height.description".tr()),
+          provider: charaDetailItemCellMaxHeightPercentProvider,
+          min: itemBoundPercentMin,
+          max: itemBoundPercentMax,
+          step: 5,
+          fieldWidth: 56,
+          unit: "$tr_table_settings.display.item_cell_max_height.unit".tr(),
         ),
         const FormTileDivider(),
       ],

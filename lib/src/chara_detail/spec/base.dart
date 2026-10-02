@@ -26,6 +26,14 @@ part 'base.mapper.dart';
 // ignore: constant_identifier_names
 const tr_common = "pages.chara_detail.column_predicate.common";
 
+// ignore: constant_identifier_names
+const tr_columns = "pages.chara_detail.columns";
+
+/// What a column is for: the add-column dialog shows it as the tooltip of the chip that creates the column, and the
+/// column dialog heads the column with it. [truthTable], when present, is shown beneath [text]; its first row is the
+/// header and the remaining rows are the cells.
+typedef ColumnDescription = ({String text, List<List<String>>? truthTable});
+
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
@@ -81,6 +89,48 @@ final charaDetailMinRowLinesProvider = IntNotifierProvider(() {
 /// Only the colour changes; the border width stays the same.
 final charaDetailStrongRowBordersProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(entryKey: SettingsEntryKey.strongRowBorders.name, defaultValue: false);
+});
+
+/// The range the table settings offer for the default width of a skill or factor column, in logical pixels: from
+/// trina's minimum column width to the bound a pinned width is sanitised to.
+const itemColumnDefaultWidthMin = 80;
+const itemColumnDefaultWidthMax = 2000;
+
+/// The range the table settings offer for the two bounds given as a percentage of the table's visible size.
+const itemBoundPercentMin = 10;
+const itemBoundPercentMax = 200;
+
+/// The width a skill or factor column auto-fits to at most, in logical pixels (default 300). A column the user has
+/// sized by dragging keeps its width.
+final charaDetailItemColumnDefaultWidthProvider = IntNotifierProvider(() {
+  return IntNotifier(
+    entryKey: SettingsEntryKey.itemColumnDefaultWidth.name,
+    defaultValue: 300,
+    min: itemColumnDefaultWidthMin,
+    max: itemColumnDefaultWidthMax,
+  );
+});
+
+/// The widest a skill or factor column becomes, by auto-fit or by dragging, as a percentage of the table's visible
+/// width (default 50).
+final charaDetailItemColumnMaxWidthPercentProvider = IntNotifierProvider(() {
+  return IntNotifier(
+    entryKey: SettingsEntryKey.itemColumnMaxWidthPercent.name,
+    defaultValue: 50,
+    min: itemBoundPercentMin,
+    max: itemBoundPercentMax,
+  );
+});
+
+/// The tallest a skill or factor cell lays its items out, as a percentage of the table's visible height (default
+/// 50). Items past it are left to the omission counter, in every row-height mode.
+final charaDetailItemCellMaxHeightPercentProvider = IntNotifierProvider(() {
+  return IntNotifier(
+    entryKey: SettingsEntryKey.itemCellMaxHeightPercent.name,
+    defaultValue: 50,
+    min: itemBoundPercentMin,
+    max: itemBoundPercentMax,
+  );
 });
 
 /// Renders a text-based cell, capping the line count only in
@@ -148,17 +198,28 @@ abstract class ColumnBuilder {
   /// onto the spec it builds so the column can later regenerate its default filter
   /// by re-running this builder (see `builderSpecOf`). Null for plain builders
   /// whose default is "accept every row"; filter-bearing builders override it with
-  /// a stored value.
+  /// a stored value. The column dialog also finds this builder's [description]
+  /// through it (see `columnDescriptionOf`).
   String? get builderId => null;
 
-  /// Optional explanatory tooltip shown on the builder chip in the add-column
-  /// dialog. Null means no tooltip (the default for data columns).
-  String? get tooltip => null;
+  /// What a column of the type [build] creates is for, decided only from data that column stores and never edits
+  /// (its parser, whether it selects by tag, its operator). [ColumnSpec.typeDescription] of the built column is the
+  /// same, because both are computed by one function from the same values.
+  ColumnDescription get typeDescription;
 
-  /// Optional truth table rendered beneath [tooltip] in the add-column dialog.
-  /// The first row is the header; remaining rows are the cells. Null means no
-  /// table (the default). The dialog turns this data into a `Table` widget.
-  List<List<String>>? get truthTable => null;
+  /// The sentence of a chip whose column says more than its type does (a preset filter, such as "rank B or lower").
+  /// It counts only alongside a [builderId]: the column records that id, and the id is the only way its column
+  /// dialog finds this sentence again.
+  String? get presetDescription => null;
+
+  /// What the column this builder creates is for: the chip's tooltip in the add-column dialog, and the heading of
+  /// the column dialog of every column it creates (`columnDescriptionOf`). It is [presetDescription] when this builder
+  /// has a [builderId] and one, else [typeDescription]. Overridden only by a builder whose chip creates storage as well
+  /// as a column, so that chip states the creation while the created column keeps [typeDescription].
+  ColumnDescription get description {
+    final preset = builderId == null ? null : presetDescription;
+    return preset == null ? typeDescription : (text: preset, truthTable: null);
+  }
 
   /// Whether this builder participates in the category's "add all" shortcut.
   /// Logic columns opt out so the shortcut never bulk-adds empty operators.
@@ -301,8 +362,7 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   bool get isObsolete => false;
 
   /// Whether this column is hidden from the grid. A hidden column contributes no
-  /// visible column, yet a column that filters (every column except a root item
-  /// column in a non-normal display mode, see [ItemColumnSpec]) still participates
+  /// visible column, yet a column that filters rows (see [ColumnSpec.filtersRows]) still participates
   /// in row filtering and the pass-count badge — so it acts as an invisible
   /// filter. Defaults to false (shown); legacy
   /// specs saved before this field existed therefore decode as shown.
@@ -317,8 +377,11 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   String? get description => null;
 
   /// User-pinned display width for this column in logical pixels, or null when the
-  /// column auto-fits to its content. A non-null value makes [autoFitColumns] skip
-  /// the column so the user's chosen width survives data and layout changes; null
+  /// column auto-fits to its content. A non-null value makes [autoFitColumns] leave
+  /// the column unmeasured, shown at this width — held within the table's maximum
+  /// column width for a skill or factor column ([ItemColumnBounds.maxWidth]), with
+  /// this value left as stored — so the user's chosen width survives data and
+  /// layout changes; null
   /// (the default, and what legacy specs saved before this field existed decode to)
   /// keeps the content-driven auto-fit. Every editable concrete spec overrides this
   /// with a stored field and implements [withWidth].
@@ -353,6 +416,10 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// to false so the auto row-height pass never inflates a row from their
   /// width-measurement placeholder text. Defaults to true.
   bool get wrapsText => true;
+
+  /// Whether the table's bounds on skill and factor columns ([ItemColumnBounds]) apply to this column: its auto-fit
+  /// width, its dragged width and the height its cells lay items out in.
+  bool get takesItemColumnBounds => false;
 
   /// The text the cell actually paints, which [measuredContent] measures by default.
   /// Defaults to the trina-formatted cell value; specs whose renderer
@@ -400,10 +467,17 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// Identifier of the column builder (the "add column" template) this column was
   /// created from, or null when it carries no such origin (a plain column, or one
   /// added before this field existed). Used by the dialog to regenerate the
-  /// column's default filter on reset (see `builderSpecOf` in builder.dart).
+  /// column's default filter on reset (see `builderSpecOf` in builder.dart), and to
+  /// head the dialog with that builder's description (see `columnDescriptionOf`).
   /// Builder-default-capable leaf specs override this with a stored field;
   /// everything else has none.
   String? get builderId => null;
+
+  /// What a column of this type is for, decided only from data this column stores and never edits. The builder that
+  /// creates it computes its [ColumnBuilder.typeDescription] with the same function from the same values, so a
+  /// column whose [builderId] finds no builder is still described the way its chip is, unless that chip has a
+  /// [ColumnBuilder.presetDescription].
+  ColumnDescription get typeDescription;
 
   /// Returns a copy of this spec with its filter (predicate) reset to its default,
   /// preserving the display settings (title, width, hidden, description).
@@ -435,6 +509,15 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// Whether this container still has room for another child. Containers with a
   /// fixed arity (e.g. a NOT logic column) return false once full.
   bool get acceptsMoreChildren => false;
+
+  /// Whether this column's [evaluate] decides which rows are listed. A column that does not filter neither hides a
+  /// row nor carries a pass count, and no container accepts it as a child: a container combines its children's row
+  /// conditions, and this column has none to give. Unrelated to [hasFilter], which only offers the dialog's reset.
+  bool get filtersRows => true;
+
+  /// Whether [child] may be inserted among this column's children now. Only a container with room for another
+  /// child accepts one, and only a [child] that [filtersRows].
+  bool acceptsChild(ColumnSpec child) => false;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
@@ -507,6 +590,9 @@ bool isSpecMapIncomplete(Object? raw, Object? full) {
 const _factorSpecType = 'FactorColumnSpec';
 const _skillSpecType = 'SkillColumnSpec';
 
+// Serialized name of the unmet-rows choice ([UnmetRows]).
+const _unmetRowsKey = 'unmetRows';
+
 // Legacy factor notation `mode` values mapped to their current replacements, as
 // `[withName, valueOnly]` — the second is used when the legacy `max` was 0 (the
 // old "value only, no name" switch). See [_upgradeLegacyFactorNotation].
@@ -516,44 +602,29 @@ const _legacyFactorNotationModes = <String, List<String>>{
   'each': ['nameStarEach', 'starEach'],
 };
 
-// Both factor and skill notation formerly overloaded `max == 0` to mean "show a
-// single aggregate value instead of names"; that is now an explicit `mode`. The
-// value-only modes ignore `max`, but the new UI requires it to be >= 1, so a
-// legacy `max == 0` is reset to the default.
-void _resetValueOnlyMax(Map<String, dynamic> notation) {
-  notation['max'] = 3;
-}
-
 // Rewrites a legacy factor `notation` sub-map to the current format, in place.
 // A legacy factor map carries a `mode` that is no longer a valid enum value (so
 // it would fail to decode). Idempotent: a map already in the current format —
 // or with a missing/unknown `mode`, which is left to decode into a broken
-// placeholder — is untouched.
+// placeholder — is untouched. A legacy `max == 0` marks the value-only form, which
+// the `mode` now states.
 void _upgradeLegacyFactorNotation(Map<String, dynamic> notation) {
   final mapping = _legacyFactorNotationModes[notation['mode']];
   if (mapping == null) {
     return;
   }
-  final wasValueOnly = notation['max'] == 0;
-  notation['mode'] = wasValueOnly ? mapping[1] : mapping[0];
-  if (wasValueOnly) {
-    _resetValueOnlyMax(notation);
-  }
+  notation['mode'] = notation['max'] == 0 ? mapping[1] : mapping[0];
 }
 
 // Rewrites a legacy skill `notation` sub-map to the current format, in place.
 // A legacy skill map has no `mode` at all (so it would be flagged broken for
-// the missing key). Idempotent: a map that already carries a `mode` is
-// untouched.
+// the missing key). A legacy `max == 0` marks the count form, which the `mode`
+// now states. Idempotent: a map that already carries a `mode` is untouched.
 void _upgradeLegacySkillNotation(Map<String, dynamic> notation) {
   if (notation.containsKey('mode')) {
     return;
   }
-  final wasValueOnly = notation['max'] == 0;
-  notation['mode'] = wasValueOnly ? 'count' : 'names';
-  if (wasValueOnly) {
-    _resetValueOnlyMax(notation);
-  }
+  notation['mode'] = notation['max'] == 0 ? 'count' : 'names';
 }
 
 // Upgrades legacy notation payloads throughout a stored spec map, recursing into
@@ -564,6 +635,8 @@ void _upgradeLegacySkillNotation(Map<String, dynamic> notation) {
 // Gated by the spec's `type` discriminator: only factor and skill specs ever
 // carried the legacy notation shape, and a future spec type with its own
 // `notation` map must not be silently mutated on load.
+// A stored display count (`max` in a notation) counted items; nothing reads it,
+// and the next save drops it.
 void migrateLegacyColumnSpecMap(Map<String, dynamic> specMap) {
   final type = specMap['type'];
   if (type == _factorSpecType || type == _skillSpecType) {
@@ -682,8 +755,13 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   @override
   Widget label() => Text(title);
 
+  // The column dialog heads every column with its description, so the explanation of a broken column is all the
+  // dialog shows: there is nothing to edit.
   @override
-  Widget selector(ChangeNotifier onDecided) => Text("$tr_broken.description".tr());
+  ColumnDescription get typeDescription => (text: "$tr_broken.description".tr(), truthTable: null);
+
+  @override
+  Widget selector(ChangeNotifier onDecided) => const SizedBox.shrink();
 
   @override
   Map<String, dynamic> toMap() => rawMap;
@@ -728,12 +806,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // from the incompleteness check so those legacy specs are not flagged broken
   // merely for lacking it.
   static const _selectByTagKey = 'selectByTag';
-
-  // Serialized field names of the skill/factor display mode (enum, default
-  // normal) and "hide common items" flag (bool, default false). A stored map may
-  // lack them, like [_selectByTagKey], so they are excluded for the same reason.
-  static const _displayModeKey = 'displayMode';
-  static const _hideCommonItemsKey = 'hideCommonItems';
 
   Set<String> get brokenIds => {..._brokenIds};
 
@@ -825,9 +897,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       // 'selectByTag' was likewise added after specs existed on disk; its absence
       // decodes to the default (false) and must not flag a spec as broken.
       if (entry.key == _selectByTagKey) continue;
-      // The display mode and "hide common items" flag likewise decode to their
-      // defaults (normal, false) when absent.
-      if (entry.key == _displayModeKey || entry.key == _hideCommonItemsKey) continue;
+      // The skill/factor unmet-rows choice likewise decodes to its default
+      // (filter out) when absent.
+      if (entry.key == _unmetRowsKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }
@@ -879,13 +951,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     if (removed == null) {
       return;
     }
-    // Reject illegal targets (a full NOT, or a non-container) so the model never
-    // builds a tree the UI's slot suppression would have forbidden. Evaluated
-    // against the detached tree, so reordering a container's sole child within it
-    // (the container is momentarily empty) still passes.
+    // Reject illegal targets (a full NOT, a non-container, or a container that refuses this column) so the model
+    // never builds a tree the UI's slot suppression would have forbidden. Evaluated against the detached tree, so
+    // reordering a container's sole child within it (the container is momentarily empty) still passes.
     if (parentId != null) {
       final parent = findInForest(detached, parentId);
-      if (parent == null || !parent.acceptsChildren || !parent.acceptsMoreChildren) {
+      if (parent == null || !parent.acceptsChild(removed)) {
         return;
       }
     }
@@ -1137,14 +1208,94 @@ class CellMeasurement {
   }
 }
 
+/// The bounds the table settings put on skill and factor columns, resolved against the size of the table's visible
+/// area: [defaultWidth] and [maxWidth] bound the width of such a column, [maxCellHeight] the height its cells lay
+/// their items out in. A cell drawn outside a table (the theme gallery) gets [unbounded].
+@immutable
+class ItemColumnBounds {
+  const ItemColumnBounds({required this.defaultWidth, required this.maxWidth, required this.maxCellHeight});
+
+  static const unbounded = ItemColumnBounds(
+    defaultWidth: double.infinity,
+    maxWidth: double.infinity,
+    maxCellHeight: double.infinity,
+  );
+
+  /// The bounds of a table whose visible area is [tableSize], from the settings; [unbounded] when the area is not
+  /// finite. Whole pixels, so a resize that moves the area by a fraction of a pixel does not count as a change; the
+  /// maximum column width never goes below trina's minimum column width, which a drag cannot go below either.
+  factory ItemColumnBounds.resolve(
+    Size tableSize, {
+    required int defaultWidth,
+    required int maxWidthPercent,
+    required int maxCellHeightPercent,
+  }) {
+    if (!tableSize.isFinite) {
+      return unbounded;
+    }
+    return ItemColumnBounds(
+      defaultWidth: defaultWidth.toDouble(),
+      maxWidth: max(_trinaMinColumnWidth, (tableSize.width * maxWidthPercent / 100).floorToDouble()),
+      maxCellHeight: (tableSize.height * maxCellHeightPercent / 100).floorToDouble(),
+    );
+  }
+
+  /// `TrinaGridSettings.minColumnWidth`, the narrowest trina lets a column be.
+  static const _trinaMinColumnWidth = 80.0;
+
+  /// The default width setting: the widest auto-fit makes such a column, unless [maxWidth] is narrower.
+  final double defaultWidth;
+
+  /// The maximum column width: the widest such a column becomes, by auto-fit, by dragging, or shown at a width
+  /// the user chose.
+  final double maxWidth;
+
+  /// The cell height cap: the tallest such a cell lays its items out; items past it are left to the omission
+  /// counter.
+  final double maxCellHeight;
+
+  /// The widest auto-fit makes such a column: the narrower of [defaultWidth] and [maxWidth].
+  double get autoFitWidth => min(defaultWidth, maxWidth);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ItemColumnBounds &&
+      other.defaultWidth == defaultWidth &&
+      other.maxWidth == maxWidth &&
+      other.maxCellHeight == maxCellHeight;
+
+  @override
+  int get hashCode => Object.hash(defaultWidth, maxWidth, maxCellHeight);
+
+  @override
+  String toString() =>
+      'ItemColumnBounds(defaultWidth: $defaultWidth, maxWidth: $maxWidth, maxCellHeight: $maxCellHeight)';
+}
+
+/// Hands the table's [ItemColumnBounds] to the item cells drawn under it; a cell outside any scope is unbounded. The
+/// table passes the same value its auto-fit and row-height passes measure with, so a cell draws under the cap it
+/// was measured with.
+class ItemColumnBoundsScope extends InheritedWidget {
+  const ItemColumnBoundsScope({super.key, required this.bounds, required super.child});
+
+  final ItemColumnBounds bounds;
+
+  static ItemColumnBounds of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ItemColumnBoundsScope>()?.bounds ?? ItemColumnBounds.unbounded;
+
+  @override
+  bool updateShouldNotify(ItemColumnBoundsScope oldWidget) => bounds != oldWidget.bounds;
+}
+
 /// What a cell lays out, compared by value so a pass measures equal contents once.
 @immutable
 abstract class MeasuredContent {
   const MeasuredContent();
 
-  /// The size the content takes laid out within [maxWidth]; on one line when
-  /// [maxWidth] is infinite.
-  Size measure(CellMeasurement m, {double maxWidth = double.infinity});
+  /// The size the content takes laid out within [maxWidth]; on one line when [maxWidth] is infinite. Content that
+  /// can leave part of itself out to fit (item boxes, which then show the omission counter) also keeps within
+  /// [maxHeight]; text cannot, and ignores it.
+  Size measure(CellMeasurement m, {double maxWidth = double.infinity, double maxHeight = double.infinity});
 }
 
 /// A string in the pass's text style, wrapped at the width it is given: the
@@ -1155,7 +1306,7 @@ class TextMeasuredContent extends MeasuredContent {
   final String text;
 
   @override
-  Size measure(CellMeasurement m, {double maxWidth = double.infinity}) {
+  Size measure(CellMeasurement m, {double maxWidth = double.infinity, double maxHeight = double.infinity}) {
     if (text.isEmpty || maxWidth <= 0) {
       return Size.zero;
     }
@@ -1176,9 +1327,11 @@ class TextMeasuredContent extends MeasuredContent {
 }
 
 // A wrapping ([ColumnSpec.wrapsText]) column paired with its per-pass layout:
-// the content max-width its content wraps within and the vertical cell padding
-// added to the wrapped height. Constant across rows within one row-height pass.
-typedef _WrapColumn = ({TrinaColumn col, ColumnSpec spec, double maxWidth, double verticalPadding});
+// the content max-width its content wraps within, the height it lays its content
+// out in at most (the table's cell height cap for a skill or factor column), and
+// the vertical cell padding added to the wrapped height. Constant across rows
+// within one row-height pass.
+typedef _WrapColumn = ({TrinaColumn col, ColumnSpec spec, double maxWidth, double maxHeight, double verticalPadding});
 
 // Measures wrapped row heights for one [applyRowHeights] pass. Built once from
 // the wrapping columns' fixed layout so the per-row scan does no repeated
@@ -1193,15 +1346,17 @@ class _RowHeightMeasurer {
   final CellMeasurement _measurement;
 
   // The rendered height of [row]'s wrapped content ([ColumnSpec.measuredContent])
-  // across its wrapping columns, or 0 when none wrap. A column clamped below its
-  // content wraps and must grow the row, while an auto-fit column stays one line
-  // and adds nothing.
+  // across its wrapping columns, or 0 when none wrap. Content wider than its
+  // column wraps and grows the row, a skill or factor cell up to the table's cell
+  // height cap; content that fits stays one line.
   double contentHeight(TrinaRow row) {
     var maxHeight = 0.0;
     for (final column in _columns) {
       final cell = row.cells[column.col.field];
       final content = column.spec.measuredContent(cell, column.col.formattedValueForDisplay(cell?.value));
-      final height = content.measure(_measurement, maxWidth: column.maxWidth).height + column.verticalPadding;
+      final height =
+          content.measure(_measurement, maxWidth: column.maxWidth, maxHeight: column.maxHeight).height +
+          column.verticalPadding;
       if (height > maxHeight) {
         maxHeight = height;
       }
@@ -1236,11 +1391,19 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   // by character count) plus a separate cell pass, so the rows are scanned once.
   // The title is measured the same way the built-in does (columnTextStyle + title
   // padding), while cells are measured by true rendered width over distinct values.
-  void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {
+  // A column that takes the table's bounds on skill and factor columns
+  // ([ColumnSpec.takesItemColumnBounds]) is bounded by [ItemColumnBounds.autoFitWidth]:
+  // its cells are measured wrapped within that width and within the cell height cap,
+  // as they are drawn, and its title is clipped at it too.
+  void autoFitColumnPrecise(BuildContext context, TrinaColumn column, ItemColumnBounds bounds) {
     if (refRows.isEmpty) {
       return;
     }
     final spec = column.getUserData<ColumnSpec>();
+    final itemBounds = spec?.takesItemColumnBounds == true ? bounds : null;
+    final cap = itemBounds?.autoFitWidth ?? double.infinity;
+    final maxContentHeight = itemBounds?.maxCellHeight ?? double.infinity;
+    final cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
     final contents = refRows.map((e) {
       final cell = e.cells[column.field];
       final formatted = column.formattedValueForDisplay(cell?.value);
@@ -1254,9 +1417,13 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     final textScaler = MediaQuery.textScalerOf(context);
     final cellMeasurement = CellMeasurement(style: DefaultTextStyle.of(context).style, textScaler: textScaler);
     final titleMeasurement = CellMeasurement(style: configuration.style.columnTextStyle, textScaler: textScaler);
-    final cellWidth = contents.toSet().map((c) => c.measure(cellMeasurement).width).max;
+    // The widest line of the cells laid out within the cap, so a column with few items stays narrow.
+    final contentMaxWidth = cap - cellPadding.horizontal - 8;
+    final cellWidth = contents
+        .toSet()
+        .map((c) => c.measure(cellMeasurement, maxWidth: contentMaxWidth, maxHeight: maxContentHeight).width)
+        .max;
 
-    final cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
     final titlePadding = column.titlePadding ?? configuration.style.defaultColumnTitlePadding;
     final titleWidth = TextMeasuredContent(column.title).measure(titleMeasurement).width;
     cellMeasurement.dispose();
@@ -1269,10 +1436,13 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     final titleTarget =
         titleWidth + titlePadding.horizontal + (column.isShowRightIcon ? configuration.style.iconSize : 0) + 8;
 
-    resizeColumn(column, [cellTarget, titleTarget].max - column.width);
+    // The title is clipped at the cap like the cells: the cap is absolute.
+    final target = min(max(cellTarget, titleTarget), cap);
+    resizeColumn(column, target - column.width);
   }
 
-  void autoFitColumns() {
+  /// Sizes every column for [bounds], the table's bounds on skill and factor columns.
+  void autoFitColumns(ItemColumnBounds bounds) {
     if (refRows.isEmpty) {
       return;
     }
@@ -1284,30 +1454,37 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       if (col.enableRowChecked) {
         continue;
       }
-      // A column the user has pinned to an explicit width (spec.width != null) is
-      // intentionally excluded so its chosen width survives data/layout changes.
-      // Its width was applied at plutoColumn build time and must not be remeasured.
-      if (col.getUserData<ColumnSpec>()?.width != null) {
-        continue;
-      }
+      final spec = col.getUserData<ColumnSpec>();
+      final columnMaxWidth = spec?.takesItemColumnBounds == true ? bounds.maxWidth : double.infinity;
+      final pinned = spec?.clampedWidth;
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
-      // autoFitColumnPrecise sizes the column to max(title, widest cell) in one
-      // row scan, so the header title is never clipped and the cell width is exact.
-      autoFitColumnPrecise(context, col);
-      if (maxWidth != null && col.width > maxWidth!) {
-        resizeColumn(col, -(col.width / 2 - 24));
+      if (pinned != null) {
+        // A width the user chose by dragging (spec.width != null) is not measured, so it survives data and layout
+        // changes; it is shown as chosen, held within the table's maximum column width. The stored width is left as it is.
+        resizeColumn(col, min(pinned, columnMaxWidth) - col.width);
+      } else {
+        // autoFitColumnPrecise sizes the column to max(title, widest cell) in one
+        // row scan, bounded by the table's bounds on skill and factor columns
+        // ([ItemColumnBounds]) when the column takes them.
+        autoFitColumnPrecise(context, col, bounds);
+        // A column wider than the grid is halved, unless the table bounds it: its cap is the bound it declares.
+        if (columnMaxWidth.isInfinite && maxWidth != null && col.width > maxWidth!) {
+          resizeColumn(col, -(col.width / 2 - 24));
+        }
       }
       col.enableDropToResize = enabled;
     }
   }
 
   // The text-rendering ([ColumnSpec.wrapsText]) columns paired with their fixed
-  // per-pass layout (content max-width and vertical padding), computed once so
-  // the per-row height scan in [_RowHeightMeasurer] does no repeated
-  // column-metadata lookups. Widget/icon columns render at a fixed height and a
-  // column without a spec (the checkbox column) is excluded.
-  List<_WrapColumn> _wrappingColumns() {
+  // per-pass layout (content max-width, content max-height and vertical padding),
+  // computed once so the per-row height scan in [_RowHeightMeasurer] does no
+  // repeated column-metadata lookups. A column that takes [bounds]
+  // ([ColumnSpec.takesItemColumnBounds]) lays its content out within the cell
+  // height cap. Widget/icon columns render at a fixed height and a column without
+  // a spec (the checkbox column) is excluded.
+  List<_WrapColumn> _wrappingColumns(ItemColumnBounds bounds) {
     final result = <_WrapColumn>[];
     for (final col in columns) {
       final spec = col.getUserData<ColumnSpec>();
@@ -1319,6 +1496,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         col: col,
         spec: spec,
         maxWidth: col.width - cellPadding.horizontal,
+        maxHeight: spec.takesItemColumnBounds ? bounds.maxCellHeight : double.infinity,
         verticalPadding: cellPadding.vertical,
       ));
     }
@@ -1341,18 +1519,20 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
 
   // Sizes every row for [mode], flooring at [minLines] lines ([_minRowHeight]): wrap fixes all
   // rows at the floor, autoPerRow grows each to its own text, autoUniform grows
-  // all to the tallest row's text. trina's setRowHeight rebuilds the row, dropping
+  // all to the tallest row's text — a skill or factor cell's text counted only up
+  // to the table's cell height cap. trina's setRowHeight rebuilds the row, dropping
   // its attached record and notifying per row, so rows are replaced here in one
   // pass — carrying over cells, key, flags, and the record user-data — and the
-  // caller notifies once. Returns whether anything changed.
-  bool applyRowHeights({required RowHeightMode mode, required int minLines}) {
+  // caller notifies once. Returns whether anything changed. [bounds] holds the
+  // measured content of a skill or factor cell to the table's cell height cap.
+  bool applyRowHeights({required RowHeightMode mode, required int minLines, required ItemColumnBounds bounds}) {
     final context = gridKey.currentContext;
     if (context == null) {
       return false;
     }
     final style = DefaultTextStyle.of(context).style;
     final textScaler = MediaQuery.textScalerOf(context);
-    final columns = _wrappingColumns();
+    final columns = _wrappingColumns(bounds);
     final floorMeasurement = CellMeasurement(style: style, textScaler: textScaler);
     double floor(TrinaRow row) => _minRowHeight(row, columns, floorMeasurement, minLines);
     // The auto modes measure wrapped text; wrap fills the floor without measuring.
@@ -1543,8 +1723,8 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// without a structural replace that would drop their width and sort indicator.
   ///
   /// Re-seating the spec keeps the live column's user data in sync with the
-  /// current spec after a non-structural edit (e.g. a skill column's display
-  /// count). Width-persisting callers read the spec back off the live column, so
+  /// current spec after a non-structural edit (e.g. a column's description).
+  /// Width-persisting callers read the spec back off the live column, so
   /// a stale spec here would let a later resize/reset overwrite that edit. The
   /// rebuilt spec carries the current pinned width (every spec mutation also
   /// persists it), so re-seating never loses a width. The checkbox column has no
@@ -1558,19 +1738,27 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// unchanged: [reconcileRows] keeps that row as it is. A cell whose rendering
   /// depends on more than its value carries [RenderedCellData], whose
   /// [RenderedCellData.paintState] [reconcileRows] compares to replace the row.
-  void refreshColumnRenderers(List<TrinaColumn> nextColumns) {
+  ///
+  /// Returns whether a column's title changed, which the auto-fit measures but no
+  /// cell shows, so [reconcileRows] does not report it.
+  bool refreshColumnRenderers(List<TrinaColumn> nextColumns) {
     final nextByField = {for (final column in nextColumns) column.field: column};
+    var titlesChanged = false;
     for (final live in columns) {
       final next = nextByField[live.field];
       if (next != null) {
+        final nextSpec = next.getUserData<ColumnSpec>();
+        if (live.title != next.title) {
+          titlesChanged = true;
+        }
         live.renderer = next.renderer;
         live.title = next.title;
-        final nextSpec = next.getUserData<ColumnSpec>();
         if (nextSpec != null) {
           live.setUserData(nextSpec);
         }
       }
     }
+    return titlesChanged;
   }
 
   /// Whether two rows for the same record render identically: same pinned state,

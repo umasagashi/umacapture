@@ -1,30 +1,37 @@
 // Tests the skill and factor cells the grid build produces through
-// currentGridProvider: the difference display's per-group tally (pinned rows
-// against pinned rows, the rest against the rest, filtered rows left out), the
-// absence display's marks, the display count applied to the whole cell, the
-// factors counted as held under the trainee subject, the normal display's
-// value, CSV and measured text, and the item order (query, then master) and the
-// display count (cut only while the column selects nothing) of every display.
+// currentGridProvider: the difference columns' tally over every displayed row
+// (pinned or not, filtered rows left out), the
+// red marks of a column that keeps its unmet rows, the factors counted as held
+// under the trainee subject, a filtering column's value, CSV and measured text,
+// and the item order (query, then master) and every item a cell holds, whether it selects or not.
+// Three widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
+// counter alone in a cell too narrow for even a shortened first item, and one hovers the counter for its tooltip
+// naming the cause.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_grid_test.dart
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
+import 'package:umacapture/src/chara_detail/spec/factor_difference.dart';
 import 'package:umacapture/src/chara_detail/spec/item_cell.dart';
 import 'package:umacapture/src/chara_detail/spec/item_cell_text.dart';
 import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
+import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/preference/notifier.dart';
 
+import 'support/localization.dart';
 import 'support/records.dart';
 
 const _normal = ItemState.normal;
-const _held = ItemState.held;
 const _missing = ItemState.missing;
 const _short = ItemState.short;
 const _common = ItemState.common;
@@ -77,13 +84,11 @@ CharaDetailRecord _rec(
 SkillColumnSpec _skill(
   String id, {
   Set<int> query = const {},
-  ItemDisplayMode mode = ItemDisplayMode.normal,
+  UnmetRows unmetRows = UnmetRows.filterOut,
   SkillNotationMode notation = SkillNotationMode.names,
-  int max = 3,
   SkillSetLogicMode logic = SkillSetLogicMode.anyOf,
   int min = 1,
   Set<String> tags = const {},
-  bool hideCommon = false,
 }) => SkillColumnSpec(
   id: id,
   title: id,
@@ -92,25 +97,38 @@ SkillColumnSpec _skill(
     query: query,
     logic: logic,
     min: min,
-    notation: SkillNotation(mode: notation, max: max),
+    notation: SkillNotation(mode: notation),
     tags: tags,
   ),
   selectByTag: tags.isNotEmpty,
-  displayMode: mode,
+  unmetRows: unmetRows,
+);
+
+SkillDifferenceColumnSpec _skillDiff(
+  String id, {
+  Set<int> query = const {},
+  Set<String> tags = const {},
+  bool hideCommon = false,
+}) => SkillDifferenceColumnSpec(
+  id: id,
+  title: id,
+  parser: SkillParser(),
+  query: query,
+  tags: tags,
+  selectByTag: tags.isNotEmpty,
   hideCommonItems: hideCommon,
 );
 
 FactorColumnSpec _factor(
   String id, {
   Set<int> query = const {},
-  ItemDisplayMode mode = ItemDisplayMode.normal,
+  UnmetRows unmetRows = UnmetRows.filterOut,
   FactorSearchSubjectMode subject = FactorSearchSubjectMode.family,
   FactorSetLogicMode logic = FactorSetLogicMode.anyOf,
   FactorSearchElementMode element = FactorSearchElementMode.starOnly,
   int star = 1,
   int count = 1,
   FactorNotationMode notation = FactorNotationMode.nameStarTotal,
-  int max = 3,
 }) => FactorColumnSpec(
   id: id,
   title: id,
@@ -120,9 +138,23 @@ FactorColumnSpec _factor(
     logic: logic,
     subject: subject,
     element: FactorSearchElement(mode: element, star: star, count: count),
-    notation: FactorNotation(mode: notation, max: max),
+    notation: FactorNotation(mode: notation),
   ),
-  displayMode: mode,
+  unmetRows: unmetRows,
+);
+
+FactorDifferenceColumnSpec _factorDiff(
+  String id, {
+  FactorSearchSubjectMode subject = FactorSearchSubjectMode.family,
+  FactorNotationMode notation = FactorNotationMode.nameStarTotal,
+  bool hideCommon = false,
+}) => FactorDifferenceColumnSpec(
+  id: id,
+  title: id,
+  parser: FactorSetParser(),
+  subject: subject,
+  notationMode: notation,
+  hideCommonItems: hideCommon,
 );
 
 class _Built {
@@ -143,16 +175,13 @@ class _Built {
   ];
 
   /// What the row-height and column-width passes measure for the cell: the string of a text content, or the
-  /// texts of the item boxes (joined by `|`) and the total the omission counter counts against.
+  /// texts of the item boxes (joined by `|`).
   Object measured(String recordId, String specId) {
     final spec = specs.firstWhere((s) => s.id == specId);
     final cell = this.cell(recordId, specId);
     return switch (spec.measuredContent(cell, cell.value.toString())) {
       TextMeasuredContent(:final text) => text,
-      ItemMeasuredContent(:final data) => (
-        texts: [for (final item in data.items) item.text].join('|'),
-        total: data.total,
-      ),
+      ItemMeasuredContent(:final data) => (texts: [for (final item in data.items) item.text].join('|')),
       final other => other,
     };
   }
@@ -187,33 +216,23 @@ _Built _build(
 void main() {
   setUpAll(initializeMappers);
 
-  group('difference display tallies each group of displayed rows', () {
-    test('pinned rows are compared with pinned rows and the rest with the rest', () {
+  group('a difference column tallies every displayed row', () {
+    test('pinned rows are compared with every displayed row, pinned or not', () {
       final records = [
         _rec('a', skills: [1, 2]),
         _rec('b', skills: [1]),
         _rec('c', skills: [1, 2]),
         _rec('d', skills: [2]),
       ];
-      final g = _build(records, [_skill('s', mode: ItemDisplayMode.difference)], pinned: {'a', 'b'});
-      expect(g.items('a', 's'), [('S1', _common), ('S2', _partialHeld)]);
-      expect(g.items('b', 's'), [('S1', _common), ('S2', _partialMissing)]);
-      expect(g.items('c', 's'), [('S1', _partialHeld), ('S2', _common)]);
-      expect(g.items('d', 's'), [('S1', _partialMissing), ('S2', _common)]);
+      final g = _build(records, [_skillDiff('s')], pinned: {'a', 'b'});
+      // Unpinned d lacks S1, so pinned a and b do not share it as common.
+      expect(g.items('a', 's'), [('S1', _partialHeld), ('S2', _partialHeld)]);
+      expect(g.items('b', 's'), [('S1', _partialHeld), ('S2', _partialMissing)]);
+      expect(g.items('c', 's'), [('S1', _partialHeld), ('S2', _partialHeld)]);
+      expect(g.items('d', 's'), [('S1', _partialMissing), ('S2', _partialHeld)]);
     });
 
-    test('a single pinned row forms a group of one, so all of its items are common', () {
-      final records = [
-        _rec('a', skills: [1, 2]),
-        _rec('b', skills: [1]),
-        _rec('c', skills: [3]),
-      ];
-      final g = _build(records, [_skill('s', mode: ItemDisplayMode.difference)], pinned: {'a'});
-      expect(g.items('a', 's'), [('S1', _common), ('S2', _common)]);
-      expect(g.items('b', 's'), [('S1', _partialHeld), ('S3', _partialMissing)]);
-    });
-
-    test('a pinned row a filter hides is not part of its group', () {
+    test('a pinned row a filter hides is not compared', () {
       final records = [
         _rec('a', skills: [1, 2]),
         _rec('b', skills: [1, 3]),
@@ -221,7 +240,7 @@ void main() {
       final g = _build(
         records,
         [
-          _skill('s', mode: ItemDisplayMode.difference),
+          _skillDiff('s'),
           _skill('filter', query: {2}),
         ],
         pinned: {'a', 'b'},
@@ -229,9 +248,50 @@ void main() {
       expect(g.rowOf('b'), isNull);
       expect(g.items('a', 's'), [('S1', _common), ('S2', _common)]);
     });
+
+    group('a factor every row holds is common only at the same star total', () {
+      // F1: every row, totals 3 and 3 (one row splits it across slots). F2: every row, totals 1 and 3.
+      final records = [
+        _rec('a', self: [const Factor(1, 3), const Factor(2, 1)]),
+        _rec('b', self: [const Factor(1, 2), const Factor(2, 3)], parent1: [const Factor(1, 1)]),
+      ];
+
+      test('common items shown', () {
+        final g = _build(records, [_factorDiff('f')]);
+        expect(g.data('a', 'f').items, [
+          const CellItem('F1(3)', _common, strength: 3, strengthMax: 3),
+          const CellItem('F2(1)', _partialHeld, strength: 1, strengthMax: 3),
+        ]);
+        expect(g.items('b', 'f'), [('F1(3)', _common), ('F2(3)', _partialHeld)]);
+      });
+
+      test('common items hidden', () {
+        final g = _build(records, [_factorDiff('f', hideCommon: true)]);
+        expect(g.items('a', 'f'), [('F2(1)', _partialHeld)]);
+        expect(g.items('b', 'f'), [('F2(3)', _partialHeld)]);
+      });
+    });
+
+    test("a factor's shade tops out at the largest star total any displayed row holds it at", () {
+      // Pinned a, b hold F1 at 1 and 5; unpinned c, d hold it at 2 and 2, and F3 at 1 and 1.
+      final records = [
+        _rec('a', self: [const Factor(1, 1)]),
+        _rec('b', self: [const Factor(1, 3)], parent1: [const Factor(1, 2)]),
+        _rec('c', self: [const Factor(1, 2), const Factor(3, 1)]),
+        _rec('d', self: [const Factor(1, 2), const Factor(3, 1)]),
+      ];
+      final g = _build(records, [_factorDiff('f')], pinned: {'a', 'b'});
+      // Unpinned c's F1 shade is scaled by pinned b's 5.
+      expect(g.data('c', 'f').items, [
+        const CellItem('F1(2)', _partialHeld, strength: 2, strengthMax: 5),
+        const CellItem('F3(1)', _partialHeld, strength: 1, strengthMax: 1),
+      ]);
+      expect(g.items('a', 'f'), [('F1(1)', _partialHeld), ('F3(0)', _partialMissing)]);
+      expect(g.data('b', 'f').items.first, const CellItem('F1(5)', _partialHeld, strength: 5, strengthMax: 5));
+    });
   });
 
-  group('absence display marks what a row lacks', () {
+  group('marking missing items marks what a row lacks', () {
     // Self holds F1, a parent holds F2; the query asks for F1, F2 and F3.
     final record = _rec('r', self: [const Factor(1, 2)], parent1: [const Factor(2, 3)]);
 
@@ -239,23 +299,23 @@ void main() {
       final g = _build(
         [record],
         [
-          _factor('f', query: {1, 2, 3}, mode: ItemDisplayMode.absence, subject: FactorSearchSubjectMode.trainee),
+          _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee),
         ],
       );
-      expect(g.items('r', 'f'), [('F1(2)', _held), ('F2(0)', _missing), ('F3(0)', _missing)]);
+      expect(g.items('r', 'f'), [('F1(2)', _normal), ('F2(0)', _missing), ('F3(0)', _missing)]);
       expect(g.cell('r', 'f').value, 'F1(2)');
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(0)|F3(0)', total: 3));
+      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(0)|F3(0)'));
     });
 
     test('family subject: a factor a parent holds is held', () {
       final g = _build(
         [record],
         [
-          _factor('f', query: {1, 2, 3}, mode: ItemDisplayMode.absence),
+          _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 'f'), [('F1(2)', _held), ('F2(3)', _held), ('F3(0)', _missing)]);
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)|F3(0)', total: 3));
+      expect(g.items('r', 'f'), [('F1(2)', _normal), ('F2(3)', _normal), ('F3(0)', _missing)]);
+      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)|F3(0)'));
     });
 
     // A placeholder takes the notation of a held factor with every slot 0, so every row places its factors alike.
@@ -275,11 +335,11 @@ void main() {
           final g = _build(
             [record],
             [
-              _factor('f', query: {1, 3}, mode: ItemDisplayMode.absence, subject: subject, notation: notation),
+              _factor('f', query: {1, 3}, unmetRows: UnmetRows.markMissing, subject: subject, notation: notation),
             ],
           );
-          expect(g.items('r', 'f'), [(held, _held), (placeholder, _missing)]);
-          expect(g.measured('r', 'f'), (texts: '$held|$placeholder', total: 2));
+          expect(g.items('r', 'f'), [(held, _normal), (placeholder, _missing)]);
+          expect(g.measured('r', 'f'), (texts: '$held|$placeholder'));
         });
       }
     }
@@ -290,11 +350,11 @@ void main() {
           _rec('r', skills: [3, 1]),
         ],
         [
-          _skill('s', query: {4, 1, 2}, mode: ItemDisplayMode.absence),
+          _skill('s', query: {4, 1, 2}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 's'), [('S4', _missing), ('S1', _held), ('S2', _missing)]);
-      expect(g.measured('r', 's'), (texts: 'S4|S1|S2', total: 3));
+      expect(g.items('r', 's'), [('S4', _missing), ('S1', _normal), ('S2', _missing)]);
+      expect(g.measured('r', 's'), (texts: 'S4|S1|S2'));
     });
 
     test('factor countOnly: a factor held in fewer slots than the count is short', () {
@@ -303,10 +363,16 @@ void main() {
         _rec('two', self: [const Factor(1, 1)], parent1: [const Factor(1, 1)]),
       ];
       final g = _build(records, [
-        _factor('f', query: {1}, mode: ItemDisplayMode.absence, element: FactorSearchElementMode.countOnly, count: 2),
+        _factor(
+          'f',
+          query: {1},
+          unmetRows: UnmetRows.markMissing,
+          element: FactorSearchElementMode.countOnly,
+          count: 2,
+        ),
       ]);
       expect(g.items('one', 'f'), [('F1(3)', _short)]);
-      expect(g.items('two', 'f'), [('F1(2)', _held)]);
+      expect(g.items('two', 'f'), [('F1(2)', _normal)]);
     });
 
     test('an empty query marks no factor short, whatever the lower bound', () {
@@ -314,43 +380,36 @@ void main() {
         _rec('r', self: [const Factor(1, 1)], parent1: [const Factor(2, 1)]),
       ];
       final g = _build(records, [
-        _factor('star', mode: ItemDisplayMode.absence, subject: FactorSearchSubjectMode.trainee, star: 3),
-        _factor('count', mode: ItemDisplayMode.absence, element: FactorSearchElementMode.countOnly, count: 2),
+        _factor('star', unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee, star: 3),
+        _factor('count', unmetRows: UnmetRows.markMissing, element: FactorSearchElementMode.countOnly, count: 2),
       ]);
-      expect(g.items('r', 'star'), [('F1(1)', _held)]);
-      expect(g.items('r', 'count'), [('F1(1)', _held), ('F2(1)', _held)]);
+      expect(g.items('r', 'star'), [('F1(1)', _normal)]);
+      expect(g.items('r', 'count'), [('F1(1)', _normal), ('F2(1)', _normal)]);
     });
 
-    test('a column with a query selection is not cut to the display count, placeholders included', () {
+    test('a column with a query selection holds every item, placeholders included', () {
       final g = _build(
         [
           _rec('r', skills: [1]),
         ],
         [
-          _skill('s', query: {1, 2, 3, 4}, mode: ItemDisplayMode.absence, max: 2),
+          _skill('s', query: {1, 2, 3, 4}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 's'), [('S1', _held), ('S2', _missing), ('S3', _missing), ('S4', _missing)]);
+      expect(g.items('r', 's'), [('S1', _normal), ('S2', _missing), ('S3', _missing), ('S4', _missing)]);
     });
   });
 
-  test('difference display compares only the selected items, whatever the logic and lower bound', () {
+  test('difference compares only the selected items', () {
     final records = [
       _rec('a', skills: [1, 2, 3]),
       _rec('b', skills: [1, 3]),
     ];
     final plain = _build(records, [
-      _skill('s', query: {1, 2}, mode: ItemDisplayMode.difference),
+      _skillDiff('s', query: {1, 2}),
     ]);
     expect(plain.items('a', 's'), [('S1', _common), ('S2', _partialHeld)]);
     expect(plain.items('b', 's'), [('S1', _common), ('S2', _partialMissing)]);
-
-    final strict = _build(records, [
-      _skill('s', query: {1, 2}, mode: ItemDisplayMode.difference, logic: SkillSetLogicMode.sumOf, min: 5),
-    ]);
-    for (final id in ['a', 'b']) {
-      expect(strict.data(id, 's'), plain.data(id, 's'));
-    }
   });
 
   test('trainee subject with an empty query: a factor only a parent holds counts as not held', () {
@@ -358,10 +417,8 @@ void main() {
       _rec('a', self: [const Factor(5, 2)]),
       _rec('b', parent1: [const Factor(5, 3)]),
     ];
-    final g = _build(records, [
-      _factor('f', mode: ItemDisplayMode.difference, subject: FactorSearchSubjectMode.trainee),
-    ]);
-    expect(g.data('a', 'f').items, [const CellItem('F5(2)', _partialHeld, strength: 2, strengthMax: 3)]);
+    final g = _build(records, [_factorDiff('f', subject: FactorSearchSubjectMode.trainee)]);
+    expect(g.data('a', 'f').items, [const CellItem('F5(2)', _partialHeld, strength: 2, strengthMax: 2)]);
     expect(g.items('b', 'f'), [('F5(0)', _partialMissing)]);
   });
 
@@ -370,10 +427,10 @@ void main() {
       _rec('a', self: [const Factor(5, 2)], parent1: [const Factor(5, 1)]),
       _rec('b', self: [const Factor(6, 1)]),
     ];
-    final g = _build(records, [_factor('f', mode: ItemDisplayMode.difference, notation: FactorNotationMode.starEach)]);
+    final g = _build(records, [_factorDiff('f', notation: FactorNotationMode.nameStarEach)]);
     expect(g.items('a', 'f'), [('F5(2/1/0)', _partialHeld), ('F6(0/0/0)', _partialMissing)]);
     expect(g.items('b', 'f'), [('F5(0/0/0)', _partialMissing), ('F6(1/0/0)', _partialHeld)]);
-    expect(g.measured('b', 'f'), (texts: 'F5(0/0/0)|F6(1/0/0)', total: 2));
+    expect(g.measured('b', 'f'), (texts: 'F5(0/0/0)|F6(1/0/0)'));
   });
 
   group('normal display cells keep their value, CSV and measured text', () {
@@ -385,11 +442,10 @@ void main() {
         [_skill('s')],
       );
       final cell = g.cell('r', 's');
-      expect(cell.value, 'S1, S2, S3');
+      expect(cell.value, 'S1, S2, S3, S4');
       expect(g.data('r', 's').csv, 'S1,S2,S3,S4');
-      expect(g.measured('r', 's'), (texts: 'S1|S2|S3', total: 4));
-      expect(g.items('r', 's'), [('S1', _normal), ('S2', _normal), ('S3', _normal)]);
-      expect(g.data('r', 's').total, 4);
+      expect(g.measured('r', 's'), (texts: 'S1|S2|S3|S4'));
+      expect(g.items('r', 's'), [('S1', _normal), ('S2', _normal), ('S3', _normal), ('S4', _normal)]);
     });
 
     test('skill count', () {
@@ -414,7 +470,7 @@ void main() {
       );
       expect(g.cell('r', 'f').value, 'F1(2), F2(3)');
       expect(g.data('r', 'f').csv, 'F1(2),F2(3)');
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)', total: 2));
+      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)'));
     });
 
     test('factor star total', () {
@@ -435,31 +491,28 @@ void main() {
       final named = _build([record], [_factor('f', subject: FactorSearchSubjectMode.trainee)]);
       expect(named.cell('r', 'f').value, 'F1(2)');
       expect(named.data('r', 'f').csv, 'F1(2)');
-      expect(named.measured('r', 'f'), (texts: 'F1(2)', total: 1));
+      expect(named.measured('r', 'f'), (texts: 'F1(2)'));
       final nameOnly = _build(
         [record],
         [_factor('f', subject: FactorSearchSubjectMode.trainee, notation: FactorNotationMode.nameOnly)],
       );
       expect(nameOnly.cell('r', 'f').value, 'F1');
       expect(nameOnly.data('r', 'f').csv, 'F1');
-      expect(nameOnly.measured('r', 'f'), (texts: 'F1', total: 1));
+      expect(nameOnly.measured('r', 'f'), (texts: 'F1'));
     });
 
-    test('trainee subject with an empty query: parent-only factors earlier in the master do not push the '
-        "trainee's factor out of the display count", () {
+    test('trainee subject with an empty query: parent-only factors earlier in the master do not take the place '
+        "of the trainee's factor", () {
       final record = _rec(
         'r',
         self: [const Factor(5, 3)],
         parent1: [const Factor(1, 3), const Factor(2, 3), const Factor(3, 3)],
       );
-      final g = _build(
-        [record],
-        [_factor('trainee', subject: FactorSearchSubjectMode.trainee, max: 3), _factor('family', max: 3)],
-      );
+      final g = _build([record], [_factor('trainee', subject: FactorSearchSubjectMode.trainee), _factor('family')]);
       expect(g.items('r', 'trainee'), [('F5(3)', _normal)]);
       expect(g.cell('r', 'trainee').value, 'F5(3)');
       expect(g.data('r', 'trainee').csv, 'F5(3)');
-      expect(g.items('r', 'family'), [('F1(3)', _normal), ('F2(3)', _normal), ('F3(3)', _normal)]);
+      expect(g.items('r', 'family'), [('F1(3)', _normal), ('F2(3)', _normal), ('F3(3)', _normal), ('F5(3)', _normal)]);
       expect(g.data('r', 'family').csv, 'F1(3),F2(3),F3(3),F5(3)');
     });
   });
@@ -473,7 +526,7 @@ void main() {
         _rec('a', skills: [2, 1]),
         _rec('b', skills: [3]),
       ];
-      final g = _build(records, [_skill('s', mode: ItemDisplayMode.difference)], skillMaster: master);
+      final g = _build(records, [_skillDiff('s')], skillMaster: master);
       expect(g.items('a', 's'), [('S3', _partialMissing), ('S1', _partialHeld), ('S2', _partialHeld)]);
       expect(g.items('b', 's'), [('S3', _partialHeld), ('S1', _partialMissing), ('S2', _partialMissing)]);
     });
@@ -484,23 +537,23 @@ void main() {
         _rec('b', skills: [4]),
       ];
       final g = _build(records, [
-        _skill('s', query: {4, 1, 3}, mode: ItemDisplayMode.difference),
+        _skillDiff('s', query: {4, 1, 3}),
       ], skillMaster: master);
       expect(g.items('a', 's'), [('S4', _partialMissing), ('S1', _partialHeld), ('S3', _partialHeld)]);
       expect(g.items('b', 's'), [('S4', _partialHeld), ('S1', _partialMissing), ('S3', _partialMissing)]);
     });
 
-    test('absence: own items and placeholders interleave in query order', () {
+    test('marking missing items: own items and placeholders interleave in query order', () {
       final g = _build(
         [
           _rec('r', skills: [2, 0]),
         ],
         [
-          _skill('s', query: {0, 3, 2}, mode: ItemDisplayMode.absence),
+          _skill('s', query: {0, 3, 2}, unmetRows: UnmetRows.markMissing),
         ],
         skillMaster: master,
       );
-      expect(g.items('r', 's'), [('S0', _held), ('S3', _missing), ('S2', _held)]);
+      expect(g.items('r', 's'), [('S0', _normal), ('S3', _missing), ('S2', _normal)]);
     });
 
     test('normal, empty query: master order for the items, the sort value and the CSV', () {
@@ -511,8 +564,8 @@ void main() {
         [_skill('s')],
         skillMaster: master,
       );
-      expect(g.items('r', 's'), [('S3', _normal), ('S1', _normal), ('S4', _normal)]);
-      expect(g.cell('r', 's').value, 'S3, S1, S4');
+      expect(g.items('r', 's'), [('S3', _normal), ('S1', _normal), ('S4', _normal), ('S2', _normal)]);
+      expect(g.cell('r', 's').value, 'S3, S1, S4, S2');
       expect(g.data('r', 's').csv, 'S3,S1,S4,S2');
     });
 
@@ -538,14 +591,14 @@ void main() {
         [record],
         [
           _factor('normal'),
-          _factor('absence', query: {3, 2, 1}, mode: ItemDisplayMode.absence),
+          _factor('absence', query: {3, 2, 1}, unmetRows: UnmetRows.markMissing),
         ],
         factorMaster: master,
       );
       expect(g.items('r', 'normal'), [('F1(3)', _normal), ('F2(1)', _normal)]);
       expect(g.cell('r', 'normal').value, 'F1(3), F2(1)');
       expect(g.data('r', 'normal').csv, 'F1(3),F2(1)');
-      expect(g.items('r', 'absence'), [('F3(0)', _missing), ('F2(1)', _held), ('F1(3)', _held)]);
+      expect(g.items('r', 'absence'), [('F3(0)', _missing), ('F2(1)', _normal), ('F1(3)', _normal)]);
     });
 
     test('an id the master does not list sorts after every listed one, without throwing', () {
@@ -554,7 +607,7 @@ void main() {
           _rec('a', skills: [9, 5, 1]),
           _rec('b', skills: [2]),
         ],
-        [_skill('normal', max: 9), _skill('diff', mode: ItemDisplayMode.difference, max: 9)],
+        [_skill('normal'), _skillDiff('diff')],
         skillMaster: master,
       );
       expect(g.items('a', 'normal'), [('S1', _normal), ('S5', _normal), ('S9', _normal)]);
@@ -567,40 +620,48 @@ void main() {
     });
   });
 
-  group('the display count cuts only a column that selects nothing', () {
+  group('every item cell holds every item, selecting or not', () {
     final record = _rec(
       'r',
       skills: [1, 2, 3, 4],
       self: [const Factor(1, 1), const Factor(2, 1), const Factor(3, 1), const Factor(4, 1)],
     );
 
-    test('normal: a hand-picked query shows every held item; an empty query is cut', () {
+    test('normal: a hand-picked, an empty and a marking query all hold every held item, and the sort value lists '
+        'them all', () {
       final g = _build(
         [record],
         [
-          _skill('picked', query: {1, 2, 3, 4}, max: 2),
-          _skill('all', max: 2),
-          _factor('fpicked', query: {1, 2, 3, 4}, max: 2),
-          _factor('fall', max: 2),
+          _skill('picked', query: {1, 2, 3, 4}),
+          _skill('all'),
+          _factor('fpicked', query: {1, 2, 3, 4}),
+          _factor('fall'),
+          _factor('fmark', unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee),
         ],
       );
-      expect(g.items('r', 'picked').length, 4);
-      expect(g.cell('r', 'picked').value, 'S1, S2, S3, S4');
-      expect(g.items('r', 'all'), [('S1', _normal), ('S2', _normal)]);
-      expect(g.cell('r', 'all').value, 'S1, S2');
+      for (final id in ['picked', 'all']) {
+        expect(g.items('r', id), [('S1', _normal), ('S2', _normal), ('S3', _normal), ('S4', _normal)], reason: id);
+        expect(g.cell('r', id).value, 'S1, S2, S3, S4', reason: id);
+      }
       expect(g.data('r', 'all').csv, 'S1,S2,S3,S4');
-      expect(g.items('r', 'fpicked').length, 4);
+      for (final id in ['fpicked', 'fall', 'fmark']) {
+        expect(g.items('r', id), [
+          ('F1(1)', _normal),
+          ('F2(1)', _normal),
+          ('F3(1)', _normal),
+          ('F4(1)', _normal),
+        ], reason: id);
+      }
       expect(g.cell('r', 'fpicked').value, 'F1(1), F2(1), F3(1), F4(1)');
-      expect(g.items('r', 'fall'), [('F1(1)', _normal), ('F2(1)', _normal)]);
-      expect(g.cell('r', 'fall').value, 'F1(1), F2(1)');
+      expect(g.cell('r', 'fall').value, 'F1(1), F2(1), F3(1), F4(1)');
     });
 
-    test('a tag-driven column whose tags resolve to items counts as selecting them', () {
+    test('a tag-driven column holds the items its tags resolve to', () {
       final g = _build(
         [record],
         [
-          _skill('tag', tags: {'green'}, max: 2),
-          _skill('tagdiff', tags: {'green'}, max: 2, mode: ItemDisplayMode.difference),
+          _skill('tag', tags: {'green'}),
+          _skillDiff('tagdiff', tags: {'green'}),
         ],
         skillTags: {
           1: {'green'},
@@ -613,54 +674,169 @@ void main() {
       expect(g.items('r', 'tagdiff').length, 3);
     });
 
-    test('difference, empty query: cut to the display count', () {
+    test('difference, empty query: every item is held; the sort value lists the held ones', () {
       final records = [
         record,
         _rec('b', skills: [5]),
       ];
-      final g = _build(records, [_skill('s', mode: ItemDisplayMode.difference, max: 2)]);
-      expect(g.items('r', 's'), [('S1', _partialHeld), ('S2', _partialHeld)]);
-      expect(g.cell('r', 's').value, 'S1, S2');
-      // S1..S4 held here and S5 held by the other row: five items, two shown.
-      expect(g.data('r', 's').total, 5);
-      expect(g.measured('r', 's'), (texts: 'S1|S2', total: 5));
+      final g = _build(records, [_skillDiff('s')]);
+      // S1..S4 held here and S5 held by the other row.
+      expect(g.items('r', 's'), [
+        ('S1', _partialHeld),
+        ('S2', _partialHeld),
+        ('S3', _partialHeld),
+        ('S4', _partialHeld),
+        ('S5', _partialMissing),
+      ]);
+      expect(g.cell('r', 's').value, 'S1, S2, S3, S4');
     });
   });
 
-  group('the cell records how many items the display count cut', () {
-    test('an uncut cell totals its items and measures no counter', () {
-      final g = _build(
-        [
-          _rec('r', skills: [1, 2]),
-        ],
-        [_skill('s', max: 3)],
-      );
-      expect(g.data('r', 's').total, 2);
-      expect(g.measured('r', 's'), (texts: 'S1|S2', total: 2));
-    });
+  test('difference with common items hidden: the cell holds only what hiding left', () {
+    final records = [
+      _rec('a', skills: [1, 2, 3, 4, 5]),
+      _rec('b', skills: [1, 2, 6]),
+    ];
+    final g = _build(records, [_skillDiff('s', hideCommon: true)]);
+    // Common S1 and S2 are hidden; S3, S4, S5 held and S6 missing remain for 'a'.
+    expect(g.items('a', 's'), [
+      ('S3', _partialHeld),
+      ('S4', _partialHeld),
+      ('S5', _partialHeld),
+      ('S6', _partialMissing),
+    ]);
+    expect(g.measured('a', 's'), (texts: 'S3|S4|S5|S6'));
+  });
 
-    test('factor absence, empty query: the total counts every held factor', () {
-      final g = _build(
-        [
-          _rec('r', self: [const Factor(1, 1), const Factor(2, 1), const Factor(3, 1)]),
+  testWidgets("a cell draws the items that fit the table's cell height cap, then the counter against every item it "
+      'holds', (tester) async {
+    // Auto row height, so the row height cuts nothing and the cap alone binds; 180 px fits two of the five boxes
+    // beside the counter on a row, and the 40 px cap one row.
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, 3, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          charaDetailRowHeightModeProvider.overrideWith(
+            () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+          ),
         ],
-        [_factor('f', mode: ItemDisplayMode.absence, subject: FactorSearchSubjectMode.trainee, max: 1)],
-      );
-      expect(g.items('r', 'f'), [('F1(1)', _held)]);
-      expect(g.data('r', 'f').total, 3);
-      expect(g.measured('r', 'f'), (texts: 'F1(1)', total: 3));
-    });
+        child: MaterialApp(
+          home: Material(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ItemColumnBoundsScope(
+                bounds: const ItemColumnBounds(
+                  defaultWidth: double.infinity,
+                  maxWidth: double.infinity,
+                  maxCellHeight: 40,
+                ),
+                child: SizedBox(width: 180, child: ItemCellText(g.data('r', 's'))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.bySemanticsLabel('S1, S2, ${itemCounterText(2, 5)}'), findsOneWidget);
+    semantics.dispose();
+  });
 
-    test('difference with common items hidden: the total leaves out what hiding removed', () {
-      final records = [
-        _rec('a', skills: [1, 2, 3, 4, 5]),
-        _rec('b', skills: [1, 2, 6]),
-      ];
-      final g = _build(records, [_skill('s', mode: ItemDisplayMode.difference, max: 2, hideCommon: true)]);
-      // Common S1 and S2 are hidden; S3, S4, S5 held and S6 missing remain for 'a'.
-      expect(g.items('a', 's'), [('S3', _partialHeld), ('S4', _partialHeld)]);
-      expect(g.data('a', 's').total, 4);
-      expect(g.measured('a', 's'), (texts: 'S3|S4', total: 4));
-    });
+  testWidgets('a cell too narrow to set even a shortened first item beside the counter shows the counter alone '
+      'within its height cap', (tester) async {
+    // 80 px holds the counter but not the counter beside a shortened item; the 40 px cap fits one row of boxes.
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, 3, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          charaDetailRowHeightModeProvider.overrideWith(
+            () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+          ),
+        ],
+        child: MaterialApp(
+          home: Material(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ItemColumnBoundsScope(
+                bounds: const ItemColumnBounds(
+                  defaultWidth: double.infinity,
+                  maxWidth: double.infinity,
+                  maxCellHeight: 40,
+                ),
+                child: SizedBox(width: 80, child: ItemCellText(g.data('r', 's'))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byType(ItemCellText)).height, lessThanOrEqualTo(40));
+    expect(find.bySemanticsLabel(itemCounterText(0, 5)), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('hovering the counter of a cell its height cap cut, in a taller wrap row, names the cap and how many '
+      'it cut', (tester) async {
+    // Wrap row height with a row tall enough for all five items, under a 40 px cap that fits one row of boxes:
+    // the lower of the two heights cuts, and the tooltip names the cap.
+    loadAppTranslations();
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, 3, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          charaDetailRowHeightModeProvider.overrideWith(
+            () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.wrap),
+          ),
+        ],
+        child: MaterialApp(
+          home: Material(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ItemColumnBoundsScope(
+                bounds: const ItemColumnBounds(
+                  defaultWidth: double.infinity,
+                  maxWidth: double.infinity,
+                  maxCellHeight: 40,
+                ),
+                child: SizedBox(width: 180, height: 200, child: ItemCellText(g.data('r', 's'))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final cell = tester.renderObject<RenderItemCellText>(find.byType(ItemCellText));
+    final counter = cell.arrangement.counter;
+    expect(counter?.text, itemCounterText(2, 5));
+    final said = appSentenceAt('$tr_item_omission.cell_height').replaceAll('{count}', '3');
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(cell.localToGlobal(counter?.box.center ?? Offset.zero));
+    await tester.pumpAndSettle();
+    expect(find.text(said), findsOneWidget);
   });
 }

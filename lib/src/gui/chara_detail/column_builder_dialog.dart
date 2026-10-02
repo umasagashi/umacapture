@@ -10,6 +10,7 @@ import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
+import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -49,29 +50,6 @@ String? optionalGuidanceLine(String key) {
   return text.isEmpty ? null : text;
 }
 
-/// A leading info icon followed by dimmed guidance text, used for the dialog's
-/// top tip and each category's usage note so they share one look.
-class _HintLine extends StatelessWidget {
-  final String text;
-
-  const _HintLine(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(Symbols.info_rounded, size: 18, color: theme.hintColor),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
-        ),
-      ],
-    );
-  }
-}
-
 class ColumnBuilderDialog extends ConsumerWidget {
   const ColumnBuilderDialog({super.key});
 
@@ -95,41 +73,10 @@ class ColumnBuilderDialog extends ConsumerWidget {
     );
   }
 
-  // Renders a truth table (header row first) as a compact bordered table, styled
-  // to sit on the tooltip's background.
-  Widget truthTableWidget(BuildContext context, List<List<String>> rows) {
-    final theme = Theme.of(context);
-    final color = theme.tooltipTheme.textStyle?.color ?? theme.colorScheme.onInverseSurface;
-    final cellStyle = (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
-      color: color,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
-    final headerStyle = cellStyle.copyWith(fontWeight: FontWeight.bold);
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Table(
-        defaultColumnWidth: const IntrinsicColumnWidth(),
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        border: TableBorder.symmetric(inside: BorderSide(color: color.withValues(alpha: 0.4), width: 0.5)),
-        children: [
-          for (final (rowIndex, row) in rows.indexed)
-            TableRow(
-              children: [
-                for (final cell in row)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    child: Text(cell, style: rowIndex == 0 ? headerStyle : cellStyle, textAlign: TextAlign.center),
-                  ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget builderChip(BuildContext context, WidgetRef ref, ColumnBuilder builder) {
     final theme = Theme.of(context);
-    final truthTable = builder.truthTable;
+    final description = builder.description;
+    final truthTable = description.truthTable;
     Widget chip = GestureDetector(
       onLongPress: () {
         final spec = builder.build(ref.base);
@@ -141,7 +88,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         backgroundColor: builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
         label: Text(builder.title),
         // The plain tooltip is suppressed when a rich tooltip wraps the chip below.
-        tooltip: truthTable == null ? builder.tooltip : null,
+        tooltip: truthTable == null ? description.text : null,
         onPressed: () {
           ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(builder.build(ref.base));
           CardDialog.dismiss(ref.base);
@@ -154,8 +101,16 @@ class ColumnBuilderDialog extends ConsumerWidget {
           children: [
             // Trailing newline forces the table onto its own line below the text;
             // without it the WidgetSpan flows inline to the right of the text.
-            if (builder.tooltip != null) TextSpan(text: "${builder.tooltip}\n"),
-            WidgetSpan(child: truthTableWidget(context, truthTable)),
+            TextSpan(text: "${description.text}\n"),
+            WidgetSpan(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: TruthTable(
+                  rows: truthTable,
+                  color: theme.tooltipTheme.textStyle?.color ?? theme.colorScheme.onInverseSurface,
+                ),
+              ),
+            ),
           ],
         ),
         child: chip,
@@ -259,7 +214,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(8),
-            child: _HintLine("$tr_chara_detail.column_spec.dialog.description".tr()),
+            child: HintLine("$tr_chara_detail.column_spec.dialog.description".tr()),
           ),
           for (final cat in ColumnCategory.values) ...[
             Row(
@@ -269,7 +224,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
               ],
             ),
             if (categoryDescription(cat) case final description?)
-              Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: _HintLine(description)),
+              Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: HintLine(description)),
             Padding(
               padding: const EdgeInsets.all(16),
               child: builderChipCategory(context, ref, cat, buildersMap[cat] ?? []),

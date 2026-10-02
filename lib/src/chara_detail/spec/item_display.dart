@@ -9,68 +9,51 @@ import '/src/core/utils.dart';
 
 part 'item_display.mapper.dart';
 
-/// How a column that lists items (skills, factors) presents its query.
-///
-/// [normal] filters rows by the query. [absence] and [difference] keep every
-/// row and instead annotate the cells: [absence] marks the queried items a row
-/// lacks, [difference] compares the displayed rows against each other. Only a
-/// root column honours a non-normal mode; see [effectiveItemDisplayMode].
+/// What a root skill or factor column does with a row that does not meet its query.
 @MappableEnum()
-enum ItemDisplayMode { normal, absence, difference }
+enum UnmetRows {
+  /// The row is filtered out (not listed).
+  filterOut,
 
-/// Capability of a column whose cell lists items (skills, factors) and can be
-/// shown in a display mode other than filtering. Reached from the grid build
-/// through an `is ItemColumnSpec` test, like [ContainerColumnSpec].
+  /// The row is kept, and the queried items it lacks or holds short are marked red.
+  markMissing,
+}
+
+/// Capability of a column whose cell lists items (skills, factors). Reached from the grid build through an
+/// `is ItemColumnSpec` test, like [ContainerColumnSpec]. How the items are compared is the business of
+/// [QueryItemColumnSpec] (against the column's query) or [DifferenceItemColumnSpec] (row against row).
 mixin ItemColumnSpec<T> on ColumnSpec<T> {
-  /// The stored display mode. Inert while the column is nested under a
-  /// container; read [effectiveItemDisplayMode] for the mode that applies.
-  ItemDisplayMode get displayMode;
+  /// The items [value] holds within the column's comparison scope (the query, and for factors the subject), as
+  /// item id to strength (for a factor the star sum, for a skill 1). A row's contribution to an [ItemTally], and the
+  /// strength a difference cell shades the row's own items by.
+  Map<int, int> heldItemStrengths(RefBase ref, T value);
 
-  /// Whether items every compared row shares are left out of the cell. Only
-  /// meaningful in [ItemDisplayMode.difference].
-  bool get hideCommonItems;
+  @override
+  bool get takesItemColumnBounds => true;
 
-  /// Whether [ItemDisplayMode.absence] is offered. A column whose items are
-  /// resolved from tags lists too many items for a per-item absence mark.
-  bool get offersAbsenceDisplay;
+  /// A text column whose cell draws the [ItemCellData] the grid build stored on it.
+  @override
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
+      title: title,
+      field: id,
+      type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
+      enableContextMenu: false,
+      enableDropToResize: true,
+      enableColumnDrag: false,
+      enableEditingMode: false,
+      renderer: (TrinaColumnRendererContext context) {
+        return ItemCellText(context.cell.getUserData<ItemCellData>()!);
+      },
+    )..setUserData(this);
+  }
 
-  /// Whether the column's query, once resolved (a tag-driven column included), selects any item. A selecting
-  /// column draws every selected item it has in any display mode; only a column that selects nothing is cut to
-  /// its display count ([itemLimit]).
-  bool hasQuerySelection(RefBase ref);
-
-  /// The number of items a cell keeps out of [max], the stored display count: null (every item) while the
-  /// column [hasQuerySelection]. The cell, its sort value and its CSV all follow it.
-  int? itemLimit(RefBase ref, int max) => hasQuerySelection(ref) ? null : max;
-
-  /// Whether the column's notation is a single value-only aggregate (a count, a summed metric) rather than the
-  /// items named. The cell value and the CSV follow it in every display mode.
-  bool get notatesValueOnly;
-
-  /// Whether a cell drawn in [mode] shows its value-only summary as text rather than item boxes: only a
-  /// [notatesValueOnly] column in the normal display, since a highlight belongs to an item.
-  bool drawsSummary(ItemDisplayMode mode) => notatesValueOnly && mode == ItemDisplayMode.normal;
-
-  ColumnSpec withDisplayMode(ItemDisplayMode mode);
-
-  ColumnSpec withHideCommonItems(bool hide);
-
-  /// Ids of the items [value] holds within the column's comparison scope (the
-  /// query, and for factors the subject). A row's contribution to an [ItemTally].
-  Set<int> heldItemIds(RefBase ref, T value);
-
-  /// The cell of [value] drawn in [context]. [ColumnSpec.plutoCell] is this in
-  /// [ItemCellContext.normal]; the grid build calls it directly for a column
-  /// that annotates its cells.
-  TrinaCell itemCell(RefBase ref, T value, ItemCellContext context);
-
-  /// Measures the item boxes drawn, placeholders included, with the omission
-  /// counter box the renderer adds after a cell cut to its display count. A
-  /// value-only summary is measured as the cell value, not as the summary text
-  /// drawn.
+  /// Measures the item boxes drawn, placeholders included, with the omission counter box the renderer adds when
+  /// the items do not all fit the height the measurement is given (the table's cell height cap). A value-only
+  /// summary is measured as the cell value, not as the summary text drawn.
   ///
-  /// Only the display count is known here; a cut for want of lines happens in
-  /// the wrap row-height mode, which does not measure.
+  /// A cut for want of lines happens in the wrap row-height mode, which does not measure.
   @override
   MeasuredContent measuredContent(TrinaCell? cell, String formatted) {
     final data = cell?.getUserData<ItemCellData>();
@@ -78,10 +61,8 @@ mixin ItemColumnSpec<T> on ColumnSpec<T> {
   }
 
   /// [lines] rows of item boxes, so a fixed row height shows the minimum lines as whole rows of boxes; [lines]
-  /// lines of text for a [cell] that draws the summary text ([drawsSummary]). Read from the cell, not from the
-  /// stored [displayMode]: a column nested under a container draws its cells in the normal display whatever mode
-  /// it stores ([effectiveItemDisplayMode]), and the grid build, which knows where the column sits in the column
-  /// forest, records in the cell what it draws. Without a cell, rows of boxes.
+  /// lines of text for a [cell] that draws the summary text. Read from the cell, which records what it draws.
+  /// Without a cell, rows of boxes.
   @override
   double minContentHeight(int lines, CellMeasurement m, {TrinaCell? cell}) =>
       cell?.getUserData<ItemCellData>()?.summary != null
@@ -89,51 +70,56 @@ mixin ItemColumnSpec<T> on ColumnSpec<T> {
       : itemBoxesMinHeight(lines, m);
 }
 
-/// What an item cell is drawn against.
-sealed class ItemCellContext {
-  const ItemCellContext();
+/// Capability of an item column that compares a row's items against the column's query. What it does with a row
+/// that does not meet the query is its [unmetRows]: filter it out, or keep it and mark the missing items red.
+mixin QueryItemColumnSpec<T> on ItemColumnSpec<T> {
+  UnmetRows get unmetRows;
 
-  /// The display mode the cell is drawn in.
-  ItemDisplayMode get mode;
+  /// Whether [UnmetRows.markMissing] is offered. A column whose items come from tags lists too many items to mark.
+  bool get offersMarkMissing;
 
-  const factory ItemCellContext.normal() = NormalItemCellContext;
+  QueryItemColumnSpec<T> withUnmetRows(UnmetRows value);
 
-  const factory ItemCellContext.absence() = AbsenceItemCellContext;
-
-  const factory ItemCellContext.difference(ItemTally tally) = DifferenceItemCellContext;
-}
-
-/// Plain filtering display: the record's items, no highlight.
-class NormalItemCellContext extends ItemCellContext {
-  const NormalItemCellContext();
+  /// Whether the cell marks the queried items a row lacks or holds short, instead of filtering the row out.
+  bool get marksMissing => unmetRows == UnmetRows.markMissing;
 
   @override
-  ItemDisplayMode get mode => ItemDisplayMode.normal;
+  bool get filtersRows => !marksMissing;
+
+  /// Whether the column's notation is a single value-only aggregate (a count, a summed metric) rather than the
+  /// items named. The cell value and the CSV follow it either way.
+  bool get notatesValueOnly;
+
+  /// Whether the cell shows its value-only summary as text rather than item boxes: only while filtering, since a
+  /// red mark belongs to an item.
+  bool get drawsSummary => notatesValueOnly && !marksMissing;
 }
 
-/// Absence display: the queried items the record lacks are marked.
-class AbsenceItemCellContext extends ItemCellContext {
-  const AbsenceItemCellContext();
+/// Capability of an item column that compares the displayed rows against each other rather than against a query:
+/// each cell marks the items only some displayed rows hold. It does not filter rows ([filtersRows] is false),
+/// so it has no pass count and no container accepts it as a child.
+mixin DifferenceItemColumnSpec<T> on ItemColumnSpec<T> {
+  /// Whether common items ([ItemTally.common]: every compared row holds them with the same strength) are left out
+  /// of the cell.
+  bool get hideCommonItems;
+
+  DifferenceItemColumnSpec<T> withHideCommonItems(bool hide);
 
   @override
-  ItemDisplayMode get mode => ItemDisplayMode.absence;
-}
+  bool get filtersRows => false;
 
-/// Difference display against [tally], the item holdings of the row's group.
-class DifferenceItemCellContext extends ItemCellContext {
-  final ItemTally tally;
-
-  const DifferenceItemCellContext(this.tally);
-
+  /// Every row passes: the column lists every row it is given and hides none.
   @override
-  ItemDisplayMode get mode => ItemDisplayMode.difference;
+  List<bool> evaluate(RefBase ref, List<T> values) => List<bool>.filled(values.length, true);
+
+  /// The cell of [value] compared against [tally], the item holdings of every displayed row.
+  TrinaCell differenceCell(RefBase ref, T value, ItemTally tally);
+
+  /// Outside the grid build there is no group to compare against, so the cell is drawn against the row alone.
+  @override
+  TrinaCell plutoCell(RefBase ref, T value) =>
+      differenceCell(ref, value, ItemTally.of([heldItemStrengths(ref, value)]));
 }
 
-/// Whether the column [specId] is a root of the column forest, as opposed to one
-/// nested under a container. Only a root column honours a non-normal display mode.
+/// Whether the column [specId] is a root of the column forest, as opposed to one nested under a container.
 bool isRootColumn(RefBase ref, String specId) => ref.read(currentColumnSpecsProvider).any((s) => s.id == specId);
-
-/// The display mode that actually applies: the stored [mode] for a root column,
-/// normal for a column nested under a container (its stored mode is kept but inert).
-ItemDisplayMode effectiveItemDisplayMode(RefBase ref, String specId, ItemDisplayMode mode) =>
-    isRootColumn(ref, specId) ? mode : ItemDisplayMode.normal;

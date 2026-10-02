@@ -178,14 +178,18 @@ class SwitchWidget extends ConsumerWidget {
 
 /// A compact −/value/+ spinbox bound to an [IntNotifierProvider], clamped to
 /// [min]..[max] (the buttons disable at the bounds). The value is also directly
-/// editable via the shared [IntStepperField]. Mirrors [SwitchWidget]'s shape for
-/// use in the same settings groups.
+/// editable via the shared [IntStepperField], which the buttons move by [step]
+/// and which is [fieldWidth] wide. Mirrors [SwitchWidget]'s shape for use in the
+/// same settings groups.
 class StepperWidget extends ConsumerWidget {
   final Widget title;
   final Widget description;
   final IntNotifierProvider provider;
   final int min;
   final int max;
+  final int step;
+  final double fieldWidth;
+  final String? unit;
 
   const StepperWidget({
     super.key,
@@ -194,6 +198,9 @@ class StepperWidget extends ConsumerWidget {
     required this.provider,
     required this.min,
     required this.max,
+    this.step = 1,
+    this.fieldWidth = 44,
+    this.unit,
   });
 
   @override
@@ -204,7 +211,15 @@ class StepperWidget extends ConsumerWidget {
       subtitle: description,
       trailing: Align(
         widthFactor: 1,
-        child: IntStepperField(value: value, min: min, max: max, onChanged: ref.read(provider.notifier).set),
+        child: IntStepperField(
+          value: value,
+          min: min,
+          max: max,
+          step: step,
+          fieldWidth: fieldWidth,
+          unit: unit,
+          onChanged: ref.read(provider.notifier).set,
+        ),
       ),
     );
   }

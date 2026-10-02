@@ -24,7 +24,8 @@ A release has two phases:
    build/publish work.
 2. **Tag + deploy** — tag the merged `develop` commit, then `flutter_distributor`
    builds the Windows installer (Inno Setup `exe`) and a `zip`, and publishes both
-   as assets on a GitHub release of `umasagashi/umacapture`.
+   as assets on a GitHub release of `umasagashi/umacapture`. When that release is
+   the Latest (not a pre-release), `main` is fast-forwarded to the tagged commit.
 
 > **`develop` is a protected branch** (GitHub branch protection requires the two
 > CI status checks — `Flutter unit/widget tests` and `Native C++ tests (doctest)`
@@ -370,10 +371,28 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    ```bash
    gh release upload "v<version>" assets/version_info.json --clobber
    ```
-11. Verify the release — all three assets present and `isPrerelease` true:
+11. Verify the release — all three assets present and `isPrerelease` as intended
+    (true for the default pre-release, false when it was published as the Latest):
     ```bash
     gh release view "v<version>" --json tagName,isPrerelease,isDraft,assets \
       --jq '{tag:.tagName,prerelease:.isPrerelease,draft:.isDraft,assets:[.assets[].name]}'
+    ```
+12. **Only if `v<version>` is now the Latest release**, fast-forward `main` to it.
+    `main` points at the develop commit tagged by the latest full (non-pre-release)
+    release, so that rule is what this step keeps true. A pre-release (the default,
+    see Notes) leaves `main` where it is; run this step whenever a release is later
+    promoted to Latest instead. Confirm first — the command must print `v<version>`:
+    ```bash
+    gh release list --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName'
+    ```
+    Then push the tagged commit to `main` without switching the working tree. This
+    is a plain push, so the remote rejects it unless it is a fast-forward; never add
+    `--force`. If it is rejected, stop and report to the user — `main` carries
+    something that is not on `develop`'s history:
+    ```bash
+    git push origin "v<version>^{commit}:refs/heads/main"
+    git fetch origin main:main    # align the local main too (skip if it is checked out)
+    [ "$(git rev-parse origin/main)" = "$(git rev-parse "v<version>^{commit}")" ] && echo "main ok" || echo "MISMATCH"
     ```
 
 ### If the release also publishes a web bundle
@@ -413,7 +432,8 @@ Two properties make the order load-bearing:
 - **Releases publish as pre-releases** by default (`release-prerelease: "true"`
   in `distribute_options.yaml`). To cut a full (non-pre-release) release instead,
   drop that arg for the run, or promote afterwards with
-  `gh release edit "v<version>" --latest --prerelease=false`. Historically
+  `gh release edit "v<version>" --latest --prerelease=false`. Either way, follow
+  with step 12 so `main` moves to the new Latest. Historically
   pre-releases also used a date-suffixed tag, e.g. `v0.0.10-20260507`.
 - **The pre-commit hook re-checks the web pins** (`tool/hooks/pre-commit` runs
   `dart run tool/check_web_pins.dart`), so a commit that changed a pinned file

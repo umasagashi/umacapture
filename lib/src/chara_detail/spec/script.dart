@@ -523,6 +523,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -1577,7 +1580,8 @@ class _PreviewGrid extends StatelessWidget {
             cellTextStyle: theme.textTheme.bodyMedium!,
           ),
         ),
-        onLoaded: (event) => event.stateManager.autoFitColumns(),
+        // A script column takes no table bounds ([ColumnSpec.takesItemColumnBounds]), so the preview needs none.
+        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded),
       ),
     );
     if (!truncated) return grid;
@@ -1614,6 +1618,9 @@ class ScriptColumnBuilder extends ColumnBuilder {
   ScriptColumnBuilder({required this.title, required this.category, this.type = ColumnBuilderType.normal});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ScriptColumnSpec build(RefBase ref) {
     return ScriptColumnSpec(
       id: const Uuid().v4(),
@@ -1623,3 +1630,6 @@ class ScriptColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a script column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() => (text: "$tr_columns.script.description".tr(), truthTable: null);

@@ -7,6 +7,9 @@
 // names". `migrateLegacyColumnSpecMap` rewrites those stored maps in place so
 // they (a) decode into the current enums and (b) match the freshly encoded spec,
 // so `isSpecMapIncomplete` does not flag them broken.
+//
+// The fixtures carry the column keys a v0.1.0 build wrote, the shape these
+// notations were stored in.
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -32,9 +35,6 @@ Map<String, dynamic> _factorMap(Map<String, dynamic> notation) => <String, dynam
   'showAllWhenQueryIsEmpty': true,
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
-  'selectByTag': false,
-  'displayMode': 'normal',
-  'hideCommonItems': false,
   'hidden': false,
 };
 
@@ -53,11 +53,14 @@ Map<String, dynamic> _skillMap(Map<String, dynamic> notation) => <String, dynami
   'showAllWhenQueryIsEmpty': true,
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
-  'selectByTag': false,
-  'displayMode': 'normal',
-  'hideCommonItems': false,
   'hidden': false,
 };
+
+// The freshly encoded map, without the column keys added after v0.1.0. Their
+// absence decodes to the default, and the load path does not flag it broken.
+Map<String, dynamic> _encoded(ColumnSpec spec) => spec.toMap()
+  ..remove('selectByTag')
+  ..remove('unmetRows');
 
 void main() {
   setUpAll(initializeMappers);
@@ -68,8 +71,7 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.nameStarTotal);
-      expect(spec.predicate.notation.max, 3);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
     test('legacy each with a name limit becomes name + star each', () {
@@ -77,17 +79,15 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.nameStarEach);
-      expect(spec.predicate.notation.max, 5);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
-    test('legacy max==0 becomes the value-only mode with max reset to a valid value', () {
+    test('legacy max==0 becomes the value-only mode', () {
       final map = _factorMap({'mode': 'each', 'max': 0});
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.starEach);
-      expect(spec.predicate.notation.max, 3);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
     test('dropped traineeAndParents folds into the total granularity', () {
@@ -95,7 +95,7 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.nameStarTotal);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
     test('a current-format map is left untouched (idempotent)', () {
@@ -103,8 +103,7 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.countTotal);
-      expect(spec.predicate.notation.max, 4);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
   });
 
@@ -114,17 +113,15 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.names);
-      expect(spec.predicate.notation.max, 3);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
-    test('legacy max==0 becomes the count mode with max reset to a valid value', () {
+    test('legacy max==0 becomes the count mode', () {
       final map = _skillMap({'max': 0});
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.count);
-      expect(spec.predicate.notation.max, 3);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
     test('a current-format map is left untouched (idempotent)', () {
@@ -132,8 +129,7 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.count);
-      expect(spec.predicate.notation.max, 5);
-      expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+      expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
   });
 
@@ -171,7 +167,7 @@ void main() {
         'children': [child],
       };
       migrateLegacyColumnSpecMap(container);
-      expect((child['predicate'] as Map<String, dynamic>)['notation'], {'mode': 'starTotal', 'max': 3});
+      expect((child['predicate'] as Map<String, dynamic>)['notation'], {'mode': 'starTotal', 'max': 0});
     });
   });
 }

@@ -118,49 +118,42 @@ void main() {
     });
   });
 
-  group('a reset onto a tag-driven filter drops the absence display it no longer offers', () {
-    SkillColumnSpec skill({required bool selectByTag, ItemDisplayMode mode = ItemDisplayMode.normal}) =>
-        SkillColumnSpec(
-          id: 'id-s',
-          title: 'skill',
-          parser: SkillParser(),
-          predicate: AggregateSkillPredicate.any(),
-          selectByTag: selectByTag,
-          displayMode: mode,
-        );
+  group('a reset onto a tag-driven filter drops the marking of missing items it no longer offers', () {
+    SkillColumnSpec skill({required bool selectByTag, UnmetRows unmetRows = UnmetRows.filterOut}) => SkillColumnSpec(
+      id: 'id-s',
+      title: 'skill',
+      parser: SkillParser(),
+      predicate: AggregateSkillPredicate.any(),
+      selectByTag: selectByTag,
+      unmetRows: unmetRows,
+    );
 
-    test('absence falls back to normal when the default is tag-driven', () {
-      final spec = skill(selectByTag: false, mode: ItemDisplayMode.absence);
+    test('marking falls back to filtering when the default is tag-driven', () {
+      final spec = skill(selectByTag: false, unmetRows: UnmetRows.markMissing);
       final reset = spec.withFilterReset(skill(selectByTag: true)) as SkillColumnSpec;
       expect(reset.selectByTag, isTrue);
-      expect(reset.displayMode, ItemDisplayMode.normal);
+      expect(reset.unmetRows, UnmetRows.filterOut);
     });
 
-    test('other modes and non-tag defaults keep the display mode', () {
-      final difference = skill(selectByTag: false, mode: ItemDisplayMode.difference);
-      expect(
-        (difference.withFilterReset(skill(selectByTag: true)) as SkillColumnSpec).displayMode,
-        ItemDisplayMode.difference,
-      );
-      final absence = skill(selectByTag: false, mode: ItemDisplayMode.absence);
-      expect((absence.withFilterReset(null) as SkillColumnSpec).displayMode, ItemDisplayMode.absence);
+    test('a non-tag default keeps the marking', () {
+      final marking = skill(selectByTag: false, unmetRows: UnmetRows.markMissing);
+      expect((marking.withFilterReset(null) as SkillColumnSpec).unmetRows, UnmetRows.markMissing);
     });
   });
 
-  test('a factor column also drops absence when reset onto a tag-driven default', () {
-    FactorColumnSpec factor({required bool selectByTag, ItemDisplayMode mode = ItemDisplayMode.normal}) =>
-        FactorColumnSpec(
-          id: 'id-f',
-          title: 'factor',
-          parser: FactorSetParser(),
-          predicate: AggregateFactorSetPredicate.any(),
-          selectByTag: selectByTag,
-          displayMode: mode,
-        );
-    final spec = factor(selectByTag: false, mode: ItemDisplayMode.absence);
+  test('a factor column also drops the marking when reset onto a tag-driven default', () {
+    FactorColumnSpec factor({required bool selectByTag, UnmetRows unmetRows = UnmetRows.filterOut}) => FactorColumnSpec(
+      id: 'id-f',
+      title: 'factor',
+      parser: FactorSetParser(),
+      predicate: AggregateFactorSetPredicate.any(),
+      selectByTag: selectByTag,
+      unmetRows: unmetRows,
+    );
+    final spec = factor(selectByTag: false, unmetRows: UnmetRows.markMissing);
     final reset = spec.withFilterReset(factor(selectByTag: true)) as FactorColumnSpec;
     expect(reset.selectByTag, isTrue);
-    expect(reset.displayMode, ItemDisplayMode.normal);
+    expect(reset.unmetRows, UnmetRows.filterOut);
   });
 
   group('non-preset filters reset to accept-all', () {

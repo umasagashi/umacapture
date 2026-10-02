@@ -88,6 +88,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -328,6 +331,9 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
   @override
   final String? builderId;
 
+  @override
+  final String? presetDescription;
+
   SimpleLabelColumnBuilder({
     required this.title,
     required this.category,
@@ -336,7 +342,11 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
     this.rejects,
     this.cellAction,
     this.builderId,
+    this.presetDescription,
   }) : type = rejects != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
 
   @override
   SimpleLabelColumnSpec build(RefBase ref) {
@@ -350,4 +360,21 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
       builderId: builderId,
     );
   }
+}
+
+/// [ColumnSpec.typeDescription] of a simple-label column and [ColumnBuilder.typeDescription] of its builder,
+/// told apart by the value its parser reads. A parser no chip uses gets the sentence of the type alone.
+ColumnDescription _typeDescription(Parser parser) {
+  final subject = switch (parser) {
+    CampaignScenarioParser() => "campaign_scenario",
+    RecordTypeParser() => "record_type",
+    RaceStrategyParser() => "race_strategy",
+    _ => null,
+  };
+  return (
+    text: subject == null
+        ? "$tr_columns.type_descriptions.simple_label".tr()
+        : "$tr_columns.descriptions.labeled".tr(args: ["$tr_columns.$subject.title".tr()]),
+    truthTable: null,
+  );
 }

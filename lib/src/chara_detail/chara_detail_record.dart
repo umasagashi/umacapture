@@ -840,14 +840,25 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// record is not a derived value: the recognizer leaves all six cards zeroed when it cannot find the
   /// support card area, so a 0 stays 0. The new values and the new `format_version` come out as one
   /// record, so upgrading an upgraded record changes nothing.
+  ///
+  /// The steps apply in order, each selected by the stored major version. A new step is added here after
+  /// the last one, and each step stamps the version it reaches as a literal; the version the last step
+  /// reaches equals [recordFormatVersion].
   CharaDetailRecord upgradeFormat() {
-    if (Version.parse(metadata.formatVersion).major >= 2) {
-      return this;
+    final major = Version.parse(metadata.formatVersion).major;
+    var record = this;
+    if (major < 2) {
+      record = record._fromMajor1();
     }
+    return record;
+  }
+
+  /// The step from major 1 to "2.0.0": skill levels and support card ranks one lower.
+  CharaDetailRecord _fromMajor1() {
     final m = metadata;
     return CharaDetailRecord(
       Metadata(
-        recordFormatVersion,
+        "2.0.0",
         m.region,
         m.recordId,
         m.trainerId,

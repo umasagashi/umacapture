@@ -10,7 +10,6 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/item_cell.dart';
-import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -39,12 +38,11 @@ enum SkillNotationMode { names, count }
 @MappableClass()
 class SkillNotation with SkillNotationMappable {
   final SkillNotationMode mode;
-  final int max;
 
-  SkillNotation({this.mode = SkillNotationMode.names, this.max = 3});
+  SkillNotation({this.mode = SkillNotationMode.names});
 
-  SkillNotation copyWith({SkillNotationMode? mode, int? max}) {
-    return SkillNotation(mode: mode ?? this.mode, max: max ?? this.max);
+  SkillNotation copyWith({SkillNotationMode? mode}) {
+    return SkillNotation(mode: mode ?? this.mode);
   }
 }
 
@@ -68,7 +66,7 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
     : query = {},
       logic = SkillSetLogicMode.anyOf,
       min = 1,
-      notation = SkillNotation(max: 3),
+      notation = SkillNotation(),
       tags = {};
 
   AggregateSkillPredicate copyWith({
@@ -123,29 +121,108 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
 }
 
 @MappableEnum()
-enum SkillDialogElements { selection, selectionList, selectionTags, mode, notationMax }
+enum SkillDialogElements {
+  selection,
+  selectionList,
+  selectionTags,
+  mode,
+
+  /// The notation mode choice: hidden for a column fixed to its skills (the consolidation shortcut), which lists
+  /// too few items for it to matter. The name is a stored value, so it stays.
+  notationMax,
+}
+
+/// Capability of a column whose items are skills: the skill selection (hand-picked or by tag), its resolution
+/// against the current skill master, and the skills a record holds within it.
+mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
+  /// The hand-picked skills. Ignored while [selectByTag].
+  Set<int> get selectedSkillIds;
+
+  /// The tags that define the selection while [selectByTag].
+  Set<String> get skillTags;
+
+  /// When true, the selection is defined by [skillTags] rather than [selectedSkillIds]: it is resolved live
+  /// against the current skill master, so newly tagged skills are included automatically.
+  bool get selectByTag;
+
+  bool get showAvailableOnly;
+
+  /// Whether an empty selection shows every skill a record holds, rather than none.
+  bool get showAllWhenQueryIsEmpty;
+
+  Set<SkillDialogElements> get hiddenElements;
+
+  String get labelKey;
+
+  /// This column with its hand-picked skills or its tags replaced.
+  SkillItemsColumnSpec withSkillSelection({Set<int>? ids, Set<String>? tags});
+
+  /// The selected skill ids: the tags resolved against the current skill master while [selectByTag], the
+  /// hand-picked ones otherwise.
+  Set<int> resolvedSkillIds(RefBase ref) {
+    if (!selectByTag) {
+      return selectedSkillIds;
+    }
+    return ref.read(_skillTagQueryProvider(_skillTagsKey(skillTags)));
+  }
+
+  /// The skills [value] holds within the selection. An empty selection yields every skill when
+  /// [showAllWhenQueryIsEmpty] and none otherwise (e.g. a tag-driven column with no tag selected yet), mirroring
+  /// [FactorItemsColumnSpec.heldFactors].
+  List<Skill> heldSkills(RefBase ref, List<Skill> value) {
+    final ids = resolvedSkillIds(ref);
+    if (ids.isEmpty) {
+      return showAllWhenQueryIsEmpty ? value : [];
+    }
+    return value.where((e) => ids.contains(e.id)).toList();
+  }
+
+  /// The order the cell lists skills in: the selection's order first, then the master's.
+  ItemOrder itemOrder(RefBase ref) =>
+      ItemOrder(query: resolvedSkillIds(ref), masterRank: ref.watch(skillMasterRankProvider));
+
+  @override
+  @override
+  Map<int, int> heldItemStrengths(RefBase ref, List<Skill> value) => {
+    for (final skill in heldSkills(ref, value)) skill.id: 1,
+  };
+}
 
 @MappableClass(discriminatorValue: 'SkillColumnSpec', ignoreNull: true)
-class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable, ItemColumnSpec<List<Skill>> {
+class SkillColumnSpec extends ColumnSpec<List<Skill>>
+    with SkillColumnSpecMappable, ItemColumnSpec<List<Skill>>, SkillItemsColumnSpec, QueryItemColumnSpec<List<Skill>> {
   final Parser parser;
+  @override
   final String labelKey = LabelKeys.skill;
   final AggregateSkillPredicate predicate;
 
+  @override
   final bool showAllWhenQueryIsEmpty;
+  @override
   final bool showAvailableOnly;
+  @override
   final Set<SkillDialogElements> hiddenElements;
 
   /// When true, the column is defined by its tags rather than hand-picked skills:
   /// the query is resolved live from `predicate.tags` against the current skill
   /// master at evaluation time (so newly tagged skills are included automatically),
   /// and the individual skill list is hidden in the dialog.
+  @override
   final bool selectByTag;
 
   @override
-  final ItemDisplayMode displayMode;
+  Set<int> get selectedSkillIds => predicate.query;
 
   @override
-  final bool hideCommonItems;
+  Set<String> get skillTags => predicate.tags;
+
+  @override
+  SkillColumnSpec withSkillSelection({Set<int>? ids, Set<String>? tags}) => copyWith(
+    predicate: predicate.copyWith(query: ids, tags: tags),
+  );
+
+  @override
+  final UnmetRows unmetRows;
 
   @override
   final String id;
@@ -177,13 +254,15 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
     this.selectByTag = false,
-    this.displayMode = ItemDisplayMode.normal,
-    this.hideCommonItems = false,
+    this.unmetRows = UnmetRows.filterOut,
     this.hidden = false,
     this.description,
     this.width,
     this.builderId,
   });
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
@@ -195,13 +274,13 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   @override
-  bool get offersAbsenceDisplay => !selectByTag;
+  bool get offersMarkMissing => !selectByTag;
 
   @override
-  ColumnSpec withDisplayMode(ItemDisplayMode mode) => copyWith(displayMode: mode);
+  SkillColumnSpec withUnmetRows(UnmetRows value) => copyWith(unmetRows: value);
 
-  @override
-  ColumnSpec withHideCommonItems(bool hide) => copyWith(hideCommonItems: hide);
+  /// Whether the logic and the lower bound apply: the red marks read only the selected skills.
+  bool get usesLogic => !marksMissing;
 
   @override
   bool get hasFilter => true;
@@ -214,13 +293,12 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
               // shortcut) to the tag-driven mode when the user resets its filter.
               ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
               : copyWith(predicate: AggregateSkillPredicate.any(), selectByTag: false))
-          ._withOfferedDisplayMode();
+          ._withOfferedUnmetRows();
 
-  // Falls back to normal when the reset landed on a mode this column no longer
-  // offers (absence on a tag-driven column).
-  SkillColumnSpec _withOfferedDisplayMode() => !offersAbsenceDisplay && displayMode == ItemDisplayMode.absence
-      ? copyWith(displayMode: ItemDisplayMode.normal)
-      : this;
+  // Falls back to filtering when the reset landed on a column that no longer offers
+  // marking (a tag-driven column).
+  SkillColumnSpec _withOfferedUnmetRows() =>
+      !offersMarkMissing && marksMissing ? copyWith(unmetRows: UnmetRows.filterOut) : this;
 
   SkillColumnSpec copyWith({
     String? id,
@@ -231,8 +309,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     bool? showAvailableOnly,
     Set<SkillDialogElements>? hiddenElements,
     bool? selectByTag,
-    ItemDisplayMode? displayMode,
-    bool? hideCommonItems,
+    UnmetRows? unmetRows,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
@@ -247,8 +324,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
       selectByTag: selectByTag ?? this.selectByTag,
-      displayMode: displayMode ?? this.displayMode,
-      hideCommonItems: hideCommonItems ?? this.hideCommonItems,
+      unmetRows: unmetRows ?? this.unmetRows,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
@@ -268,7 +344,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     if (!selectByTag) {
       return predicate;
     }
-    return predicate.copyWith(query: ref.read(_skillTagQueryProvider(_skillTagsKey(predicate.tags))));
+    return predicate.copyWith(query: resolvedSkillIds(ref));
   }
 
   @override
@@ -283,91 +359,35 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     return values.map((e) => resolved.apply(e)).toList();
   }
 
-  /// Skills to display, honoring [showAllWhenQueryIsEmpty]: an empty query shows the
-  /// record's full skill list only when the flag is set (the plain skill column);
-  /// otherwise (e.g. a tag-driven column with no tag selected yet) it shows nothing,
-  /// mirroring [FactorColumnSpec._heldFactors].
-  List<Skill> _extract(AggregateSkillPredicate predicate, List<Skill> value) {
-    if (predicate.query.isEmpty && !showAllWhenQueryIsEmpty) {
-      return [];
-    }
-    return predicate.extract(value);
-  }
-
-  @override
-  bool hasQuerySelection(RefBase ref) => _resolved(ref).query.isNotEmpty;
-
   @override
   bool get notatesValueOnly => predicate.notation.mode == SkillNotationMode.count;
 
   @override
-  Set<int> heldItemIds(RefBase ref, List<Skill> value) => _extract(_resolved(ref), value).map((e) => e.id).toSet();
-
-  @override
-  TrinaCell plutoCell(RefBase ref, List<Skill> value) => itemCell(ref, value, const ItemCellContext.normal());
-
-  @override
-  TrinaCell itemCell(RefBase ref, List<Skill> value, ItemCellContext context) {
+  TrinaCell plutoCell(RefBase ref, List<Skill> value) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final predicate = _resolved(ref);
-    final order = ItemOrder(query: predicate.query, masterRank: ref.watch(skillMasterRankProvider));
-    final foundSkills = order.sort(_extract(predicate, value), (e) => e.id);
+    final order = itemOrder(ref);
+    final foundSkills = order.sort(heldSkills(ref, value), (e) => e.id);
     // A skill id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final skillNames = foundSkills.map((e) => nameOf(e.id)).toList();
-    final max = itemLimit(ref, predicate.notation.max);
-    // The value (sorting) and the CSV do not depend on the display mode.
+    // The value (sorting) and the CSV do not depend on whether missing items are marked.
     final csv = const CsvEncoder().convert([skillNames]);
-    final cellValue = notatesValueOnly
-        ? foundSkills.length.toString().padLeft(3, "0")
-        : (max == null ? skillNames : skillNames.partial(0, max)).join(", ");
+    final cellValue = notatesValueOnly ? foundSkills.length.toString().padLeft(3, "0") : skillNames.join(", ");
 
-    // Outside the normal display the count is drawn as the names, since a highlight belongs to an item.
+    // While marking missing skills the count is drawn as the names, since a red mark belongs to an item.
     final own = [for (final (i, skill) in foundSkills.indexed) OwnItem(skill.id, skillNames[i], strength: 1)];
-    final ItemCellData data = switch (context) {
-      _ when drawsSummary(context.mode) => ItemCellData(
-        items: const [],
-        summary: foundSkills.length.toString(),
-        csv: csv,
-      ),
-      NormalItemCellContext() => ItemCellData.limited(
-        [for (final item in own) CellItem(item.text, ItemState.normal)],
-        max,
-        hideCommon: false,
-        csv: csv,
-      ),
-      AbsenceItemCellContext() => ItemCellData.limited(
-        absenceItems(own, predicate.query, nameOf, order, perItemThreshold: false),
-        max,
-        hideCommon: false,
-        csv: csv,
-      ),
-      DifferenceItemCellContext(:final tally) => ItemCellData.limited(
-        differenceItems(own, tally, nameOf, order, strengthMax: 1),
-        max,
-        hideCommon: hideCommonItems,
-        csv: csv,
-      ),
-    };
+    final ItemCellData data = drawsSummary
+        ? ItemCellData(items: const [], summary: foundSkills.length.toString(), csv: csv)
+        : ItemCellData.listing(
+            marksMissing
+                ? missingMarkedItems(own, predicate.query, nameOf, order, perItemThreshold: false)
+                : [for (final item in own) CellItem(item.text, ItemState.normal)],
+            hideCommon: false,
+            csv: csv,
+          );
     return TrinaCell(value: cellValue)..setUserData(data);
-  }
-
-  @override
-  TrinaColumn plutoColumn(RefBase ref) {
-    return TrinaColumn(
-      title: title,
-      field: id,
-      type: TrinaColumnType.text(),
-      width: width ?? TrinaGridSettings.columnWidth,
-      enableContextMenu: false,
-      enableDropToResize: true,
-      enableColumnDrag: false,
-      enableEditingMode: false,
-      renderer: (TrinaColumnRendererContext context) {
-        return ItemCellText(context.cell.getUserData<ItemCellData>()!);
-      },
-    )..setUserData(this);
   }
 
   @override
@@ -380,9 +400,8 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     const sep = "\n";
     String modeText = "";
 
-    // Difference display ignores the logic and the lower bound, so their lines are left out.
-    final ignoresFilter = effectiveItemDisplayMode(ref, id, displayMode) == ItemDisplayMode.difference;
-    if (predicate.query.length >= 2 && !ignoresFilter) {
+    // While marking missing skills the logic and the lower bound are not used, so their lines are left out.
+    if (predicate.query.length >= 2 && usesLogic) {
       final selection = "$tr_skill.mode.${predicate.logic.name.snakeCase}.label".tr();
       modeText += "$sep${"-" * 10}";
       modeText += "$sep${"$tr_skill.mode.label".tr()}: $selection";
@@ -424,6 +443,7 @@ final _skillTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
 });
 
 final _clonedSpecProvider = SpecProviderAccessor<SkillColumnSpec>();
+final _selectionSpecProvider = SpecProviderAccessor<SkillItemsColumnSpec>();
 
 class _SelectedTags extends TagSelectionNotifier {
   _SelectedTags(this.specId);
@@ -432,22 +452,23 @@ class _SelectedTags extends TagSelectionNotifier {
 
   @override
   Set<String> build() {
-    final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
-    return Set.from(spec.predicate.tags);
+    final spec = ref.read(specCloneProvider(specId)) as SkillItemsColumnSpec;
+    return Set.from(spec.skillTags);
   }
 
   @override
   void toggle(String tag, {bool? shouldExists}) {
     super.toggle(tag, shouldExists: shouldExists);
-    final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
+    final spec = ref.read(specCloneProvider(specId)) as SkillItemsColumnSpec;
     if (!spec.selectByTag) {
       return;
     }
     // Tag-driven column: persist the chosen tags into the spec. The query is not
-    // stored — it is resolved live from the tags at evaluation time (see [_resolved]).
+    // stored — it is resolved live from the tags at evaluation time (see
+    // [SkillItemsColumnSpec.resolvedSkillIds]).
     ref
         .read(specCloneProvider(specId).notifier)
-        .update((s) => (s as SkillColumnSpec).copyWith(predicate: s.predicate.copyWith(tags: state)));
+        .update((s) => (s as SkillItemsColumnSpec).withSkillSelection(tags: state));
   }
 }
 
@@ -455,20 +476,22 @@ final _selectedTagsProvider = NotifierProvider.autoDispose.family<TagSelectionNo
   _SelectedTags.new,
 );
 
-class _SelectionSelector extends ConsumerStatefulWidget {
+/// The skill selection group of a column's dialog: the tag chips and, unless hidden, the individual skill list.
+/// Reads and writes the column only through [SkillItemsColumnSpec].
+class SkillSelectionGroup extends ConsumerStatefulWidget {
   final String specId;
 
-  const _SelectionSelector({required this.specId});
+  const SkillSelectionGroup({super.key, required this.specId});
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
+  ConsumerState<ConsumerStatefulWidget> createState() => _SkillSelectionGroupState();
 }
 
-class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
+class _SkillSelectionGroupState extends ConsumerState<SkillSelectionGroup> {
   String textQuery = "";
 
   List<SkillInfo> _watchCandidateSkills(String specId) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+    final spec = _selectionSpecProvider.watch(ref, specId);
     final info = ref.watch(spec.showAvailableOnly ? availableSkillInfoProvider : skillInfoProvider);
     final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
     final normalizedQuery = textQuery.toLowerCase().trim();
@@ -491,7 +514,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
     // A tag-driven column shows the chips without the NoteCard frame, and its tags
     // define the column (so a dedicated description); a normal column keeps them
     // inside the bordered note alongside the individual skill list.
-    if (_clonedSpecProvider.watch(ref, widget.specId).selectByTag) {
+    if (_selectionSpecProvider.watch(ref, widget.specId).selectByTag) {
       return Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -514,16 +537,14 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
   }
 
   Widget selectorWidget(BuildContext context) {
-    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
+    final selected = _selectionSpecProvider.watch(ref, widget.specId).selectedSkillIds.toSet();
     final candidates = _watchCandidateSkills(widget.specId);
     return SelectorWidget<SkillInfo>(
       description: Text("$tr_skill.selection.description".tr()),
       candidates: candidates,
       selected: selected,
       onSelected: (newSelected) {
-        _clonedSpecProvider.update(ref, widget.specId, (spec) {
-          return spec.copyWith(predicate: spec.predicate.copyWith(query: newSelected));
-        });
+        _selectionSpecProvider.update(ref, widget.specId, (spec) => spec.withSkillSelection(ids: newSelected));
       },
       onTextQueryChanged: (query) => setState(() => textQuery = query),
     );
@@ -531,7 +552,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final hiddenElements = _clonedSpecProvider.watch(ref, widget.specId).hiddenElements;
+    final hiddenElements = _selectionSpecProvider.watch(ref, widget.specId).hiddenElements;
     return FormGroup(
       title: Text("$tr_skill.selection.label".tr()),
       children: [
@@ -598,11 +619,11 @@ class _ModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return FormGroup(
-      title: Text("$tr_skill.mode.label".tr()),
+      title: Text("$tr_common.condition.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
-        DifferenceIgnoredSetting(
-          specId: specId,
+        UnusedWhileMarking(
+          unused: !_clonedSpecProvider.watch(ref, specId).usesLogic,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [logicChoiceWidget(context, ref), minCountWidget(context, ref)],
@@ -645,12 +666,8 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     super.dispose();
   }
 
-  /// Whether the column is in effect shown in a non-normal display mode, which
-  /// names every item whatever notation mode is stored.
-  bool _namesItems(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    return effectiveItemDisplayMode(ref.base, widget.specId, spec.displayMode) != ItemDisplayMode.normal;
-  }
+  /// Whether the column marks missing items, which names every item whatever notation mode is stored.
+  bool _namesItems(WidgetRef ref) => _clonedSpecProvider.watch(ref, widget.specId).marksMissing;
 
   Widget notationModeWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
@@ -668,41 +685,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           );
         });
       },
-    );
-  }
-
-  Widget notationMaxWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    final predicate = spec.predicate;
-    // The count mode renders a single number, so the per-cell skill limit has no
-    // effect. A non-normal display mode names the items even under the count mode,
-    // and the limit applies again. When both reasons hold, the count mode is named:
-    // it keeps the limit off whatever is selected.
-    final countOnly = predicate.notation.mode == SkillNotationMode.count && !_namesItems(ref);
-    // A column that selects items shows every one of them, so the limit applies
-    // only while nothing is selected.
-    final selecting = spec.hasQuerySelection(ref.base);
-    return FormTile(
-      title: Text("$tr_skill.notation.max.label".tr()),
-      description: Text("$tr_skill.notation.max.description".tr()),
-      trailing: Disabled(
-        disabled: countOnly || selecting,
-        tooltip: countOnly
-            ? "$tr_skill.notation.max.disabled_tooltip".tr()
-            : "$tr_common.notation.max_selected_tooltip".tr(),
-        child: IntStepperField(
-          min: 1,
-          max: 100,
-          value: predicate.notation.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
-              );
-            });
-          },
-        ),
-      ),
     );
   }
 
@@ -727,11 +709,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
-        ItemDisplaySelector(specId: widget.specId),
-        if (!hiddenElements.contains(SkillDialogElements.notationMax)) ...[
-          notationModeWidget(context, ref),
-          notationMaxWidget(ref),
-        ],
+        if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationModeWidget(context, ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
@@ -752,13 +730,15 @@ class SkillColumnSelector extends ConsumerWidget {
     return Column(
       children: [
         if (!hiddenElements.contains(SkillDialogElements.selection)) ...[
-          _SelectionSelector(specId: specId),
+          SkillSelectionGroup(specId: specId),
           const SizedBox(height: 32),
         ],
         if (!hiddenElements.contains(SkillDialogElements.mode)) ...[
           _ModeSelector(specId: specId),
           const SizedBox(height: 32),
         ],
+        UnmetRowsGroup(specId: specId),
+        const SizedBox(height: 32),
         _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
@@ -776,6 +756,13 @@ class SkillColumnBuilder extends ColumnBuilder {
 
   SkillColumnBuilder({required this.title, required this.category, required this.parser});
 
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
+
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
     return SkillColumnSpec(
@@ -783,6 +770,7 @@ class SkillColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       predicate: AggregateSkillPredicate.any(),
+      selectByTag: _selectByTag,
     );
   }
 }
@@ -794,6 +782,9 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
 
   @override
   final String? builderId;
+
+  @override
+  final String? presetDescription;
 
   @override
   final String title;
@@ -812,7 +803,15 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
     this.initialTags = const {},
     required this.initialIds,
     this.builderId,
+    this.presetDescription,
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
@@ -825,9 +824,10 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
         query: initialIds,
         logic: SkillSetLogicMode.anyOf,
         min: 1,
-        notation: SkillNotation(max: 3),
+        notation: SkillNotation(),
         tags: initialTags,
       ),
+      selectByTag: _selectByTag,
       hiddenElements: {
         if (initialTags.isEmpty) ...{
           SkillDialogElements.selection,
@@ -863,6 +863,9 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
   final String? builderId;
 
   @override
+  final String? presetDescription;
+
+  @override
   final String title;
 
   @override
@@ -873,10 +876,18 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
     required this.category,
     required this.parser,
     this.builderId,
+    this.presetDescription,
     this.initialTags = const {},
     this.hiddenElements = const {SkillDialogElements.selectionList, SkillDialogElements.mode},
     this.type = ColumnBuilderType.normal,
   });
+
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = true;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
@@ -885,11 +896,18 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       builderId: builderId,
-      predicate: AggregateSkillPredicate(notation: SkillNotation(max: 3), tags: initialTags),
-      selectByTag: true,
+      predicate: AggregateSkillPredicate(notation: SkillNotation(), tags: initialTags),
+      selectByTag: _selectByTag,
       hiddenElements: hiddenElements,
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a skill column and [ColumnBuilder.typeDescription] of its builders: whether it
+/// selects its skills by tag is all that tells them apart.
+ColumnDescription _typeDescription({required bool selectByTag}) => (
+  text: (selectByTag ? "$tr_columns.skill.tag_driven.description" : "$tr_columns.skill.description").tr(),
+  truthTable: null,
+);

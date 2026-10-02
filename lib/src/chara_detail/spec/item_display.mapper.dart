@@ -7,53 +7,49 @@
 
 part of 'item_display.dart';
 
-class ItemDisplayModeMapper extends EnumMapper<ItemDisplayMode> {
-  ItemDisplayModeMapper._();
+class UnmetRowsMapper extends EnumMapper<UnmetRows> {
+  UnmetRowsMapper._();
 
-  static ItemDisplayModeMapper? _instance;
-  static ItemDisplayModeMapper ensureInitialized() {
+  static UnmetRowsMapper? _instance;
+  static UnmetRowsMapper ensureInitialized() {
     if (_instance == null) {
-      MapperContainer.globals.use(_instance = ItemDisplayModeMapper._());
+      MapperContainer.globals.use(_instance = UnmetRowsMapper._());
     }
     return _instance!;
   }
 
-  static ItemDisplayMode fromValue(dynamic value) {
+  static UnmetRows fromValue(dynamic value) {
     ensureInitialized();
     return MapperContainer.globals.fromValue(value);
   }
 
   @override
-  ItemDisplayMode decode(dynamic value) {
+  UnmetRows decode(dynamic value) {
     switch (value) {
-      case r'normal':
-        return ItemDisplayMode.normal;
-      case r'absence':
-        return ItemDisplayMode.absence;
-      case r'difference':
-        return ItemDisplayMode.difference;
+      case r'filterOut':
+        return UnmetRows.filterOut;
+      case r'markMissing':
+        return UnmetRows.markMissing;
       default:
         throw MapperException.unknownEnumValue(value);
     }
   }
 
   @override
-  dynamic encode(ItemDisplayMode self) {
+  dynamic encode(UnmetRows self) {
     switch (self) {
-      case ItemDisplayMode.normal:
-        return r'normal';
-      case ItemDisplayMode.absence:
-        return r'absence';
-      case ItemDisplayMode.difference:
-        return r'difference';
+      case UnmetRows.filterOut:
+        return r'filterOut';
+      case UnmetRows.markMissing:
+        return r'markMissing';
     }
   }
 }
 
-extension ItemDisplayModeMapperExtension on ItemDisplayMode {
+extension UnmetRowsMapperExtension on UnmetRows {
   String toValue() {
-    ItemDisplayModeMapper.ensureInitialized();
-    return MapperContainer.globals.toValue<ItemDisplayMode>(this) as String;
+    UnmetRowsMapper.ensureInitialized();
+    return MapperContainer.globals.toValue<UnmetRows>(this) as String;
   }
 }
 
