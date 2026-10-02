@@ -25,8 +25,8 @@ part 'factor_difference.mapper.dart';
 const _unset = Object();
 
 /// A factor column that compares the displayed rows against each other within [subject]: each cell marks the
-/// selected factors it holds green, shaded by its star sum, and the ones it lacks that other rows of its group hold
-/// red. A factor every row of the group holds with the same star sum is common and may be hidden. It lists every
+/// selected factors it holds green, shaded by its star sum, and the ones it lacks that other displayed rows hold
+/// red. A factor every displayed row holds with the same star sum is common and may be hidden. It lists every
 /// row and filters none ([DifferenceItemColumnSpec]).
 @MappableClass(discriminatorValue: 'FactorDifferenceColumnSpec', ignoreNull: true)
 class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>

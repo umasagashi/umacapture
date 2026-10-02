@@ -1,6 +1,6 @@
 // Tests the skill and factor cells the grid build produces through
-// currentGridProvider: the difference columns' per-group tally (pinned rows
-// against pinned rows, the rest against the rest, filtered rows left out), the
+// currentGridProvider: the difference columns' tally over every displayed row
+// (pinned or not, filtered rows left out), the
 // red marks of a column that keeps its unmet rows, the factors counted as held
 // under the trainee subject, a filtering column's value, CSV and measured text,
 // and the item order (query, then master) and every item a cell holds, whether it selects or not.
@@ -215,8 +215,8 @@ _Built _build(
 void main() {
   setUpAll(initializeMappers);
 
-  group('a difference column tallies each group of displayed rows', () {
-    test('pinned rows are compared with pinned rows and the rest with the rest', () {
+  group('a difference column tallies every displayed row', () {
+    test('pinned rows are compared with every displayed row, pinned or not', () {
       final records = [
         _rec('a', skills: [1, 2]),
         _rec('b', skills: [1]),
@@ -224,24 +224,14 @@ void main() {
         _rec('d', skills: [2]),
       ];
       final g = _build(records, [_skillDiff('s')], pinned: {'a', 'b'});
-      expect(g.items('a', 's'), [('S1', _common), ('S2', _partialHeld)]);
-      expect(g.items('b', 's'), [('S1', _common), ('S2', _partialMissing)]);
-      expect(g.items('c', 's'), [('S1', _partialHeld), ('S2', _common)]);
-      expect(g.items('d', 's'), [('S1', _partialMissing), ('S2', _common)]);
+      // Unpinned d lacks S1, so pinned a and b do not share it as common.
+      expect(g.items('a', 's'), [('S1', _partialHeld), ('S2', _partialHeld)]);
+      expect(g.items('b', 's'), [('S1', _partialHeld), ('S2', _partialMissing)]);
+      expect(g.items('c', 's'), [('S1', _partialHeld), ('S2', _partialHeld)]);
+      expect(g.items('d', 's'), [('S1', _partialMissing), ('S2', _partialHeld)]);
     });
 
-    test('a single pinned row forms a group of one, so all of its items are common', () {
-      final records = [
-        _rec('a', skills: [1, 2]),
-        _rec('b', skills: [1]),
-        _rec('c', skills: [3]),
-      ];
-      final g = _build(records, [_skillDiff('s')], pinned: {'a'});
-      expect(g.items('a', 's'), [('S1', _common), ('S2', _common)]);
-      expect(g.items('b', 's'), [('S1', _partialHeld), ('S3', _partialMissing)]);
-    });
-
-    test('a pinned row a filter hides is not part of its group', () {
+    test('a pinned row a filter hides is not compared', () {
       final records = [
         _rec('a', skills: [1, 2]),
         _rec('b', skills: [1, 3]),
@@ -281,7 +271,7 @@ void main() {
       });
     });
 
-    test("a factor's shade tops out at the largest star total its own group holds it at", () {
+    test("a factor's shade tops out at the largest star total any displayed row holds it at", () {
       // Pinned a, b hold F1 at 1 and 5; unpinned c, d hold it at 2 and 2, and F3 at 1 and 1.
       final records = [
         _rec('a', self: [const Factor(1, 1)]),
@@ -290,12 +280,13 @@ void main() {
         _rec('d', self: [const Factor(1, 2), const Factor(3, 1)]),
       ];
       final g = _build(records, [_factorDiff('f')], pinned: {'a', 'b'});
+      // Unpinned c's F1 shade is scaled by pinned b's 5.
       expect(g.data('c', 'f').items, [
-        const CellItem('F1(2)', _common, strength: 2, strengthMax: 2),
-        const CellItem('F3(1)', _common, strength: 1, strengthMax: 1),
+        const CellItem('F1(2)', _partialHeld, strength: 2, strengthMax: 5),
+        const CellItem('F3(1)', _partialHeld, strength: 1, strengthMax: 1),
       ]);
-      expect(g.data('a', 'f').items, [const CellItem('F1(1)', _partialHeld, strength: 1, strengthMax: 5)]);
-      expect(g.data('b', 'f').items, [const CellItem('F1(5)', _partialHeld, strength: 5, strengthMax: 5)]);
+      expect(g.items('a', 'f'), [('F1(1)', _partialHeld), ('F3(0)', _partialMissing)]);
+      expect(g.data('b', 'f').items.first, const CellItem('F1(5)', _partialHeld, strength: 5, strengthMax: 5));
     });
   });
 

@@ -17,15 +17,15 @@ enum ItemState {
   /// The record has a queried item but below the per-item threshold (red). A column that marks missing items, factors only.
   short,
 
-  /// Every record of the group has the item with the same strength (green, shaded by strength, may be hidden). A
+  /// Every compared record has the item with the same strength (green, shaded by strength, may be hidden). A
   /// difference column.
   common,
 
-  /// Some records of the group have the item, or every record does at differing strengths, this one included
+  /// Some compared records have the item, or every record does at differing strengths, this one included
   /// (green, shaded by strength). A difference column.
   partialHeld,
 
-  /// Some records of the group have the item, this one not (red placeholder). A difference column.
+  /// Some compared records have the item, this one not (red placeholder). A difference column.
   partialMissing,
 }
 
@@ -39,7 +39,7 @@ class CellItem {
   /// Input to the green shade of [ItemState.common] and [ItemState.partialHeld]; 0 for every other state.
   final int strength;
 
-  /// Top of the shade scale for [strength]: the item's [ItemTally.maxStrengthOf] in the compared group; 0 for every
+  /// Top of the shade scale for [strength]: the item's [ItemTally.maxStrengthOf] over the compared rows; 0 for every
   /// other state.
   final int strengthMax;
 
@@ -77,8 +77,8 @@ class OwnItem {
   const OwnItem(this.id, this.text, {this.meetsQuery = true, this.strength = 0});
 }
 
-/// How many rows of a group hold each item of one column, the strongest holding of each, and which items the group
-/// has in common.
+/// How many of the compared rows hold each item of one column, the strongest holding of each, and which items
+/// they have in common.
 @immutable
 class ItemTally {
   final int rowCount;
@@ -86,11 +86,11 @@ class ItemTally {
   /// Item id to the number of rows holding it, in the order the ids were first seen.
   final Map<int, int> holders;
 
-  /// Ids of the items every row of the group holds with the same strength (for a factor, the same star sum).
+  /// Ids of the items every compared row holds with the same strength (for a factor, the same star sum).
   /// An item every row holds at differing strengths is not common.
   final Set<int> common;
 
-  /// Item id to the largest strength any row of the group holds it at (for a factor, the largest star sum).
+  /// Item id to the largest strength any compared row holds it at (for a factor, the largest star sum).
   final Map<int, int> maxStrengths;
 
   const ItemTally._(this.rowCount, this.holders, this.common, this.maxStrengths);
@@ -227,10 +227,10 @@ List<CellItem> missingMarkedItems(
   return [for (final (_, item) in order.sort(items, (e) => e.$1)) item];
 }
 
-/// Items of a difference-display cell against the group's [tally]: the record's own items as
+/// Items of a difference-display cell against the compared rows' [tally]: the record's own items as
 /// [ItemState.common] (the tally's [ItemTally.common]) or [ItemState.partialHeld], both shaded by the item's
-/// strength against the strongest holding of that item in the group ([ItemTally.maxStrengthOf]), and a
-/// [ItemState.partialMissing] placeholder for each item some but not all rows of the group hold, together in
+/// strength against the strongest holding of that item among them ([ItemTally.maxStrengthOf]), and a
+/// [ItemState.partialMissing] placeholder for each item some but not all compared rows hold, together in
 /// [order], so a row's cell does not depend on the row order. [placeholderOf] gives a placeholder's text.
 List<CellItem> differenceItems(
   List<OwnItem> own,

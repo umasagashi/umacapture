@@ -25,7 +25,7 @@ part 'skill_difference.mapper.dart';
 const _unset = Object();
 
 /// A skill column that compares the displayed rows against each other: each cell marks the selected skills it
-/// holds green and the ones it lacks that other rows of its group hold red. A skill every row of the group holds is
+/// holds green and the ones it lacks that other displayed rows hold red. A skill every displayed row holds is
 /// common and may be hidden. It lists every row and filters none ([DifferenceItemColumnSpec]).
 @MappableClass(discriminatorValue: 'SkillDifferenceColumnSpec', ignoreNull: true)
 class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>

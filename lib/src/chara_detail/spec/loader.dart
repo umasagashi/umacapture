@@ -1024,19 +1024,13 @@ Grid _buildGrid(
 
   final visibleIndices = rowConditions.indexed.where((e) => e.$2).map((e) => e.$1).toList();
 
-  // A difference column compares each displayed row against the displayed rows of its own group: pinned rows
-  // against pinned rows, the rest against the rest. Each row's tally is built from the group the row is in.
-  bool isPinned(int rowIndex) => pinnedIds.contains(recordList[rowIndex].id);
-  final groups = visibleIndices.groupListsBy(isPinned);
-  final tallies = <String, Map<bool, ItemTally>>{
+  // A difference column compares each displayed row against every displayed row, pinned or not.
+  final tallies = <String, ItemTally>{
     for (final spec in visibleSpecs)
       if (spec is DifferenceItemColumnSpec)
-        spec.id: {
-          for (final MapEntry(key: pinned, value: rowIndices) in groups.entries)
-            pinned: ItemTally.of(
-              rowIndices.map((rowIndex) => spec.heldItemStrengths(ref, parsedById[spec.id]![rowIndex])),
-            ),
-        },
+        spec.id: ItemTally.of(
+          visibleIndices.map((rowIndex) => spec.heldItemStrengths(ref, parsedById[spec.id]![rowIndex])),
+        ),
   };
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
@@ -1045,7 +1039,7 @@ Grid _buildGrid(
     }
     final value = parsedById[spec.id]![rowIndex];
     if (spec is DifferenceItemColumnSpec) {
-      return spec.differenceCell(ref, value, tallies[spec.id]![isPinned(rowIndex)]!);
+      return spec.differenceCell(ref, value, tallies[spec.id]!);
     }
     return spec.plutoCell(ref, value);
   }

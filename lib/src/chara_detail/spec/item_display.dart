@@ -78,7 +78,7 @@ mixin QueryItemColumnSpec<T> on ItemColumnSpec<T> {
 }
 
 /// Capability of an item column that compares the displayed rows against each other rather than against a query:
-/// each cell marks the items only some rows of its group hold. It does not filter rows ([filtersRows] is false),
+/// each cell marks the items only some displayed rows hold. It does not filter rows ([filtersRows] is false),
 /// so it has no pass count and no container accepts it as a child.
 mixin DifferenceItemColumnSpec<T> on ItemColumnSpec<T> {
   /// Whether common items ([ItemTally.common]: every compared row holds them with the same strength) are left out
@@ -94,7 +94,7 @@ mixin DifferenceItemColumnSpec<T> on ItemColumnSpec<T> {
   @override
   List<bool> evaluate(RefBase ref, List<T> values) => List<bool>.filled(values.length, true);
 
-  /// The cell of [value] compared against [tally], the item holdings of the displayed rows in the row's group.
+  /// The cell of [value] compared against [tally], the item holdings of every displayed row.
   TrinaCell differenceCell(RefBase ref, T value, ItemTally tally);
 
   /// Outside the grid build there is no group to compare against, so the cell is drawn against the row alone.
