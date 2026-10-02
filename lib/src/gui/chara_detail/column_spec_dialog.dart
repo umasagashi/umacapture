@@ -127,8 +127,24 @@ class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch>
 // ignore: constant_identifier_names
 const tr_unmet_rows = "$tr_chara_detail.column_predicate.common.unmet_rows";
 
+/// The mode (モード) group of a skill or factor column, between its condition and notation groups: what the
+/// column does with a row that does not meet its query.
+class UnmetRowsGroup extends StatelessWidget {
+  final String specId;
+
+  const UnmetRowsGroup({super.key, required this.specId});
+
+  @override
+  Widget build(BuildContext context) {
+    return FormGroup(
+      title: Text("$tr_chara_detail.column_predicate.common.mode.label".tr()),
+      children: [UnmetRowsChoice(specId: specId)],
+    );
+  }
+}
+
 /// The choice of what a skill or factor column does with a row that does not meet its query
-/// ([QueryItemColumnSpec.unmetRows]), at the head of the notation (表示) group.
+/// ([QueryItemColumnSpec.unmetRows]), the one item of [UnmetRowsGroup].
 ///
 /// Marking is refused for a column whose items come from tags ([QueryItemColumnSpec.offersMarkMissing]) and for a
 /// column nested under a logic column, which hands its parent only a row condition. Like the notation mode, a
@@ -259,6 +275,31 @@ class _ColumnDescriptionFieldState extends ConsumerState<ColumnDescriptionField>
   }
 }
 
+/// What the column is for, at the head of its dialog: the description (and truth table) its chip in the add-column
+/// dialog shows as a tooltip, or its type's description when the column does not record its chip.
+class _ColumnDescriptionHeader extends ConsumerWidget {
+  final ColumnSpec spec;
+
+  const _ColumnDescriptionHeader({required this.spec});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final description = columnDescriptionOf(ref.base, spec);
+    final truthTable = description.truthTable;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(description.text, style: Theme.of(context).textTheme.bodyMedium),
+        if (truthTable != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TruthTable(rows: truthTable, color: Theme.of(context).hintColor),
+          ),
+      ],
+    );
+  }
+}
+
 class ColumnSpecDialog extends ConsumerStatefulWidget {
   final ColumnSpec spec;
 
@@ -307,7 +348,16 @@ class _ColumnSpecDialogState extends ConsumerState<ColumnSpecDialog> {
       child: CardDialog(
         dialogTitle: "$tr_chara_detail.column_predicate.dialog.title".tr(),
         closeButtonTooltip: "$tr_chara_detail.column_predicate.dialog.close_button.tooltip".tr(),
-        content: KeyedSubtree(key: ValueKey(_resetEpoch), child: widget.spec.selector(_onDecided)),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: _ColumnDescriptionHeader(spec: widget.spec),
+            ),
+            KeyedSubtree(key: ValueKey(_resetEpoch), child: widget.spec.selector(_onDecided)),
+          ],
+        ),
         bottom: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

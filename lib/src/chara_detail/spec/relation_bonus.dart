@@ -146,6 +146,9 @@ class RelationBonusColumnSpec extends ColumnSpec<RelationBonusStatus> with Relat
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -384,7 +387,14 @@ class RelationBonusColumnBuilder extends ColumnBuilder {
   RelationBonusColumnBuilder({required this.title, required this.category});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   RelationBonusColumnSpec build(RefBase ref) {
     return RelationBonusColumnSpec(id: const Uuid().v4(), title: title, predicate: IsInRangeIntegerPredicate());
   }
 }
+
+/// [ColumnSpec.typeDescription] of a relation-bonus column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() =>
+    (text: "$tr_columns.descriptions.ranged".tr(args: ["$tr_columns.relation_bonus.title".tr()]), truthTable: null);

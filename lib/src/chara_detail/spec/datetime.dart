@@ -97,6 +97,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -352,6 +355,9 @@ class DateTimeColumnBuilder extends ColumnBuilder {
   DateTimeColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   DateTimeColumnSpec build(RefBase ref) {
     return DateTimeColumnSpec(
       id: const Uuid().v4(),
@@ -360,4 +366,20 @@ class DateTimeColumnBuilder extends ColumnBuilder {
       predicate: IsInRangeDateTimePredicate(),
     );
   }
+}
+
+/// [ColumnSpec.typeDescription] of a date column and [ColumnBuilder.typeDescription] of its builder, told apart by the
+/// value its parser reads. A parser no chip uses gets the sentence of the type alone.
+ColumnDescription _typeDescription(Parser parser) {
+  final subject = switch (parser) {
+    TrainedDateParser() => "trained_date",
+    CapturedDateParser() => "captured_date",
+    _ => null,
+  };
+  return (
+    text: subject == null
+        ? "$tr_columns.type_descriptions.date_time".tr()
+        : "$tr_columns.descriptions.dated".tr(args: ["$tr_columns.$subject.title".tr()]),
+    truthTable: null,
+  );
 }

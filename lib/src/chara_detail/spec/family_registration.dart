@@ -182,6 +182,9 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -524,6 +527,9 @@ class FamilyRegistrationColumnBuilder extends ColumnBuilder {
   FamilyRegistrationColumnBuilder({required this.title, required this.category});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   FamilyRegistrationColumnSpec build(RefBase ref) {
     return FamilyRegistrationColumnSpec(
       id: const Uuid().v4(),
@@ -532,3 +538,6 @@ class FamilyRegistrationColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a family-registration column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() => (text: "$tr_columns.family_registration.description".tr(), truthTable: null);

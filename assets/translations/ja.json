@@ -555,7 +555,7 @@
             },
             "column_spec": {
                 "dialog": {
-                    "title": "表示項目の選択",
+                    "title": "新規カラムの追加",
                     "close_button": {
                         "tooltip": "追加せずにキャンセル"
                     },
@@ -564,12 +564,12 @@
                         "trainee": "",
                         "status": "",
                         "aptitude": "",
-                        "skill": "差分の列は行を絞り込みません。",
-                        "factor": "差分の列は行を絞り込みません。",
+                        "skill": "",
+                        "factor": "",
                         "campaign": "",
                         "metadata": "",
                         "script": "",
-                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。差分の列と赤で示す列は入れられません。"
+                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。差分の列と不適合表示の列は入れられません。"
                     },
                     "add_all_button": {
                         "label": "全部",
@@ -596,7 +596,6 @@
             },
             "column_predicate": {
                 "difference": {
-                    "description": "固定行は固定行どうし、他は他どうしで比べ、自分が持つ項目を緑、他の行だけが持つ項目を赤で示します。",
                     "hide_common": {
                         "label": "共通の項目を隠す",
                         "description": "比べる行のすべてが持ち、因子は星の合計も同じ項目を出しません。"
@@ -608,7 +607,7 @@
                     "description": "この列の定義を読み込めませんでした。形式が古いか壊れている可能性があります。このまま閉じると現状のまま保持されます。不要であれば「列を削除」してください。"
                 },
                 "dialog": {
-                    "title": "フィルタカスタマイズ",
+                    "title": "カラムカスタマイズ",
                     "ok_button": {
                         "label": "OK",
                         "tooltip": "この設定でテーブルに反映",
@@ -656,20 +655,26 @@
                             "same_as_max": "無制限"
                         }
                     },
+                    "condition": {
+                        "label": "条件"
+                    },
+                    "mode": {
+                        "label": "モード"
+                    },
                     "unmet_rows": {
-                        "label": "条件を満たさない行を",
+                        "label": "不適合項目",
                         "description": "条件を満たさない行の扱いを選びます。",
                         "filter_out": {
-                            "label": "絞り込む（表示しない）",
+                            "label": "フィルタ",
                             "tooltip": "条件を満たす行だけを表示します"
                         },
                         "mark_missing": {
-                            "label": "残して、足りない項目を赤で示す",
+                            "label": "不適合表示",
                             "tooltip": "持っていない項目と、条件に届かない因子を赤で示します",
                             "disabled_tooltip": "タグ指定の列と論理列の中の列では使えません"
                         },
                         "unused_while_marking": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は使いません",
-                        "marker": "条件を満たさない行: 残して赤で示す"
+                        "marker": "不適合項目: 不適合表示"
                     },
                     "notation": {
                         "show": {
@@ -677,6 +682,7 @@
                             "tooltip": "オフにするとテーブルで列を非表示にします。非表示でも絞り込みは効きます。"
                         },
                         "hidden_marker": "非表示",
+                        "pass_count_marker": "全{total}件のうち、この列の条件を満たすのは{count}件です。",
                         "tooltip_field": {
                             "label": "説明",
                             "tooltip": "列チップにマウスを乗せたときに表示される説明文を指定します。",
@@ -796,7 +802,6 @@
                         }
                     },
                     "mode": {
-                        "label": "モード",
                         "template": "現在の条件：選択した因子{selection}、{subject}で{count}",
                         "logic": {
                             "label": "対象",
@@ -830,7 +835,7 @@
                             "description": "因子を数える範囲を指定します。"
                         },
                         "element": {
-                            "label": "条件",
+                            "label": "判定基準",
                             "star_only": {
                                 "label": "星合計",
                                 "description": "星{star}以上の"
@@ -1085,7 +1090,8 @@
             },
             "columns": {
                 "character": {
-                    "title": "ウマ娘"
+                    "title": "ウマ娘",
+                    "description": "ウマ娘を表示し、選んだウマ娘で絞り込めます。"
                 },
                 "evaluation": {
                     "title": "評価点"
@@ -1094,7 +1100,8 @@
                     "title": "ランク",
                     "shortcuts": {
                         "less_than_a": {
-                            "title": "B以下"
+                            "title": "B以下",
+                            "description": "ランクがB以下の行に絞り込みます。"
                         }
                     }
                 },
@@ -1163,44 +1170,57 @@
                 },
                 "skill": {
                     "title": "スキル",
+                    "description": "スキルを表示し、選んだスキルで絞り込めます。",
                     "tag_driven": {
-                        "title": "タグ指定スキル"
+                        "title": "タグ指定スキル",
+                        "description": "タグで選んだスキルを表示し、絞り込めます。"
                     },
                     "difference": {
                         "title": "スキル差分",
+                        "description": "表示中の行同士でスキルを比べ、違いを色分けして表示します。行は絞り込みません。",
                         "tag_driven": {
-                            "title": "タグ指定スキル差分"
+                            "title": "タグ指定スキル差分",
+                            "description": "タグで選んだスキルを、表示中の行同士で比べ、違いを色分けして表示します。行は絞り込みません。"
                         }
                     },
                     "shortcuts": {
                         "status_up": {
-                            "title": "緑スキル"
+                            "title": "緑スキル",
+                            "description": "緑スキルを持つ行に絞り込みます。"
                         },
                         "consolidation": {
-                            "title": "地固め"
+                            "title": "地固め",
+                            "description": "地固めを持つ行に絞り込みます。"
                         }
                     }
                 },
                 "factor": {
                     "title": "因子",
+                    "description": "因子を表示し、選んだ因子で絞り込めます。",
                     "tag_driven": {
-                        "title": "タグ指定因子"
+                        "title": "タグ指定因子",
+                        "description": "タグで選んだ因子を表示し、絞り込めます。"
                     },
                     "difference": {
                         "title": "因子差分",
+                        "description": "表示中の行同士で因子を比べ、違いを色分けして表示します。行は絞り込みません。",
                         "tag_driven": {
-                            "title": "タグ指定因子差分"
+                            "title": "タグ指定因子差分",
+                            "description": "タグで選んだ因子を、表示中の行同士で比べ、違いを色分けして表示します。行は絞り込みません。"
                         }
                     },
                     "shortcuts": {
                         "status": {
-                            "title": "青因子"
+                            "title": "青因子",
+                            "description": "青因子を表示します。"
                         },
                         "aptitude": {
-                            "title": "赤因子"
+                            "title": "赤因子",
+                            "description": "赤因子を表示します。"
                         },
                         "scenario": {
-                            "title": "シナリオ因子"
+                            "title": "シナリオ因子",
+                            "description": "シナリオ因子を持つ行に絞り込みます。"
                         },
                         "short_range": {
                             "title": "短距離"
@@ -1242,6 +1262,7 @@
                 },
                 "family_registration": {
                     "title": "家系登録状況",
+                    "description": "家系に登録済みの親・祖父母の数を表示し、絞り込めます。",
                     "slots": {
                         "parent1": "左親",
                         "grandparent11": "左左祖",
@@ -1272,16 +1293,21 @@
                     }
                 },
                 "rating": {
-                    "title": "レーティング"
+                    "title": "レーティング",
+                    "description": "評価を表示し、範囲で絞り込めます。セルをクリックすると評価を付けられます。",
+                    "add_description": "新しい評価データを作り、その列を追加します。"
                 },
                 "memo": {
-                    "title": "メモ"
+                    "title": "メモ",
+                    "description": "メモを表示し、検索で絞り込めます。セルをクリックするとメモを書き込めます。",
+                    "add_description": "新しいメモデータを作り、その列を追加します。"
                 },
                 "captured_date": {
                     "title": "キャプチャ日"
                 },
                 "script": {
-                    "title": "スクリプト"
+                    "title": "スクリプト",
+                    "description": "スクリプトで行を絞り込み、表示する値を計算します。"
                 },
                 "logic": {
                     "and": {
@@ -1305,6 +1331,22 @@
                     "xnor": {
                         "title": "XNOR"
                     }
+                },
+                "descriptions": {
+                    "ranged": "{}を表示し、範囲で絞り込めます。",
+                    "aptitude": "{}適性を表示し、範囲で絞り込めます。",
+                    "aptitude_s": "{}適性がSの行に絞り込みます。",
+                    "labeled": "{}を表示し、選んだ値で絞り込めます。",
+                    "strategy": "作戦が{}の行に絞り込みます。",
+                    "dated": "{}を表示し、期間で絞り込めます。",
+                    "factor_distance": "{}因子を持つ行に絞り込みます。"
+                },
+                "type_descriptions": {
+                    "ranged_integer": "数値を表示し、範囲で絞り込めます。",
+                    "ranged_label": "値を表示し、範囲で絞り込めます。",
+                    "simple_label": "値を表示し、選んだ値で絞り込めます。",
+                    "date_time": "日付を表示し、期間で絞り込めます。",
+                    "race_grade": "選んだレースの勝利数を表示し、範囲で絞り込めます。"
                 }
             },
             "context_menu": {

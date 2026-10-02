@@ -173,6 +173,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -685,6 +688,16 @@ class RatingColumnBuilder extends ColumnBuilder {
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  // A chip states what pressing it does, while the column dialog states what the column is. A builder without a
+  // [storageKey] creates new rating data when pressed (the "add" chip, and the plain chip while no data exists yet), so
+  // its tooltip says that; the column it creates keeps [typeDescription] as its dialog heading.
+  @override
+  ColumnDescription get description =>
+      storageKey == null ? (text: "$tr_columns.rating.add_description".tr(), truthTable: null) : typeDescription;
+
+  @override
   RatingColumnSpec build(RefBase ref) {
     String? actualKey = storageKey;
     if (actualKey == null) {
@@ -701,3 +714,6 @@ class RatingColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a rating column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() => (text: "$tr_columns.rating.description".tr(), truthTable: null);

@@ -118,6 +118,9 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -251,7 +254,7 @@ class FactorDifferenceColumnSelector extends ConsumerWidget {
         FactorSelectionGroup(specId: specId),
         const SizedBox(height: 32),
         FormGroup(
-          title: Text("$tr_factor.mode.label".tr()),
+          title: Text("$tr_common.condition.label".tr()),
           children: [FactorSubjectChoice(specId: specId)],
         ),
         const SizedBox(height: 32),
@@ -323,7 +326,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_common.notation.label".tr()),
-      description: NoteCard(description: Text("$tr_difference.description".tr())),
       children: [
         DifferenceCommonItemsSwitch(specId: widget.specId),
         notationChoiceWidget(ref),
@@ -356,6 +358,9 @@ class FactorDifferenceColumnBuilder extends ColumnBuilder {
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec<FactorSet> build(RefBase ref) {
     return FactorDifferenceColumnSpec(
       id: const Uuid().v4(),
@@ -370,3 +375,14 @@ class FactorDifferenceColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a factor difference column and [ColumnBuilder.typeDescription] of its builder:
+/// whether it selects its factors by tag is all that tells them apart.
+ColumnDescription _typeDescription({required bool selectByTag}) => (
+  text:
+      (selectByTag
+              ? "$tr_columns.factor.difference.tag_driven.description"
+              : "$tr_columns.factor.difference.description")
+          .tr(),
+  truthTable: null,
+);

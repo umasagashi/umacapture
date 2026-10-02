@@ -70,6 +70,9 @@ class RaceGradeWinningCountColumnSpec extends ColumnSpec<int> with RaceGradeWinn
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(grade);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -348,6 +351,9 @@ class RaceGradeWinningCountColumnBuilder extends ColumnBuilder {
   RaceGradeWinningCountColumnBuilder({required this.title, required this.category, this.grade = "grade_g1"});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(grade);
+
+  @override
   RaceGradeWinningCountColumnSpec build(RefBase ref) {
     return RaceGradeWinningCountColumnSpec(
       id: const Uuid().v4(),
@@ -357,3 +363,13 @@ class RaceGradeWinningCountColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a race-grade winning-count column and [ColumnBuilder.typeDescription] of its
+/// builder, told apart by the grade it counts. A grade no chip uses gets the sentence of the type alone.
+ColumnDescription _typeDescription(String grade) => (
+  text: switch (grade) {
+    "grade_g1" => "$tr_columns.descriptions.ranged".tr(args: ["$tr_columns.race_winning_count_g1.title".tr()]),
+    _ => "$tr_columns.type_descriptions.race_grade".tr(),
+  },
+  truthTable: null,
+);

@@ -14,6 +14,63 @@ import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
 
+/// A leading info icon followed by dimmed guidance text: the add-column dialog's top tip and category notes.
+class HintLine extends StatelessWidget {
+  final String text;
+
+  const HintLine(this.text, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Symbols.info_rounded, size: 18, color: theme.hintColor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+        ),
+      ],
+    );
+  }
+}
+
+/// A truth table (header row first) as a compact bordered table drawn in [color], so it reads on whatever it sits on:
+/// a tooltip's background or the dialog's surface.
+class TruthTable extends StatelessWidget {
+  final List<List<String>> rows;
+  final Color color;
+
+  const TruthTable({super.key, required this.rows, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final cellStyle = (Theme.of(context).textTheme.bodySmall ?? const TextStyle()).copyWith(
+      color: color,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final headerStyle = cellStyle.copyWith(fontWeight: FontWeight.bold);
+    return Table(
+      defaultColumnWidth: const IntrinsicColumnWidth(),
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      border: TableBorder.symmetric(inside: BorderSide(color: color.withValues(alpha: 0.4), width: 0.5)),
+      children: [
+        for (final (rowIndex, row) in rows.indexed)
+          TableRow(
+            children: [
+              for (final cell in row)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: Text(cell, style: rowIndex == 0 ? headerStyle : cellStyle, textAlign: TextAlign.center),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
 class FormGroup extends ConsumerWidget {
   final Widget title;
   final Widget? description;

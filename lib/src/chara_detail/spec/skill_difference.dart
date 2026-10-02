@@ -103,6 +103,9 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -281,7 +284,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_common.notation.label".tr()),
-      description: NoteCard(description: Text("$tr_difference.description".tr())),
       children: [
         DifferenceCommonItemsSwitch(specId: widget.specId),
         notationTitleWidget(ref),
@@ -313,6 +315,9 @@ class SkillDifferenceColumnBuilder extends ColumnBuilder {
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
     return SkillDifferenceColumnSpec(
       id: const Uuid().v4(),
@@ -327,3 +332,12 @@ class SkillDifferenceColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a skill difference column and [ColumnBuilder.typeDescription] of its builder:
+/// whether it selects its skills by tag is all that tells them apart.
+ColumnDescription _typeDescription({required bool selectByTag}) => (
+  text:
+      (selectByTag ? "$tr_columns.skill.difference.tag_driven.description" : "$tr_columns.skill.difference.description")
+          .tr(),
+  truthTable: null,
+);

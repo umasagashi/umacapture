@@ -1,4 +1,5 @@
 import 'package:dart_mappable/dart_mappable.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
@@ -29,6 +30,9 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     super.width,
     super.builderId,
   });
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription();
 
   @override
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
@@ -103,6 +107,9 @@ class CharaRankColumnBuilder extends ColumnBuilder {
   @override
   final String? builderId;
 
+  @override
+  final String? presetDescription;
+
   CharaRankColumnBuilder({
     required this.title,
     required this.category,
@@ -110,7 +117,11 @@ class CharaRankColumnBuilder extends ColumnBuilder {
     this.min,
     this.max,
     this.builderId,
+    this.presetDescription,
   }) : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription();
 
   @override
   CharaRankColumnSpec build(RefBase ref) {
@@ -124,3 +135,7 @@ class CharaRankColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a rank column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() =>
+    (text: "$tr_columns.descriptions.ranged".tr(args: ["$tr_columns.chara_rank.title".tr()]), truthTable: null);

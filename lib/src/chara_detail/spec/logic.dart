@@ -118,6 +118,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   LogicColumnSpec withChildren(List<ColumnSpec> children) => copyWith(children: children);
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(logic);
+
+  @override
   LogicColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -319,35 +322,7 @@ class LogicColumnBuilder extends ColumnBuilder {
   LogicColumnBuilder({required this.title, required this.logic, this.category = ColumnCategory.logic});
 
   @override
-  String get tooltip => "$tr_logic.builder.${logic.translationKey}".tr();
-
-  /// Truth table rows (header first) for this operator. NOT is unary; AND/OR are
-  /// binary. Output is computed from the same rule used at filter time.
-  @override
-  List<List<String>> get truthTable {
-    final output = "$tr_logic.truth_table.output".tr();
-    String bit(bool v) => v ? "1" : "0";
-    if (logic == LogicMode.not) {
-      return [
-        ["A", output],
-        for (final a in [false, true])
-          [
-            bit(a),
-            bit(logic.apply([a])),
-          ],
-      ];
-    }
-    return [
-      ["A", "B", output],
-      for (final a in [false, true])
-        for (final b in [false, true])
-          [
-            bit(a),
-            bit(b),
-            bit(logic.apply([a, b])),
-          ],
-    ];
-  }
+  ColumnDescription get typeDescription => _typeDescription(logic);
 
   @override
   bool get includeInAddAll => false;
@@ -362,4 +337,36 @@ class LogicColumnBuilder extends ColumnBuilder {
     // from the chip's pass-count badge rather than the grid. This is intended.
     return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic, hidden: true);
   }
+}
+
+/// [ColumnSpec.typeDescription] of a logic column and [ColumnBuilder.typeDescription] of its builder: what [logic]
+/// passes, with its truth table.
+ColumnDescription _typeDescription(LogicMode logic) =>
+    (text: "$tr_logic.builder.${logic.translationKey}".tr(), truthTable: _truthTable(logic));
+
+/// Truth table rows (header first) for [logic]. NOT is unary; AND/OR are
+/// binary. Output is computed from the same rule used at filter time.
+List<List<String>> _truthTable(LogicMode logic) {
+  final output = "$tr_logic.truth_table.output".tr();
+  String bit(bool v) => v ? "1" : "0";
+  if (logic == LogicMode.not) {
+    return [
+      ["A", output],
+      for (final a in [false, true])
+        [
+          bit(a),
+          bit(logic.apply([a])),
+        ],
+    ];
+  }
+  return [
+    ["A", "B", output],
+    for (final a in [false, true])
+      for (final b in [false, true])
+        [
+          bit(a),
+          bit(b),
+          bit(logic.apply([a, b])),
+        ],
+  ];
 }

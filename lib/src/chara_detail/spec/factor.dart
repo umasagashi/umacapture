@@ -521,6 +521,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -1098,7 +1101,7 @@ class _ModeSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     return FormGroup(
-      title: Text("$tr_factor.mode.label".tr()),
+      title: Text("$tr_common.condition.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
         if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic)) logicChoiceWidget(context, ref),
@@ -1193,7 +1196,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
-        UnmetRowsChoice(specId: widget.specId),
         notationChoiceWidget(context, ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
@@ -1217,6 +1219,8 @@ class FactorColumnSelector extends ConsumerWidget {
         const SizedBox(height: 32),
         _ModeSelector(specId: specId),
         const SizedBox(height: 32),
+        UnmetRowsGroup(specId: specId),
+        const SizedBox(height: 32),
         _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
@@ -1234,6 +1238,13 @@ class FactorColumnBuilder extends ColumnBuilder {
 
   FactorColumnBuilder({required this.title, required this.category, required this.parser});
 
+  /// Whether the columns this builder creates select their factors by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
+
   @override
   ColumnSpec<FactorSet> build(RefBase ref) {
     return FactorColumnSpec(
@@ -1241,6 +1252,7 @@ class FactorColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       predicate: AggregateFactorSetPredicate.any(),
+      selectByTag: _selectByTag,
     );
   }
 }
@@ -1264,6 +1276,9 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
   @override
   final String? builderId;
 
+  @override
+  final String? presetDescription;
+
   FilteredFactorColumnBuilder({
     required this.title,
     required this.category,
@@ -1274,7 +1289,15 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
     required this.initialIds,
     required this.initialStar,
     this.builderId,
+    this.presetDescription,
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  /// Whether the columns this builder creates select their factors by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<FactorSet> build(RefBase ref) {
@@ -1292,6 +1315,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         factorTags: initialFactorTags,
         skillTags: initialSkillTags,
       ),
+      selectByTag: _selectByTag,
       hiddenElements: {FactorDialogElements.selectionTags, FactorDialogElements.modeLogic},
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
@@ -1318,13 +1342,24 @@ class TagDrivenFactorColumnBuilder extends ColumnBuilder {
   @override
   final String? builderId;
 
+  @override
+  final String? presetDescription;
+
   TagDrivenFactorColumnBuilder({
     required this.title,
     required this.category,
     required this.parser,
     this.builderId,
+    this.presetDescription,
     this.type = ColumnBuilderType.normal,
   });
+
+  /// Whether the columns this builder creates select their factors by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = true;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<FactorSet> build(RefBase ref) {
@@ -1339,10 +1374,17 @@ class TagDrivenFactorColumnBuilder extends ColumnBuilder {
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
         notation: FactorNotation(mode: FactorNotationMode.nameStarTotal),
       ),
-      selectByTag: true,
+      selectByTag: _selectByTag,
       hiddenElements: {FactorDialogElements.selectionList, FactorDialogElements.modeLogic},
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a factor column and [ColumnBuilder.typeDescription] of its builders: whether it
+/// selects its factors by tag is all that tells them apart.
+ColumnDescription _typeDescription({required bool selectByTag}) => (
+  text: (selectByTag ? "$tr_columns.factor.tag_driven.description" : "$tr_columns.factor.description").tr(),
+  truthTable: null,
+);

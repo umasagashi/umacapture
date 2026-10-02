@@ -89,6 +89,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -312,6 +315,9 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
   RangedIntegerColumnBuilder({required this.title, required this.category, required this.parser, this.cellAction});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   RangedIntegerColumnSpec build(RefBase ref) {
     return RangedIntegerColumnSpec(
       id: const Uuid().v4(),
@@ -321,4 +327,26 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
       predicate: IsInRangeIntegerPredicate(),
     );
   }
+}
+
+/// [ColumnSpec.typeDescription] of a ranged-integer column and [ColumnBuilder.typeDescription] of its builder,
+/// told apart by the value its parser reads. A parser no chip uses gets the sentence of the type alone.
+ColumnDescription _typeDescription(Parser parser) {
+  final subject = switch (parser) {
+    EvaluationValueParser() => "evaluation",
+    StatusSpeedParser() => "status.speed",
+    StatusStaminaParser() => "status.stamina",
+    StatusPowerParser() => "status.power",
+    StatusGutsParser() => "status.guts",
+    StatusIntelligenceParser() => "status.intelligence",
+    RaceWinningCountParser() => "race_winning_count",
+    FansParser() => "fans",
+    _ => null,
+  };
+  return (
+    text: subject == null
+        ? "$tr_columns.type_descriptions.ranged_integer".tr()
+        : "$tr_columns.descriptions.ranged".tr(args: ["$tr_columns.$subject.title".tr()]),
+    truthTable: null,
+  );
 }

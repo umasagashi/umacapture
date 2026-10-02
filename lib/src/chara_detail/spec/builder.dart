@@ -24,15 +24,16 @@ import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/spec/skill_difference.dart';
 import '/src/core/utils.dart';
 
-// ignore: constant_identifier_names
-const tr_columns = "pages.chara_detail.columns";
-
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final labels = ref.watch(labelMapProvider);
   final strategies = labels["race_strategy.name"]!.indexed.toList();
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
   final memoStorages = ref.watch(charaDetailRecordMemoStorageDataProvider);
+  String aptitudeS(String key) =>
+      "$tr_columns.descriptions.aptitude_s".tr(args: ["$tr_columns.aptitude.$key.title".tr()]);
+  String factorDistance(String key) =>
+      "$tr_columns.descriptions.factor_distance".tr(args: ["$tr_columns.aptitude.$key.title".tr()]);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -55,6 +56,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: EvaluationValueParser(),
       max: 5,
       builderId: "chara_rank_less_than_a",
+      presetDescription: "$tr_columns.chara_rank.shortcuts.less_than_a.description".tr(),
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.speed.title".tr(),
@@ -148,6 +150,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: ShortRangeAptitudeParser(),
       min: 7,
       builderId: "aptitude_short_range",
+      presetDescription: aptitudeS("short_range"),
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.mile_range.title".tr(),
@@ -156,6 +159,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: MileRangeAptitudeParser(),
       min: 7,
       builderId: "aptitude_mile_range",
+      presetDescription: aptitudeS("mile_range"),
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.middle_range.title".tr(),
@@ -164,6 +168,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: MiddleRangeAptitudeParser(),
       min: 7,
       builderId: "aptitude_middle_range",
+      presetDescription: aptitudeS("middle_range"),
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.long_range.title".tr(),
@@ -172,6 +177,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: LongRangeAptitudeParser(),
       min: 7,
       builderId: "aptitude_long_range",
+      presetDescription: aptitudeS("long_range"),
     ),
     SkillColumnBuilder(title: "$tr_columns.skill.title".tr(), category: ColumnCategory.skill, parser: SkillParser()),
     SkillDifferenceColumnBuilder(
@@ -195,6 +201,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       // display group is editable (selection + mode hidden).
       hiddenElements: {SkillDialogElements.selection, SkillDialogElements.mode},
       builderId: "skill_status_up",
+      presetDescription: "$tr_columns.skill.shortcuts.status_up.description".tr(),
     ),
     FilteredSkillColumnBuilder(
       title: "$tr_columns.skill.shortcuts.consolidation.title".tr(),
@@ -203,6 +210,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       isFilterColumn: true,
       initialIds: {179},
       builderId: "skill_consolidation",
+      presetDescription: "$tr_columns.skill.shortcuts.consolidation.description".tr(),
     ),
     TagDrivenSkillColumnBuilder(
       title: "$tr_columns.skill.tag_driven.title".tr(),
@@ -236,6 +244,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
       initialStar: 1,
       builderId: "factor_status",
+      presetDescription: "$tr_columns.factor.shortcuts.status.description".tr(),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.aptitude.title".tr(),
@@ -246,6 +255,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
       initialStar: 1,
       builderId: "factor_aptitude",
+      presetDescription: "$tr_columns.factor.shortcuts.aptitude.description".tr(),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.scenario.title".tr(),
@@ -256,6 +266,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
       initialStar: 1,
       builderId: "factor_scenario",
+      presetDescription: "$tr_columns.factor.shortcuts.scenario.description".tr(),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.short_range.title".tr(),
@@ -266,6 +277,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {66},
       initialStar: 1,
       builderId: "factor_short_range",
+      presetDescription: factorDistance("short_range"),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.mile_range.title".tr(),
@@ -276,6 +288,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {27},
       initialStar: 1,
       builderId: "factor_mile_range",
+      presetDescription: factorDistance("mile_range"),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.middle_range.title".tr(),
@@ -286,6 +299,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {73},
       initialStar: 1,
       builderId: "factor_middle_range",
+      presetDescription: factorDistance("middle_range"),
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.long_range.title".tr(),
@@ -296,6 +310,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {142},
       initialStar: 1,
       builderId: "factor_long_range",
+      presetDescription: factorDistance("long_range"),
     ),
     TagDrivenFactorColumnBuilder(
       title: "$tr_columns.factor.tag_driven.title".tr(),
@@ -359,6 +374,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         parser: RaceStrategyParser(),
         rejects: strategies.where((e) => e.$1 != strategy.$1).map((e) => e.$1).toSet(),
         builderId: "race_strategy_${strategy.$1}",
+        presetDescription: "$tr_columns.descriptions.strategy".tr(args: [strategy.$2]),
       ),
     RelationBonusColumnBuilder(title: "$tr_columns.relation_bonus.title".tr(), category: ColumnCategory.metadata),
     if (ratingStorages.isEmpty)
@@ -435,10 +451,23 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
 /// adopts only the predicate (via [ColumnSpec.withFilterReset]); the fresh
 /// id/title are discarded.
 ColumnSpec? builderSpecOf(RefBase ref, ColumnSpec spec) {
+  return builderOf(ref, spec)?.build(ref);
+}
+
+/// The builder [spec] was created from: the one whose [ColumnBuilder.builderId] it
+/// records, or null when it records none or that builder no longer exists.
+ColumnBuilder? builderOf(RefBase ref, ColumnSpec spec) {
   final id = spec.builderId;
   if (id == null) {
     return null;
   }
-  final builder = ref.read(columnBuilderProvider).firstWhereOrNull((b) => b.builderId == id);
-  return builder?.build(ref);
+  return ref.read(columnBuilderProvider).firstWhereOrNull((b) => b.builderId == id);
+}
+
+/// What [spec] is for, as its column dialog heads it: the [ColumnBuilder.description]
+/// its chip shows as a tooltip, found through [builderOf]. A column that finds no
+/// builder falls back to [ColumnSpec.typeDescription], which is what its chip shows
+/// too unless that chip has a [ColumnBuilder.presetDescription].
+ColumnDescription columnDescriptionOf(RefBase ref, ColumnSpec spec) {
+  return builderOf(ref, spec)?.description ?? spec.typeDescription;
 }

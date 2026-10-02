@@ -26,6 +26,14 @@ part 'base.mapper.dart';
 // ignore: constant_identifier_names
 const tr_common = "pages.chara_detail.column_predicate.common";
 
+// ignore: constant_identifier_names
+const tr_columns = "pages.chara_detail.columns";
+
+/// What a column is for: the add-column dialog shows it as the tooltip of the chip that creates the column, and the
+/// column dialog heads the column with it. [truthTable], when present, is shown beneath [text]; its first row is the
+/// header and the remaining rows are the cells.
+typedef ColumnDescription = ({String text, List<List<String>>? truthTable});
+
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
@@ -190,17 +198,28 @@ abstract class ColumnBuilder {
   /// onto the spec it builds so the column can later regenerate its default filter
   /// by re-running this builder (see `builderSpecOf`). Null for plain builders
   /// whose default is "accept every row"; filter-bearing builders override it with
-  /// a stored value.
+  /// a stored value. The column dialog also finds this builder's [description]
+  /// through it (see `columnDescriptionOf`).
   String? get builderId => null;
 
-  /// Optional explanatory tooltip shown on the builder chip in the add-column
-  /// dialog. Null means no tooltip (the default for data columns).
-  String? get tooltip => null;
+  /// What a column of the type [build] creates is for, decided only from data that column stores and never edits
+  /// (its parser, whether it selects by tag, its operator). [ColumnSpec.typeDescription] of the built column is the
+  /// same, because both are computed by one function from the same values.
+  ColumnDescription get typeDescription;
 
-  /// Optional truth table rendered beneath [tooltip] in the add-column dialog.
-  /// The first row is the header; remaining rows are the cells. Null means no
-  /// table (the default). The dialog turns this data into a `Table` widget.
-  List<List<String>>? get truthTable => null;
+  /// The sentence of a chip whose column says more than its type does (a preset filter, such as "rank B or lower").
+  /// It counts only alongside a [builderId]: the column records that id, and the id is the only way its column
+  /// dialog finds this sentence again.
+  String? get presetDescription => null;
+
+  /// What the column this builder creates is for: the chip's tooltip in the add-column dialog, and the heading of
+  /// the column dialog of every column it creates (`columnDescriptionOf`). It is [presetDescription] when this builder
+  /// has a [builderId] and one, else [typeDescription]. Overridden only by a builder whose chip creates storage as well
+  /// as a column, so that chip states the creation while the created column keeps [typeDescription].
+  ColumnDescription get description {
+    final preset = builderId == null ? null : presetDescription;
+    return preset == null ? typeDescription : (text: preset, truthTable: null);
+  }
 
   /// Whether this builder participates in the category's "add all" shortcut.
   /// Logic columns opt out so the shortcut never bulk-adds empty operators.
@@ -448,10 +467,17 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// Identifier of the column builder (the "add column" template) this column was
   /// created from, or null when it carries no such origin (a plain column, or one
   /// added before this field existed). Used by the dialog to regenerate the
-  /// column's default filter on reset (see `builderSpecOf` in builder.dart).
+  /// column's default filter on reset (see `builderSpecOf` in builder.dart), and to
+  /// head the dialog with that builder's description (see `columnDescriptionOf`).
   /// Builder-default-capable leaf specs override this with a stored field;
   /// everything else has none.
   String? get builderId => null;
+
+  /// What a column of this type is for, decided only from data this column stores and never edits. The builder that
+  /// creates it computes its [ColumnBuilder.typeDescription] with the same function from the same values, so a
+  /// column whose [builderId] finds no builder is still described the way its chip is, unless that chip has a
+  /// [ColumnBuilder.presetDescription].
+  ColumnDescription get typeDescription;
 
   /// Returns a copy of this spec with its filter (predicate) reset to its default,
   /// preserving the display settings (title, width, hidden, description).
@@ -729,8 +755,13 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   @override
   Widget label() => Text(title);
 
+  // The column dialog heads every column with its description, so the explanation of a broken column is all the
+  // dialog shows: there is nothing to edit.
   @override
-  Widget selector(ChangeNotifier onDecided) => Text("$tr_broken.description".tr());
+  ColumnDescription get typeDescription => (text: "$tr_broken.description".tr(), truthTable: null);
+
+  @override
+  Widget selector(ChangeNotifier onDecided) => const SizedBox.shrink();
 
   @override
   Map<String, dynamic> toMap() => rawMap;

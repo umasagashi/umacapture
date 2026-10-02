@@ -158,8 +158,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // passes (i.e. the column filters nothing).
   Widget _countBadge(BuildContext context, ColumnSpec spec, Widget child) {
     final theme = Theme.of(context);
-    final passed = _counts[spec.id];
-    final count = passed == null || passed == _recordCount ? null : passed;
+    final count = _badgeCount(spec);
     return badges.Badge(
       showBadge: count != null,
       position: badges.BadgePosition.topEnd(top: -8, end: -8),
@@ -173,6 +172,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       badgeContent: Text("$count", style: theme.textTheme.labelSmall, textAlign: TextAlign.center),
       child: child,
     );
+  }
+
+  // The count the pass-count badge shows, or null when the badge is hidden: a
+  // column that does not filter rows has no count, and one every record passes
+  // filters nothing. The badge and the chip tooltip's pass-count line both read
+  // this, so they appear together.
+  int? _badgeCount(ColumnSpec spec) {
+    final passed = _counts[spec.id];
+    return passed == null || passed == _recordCount ? null : passed;
   }
 
   // The interactive chip for a leaf column (badge + action chip). When
@@ -218,9 +226,10 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // own filter tooltip — the single place every column's note is surfaced, so the
   // specs no longer embed it themselves. When both are empty (only a script column
   // with no note can be) a localized "no description" fallback is shown. A broken
-  // column keeps the broken notice instead. A "hidden" marker is appended below a
-  // rule when the column is hidden from the grid, so hovering a faded chip explains
-  // why it shows no column.
+  // column keeps the broken notice instead. While the pass-count badge shows, the
+  // count it shows is spelled out below a rule. A "hidden" marker is appended below
+  // a rule when the column is hidden from the grid, so hovering a faded chip
+  // explains why it shows no column.
   String _tooltipFor(ColumnSpec spec) {
     final String text;
     if (_brokenIds.contains(spec.id)) {
@@ -231,8 +240,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       final composed = desc.isEmpty ? base : (base.isEmpty ? desc : "$desc\n──────────\n$base");
       text = composed.isEmpty ? "$tr_chara_detail.column_predicate.common.notation.tooltip_field.empty".tr() : composed;
     }
+    final count = _badgeCount(spec);
     final markers = [
       ?itemDisplayMarker(spec),
+      if (count != null)
+        "$tr_chara_detail.column_predicate.common.notation.pass_count_marker".tr(
+          namedArgs: {"total": "$_recordCount", "count": "$count"},
+        ),
       if (spec.hidden) "$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr(),
     ];
     return [text, ...markers].join("\n──────────\n");

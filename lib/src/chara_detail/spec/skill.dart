@@ -263,6 +263,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: selectByTag);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -634,7 +637,7 @@ class _ModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return FormGroup(
-      title: Text("$tr_skill.mode.label".tr()),
+      title: Text("$tr_common.condition.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
         UnusedWhileMarking(
@@ -724,7 +727,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
-        UnmetRowsChoice(specId: widget.specId),
         if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationModeWidget(context, ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
@@ -753,6 +755,8 @@ class SkillColumnSelector extends ConsumerWidget {
           _ModeSelector(specId: specId),
           const SizedBox(height: 32),
         ],
+        UnmetRowsGroup(specId: specId),
+        const SizedBox(height: 32),
         _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
@@ -770,6 +774,13 @@ class SkillColumnBuilder extends ColumnBuilder {
 
   SkillColumnBuilder({required this.title, required this.category, required this.parser});
 
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
+
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
     return SkillColumnSpec(
@@ -777,6 +788,7 @@ class SkillColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       predicate: AggregateSkillPredicate.any(),
+      selectByTag: _selectByTag,
     );
   }
 }
@@ -788,6 +800,9 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
 
   @override
   final String? builderId;
+
+  @override
+  final String? presetDescription;
 
   @override
   final String title;
@@ -806,7 +821,15 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
     this.initialTags = const {},
     required this.initialIds,
     this.builderId,
+    this.presetDescription,
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = false;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
@@ -822,6 +845,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
         notation: SkillNotation(),
         tags: initialTags,
       ),
+      selectByTag: _selectByTag,
       hiddenElements: {
         if (initialTags.isEmpty) ...{
           SkillDialogElements.selection,
@@ -857,6 +881,9 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
   final String? builderId;
 
   @override
+  final String? presetDescription;
+
+  @override
   final String title;
 
   @override
@@ -867,10 +894,18 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
     required this.category,
     required this.parser,
     this.builderId,
+    this.presetDescription,
     this.initialTags = const {},
     this.hiddenElements = const {SkillDialogElements.selectionList, SkillDialogElements.mode},
     this.type = ColumnBuilderType.normal,
   });
+
+  /// Whether the columns this builder creates select their skills by tag. [typeDescription] and [build] both read it,
+  /// so the description always matches the column that gets built.
+  static const _selectByTag = true;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(selectByTag: _selectByTag);
 
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
@@ -880,10 +915,17 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
       parser: parser,
       builderId: builderId,
       predicate: AggregateSkillPredicate(notation: SkillNotation(), tags: initialTags),
-      selectByTag: true,
+      selectByTag: _selectByTag,
       hiddenElements: hiddenElements,
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a skill column and [ColumnBuilder.typeDescription] of its builders: whether it
+/// selects its skills by tag is all that tells them apart.
+ColumnDescription _typeDescription({required bool selectByTag}) => (
+  text: (selectByTag ? "$tr_columns.skill.tag_driven.description" : "$tr_columns.skill.description").tr(),
+  truthTable: null,
+);

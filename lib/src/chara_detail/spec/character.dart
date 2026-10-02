@@ -93,6 +93,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   });
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -519,6 +522,9 @@ class CharacterCardColumnBuilder extends ColumnBuilder {
   CharacterCardColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
+  ColumnDescription get typeDescription => _typeDescription();
+
+  @override
   CharacterCardColumnSpec build(RefBase ref) {
     return CharacterCardColumnSpec(
       id: const Uuid().v4(),
@@ -528,3 +534,6 @@ class CharacterCardColumnBuilder extends ColumnBuilder {
     );
   }
 }
+
+/// [ColumnSpec.typeDescription] of a character column and [ColumnBuilder.typeDescription] of its builder.
+ColumnDescription _typeDescription() => (text: "$tr_columns.character.description".tr(), truthTable: null);

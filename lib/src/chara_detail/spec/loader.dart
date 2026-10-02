@@ -24,9 +24,6 @@ import '/src/gui/toast.dart';
 
 part 'loader.mapper.dart';
 
-// ignore: constant_identifier_names
-const tr_columns = "pages.chara_detail.columns";
-
 /// Said when a rating/memo change could not be written to its file.
 ///
 /// Sibling of `tr_storage_load_failure`, and a harder one: a load failure leaves

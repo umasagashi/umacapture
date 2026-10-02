@@ -77,6 +77,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
+
+  @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   @override
@@ -314,6 +317,9 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
   @override
   final String? builderId;
 
+  @override
+  final String? presetDescription;
+
   RangedLabelColumnBuilder({
     required this.title,
     required this.category,
@@ -322,7 +328,11 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
     this.cellAction,
     this.min,
     this.builderId,
+    this.presetDescription,
   }) : type = min != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  @override
+  ColumnDescription get typeDescription => _typeDescription(parser);
 
   @override
   RangedLabelColumnSpec build(RefBase ref) {
@@ -336,4 +346,28 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
       predicate: IsInRangeIntegerPredicate(min: min),
     );
   }
+}
+
+/// [ColumnSpec.typeDescription] of a ranged-label column and [ColumnBuilder.typeDescription] of its builder,
+/// told apart by the value its parser reads. A parser no chip uses gets the sentence of the type alone.
+ColumnDescription _typeDescription(Parser parser) {
+  final subject = switch (parser) {
+    TurfGroundAptitudeParser() => "turf_ground",
+    DirtGroundAptitudeParser() => "dirt_ground",
+    ShortRangeAptitudeParser() => "short_range",
+    MileRangeAptitudeParser() => "mile_range",
+    MiddleRangeAptitudeParser() => "middle_range",
+    LongRangeAptitudeParser() => "long_range",
+    LeadPaceAptitudeParser() => "lead_pace",
+    WithPaceAptitudeParser() => "with_pace",
+    OffPaceAptitudeParser() => "off_pace",
+    LateChargeAptitudeParser() => "late_charge",
+    _ => null,
+  };
+  return (
+    text: subject == null
+        ? "$tr_columns.type_descriptions.ranged_label".tr()
+        : "$tr_columns.descriptions.aptitude".tr(args: ["$tr_columns.aptitude.$subject.title".tr()]),
+    truthTable: null,
+  );
 }
