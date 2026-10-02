@@ -131,13 +131,8 @@ class ItemTally {
 /// Compared by value, and that value is its [paintState], so a change of state alone replaces the row.
 @immutable
 class ItemCellData implements RenderedCellData {
-  /// Items in drawing order, with hiding and truncation already applied.
+  /// Every item of the cell in drawing order, with common items already hidden where the column hides them.
   final List<CellItem> items;
-
-  /// The number of items the cell would list were it not cut to the display count: [items] and every item the
-  /// cut dropped, but no item [ItemCellData.limited] hid as common. Equal to the length of [items] when nothing
-  /// was cut; the renderer shows the omission counter against it.
-  final int total;
 
   /// A value-only notation (e.g. a count). When non-null, [items] is empty.
   final String? summary;
@@ -145,23 +140,14 @@ class ItemCellData implements RenderedCellData {
   @override
   final String csv;
 
-  ItemCellData({required List<CellItem> items, int? total, this.summary, required this.csv})
+  ItemCellData({required List<CellItem> items, this.summary, required this.csv})
     : items = List.unmodifiable(items),
-      total = total ?? items.length,
-      assert(summary == null || items.isEmpty),
-      assert(total == null || total >= items.length);
+      assert(summary == null || items.isEmpty);
 
-  /// Applies the column's display count to [items]: drops [ItemState.common] items first when [hideCommon], then
-  /// keeps the first [max] of what remains in order, or all of it when [max] is null (see
-  /// [ItemColumnSpec.hasQuerySelection]). No state is exempt from the cut, placeholders included. [total] is what
-  /// remains after hiding, so a hidden common item is never counted as omitted.
-  factory ItemCellData.limited(List<CellItem> items, int? max, {required bool hideCommon, required String csv}) {
-    final shown = hideCommon ? items.where((e) => e.state != ItemState.common).toList() : items;
-    return ItemCellData(
-      items: max == null ? shown : shown.take(max < 0 ? 0 : max).toList(),
-      total: shown.length,
-      csv: csv,
-    );
+  /// [items], less the [ItemState.common] ones when [hideCommon]. Every remaining item is kept, placeholders
+  /// included; how many are shown is decided when the cell is drawn.
+  factory ItemCellData.listing(List<CellItem> items, {required bool hideCommon, required String csv}) {
+    return ItemCellData(items: hideCommon ? items.where((e) => e.state != ItemState.common).toList() : items, csv: csv);
   }
 
   @override
@@ -177,11 +163,10 @@ class ItemCellData implements RenderedCellData {
       other is ItemCellData &&
       other.summary == summary &&
       other.csv == csv &&
-      other.total == total &&
       _itemsEquality.equals(other.items, items);
 
   @override
-  int get hashCode => Object.hash(summary, csv, total, _itemsEquality.hash(items));
+  int get hashCode => Object.hash(summary, csv, _itemsEquality.hash(items));
 }
 
 /// The order of the items in a skill or factor cell, held and placeholder alike: position in the query first,

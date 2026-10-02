@@ -80,13 +80,6 @@ class FactorDifferenceColumnSpecMapper
     opt: true,
     def: FactorNotationMode.nameStarTotal,
   );
-  static int _$max(FactorDifferenceColumnSpec v) => v.max;
-  static const Field<FactorDifferenceColumnSpec, int> _f$max = Field(
-    'max',
-    _$max,
-    opt: true,
-    def: 3,
-  );
   static bool _$hideCommonItems(FactorDifferenceColumnSpec v) =>
       v.hideCommonItems;
   static const Field<FactorDifferenceColumnSpec, bool> _f$hideCommonItems =
@@ -151,7 +144,6 @@ class FactorDifferenceColumnSpecMapper
     #selectByTag: _f$selectByTag,
     #subject: _f$subject,
     #notationMode: _f$notationMode,
-    #max: _f$max,
     #hideCommonItems: _f$hideCommonItems,
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
@@ -187,7 +179,6 @@ class FactorDifferenceColumnSpecMapper
       selectByTag: data.dec(_f$selectByTag),
       subject: data.dec(_f$subject),
       notationMode: data.dec(_f$notationMode),
-      max: data.dec(_f$max),
       hideCommonItems: data.dec(_f$hideCommonItems),
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),

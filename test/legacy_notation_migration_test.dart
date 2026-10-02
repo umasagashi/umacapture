@@ -71,7 +71,6 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.nameStarTotal);
-      expect(spec.predicate.notation.max, 3);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
@@ -80,16 +79,14 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.nameStarEach);
-      expect(spec.predicate.notation.max, 5);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
-    test('legacy max==0 becomes the value-only mode with max reset to a valid value', () {
+    test('legacy max==0 becomes the value-only mode', () {
       final map = _factorMap({'mode': 'each', 'max': 0});
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.starEach);
-      expect(spec.predicate.notation.max, 3);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
@@ -106,7 +103,6 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as FactorColumnSpec;
       expect(spec.predicate.notation.mode, FactorNotationMode.countTotal);
-      expect(spec.predicate.notation.max, 4);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
   });
@@ -117,16 +113,14 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.names);
-      expect(spec.predicate.notation.max, 3);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
-    test('legacy max==0 becomes the count mode with max reset to a valid value', () {
+    test('legacy max==0 becomes the count mode', () {
       final map = _skillMap({'max': 0});
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.count);
-      expect(spec.predicate.notation.max, 3);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
 
@@ -135,7 +129,6 @@ void main() {
       migrateLegacyColumnSpecMap(map);
       final spec = ColumnSpecMapper.fromMap(map) as SkillColumnSpec;
       expect(spec.predicate.notation.mode, SkillNotationMode.count);
-      expect(spec.predicate.notation.max, 5);
       expect(isSpecMapIncomplete(map, _encoded(spec)), isFalse);
     });
   });
@@ -174,7 +167,7 @@ void main() {
         'children': [child],
       };
       migrateLegacyColumnSpecMap(container);
-      expect((child['predicate'] as Map<String, dynamic>)['notation'], {'mode': 'starTotal', 'max': 3});
+      expect((child['predicate'] as Map<String, dynamic>)['notation'], {'mode': 'starTotal', 'max': 0});
     });
   });
 }

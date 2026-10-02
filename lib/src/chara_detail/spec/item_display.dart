@@ -23,27 +23,19 @@ enum UnmetRows {
 /// `is ItemColumnSpec` test, like [ContainerColumnSpec]. How the items are compared is the business of
 /// [QueryItemColumnSpec] (against the column's query) or [DifferenceItemColumnSpec] (row against row).
 mixin ItemColumnSpec<T> on ColumnSpec<T> {
-  /// Whether the column's query, once resolved (a tag-driven column included), selects any item. A selecting
-  /// column draws every selected item it has, whether it filters rows or marks missing items; only a column that selects nothing is cut to
-  /// its display count ([itemLimit]).
-  bool hasQuerySelection(RefBase ref);
-
-  /// The number of items a cell keeps out of [max], the stored display count: null (every item) while the
-  /// column [hasQuerySelection]. The cell, its sort value and its CSV all follow it.
-  int? itemLimit(RefBase ref, int max) => hasQuerySelection(ref) ? null : max;
-
   /// The items [value] holds within the column's comparison scope (the query, and for factors the subject), as
   /// item id to strength (for a factor the star sum, for a skill 1). A row's contribution to an [ItemTally], and the
   /// strength a difference cell shades the row's own items by.
   Map<int, int> heldItemStrengths(RefBase ref, T value);
 
-  /// Measures the item boxes drawn, placeholders included, with the omission
-  /// counter box the renderer adds after a cell cut to its display count. A
-  /// value-only summary is measured as the cell value, not as the summary text
-  /// drawn.
+  @override
+  bool get takesItemColumnBounds => true;
+
+  /// Measures the item boxes drawn, placeholders included, with the omission counter box the renderer adds when
+  /// the items do not all fit the height the measurement is given (the table's cell height cap). A value-only
+  /// summary is measured as the cell value, not as the summary text drawn.
   ///
-  /// Only the display count is known here; a cut for want of lines happens in
-  /// the wrap row-height mode, which does not measure.
+  /// A cut for want of lines happens in the wrap row-height mode, which does not measure.
   @override
   MeasuredContent measuredContent(TrinaCell? cell, String formatted) {
     final data = cell?.getUserData<ItemCellData>();

@@ -252,7 +252,8 @@ class ErrorLogView extends StatelessWidget {
 }
 
 /// A −/value/+ spinbox with an editable, digits-only centre field, clamped to
-/// [min]..[max] (the buttons disable at the bounds).
+/// [min]..[max] (the buttons disable at the bounds). The buttons move the value
+/// by [step]; a typed value is only clamped, not rounded to a multiple of it.
 ///
 /// Presentational: the parent owns the value and is notified of edits via
 /// [onChanged]; typing a number and submitting (or unfocusing) commits it,
@@ -265,6 +266,11 @@ class IntStepperField extends StatefulWidget {
   final int max;
   final ValueChanged<int> onChanged;
   final double fieldWidth;
+  final int step;
+
+  /// Unit shown inside the field after the number (e.g. "px"); null shows none. It is not part of the
+  /// editable text, so parsing and clamping see digits only.
+  final String? unit;
 
   const IntStepperField({
     super.key,
@@ -273,6 +279,8 @@ class IntStepperField extends StatefulWidget {
     required this.max,
     required this.onChanged,
     this.fieldWidth = 44,
+    this.step = 1,
+    this.unit,
   });
 
   @override
@@ -331,31 +339,43 @@ class _IntStepperFieldState extends State<IntStepperField> {
   @override
   Widget build(BuildContext context) {
     final value = _clampedValue;
+    final textStyle = Theme.of(context).textTheme.titleMedium;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
           icon: const Icon(Symbols.remove_rounded),
           visualDensity: VisualDensity.compact,
-          onPressed: value <= widget.min ? null : () => _emit(value - 1),
+          onPressed: value <= widget.min ? null : () => _emit(value - widget.step),
         ),
         SizedBox(
           width: widget.fieldWidth,
           child: TextField(
             controller: _controller,
             focusNode: _focusNode,
-            textAlign: TextAlign.center,
+            // The number and its unit read as one word, so the number sits against the unit; without a unit it
+            // is centred in the field.
+            textAlign: widget.unit == null ? TextAlign.center : TextAlign.end,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            style: Theme.of(context).textTheme.titleMedium,
-            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 4)),
+            style: textStyle,
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              suffixText: widget.unit,
+              // Same size as the number, in a muted tone so the unit reads as secondary to the value; the
+              // default would be the smaller hint style.
+              suffixStyle: textStyle?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: .6),
+              ),
+            ),
             onSubmitted: (_) => _commit(),
           ),
         ),
         IconButton(
           icon: const Icon(Symbols.add_rounded),
           visualDensity: VisualDensity.compact,
-          onPressed: value >= widget.max ? null : () => _emit(value + 1),
+          onPressed: value >= widget.max ? null : () => _emit(value + widget.step),
         ),
       ],
     );

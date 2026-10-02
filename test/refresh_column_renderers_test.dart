@@ -1,14 +1,14 @@
 // Regression test for [TrinaGridStateManagerExtension.refreshColumnRenderers],
 // the non-structural reconcile path used when a column's spec changes without
-// changing the column set (e.g. editing a skill column's display count).
+// changing the column set (e.g. editing a column's description).
 // Run: .fvm/flutter_sdk/bin/flutter test test/refresh_column_renderers_test.dart
 //
-// The bug: refreshColumnRenderers used to copy only the renderer and title, so
-// the live column kept a stale [ColumnSpec] in its user data. A later resize or
-// width reset reads that spec back off the live column and persists it, which
-// reverted the user's edit (the skill display count snapped back to its default).
-// The fix re-seats the rebuilt spec onto the live column; the checkbox column,
-// which carries no spec, must be left untouched.
+// The live column must carry the rebuilt [ColumnSpec] in its user data: a later
+// resize or width reset reads that spec back off the live column and persists
+// it, so a stale spec would revert the user's edit (the description would snap
+// back). The checkbox column, which carries no spec, is left untouched.
+// The return value tells the reconcile to re-fit when a column's title changed
+// though no cell did.
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -17,17 +17,18 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
 
-SkillColumnSpec _skillSpec({required int notationMax}) {
+SkillColumnSpec _skillSpec({String? description}) {
   return SkillColumnSpec(
     id: 'skill',
     title: 'Skill',
     parser: SkillParser(),
-    predicate: AggregateSkillPredicate(notation: SkillNotation(max: notationMax)),
+    predicate: AggregateSkillPredicate(notation: SkillNotation()),
+    description: description,
   );
 }
 
-TrinaColumn _column(String field, {ColumnSpec? spec}) {
-  final column = TrinaColumn(title: field, field: field, type: TrinaColumnType.text());
+TrinaColumn _column(String field, {ColumnSpec? spec, String? title}) {
+  final column = TrinaColumn(title: title ?? field, field: field, type: TrinaColumnType.text());
   if (spec != null) {
     column.setUserData(spec);
   }
@@ -45,15 +46,33 @@ TrinaGridStateManager _stateManager(List<TrinaColumn> columns) {
 
 void main() {
   test('re-seats the rebuilt spec onto the matching live column', () {
-    final liveSkill = _column('skill', spec: _skillSpec(notationMax: 3));
+    final liveSkill = _column('skill', spec: _skillSpec(description: 'a'));
     final manager = _stateManager([liveSkill]);
 
-    final nextSkill = _column('skill', spec: _skillSpec(notationMax: 5));
+    final nextSkill = _column('skill', spec: _skillSpec(description: 'b'));
     manager.refreshColumnRenderers([nextSkill]);
 
     final spec = liveSkill.getUserData<ColumnSpec>();
     expect(spec, isA<SkillColumnSpec>());
-    expect((spec! as SkillColumnSpec).predicate.notation.max, 5);
+    expect(spec!.description, 'b');
+  });
+
+  group("reports whether a column's title changed", () {
+    bool refresh(TrinaColumn live, TrinaColumn next) => _stateManager([live]).refreshColumnRenderers([next]);
+
+    test('the title', () {
+      expect(
+        refresh(
+          _column('skill', spec: _skillSpec(), title: 'Skill'),
+          _column('skill', spec: _skillSpec(), title: 'Skills'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('nothing, for an equal rebuilt column', () {
+      expect(refresh(_column('skill', spec: _skillSpec()), _column('skill', spec: _skillSpec())), isFalse);
+    });
   });
 
   test('leaves a spec-less column (the checkbox column) untouched', () {

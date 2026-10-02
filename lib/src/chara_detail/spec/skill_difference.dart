@@ -17,7 +17,6 @@ import '/src/chara_detail/spec/skill.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
-import '/src/gui/common.dart';
 
 part 'skill_difference.mapper.dart';
 
@@ -47,9 +46,6 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
 
   @override
   final bool selectByTag;
-
-  /// The display count of a cell while nothing is selected.
-  final int max;
 
   @override
   final bool hideCommonItems;
@@ -85,7 +81,6 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
     this.query = const {},
     this.tags = const {},
     this.selectByTag = false,
-    this.max = 3,
     this.hideCommonItems = false,
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
@@ -126,7 +121,6 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
     Set<int>? query,
     Set<String>? tags,
     bool? selectByTag,
-    int? max,
     bool? hideCommonItems,
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
@@ -142,7 +136,6 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
       query: query ?? this.query,
       tags: tags ?? this.tags,
       selectByTag: selectByTag ?? this.selectByTag,
-      max: max ?? this.max,
       hideCommonItems: hideCommonItems ?? this.hideCommonItems,
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
@@ -166,16 +159,14 @@ class SkillDifferenceColumnSpec extends ColumnSpec<List<Skill>>
     // A skill id beyond a lagging module label list degrades to the raw id for that cell.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final names = skills.map((e) => nameOf(e.id)).toList();
-    final limit = itemLimit(ref, max);
     final strengths = heldItemStrengths(ref, value);
     final own = [for (final (i, skill) in skills.indexed) OwnItem(skill.id, names[i], strength: strengths[skill.id]!)];
-    final data = ItemCellData.limited(
+    final data = ItemCellData.listing(
       differenceItems(own, tally, nameOf, order),
-      limit,
       hideCommon: hideCommonItems,
       csv: const CsvEncoder().convert([names]),
     );
-    return TrinaCell(value: (limit == null ? names : names.partial(0, limit)).join(", "))..setUserData(data);
+    return TrinaCell(value: names.join(", "))..setUserData(data);
   }
 
   @override
@@ -272,27 +263,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     super.dispose();
   }
 
-  Widget notationMaxWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    // A column that selects items shows every one of them, so the limit applies only while nothing is selected.
-    return FormTile(
-      title: Text("$tr_skill.notation.max.label".tr()),
-      description: Text("$tr_skill.notation.max.description".tr()),
-      trailing: Disabled(
-        disabled: spec.hasQuerySelection(ref.base),
-        tooltip: "$tr_common.notation.max_selected_tooltip".tr(),
-        child: IntStepperField(
-          min: 1,
-          max: 100,
-          value: spec.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(max: value));
-          },
-        ),
-      ),
-    );
-  }
-
   Widget notationTitleWidget(WidgetRef ref) {
     return FormTile(
       title: Text("$tr_common.notation.title.label".tr()),
@@ -309,13 +279,11 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final hiddenElements = _clonedSpecProvider.watch(ref, widget.specId).hiddenElements;
     return FormGroup(
       title: Text("$tr_common.notation.label".tr()),
       description: NoteCard(description: Text("$tr_difference.description".tr())),
       children: [
         DifferenceCommonItemsSwitch(specId: widget.specId),
-        if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

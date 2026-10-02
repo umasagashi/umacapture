@@ -105,6 +105,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   // width change is never mistaken for a user drag.
   Map<String, double> _appliedWidths = const {};
 
+  // The table's bounds on skill and factor columns as the last layout resolved them from the table settings and the
+  // size of the table's visible area. What the auto-fit, the row heights, the drag clamp and the cells (through
+  // ItemColumnBoundsScope) all read, so the drawing and the measuring use one value.
+  ItemColumnBounds _itemBounds = ItemColumnBounds.unbounded;
+
   // The current theme and selection purpose, mirrored here so the long-lived
   // rowColorCallback/rowWrapper closures (captured once at grid init) read fresh
   // values through `this` instead of stale locals captured at first build.
@@ -499,7 +504,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 
   /// Reflows row heights for the current row-height mode and minimum line count:
   /// wrap fixes rows at the floor, autoPerRow grows each row to its text, and
-  /// autoUniform grows all rows to the tallest. Runs after every autoFit/resize
+  /// autoUniform grows all rows to the tallest; a skill or factor cell counts
+  /// only up to the table's cell height cap ([ItemColumnBounds.maxCellHeight]). Runs after every autoFit/resize
   /// since wrapping depends on the final column widths, and on a setting change.
   /// Re-indexes the pinned block because the height pass replaces the row objects
   /// it touches.
@@ -509,17 +515,47 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     }
     final mode = ref.read(charaDetailRowHeightModeProvider);
     final minLines = ref.read(charaDetailMinRowLinesProvider);
-    if (stateManager.applyRowHeights(mode: mode, minLines: minLines)) {
+    if (stateManager.applyRowHeights(mode: mode, minLines: minLines, bounds: _itemBounds)) {
       _indexPinnedRows();
       stateManager.notifyListeners();
     }
   }
 
+  /// Re-fits every column for the table's bounds ([_itemBounds]), then takes the new widths as the drag baseline
+  /// and reflows the row heights, which depend on the final widths. Runs when the column set, a cell's content or a
+  /// column's title changed, when a column is reverted to auto width, and when the table's bounds change
+  /// ([ItemColumnBounds], the table resized or a bound setting edited).
+  void _refitColumns() {
+    stateManager.autoFitColumns(_itemBounds);
+    _snapshotColumnWidths();
+    _applyRowHeights();
+  }
+
+  /// Holds every skill and factor column of [manager] at or below the table's maximum column width
+  /// ([ItemColumnBounds.maxWidth]). trina's resize has a minimum width but no maximum, so a drag past the cap is
+  /// pulled back on the resize notification, before the frame lays the column out; the drag goes on from there, so
+  /// dragging back narrows it at once.
+  void _holdItemColumnsWithinCap(TrinaGridStateManager manager) {
+    final cap = _itemBounds.maxWidth;
+    var held = false;
+    for (final col in manager.columns) {
+      if (col.width > cap && col.getUserData<ColumnSpec>()?.takesItemColumnBounds == true) {
+        col.width = cap;
+        held = true;
+      }
+    }
+    if (held) {
+      // The column positions the resize notification computed used the overshoot.
+      manager.updateVisibilityLayout();
+    }
+  }
+
   /// Pins any column the user just dragged: a live width that drifts from the
   /// recorded baseline persists onto its spec as an explicit width, which makes
-  /// [autoFitColumns] skip it thereafter. The live column's user data is updated
-  /// in lockstep so a later content re-fit keeps skipping the now-pinned column
-  /// rather than measuring it back to auto. The replaceById below also rebuilds
+  /// [autoFitColumns] leave it unmeasured thereafter (shown at that width, held
+  /// within the table's maximum column width for a skill or factor column). The
+  /// live column's user data is updated in lockstep so a later content re-fit
+  /// keeps the now-pinned column at its width rather than measuring it back to auto. The replaceById below also rebuilds
   /// the grid, and refreshColumnRenderers re-seats this same spec onto the live
   /// column, so the user data stays in sync with the loader either way.
   void _persistResizedColumns() {
@@ -642,7 +678,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   }
 
   /// Reverts a single column to auto width: clears its spec's pinned width (live
-  /// user data first so the deferred autoFit no longer skips it), persists the
+  /// user data first so the deferred autoFit measures it again), persists the
   /// change, then re-fits since a same-columns reconcile alone would not.
   void _resetColumnWidth(TrinaColumn column) {
     final spec = column.getUserData<ColumnSpec>();
@@ -652,11 +688,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     final cleared = spec.withWidth(null);
     column.setUserData(cleared);
     ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(cleared);
-    _afterFrame(() {
-      stateManager.autoFitColumns();
-      _snapshotColumnWidths();
-      _applyRowHeights();
-    });
+    _afterFrame(_refitColumns);
   }
 
   /// Sorts [column] in [order] from the header context menu. Unlike a header
@@ -759,13 +791,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       // autoFitColumns measures via gridKey.currentContext, which needs the new
       // columns laid out first, so defer it one frame (the grid may have left the
       // tree before the frame, disposing its stateManager — _afterFrame guards that).
-      _afterFrame(() {
-        stateManager.autoFitColumns();
-        _snapshotColumnWidths();
-        _applyRowHeights();
-      });
+      _afterFrame(_refitColumns);
     } else {
-      stateManager.refreshColumnRenderers(next.columns);
+      final titlesChanged = stateManager.refreshColumnRenderers(next.columns);
       // _reconcile notifies once at the end (after restoreCurrentRecord), so the
       // row diff and the restored selection land in a single repaint.
       final rowsChanged = stateManager.reconcileRows(
@@ -774,15 +802,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         sortOrder: sortOrder,
         notify: false,
       );
-      // Re-fit columns when the row set actually changed (e.g. a cell edited to a
-      // longer value), matching the pre-incremental behavior. Skipped on a
-      // selection/sort-only reconcile so widths don't churn needlessly.
-      if (rowsChanged) {
-        _afterFrame(() {
-          stateManager.autoFitColumns();
-          _snapshotColumnWidths();
-          _applyRowHeights();
-        });
+      // Re-fit columns when the rows changed (a cell's content) or a column's title
+      // did. Skipped on a selection/sort-only reconcile so widths don't churn
+      // needlessly. A change of the table's bounds re-fits from the layout instead.
+      if (rowsChanged || titlesChanged) {
+        _afterFrame(_refitColumns);
       }
     }
     // Re-highlight the same record on the same column when possible (skips the
@@ -806,6 +830,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // Watched rather than listened to: the rebuild hands TrinaGrid a new
     // configuration, which its didUpdateWidget applies to the live stateManager.
     final strongRowBorders = ref.watch(charaDetailStrongRowBordersProvider);
+    // Watched rather than listened to: the layout below resolves them against the table's size, and a change of the
+    // resolved bounds is what re-fits the columns.
+    final itemColumnDefaultWidth = ref.watch(charaDetailItemColumnDefaultWidthProvider);
+    final itemColumnMaxWidthPercent = ref.watch(charaDetailItemColumnMaxWidthPercentProvider);
+    final itemCellMaxHeightPercent = ref.watch(charaDetailItemCellMaxHeightPercentProvider);
     // Mirror the latest theme/purpose so the grid's long-lived row callbacks read
     // current values. A theme change won't touch currentGridProvider, so nudge the
     // live grid to repaint the rows with the new colors.
@@ -865,6 +894,21 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       children: [
         LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
+            // The table's visible area is what the Stack gives this builder. A change of the resolved bounds — the
+            // table resized, or a bound setting edited — re-fits the columns and the rows; on the first layout the
+            // grid is not loaded yet, and onLoaded fits with the bounds resolved here.
+            final bounds = ItemColumnBounds.resolve(
+              constraints.biggest,
+              defaultWidth: itemColumnDefaultWidth,
+              maxWidthPercent: itemColumnMaxWidthPercent,
+              maxCellHeightPercent: itemCellMaxHeightPercent,
+            );
+            if (bounds != _itemBounds) {
+              _itemBounds = bounds;
+              if (_loaded) {
+                _afterFrame(_refitColumns);
+              }
+            }
             // Back the grid with a solid surface so gridBackgroundColor can be
             // transparent. That transparency is what keeps the selected row's
             // current cell highlighted when the grid loses focus: TrinaGrid
@@ -899,298 +943,304 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               },
               child: ColoredBox(
                 color: theme.colorScheme.surface,
-                child: TrinaGrid(
-                  // Stable key keeps one grid (and its stateManager) alive across
-                  // rebuilds. Data changes are pushed in imperatively via
-                  // [_reconcile]; the columns/rows below only seed the initial grid.
-                  key: const ValueKey("chara_detail_grid"),
-                  columns: grid.columns,
-                  rows: grid.rows,
-                  mode: TrinaGridMode.select,
-                  // Paint the selected row ourselves so the highlight stays
-                  // visible even when the grid loses focus (e.g. the app is
-                  // deactivated). TrinaGrid's built-in activatedColor is gated on
-                  // hasFocus, so it disappears otherwise. Setting rowColorCallback
-                  // overrides the default striping, so reproduce it for other rows.
-                  rowColorCallback: (rowContext) {
-                    final theme = _theme;
-                    // Detect the highlighted row by record id, not row index. With
-                    // pinned (frozen) rows present, currentRowIdx is an index into
-                    // the full refRows while rowContext.rowIdx is a display index
-                    // (frozen rows render in a separate block), so an index compare
-                    // would highlight the wrong row.
-                    if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
-                      return theme.colorScheme.primaryContainer;
-                    }
-                    return rowContext.rowIdx.isEven
-                        ? theme.colorScheme.surface
-                        : theme.colorScheme.surfaceContainerLowest;
-                  },
-                  // Checked rows get a translucent amber overlay that dims the
-                  // cells and is labeled "archive", so the destructive (lossy,
-                  // irreversible) intent of the bulk selection is unmistakable.
-                  rowWrapper: (context, rowWidget, rowData, stateManager) {
-                    final theme = _theme;
-                    final purpose = _purpose;
-                    Widget row = rowWidget;
-                    if (rowData.checked == true && purpose != null) {
-                      row = _SelectionRowOverlay(purpose: purpose, child: row);
-                    }
-                    // Frozen (pinned) rows bypass rowColorCallback and the normal
-                    // row border, so reproduce both here: the same alternating
-                    // stripe (and current-row highlight) as rowColorCallback above,
-                    // a normal-weight separator between pinned rows, and a single
-                    // thick rule only at the boundary with the scrollable rows.
-                    if (rowData.frozen == TrinaRowFrozen.start) {
-                      // Position within the frozen block, precomputed by
-                      // [_indexPinnedRows] from the live row order.
-                      final rowId = stateManager.recordIdOf(rowData);
-                      final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
-                      if (pinnedIdx >= 0) {
-                        final isLast = pinnedIdx == _pinnedRowCount - 1;
-                        // The stripe and separator don't depend on the selection, so
-                        // compute them once; only the current-row highlight below is
-                        // recomputed per notify.
-                        final stripe = pinnedIdx.isEven
-                            ? theme.colorScheme.surface
-                            : theme.colorScheme.surfaceContainerLowest;
-                        final separator = isLast
-                            ? BorderSide(color: theme.colorScheme.outline, width: 3)
-                            : BorderSide(
-                                color: stateManager.configuration.style.borderColor,
-                                width: stateManager.configuration.style.cellHorizontalBorderWidth,
+                child: ItemColumnBoundsScope(
+                  bounds: bounds,
+                  child: TrinaGrid(
+                    // Stable key keeps one grid (and its stateManager) alive across
+                    // rebuilds. Data changes are pushed in imperatively via
+                    // [_reconcile]; the columns/rows below only seed the initial grid.
+                    key: const ValueKey("chara_detail_grid"),
+                    columns: grid.columns,
+                    rows: grid.rows,
+                    mode: TrinaGridMode.select,
+                    // Paint the selected row ourselves so the highlight stays
+                    // visible even when the grid loses focus (e.g. the app is
+                    // deactivated). TrinaGrid's built-in activatedColor is gated on
+                    // hasFocus, so it disappears otherwise. Setting rowColorCallback
+                    // overrides the default striping, so reproduce it for other rows.
+                    rowColorCallback: (rowContext) {
+                      final theme = _theme;
+                      // Detect the highlighted row by record id, not row index. With
+                      // pinned (frozen) rows present, currentRowIdx is an index into
+                      // the full refRows while rowContext.rowIdx is a display index
+                      // (frozen rows render in a separate block), so an index compare
+                      // would highlight the wrong row.
+                      if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
+                        return theme.colorScheme.primaryContainer;
+                      }
+                      return rowContext.rowIdx.isEven
+                          ? theme.colorScheme.surface
+                          : theme.colorScheme.surfaceContainerLowest;
+                    },
+                    // Checked rows get a translucent amber overlay that dims the
+                    // cells and is labeled "archive", so the destructive (lossy,
+                    // irreversible) intent of the bulk selection is unmistakable.
+                    rowWrapper: (context, rowWidget, rowData, stateManager) {
+                      final theme = _theme;
+                      final purpose = _purpose;
+                      Widget row = rowWidget;
+                      if (rowData.checked == true && purpose != null) {
+                        row = _SelectionRowOverlay(purpose: purpose, child: row);
+                      }
+                      // Frozen (pinned) rows bypass rowColorCallback and the normal
+                      // row border, so reproduce both here: the same alternating
+                      // stripe (and current-row highlight) as rowColorCallback above,
+                      // a normal-weight separator between pinned rows, and a single
+                      // thick rule only at the boundary with the scrollable rows.
+                      if (rowData.frozen == TrinaRowFrozen.start) {
+                        // Position within the frozen block, precomputed by
+                        // [_indexPinnedRows] from the live row order.
+                        final rowId = stateManager.recordIdOf(rowData);
+                        final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
+                        if (pinnedIdx >= 0) {
+                          final isLast = pinnedIdx == _pinnedRowCount - 1;
+                          // The stripe and separator don't depend on the selection, so
+                          // compute them once; only the current-row highlight below is
+                          // recomputed per notify.
+                          final stripe = pinnedIdx.isEven
+                              ? theme.colorScheme.surface
+                              : theme.colorScheme.surfaceContainerLowest;
+                          final separator = isLast
+                              ? BorderSide(color: theme.colorScheme.outline, width: 3)
+                              : BorderSide(
+                                  color: stateManager.configuration.style.borderColor,
+                                  width: stateManager.configuration.style.cellHorizontalBorderWidth,
+                                );
+                          final bordered = DecoratedBox(
+                            position: DecorationPosition.foreground,
+                            decoration: BoxDecoration(border: Border(bottom: separator)),
+                            child: row,
+                          );
+                          // The current-row highlight must track currentCell changes.
+                          // Scrollable rows get this for free: their highlight is
+                          // painted inside TrinaBaseRow (via rowColorCallback), which
+                          // listens to the stateManager and rebuilds on every notify.
+                          // Frozen rows render with a transparent frozenRowColor and
+                          // bypass rowColorCallback, so this outer wrapper paints their
+                          // highlight — but it only re-runs on a body rebuild, leaving a
+                          // stale highlight when the selection moves to another row.
+                          // Listen to the stateManager here so the background repaints by
+                          // record id whenever the current row changes.
+                          row = ListenableBuilder(
+                            listenable: stateManager,
+                            builder: (context, child) {
+                              final background = stateManager.isCurrentRecord(rowData)
+                                  ? theme.colorScheme.primaryContainer
+                                  : stripe;
+                              return DecoratedBox(
+                                decoration: BoxDecoration(color: background),
+                                child: child,
                               );
-                        final bordered = DecoratedBox(
-                          position: DecorationPosition.foreground,
-                          decoration: BoxDecoration(border: Border(bottom: separator)),
-                          child: row,
-                        );
-                        // The current-row highlight must track currentCell changes.
-                        // Scrollable rows get this for free: their highlight is
-                        // painted inside TrinaBaseRow (via rowColorCallback), which
-                        // listens to the stateManager and rebuilds on every notify.
-                        // Frozen rows render with a transparent frozenRowColor and
-                        // bypass rowColorCallback, so this outer wrapper paints their
-                        // highlight — but it only re-runs on a body rebuild, leaving a
-                        // stale highlight when the selection moves to another row.
-                        // Listen to the stateManager here so the background repaints by
-                        // record id whenever the current row changes.
-                        row = ListenableBuilder(
-                          listenable: stateManager,
-                          builder: (context, child) {
-                            final background = stateManager.isCurrentRecord(rowData)
-                                ? theme.colorScheme.primaryContainer
-                                : stripe;
-                            return DecoratedBox(
-                              decoration: BoxDecoration(color: background),
-                              child: child,
-                            );
-                          },
-                          child: bordered,
-                        );
+                            },
+                            child: bordered,
+                          );
+                        }
                       }
-                    }
-                    return row;
-                  },
-                  configuration: TrinaGridConfiguration(
-                    enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
-                    // Never auto-select the first row. In select mode TrinaGrid
-                    // otherwise highlights row 0 on (re)mount whenever no cell is
-                    // current, which would override the user's row selection and
-                    // make it appear to jump to the top.
-                    enableAutoSelectFirstRow: false,
-                    scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
-                    style: TrinaGridStyleConfig(
-                      enableCellBorderVertical: false,
-                      gridBackgroundColor: Colors.transparent,
-                      // Not the per-row striping (rowColorCallback overrides that),
-                      // but the body background painted behind/around the rows,
-                      // e.g. the empty space right of the last column. Without it
-                      // this falls back to TrinaGrid's default Colors.white.
-                      rowColor: theme.colorScheme.surface,
-                      // Keep the checked-row background neutral; the amber cue is
-                      // drawn as an overlay via rowWrapper instead (see below).
-                      rowCheckedColor: Colors.transparent,
-                      // Disable trina's built-in current-row fill. It highlights
-                      // the row where `currentRowIdx == widget.rowIdx`, comparing
-                      // a (tap-set) display index against each row's display
-                      // index. With pinned (frozen) rows that index space drifts
-                      // out of sync with refRows after a reconcile, so the
-                      // built-in fill lands on the wrong row — a second highlight
-                      // on top of the record-id one we paint in rowColorCallback/
-                      // rowWrapper. A transparent color fails trina's
-                      // `activatedColor.a > 0` guard, leaving our callback's color
-                      // in place, so the highlight is driven solely by record id.
-                      activatedColor: Colors.transparent,
-                      // TrinaGrid paints frozen (pinned) rows from these and
-                      // bypasses rowColorCallback for them, so its single
-                      // frozenRowColor can't reproduce the normal alternating
-                      // stripe. Make both transparent and paint the stripe + the
-                      // row separators ourselves in rowWrapper instead, so pinned
-                      // rows match normal rows except for the block boundary.
-                      frozenRowColor: Colors.transparent,
-                      frozenRowBorderColor: Colors.transparent,
-                      gridBorderColor: theme.colorScheme.outline,
-                      // Row separators (and, through trina, the column-title
-                      // dividers). The pinned-row separators in rowWrapper read
-                      // this same value back from the configuration.
-                      // The strong variant stays below the outline role that marks
-                      // the pinned-block boundary, so that boundary still reads as
-                      // distinct by colour as well as by width.
-                      borderColor: strongRowBorders
-                          ? theme.colorScheme.onSurface.withValues(alpha: 0.40)
-                          : theme.focusColor,
-                      activatedBorderColor: theme.focusColor,
-                      inactivatedBorderColor: theme.focusColor,
-                      columnTextStyle: theme.textTheme.titleSmall!,
-                      cellTextStyle: theme.textTheme.bodyMedium!,
+                      return row;
+                    },
+                    configuration: TrinaGridConfiguration(
+                      enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
+                      // Never auto-select the first row. In select mode TrinaGrid
+                      // otherwise highlights row 0 on (re)mount whenever no cell is
+                      // current, which would override the user's row selection and
+                      // make it appear to jump to the top.
+                      enableAutoSelectFirstRow: false,
+                      scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
+                      style: TrinaGridStyleConfig(
+                        enableCellBorderVertical: false,
+                        gridBackgroundColor: Colors.transparent,
+                        // Not the per-row striping (rowColorCallback overrides that),
+                        // but the body background painted behind/around the rows,
+                        // e.g. the empty space right of the last column. Without it
+                        // this falls back to TrinaGrid's default white background.
+                        rowColor: theme.colorScheme.surface,
+                        // Keep the checked-row background neutral; the amber cue is
+                        // drawn as an overlay via rowWrapper instead (see below).
+                        rowCheckedColor: Colors.transparent,
+                        // Disable trina's built-in current-row fill. It highlights
+                        // the row where `currentRowIdx == widget.rowIdx`, comparing
+                        // a (tap-set) display index against each row's display
+                        // index. With pinned (frozen) rows that index space drifts
+                        // out of sync with refRows after a reconcile, so the
+                        // built-in fill lands on the wrong row — a second highlight
+                        // on top of the record-id one we paint in rowColorCallback/
+                        // rowWrapper. A transparent color fails trina's
+                        // `activatedColor.a > 0` guard, leaving our callback's color
+                        // in place, so the highlight is driven solely by record id.
+                        activatedColor: Colors.transparent,
+                        // TrinaGrid paints frozen (pinned) rows from these and
+                        // bypasses rowColorCallback for them, so its single
+                        // frozenRowColor can't reproduce the normal alternating
+                        // stripe. Make both transparent and paint the stripe + the
+                        // row separators ourselves in rowWrapper instead, so pinned
+                        // rows match normal rows except for the block boundary.
+                        frozenRowColor: Colors.transparent,
+                        frozenRowBorderColor: Colors.transparent,
+                        gridBorderColor: theme.colorScheme.outline,
+                        // Row separators (and, through trina, the column-title
+                        // dividers). The pinned-row separators in rowWrapper read
+                        // this same value back from the configuration.
+                        // The strong variant stays below the outline role that marks
+                        // the pinned-block boundary, so that boundary still reads as
+                        // distinct by colour as well as by width.
+                        borderColor: strongRowBorders
+                            ? theme.colorScheme.onSurface.withValues(alpha: 0.40)
+                            : theme.focusColor,
+                        activatedBorderColor: theme.focusColor,
+                        inactivatedBorderColor: theme.focusColor,
+                        columnTextStyle: theme.textTheme.titleSmall!,
+                        cellTextStyle: theme.textTheme.bodyMedium!,
+                      ),
                     ),
-                  ),
-                  onLoaded: (TrinaGridOnLoadedEvent event) {
-                    stateManager = event.stateManager;
-                    _loaded = true;
-                    _appliedGrid = grid;
-                    event.stateManager.autoFitColumns();
-                    _snapshotColumnWidths();
-                    _applyRowHeights();
-                    if (sortColumn != null) {
-                      event.stateManager.sortColumnByField(sortColumn!, sortOrder);
-                    }
-                    // Index the pinned block so frozen rows are styled on first
-                    // load; a later _pending reconcile reindexes (harmlessly).
-                    _indexPinnedRows();
-                    // A grid change may have arrived before the stateManager was
-                    // ready; apply the latest one now.
-                    if (_pending != null) {
-                      final pending = _pending!;
-                      _pending = null;
-                      _reconcile(pending);
-                    }
-                    // Seed the side preview's record tracker from whatever is current
-                    // after load (normally nothing, since auto-select is disabled).
-                    _currentRecordId.value = event.stateManager.currentRecord?.id;
-                    // A focus request may have been set before the grid was ready (e.g. the capture
-                    // screen navigated here on a duplicate); apply it now that rows exist.
-                    _consumeFocusRequest();
-                  },
-                  // The side preview panel follows the grid's current record. This
-                  // fires on every current-cell change — user taps and the
-                  // programmatic restoreCurrentRecord in _navigateSidePreview alike
-                  // (setCurrentCell calls it even with notify:false) — so mirroring the
-                  // id here keeps the panel in sync without the panel storing its own.
-                  onActiveCellChanged: (_) {
-                    _currentRecordId.value = stateManager.currentRecord?.id;
-                    // Keep the shown image (mode) following the focused column on every
-                    // current-cell change — keyboard moves and the programmatic
-                    // restoreCurrentRecord alike, not just mouse clicks (which also pass
-                    // through onSelected). The panel only tracks the record id; the mode
-                    // is re-derived here from the focused column's cell action so the
-                    // image always matches the column in focus. The breakpoint is
-                    // re-checked (not read from the captured `narrow`) for the same
-                    // reason onSelected does: this closure is captured once at grid load.
-                    final sidePreview = ref.read(sidePreviewProvider);
-                    if (sidePreview != null && isSidePreviewAllowed(context)) {
-                      final action = stateManager.currentCell?.column.getUserData<ColumnSpec>()?.cellAction;
-                      final mode = imageModeForColumnAction(action);
-                      if (mode != sidePreview.mode) {
-                        ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: mode));
-                      }
-                    }
-                  },
-                  onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
-                    // event.row (== getRowByIdx(rowIdx)) is unreliable once any
-                    // row is frozen (pinned): TrinaGrid renders frozen rows in a
-                    // separate block with positional indices that don't map back
-                    // through refRows, so it would return a different record.
-                    // The tapped cell's own row is always correct.
-                    final record = event.cell.row.getUserData<CharaDetailRecord>()!;
-                    final spec = event.cell.column.getUserData<ColumnSpec>();
-                    showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
-                  },
-                  onRowChecked: (TrinaGridOnRowCheckedEvent event) {
-                    // Recompute the whole checked set (covers single + select-all
-                    // toggles) so the toolbar's archive action reads a live set.
-                    final ids = stateManager.checkedRows
-                        .map((row) => row.getUserData<CharaDetailRecord>()?.id)
-                        .nonNulls
-                        .toSet();
-                    ref.read(selectedRecordIdsProvider.notifier).set(ids);
-                    // The amber overlay is drawn by rowWrapper, which only re-runs
-                    // when the row list repaints — not when a single checkbox cell
-                    // updates itself. Nudge the grid to repaint its rows (this
-                    // reuses the existing rows, so checked state is preserved).
-                    _afterFrame(() => stateManager.notifyListeners());
-                  },
-                  onSelected: (TrinaGridOnSelectedEvent event) {
-                    try {
-                      final data = event.cell?.getUserData<CellData>();
-                      // Pass this State's live ref (stable for the widget's
-                      // lifetime), never a grid-build ref the cell captured: the
-                      // grid provider may have rebuilt and disposed that one.
-                      if (!(data?.onSelected?.call(ref.base, event) ?? false)) {
-                        final record = event.cell?.row.getUserData<CharaDetailRecord>();
-                        if (record == null) {
-                          return;
-                        }
-                        // While the side preview panel is open (and visible — not in
-                        // the narrow layout where it is hidden), a cell click only moves
-                        // the focus: the panel follows the grid's current record and the
-                        // shown image is re-derived from the focused column, both in
-                        // onActiveCellChanged (which the tap also fires). So here we only
-                        // suppress the dialog.
-                        //
-                        // The breakpoint is re-evaluated here, not read from the
-                        // build-scope `narrow`: TrinaGrid captures this onSelected
-                        // closure once (at grid load) and never refreshes it, so a
-                        // captured `narrow` would stay frozen at its first-build value
-                        // and feed the hidden panel after the window shrinks.
-                        if (ref.read(sidePreviewProvider) != null && isSidePreviewAllowed(context)) {
-                          return;
-                        }
-                        final source = ref.read(recordSourceProvider);
-                        final pathInfo = ref.read(pathInfoProvider);
-                        // event.rowIdx is unreliable once any row is frozen
-                        // (pinned): frozen rows render in a separate block and
-                        // shift the scrollable rows' indices, so it no longer maps
-                        // to getSortedRecords. Resolve the tapped record from its
-                        // own cell row and find its position by identity instead.
-                        final sorted = stateManager.getSortedRecords().toList();
-                        final index = sorted.indexOf(record);
-                        if (index < 0) {
-                          return;
-                        }
-                        final records = sorted.map((e) => recordDirOf(pathInfo, source, e)).toList();
-                        CharaDetailPreviewDialog.show(ref.base, records, index);
-                      }
-                    } catch (error, stackTrace) {
-                      logger.e(
-                        "Failed to handle cell selected. row=${event.row}, cell=${event.cell}",
-                        error,
-                        stackTrace,
+                    onLoaded: (TrinaGridOnLoadedEvent event) {
+                      stateManager = event.stateManager;
+                      _loaded = true;
+                      _appliedGrid = grid;
+                      // A rebuilt grid brings a new manager and a new notifier, so this registers once per manager;
+                      // the notifier goes with its manager.
+                      event.stateManager.resizingChangeNotifier.addListener(
+                        () => _holdItemColumnsWithinCap(event.stateManager),
                       );
-                      captureException(error, stackTrace);
-                    }
-                  },
-                  onSorted: (TrinaGridOnSortedEvent event) {
-                    if (event.column.sort == TrinaColumnSort.none) {
-                      sortColumn = null;
-                      sortOrder = TrinaColumnSort.none;
-                    } else {
-                      sortColumn = event.column.field;
-                      sortOrder = event.column.sort;
-                    }
-                    // A header click runs trina's own per-column sort, which
-                    // leaves same-day (tied) rows in an undefined order. Re-break
-                    // those ties by capture date, mirroring the sort direction.
-                    stateManager.applyCaptureDateTiebreak(event.column, event.column.sort);
-                    // A header-click sort reorders the frozen rows in place
-                    // (FilteredList.sort works on originalList), but unlike
-                    // _reconcile/onLoaded it doesn't rebuild the pinned index, so
-                    // rowWrapper's stripe/boundary would read stale positions.
-                    // toggleSortColumn fires this before its own notifyListeners,
-                    // so re-indexing here lands in the very next repaint.
-                    _indexPinnedRows();
-                  },
+                      _refitColumns();
+                      if (sortColumn != null) {
+                        event.stateManager.sortColumnByField(sortColumn!, sortOrder);
+                      }
+                      // Index the pinned block so frozen rows are styled on first
+                      // load; a later _pending reconcile reindexes (harmlessly).
+                      _indexPinnedRows();
+                      // A grid change may have arrived before the stateManager was
+                      // ready; apply the latest one now.
+                      if (_pending != null) {
+                        final pending = _pending!;
+                        _pending = null;
+                        _reconcile(pending);
+                      }
+                      // Seed the side preview's record tracker from whatever is current
+                      // after load (normally nothing, since auto-select is disabled).
+                      _currentRecordId.value = event.stateManager.currentRecord?.id;
+                      // A focus request may have been set before the grid was ready (e.g. the capture
+                      // screen navigated here on a duplicate); apply it now that rows exist.
+                      _consumeFocusRequest();
+                    },
+                    // The side preview panel follows the grid's current record. This
+                    // fires on every current-cell change — user taps and the
+                    // programmatic restoreCurrentRecord in _navigateSidePreview alike
+                    // (setCurrentCell calls it even with notify:false) — so mirroring the
+                    // id here keeps the panel in sync without the panel storing its own.
+                    onActiveCellChanged: (_) {
+                      _currentRecordId.value = stateManager.currentRecord?.id;
+                      // Keep the shown image (mode) following the focused column on every
+                      // current-cell change — keyboard moves and the programmatic
+                      // restoreCurrentRecord alike, not just mouse clicks (which also pass
+                      // through onSelected). The panel only tracks the record id; the mode
+                      // is re-derived here from the focused column's cell action so the
+                      // image always matches the column in focus. The breakpoint is
+                      // re-checked (not read from the captured `narrow`) for the same
+                      // reason onSelected does: this closure is captured once at grid load.
+                      final sidePreview = ref.read(sidePreviewProvider);
+                      if (sidePreview != null && isSidePreviewAllowed(context)) {
+                        final action = stateManager.currentCell?.column.getUserData<ColumnSpec>()?.cellAction;
+                        final mode = imageModeForColumnAction(action);
+                        if (mode != sidePreview.mode) {
+                          ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: mode));
+                        }
+                      }
+                    },
+                    onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
+                      // event.row (== getRowByIdx(rowIdx)) is unreliable once any
+                      // row is frozen (pinned): TrinaGrid renders frozen rows in a
+                      // separate block with positional indices that don't map back
+                      // through refRows, so it would return a different record.
+                      // The tapped cell's own row is always correct.
+                      final record = event.cell.row.getUserData<CharaDetailRecord>()!;
+                      final spec = event.cell.column.getUserData<ColumnSpec>();
+                      showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
+                    },
+                    onRowChecked: (TrinaGridOnRowCheckedEvent event) {
+                      // Recompute the whole checked set (covers single + select-all
+                      // toggles) so the toolbar's archive action reads a live set.
+                      final ids = stateManager.checkedRows
+                          .map((row) => row.getUserData<CharaDetailRecord>()?.id)
+                          .nonNulls
+                          .toSet();
+                      ref.read(selectedRecordIdsProvider.notifier).set(ids);
+                      // The amber overlay is drawn by rowWrapper, which only re-runs
+                      // when the row list repaints — not when a single checkbox cell
+                      // updates itself. Nudge the grid to repaint its rows (this
+                      // reuses the existing rows, so checked state is preserved).
+                      _afterFrame(() => stateManager.notifyListeners());
+                    },
+                    onSelected: (TrinaGridOnSelectedEvent event) {
+                      try {
+                        final data = event.cell?.getUserData<CellData>();
+                        // Pass this State's live ref (stable for the widget's
+                        // lifetime), never a grid-build ref the cell captured: the
+                        // grid provider may have rebuilt and disposed that one.
+                        if (!(data?.onSelected?.call(ref.base, event) ?? false)) {
+                          final record = event.cell?.row.getUserData<CharaDetailRecord>();
+                          if (record == null) {
+                            return;
+                          }
+                          // While the side preview panel is open (and visible — not in
+                          // the narrow layout where it is hidden), a cell click only moves
+                          // the focus: the panel follows the grid's current record and the
+                          // shown image is re-derived from the focused column, both in
+                          // onActiveCellChanged (which the tap also fires). So here we only
+                          // suppress the dialog.
+                          //
+                          // The breakpoint is re-evaluated here, not read from the
+                          // build-scope `narrow`: TrinaGrid captures this onSelected
+                          // closure once (at grid load) and never refreshes it, so a
+                          // captured `narrow` would stay frozen at its first-build value
+                          // and feed the hidden panel after the window shrinks.
+                          if (ref.read(sidePreviewProvider) != null && isSidePreviewAllowed(context)) {
+                            return;
+                          }
+                          final source = ref.read(recordSourceProvider);
+                          final pathInfo = ref.read(pathInfoProvider);
+                          // event.rowIdx is unreliable once any row is frozen
+                          // (pinned): frozen rows render in a separate block and
+                          // shift the scrollable rows' indices, so it no longer maps
+                          // to getSortedRecords. Resolve the tapped record from its
+                          // own cell row and find its position by identity instead.
+                          final sorted = stateManager.getSortedRecords().toList();
+                          final index = sorted.indexOf(record);
+                          if (index < 0) {
+                            return;
+                          }
+                          final records = sorted.map((e) => recordDirOf(pathInfo, source, e)).toList();
+                          CharaDetailPreviewDialog.show(ref.base, records, index);
+                        }
+                      } catch (error, stackTrace) {
+                        logger.e(
+                          "Failed to handle cell selected. row=${event.row}, cell=${event.cell}",
+                          error,
+                          stackTrace,
+                        );
+                        captureException(error, stackTrace);
+                      }
+                    },
+                    onSorted: (TrinaGridOnSortedEvent event) {
+                      if (event.column.sort == TrinaColumnSort.none) {
+                        sortColumn = null;
+                        sortOrder = TrinaColumnSort.none;
+                      } else {
+                        sortColumn = event.column.field;
+                        sortOrder = event.column.sort;
+                      }
+                      // A header click runs trina's own per-column sort, which
+                      // leaves same-day (tied) rows in an undefined order. Re-break
+                      // those ties by capture date, mirroring the sort direction.
+                      stateManager.applyCaptureDateTiebreak(event.column, event.column.sort);
+                      // A header-click sort reorders the frozen rows in place
+                      // (FilteredList.sort works on originalList), but unlike
+                      // _reconcile/onLoaded it doesn't rebuild the pinned index, so
+                      // rowWrapper's stripe/boundary would read stale positions.
+                      // toggleSortColumn fires this before its own notifyListeners,
+                      // so re-indexing here lands in the very next repaint.
+                      _indexPinnedRows();
+                    },
+                  ),
                 ),
               ),
             );

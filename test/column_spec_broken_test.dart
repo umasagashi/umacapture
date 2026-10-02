@@ -117,6 +117,25 @@ void main() {
     expect(container.read(currentColumnSpecBrokenIdsProvider), isNot(contains('grandfathered')));
   });
 
+  test('a column saved with the display count loads healthy', () async {
+    // The display count stored inside a skill column's notation. Nothing reads it, so the column decodes without
+    // it and is not broken.
+    final skill = SkillColumnSpec(
+      id: 'skill',
+      title: 'skills',
+      parser: SkillParser(),
+      predicate: AggregateSkillPredicate(notation: SkillNotation()),
+    ).toMap();
+    ((skill['predicate'] as Map<String, dynamic>)['notation'] as Map<String, dynamic>)['max'] = 5;
+    seed([skill]);
+    final container = ProviderContainer.test();
+    addTearDown(container.dispose);
+    await container.read(currentColumnSpecsLoaderProvider.future);
+
+    expect(container.read(currentColumnSpecsProvider).map((e) => e.id).toList(), ['skill']);
+    expect(container.read(currentColumnSpecBrokenIdsProvider), isEmpty);
+  });
+
   group('a spec saved before the unmet-rows choice existed loads healthy, not broken', () {
     // Encoded from the current classes, then stripped of the unmet-rows choice
     // (a non-null enum), leaving a map that lacks only that key.
@@ -167,6 +186,61 @@ void main() {
       final children = container.read(currentColumnSpecsProvider).single.children;
       expect(children.map((e) => e.id).toList(), ['skill', 'factor']);
       children.forEach(expectDefaults);
+      expect(container.read(currentColumnSpecBrokenIdsProvider), isEmpty);
+    });
+
+    test('skill and factor columns in the shape v0.2.1 wrote them', () async {
+      // Every key a v0.2.1 build wrote for these columns: no unmet-rows choice, and the display count `max` in the
+      // notation.
+      final v021Skill = <String, dynamic>{
+        'type': 'SkillColumnSpec',
+        'id': 'skill',
+        'title': 'skill',
+        'parser': <String, dynamic>{'type': 'SkillParser'},
+        'predicate': <String, dynamic>{
+          'query': <int>[1],
+          'logic': 'anyOf',
+          'min': 1,
+          'notation': <String, dynamic>{'mode': 'names', 'max': 3},
+          'tags': <String>[],
+        },
+        'showAllWhenQueryIsEmpty': true,
+        'showAvailableOnly': true,
+        'hiddenElements': <String>['notationMax'],
+        'selectByTag': false,
+        'hidden': false,
+        'width': 240.0,
+        'labelKey': 'skill.name',
+      };
+      final v021Factor = <String, dynamic>{
+        'type': 'FactorColumnSpec',
+        'id': 'factor',
+        'title': 'factor',
+        'parser': <String, dynamic>{'type': 'FactorSetParser'},
+        'predicate': <String, dynamic>{
+          'query': <int>[2],
+          'logic': 'anyOf',
+          'subject': 'family',
+          'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
+          'notation': <String, dynamic>{'mode': 'nameStarTotal', 'max': 0},
+          'factorTags': <String>[],
+          'skillTags': <String>[],
+        },
+        'showAllWhenQueryIsEmpty': true,
+        'showAvailableOnly': true,
+        'hiddenElements': <String>[],
+        'selectByTag': false,
+        'hidden': false,
+        'labelKey': 'factor.name',
+      };
+      seed([v021Skill, v021Factor]);
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+      await container.read(currentColumnSpecsLoaderProvider.future);
+
+      final specs = container.read(currentColumnSpecsProvider);
+      expect(specs.map((e) => e.id).toList(), ['skill', 'factor']);
+      specs.forEach(expectDefaults);
       expect(container.read(currentColumnSpecBrokenIdsProvider), isEmpty);
     });
   });

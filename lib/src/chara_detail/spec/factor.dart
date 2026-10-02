@@ -149,12 +149,11 @@ extension FactorNotationModeProperties on FactorNotationMode {
 @MappableClass()
 class FactorNotation with FactorNotationMappable {
   final FactorNotationMode mode;
-  final int max;
 
-  FactorNotation({required this.mode, required this.max});
+  FactorNotation({required this.mode});
 
-  FactorNotation copyWith({FactorNotationMode? mode, int? max}) {
-    return FactorNotation(mode: mode ?? this.mode, max: max ?? this.max);
+  FactorNotation copyWith({FactorNotationMode? mode}) {
+    return FactorNotation(mode: mode ?? this.mode);
   }
 }
 
@@ -277,7 +276,7 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
       logic = FactorSetLogicMode.anyOf,
       subject = FactorSearchSubjectMode.family,
       element = FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
-      notation = FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
+      notation = FactorNotation(mode: FactorNotationMode.nameStarTotal),
       factorTags = {},
       skillTags = {};
 
@@ -431,8 +430,6 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   }
 
   @override
-  bool hasQuerySelection(RefBase ref) => resolvedFactorIds(ref).isNotEmpty;
-
   @override
   Map<int, int> heldItemStrengths(RefBase ref, FactorSet value) => {
     for (final factor in heldFactors(ref, value)) factor.id: factor.sum(),
@@ -638,7 +635,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final factors = order.sort(heldFactors(ref, value), (e) => e.id);
 
     // Value-only modes render a single aggregate value across all factors, with
-    // no factor names, so the display-count limit does not apply.
+    // no factor names.
     if (notatesValueOnly) {
       final display = QueriedFactor.notationOf(factors, mode.metric, mode.granularity, width: 3);
       final summary = "(${QueriedFactor.notationOf(factors, mode.metric, mode.granularity)})";
@@ -656,14 +653,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final notations = factors
         .map((q) => FactorItemsColumnSpec.itemText(q, labels.getOrNull(q.id) ?? q.id.toString(), mode))
         .toList();
-    final max = itemLimit(ref, predicate.notation.max);
-    final desc = (max == null ? notations : notations.partial(0, max)).join(", ");
+    final desc = notations.join(", ");
     final csv = const CsvEncoder().convert([notations]);
     final data = marksMissing
         ? _markedCell(ref, predicate, order, value, csv: csv)
-        : ItemCellData.limited(
+        : ItemCellData.listing(
             [for (final text in notations) CellItem(text, ItemState.normal)],
-            max,
             hideCommon: false,
             csv: csv,
           );
@@ -672,7 +667,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
 
   /// A cell that marks the missing factors: the factors held within the subject, drawn in the named counterpart
   /// of the stored notation, and the placeholders of the queried factors the record lacks, drawn in the same
-  /// notation with every slot 0 so that a placeholder takes the shape of a held factor, cut to the display count.
+  /// notation with every slot 0 so that a placeholder takes the shape of a held factor.
   ItemCellData _markedCell(
     RefBase ref,
     AggregateFactorSetPredicate predicate,
@@ -695,7 +690,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
         ),
     ];
     final items = missingMarkedItems(own, predicate.query, placeholderOf, order, perItemThreshold: perItemThreshold);
-    return ItemCellData.limited(items, itemLimit(ref, predicate.notation.max), hideCommon: false, csv: csv);
+    return ItemCellData.listing(items, hideCommon: false, csv: csv);
   }
 
   @override
@@ -1178,41 +1173,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     );
   }
 
-  Widget notationMaxWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    final predicate = spec.predicate;
-    // Value-only modes render a single aggregate cell, so the per-cell factor limit
-    // has no effect. Marking missing factors names them even under a
-    // value-only mode, and the limit applies again. When both reasons hold, the
-    // value-only mode is named: it keeps the limit off whatever is selected.
-    final valueOnly = !predicate.notation.mode.showsName && !_namesItems(ref);
-    // A column that selects items shows every one of them, so the limit applies
-    // only while nothing is selected.
-    final selecting = spec.hasQuerySelection(ref.base);
-    return FormTile(
-      title: Text("$tr_factor.notation.max.label".tr()),
-      description: Text("$tr_factor.notation.max.description".tr()),
-      trailing: Disabled(
-        disabled: valueOnly || selecting,
-        tooltip: valueOnly
-            ? "$tr_factor.notation.max.disabled_tooltip".tr()
-            : "$tr_common.notation.max_selected_tooltip".tr(),
-        child: IntStepperField(
-          min: 1,
-          max: 100,
-          value: predicate.notation.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
-              );
-            });
-          },
-        ),
-      ),
-    );
-  }
-
   Widget notationTitleWidget(WidgetRef ref) {
     return FormTile(
       title: Text("$tr_common.notation.title.label".tr()),
@@ -1235,7 +1195,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       children: [
         UnmetRowsChoice(specId: widget.specId),
         notationChoiceWidget(context, ref),
-        notationMaxWidget(ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
@@ -1329,7 +1288,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: initialStar, count: 1),
-        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
+        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal),
         factorTags: initialFactorTags,
         skillTags: initialSkillTags,
       ),
@@ -1378,7 +1337,7 @@ class TagDrivenFactorColumnBuilder extends ColumnBuilder {
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
-        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
+        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal),
       ),
       selectByTag: true,
       hiddenElements: {FactorDialogElements.selectionList, FactorDialogElements.modeLogic},

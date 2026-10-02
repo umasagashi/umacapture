@@ -61,13 +61,6 @@ class SkillDifferenceColumnSpecMapper
     opt: true,
     def: false,
   );
-  static int _$max(SkillDifferenceColumnSpec v) => v.max;
-  static const Field<SkillDifferenceColumnSpec, int> _f$max = Field(
-    'max',
-    _$max,
-    opt: true,
-    def: 3,
-  );
   static bool _$hideCommonItems(SkillDifferenceColumnSpec v) =>
       v.hideCommonItems;
   static const Field<SkillDifferenceColumnSpec, bool> _f$hideCommonItems =
@@ -129,7 +122,6 @@ class SkillDifferenceColumnSpecMapper
     #query: _f$query,
     #tags: _f$tags,
     #selectByTag: _f$selectByTag,
-    #max: _f$max,
     #hideCommonItems: _f$hideCommonItems,
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
@@ -162,7 +154,6 @@ class SkillDifferenceColumnSpecMapper
       query: data.dec(_f$query),
       tags: data.dec(_f$tags),
       selectByTag: data.dec(_f$selectByTag),
-      max: data.dec(_f$max),
       hideCommonItems: data.dec(_f$hideCommonItems),
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),

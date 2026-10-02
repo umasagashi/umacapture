@@ -39,12 +39,11 @@ enum SkillNotationMode { names, count }
 @MappableClass()
 class SkillNotation with SkillNotationMappable {
   final SkillNotationMode mode;
-  final int max;
 
-  SkillNotation({this.mode = SkillNotationMode.names, this.max = 3});
+  SkillNotation({this.mode = SkillNotationMode.names});
 
-  SkillNotation copyWith({SkillNotationMode? mode, int? max}) {
-    return SkillNotation(mode: mode ?? this.mode, max: max ?? this.max);
+  SkillNotation copyWith({SkillNotationMode? mode}) {
+    return SkillNotation(mode: mode ?? this.mode);
   }
 }
 
@@ -68,7 +67,7 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
     : query = {},
       logic = SkillSetLogicMode.anyOf,
       min = 1,
-      notation = SkillNotation(max: 3),
+      notation = SkillNotation(),
       tags = {};
 
   AggregateSkillPredicate copyWith({
@@ -123,7 +122,16 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
 }
 
 @MappableEnum()
-enum SkillDialogElements { selection, selectionList, selectionTags, mode, notationMax }
+enum SkillDialogElements {
+  selection,
+  selectionList,
+  selectionTags,
+  mode,
+
+  /// The notation mode choice: hidden for a column fixed to its skills (the consolidation shortcut), which lists
+  /// too few items for it to matter. The name is a stored value, so it stays.
+  notationMax,
+}
 
 /// Capability of a column whose items are skills: the skill selection (hand-picked or by tag), its resolution
 /// against the current skill master, and the skills a record holds within it.
@@ -175,8 +183,6 @@ mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
       ItemOrder(query: resolvedSkillIds(ref), masterRank: ref.watch(skillMasterRankProvider));
 
   @override
-  bool hasQuerySelection(RefBase ref) => resolvedSkillIds(ref).isNotEmpty;
-
   @override
   Map<int, int> heldItemStrengths(RefBase ref, List<Skill> value) => {
     for (final skill in heldSkills(ref, value)) skill.id: 1,
@@ -364,22 +370,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     // blank every column; degrade to the raw id for that cell instead.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final skillNames = foundSkills.map((e) => nameOf(e.id)).toList();
-    final max = itemLimit(ref, predicate.notation.max);
     // The value (sorting) and the CSV do not depend on whether missing items are marked.
     final csv = const CsvEncoder().convert([skillNames]);
-    final cellValue = notatesValueOnly
-        ? foundSkills.length.toString().padLeft(3, "0")
-        : (max == null ? skillNames : skillNames.partial(0, max)).join(", ");
+    final cellValue = notatesValueOnly ? foundSkills.length.toString().padLeft(3, "0") : skillNames.join(", ");
 
     // While marking missing skills the count is drawn as the names, since a red mark belongs to an item.
     final own = [for (final (i, skill) in foundSkills.indexed) OwnItem(skill.id, skillNames[i], strength: 1)];
     final ItemCellData data = drawsSummary
         ? ItemCellData(items: const [], summary: foundSkills.length.toString(), csv: csv)
-        : ItemCellData.limited(
+        : ItemCellData.listing(
             marksMissing
                 ? missingMarkedItems(own, predicate.query, nameOf, order, perItemThreshold: false)
                 : [for (final item in own) CellItem(item.text, ItemState.normal)],
-            max,
             hideCommon: false,
             csv: csv,
           );
@@ -701,41 +703,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     );
   }
 
-  Widget notationMaxWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    final predicate = spec.predicate;
-    // The count mode renders a single number, so the per-cell skill limit has no
-    // effect. Marking missing items names the items even under the count mode,
-    // and the limit applies again. When both reasons hold, the count mode is named:
-    // it keeps the limit off whatever is selected.
-    final countOnly = predicate.notation.mode == SkillNotationMode.count && !_namesItems(ref);
-    // A column that selects items shows every one of them, so the limit applies
-    // only while nothing is selected.
-    final selecting = spec.hasQuerySelection(ref.base);
-    return FormTile(
-      title: Text("$tr_skill.notation.max.label".tr()),
-      description: Text("$tr_skill.notation.max.description".tr()),
-      trailing: Disabled(
-        disabled: countOnly || selecting,
-        tooltip: countOnly
-            ? "$tr_skill.notation.max.disabled_tooltip".tr()
-            : "$tr_common.notation.max_selected_tooltip".tr(),
-        child: IntStepperField(
-          min: 1,
-          max: 100,
-          value: predicate.notation.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
-              );
-            });
-          },
-        ),
-      ),
-    );
-  }
-
   Widget notationTitleWidget(WidgetRef ref) {
     return FormTile(
       title: Text("$tr_common.notation.title.label".tr()),
@@ -758,10 +725,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       description: Text("$tr_common.notation.description".tr()),
       children: [
         UnmetRowsChoice(specId: widget.specId),
-        if (!hiddenElements.contains(SkillDialogElements.notationMax)) ...[
-          notationModeWidget(context, ref),
-          notationMaxWidget(ref),
-        ],
+        if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationModeWidget(context, ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
@@ -855,7 +819,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
         query: initialIds,
         logic: SkillSetLogicMode.anyOf,
         min: 1,
-        notation: SkillNotation(max: 3),
+        notation: SkillNotation(),
         tags: initialTags,
       ),
       hiddenElements: {
@@ -915,7 +879,7 @@ class TagDrivenSkillColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       builderId: builderId,
-      predicate: AggregateSkillPredicate(notation: SkillNotation(max: 3), tags: initialTags),
+      predicate: AggregateSkillPredicate(notation: SkillNotation(), tags: initialTags),
       selectByTag: true,
       hiddenElements: hiddenElements,
       showAllWhenQueryIsEmpty: false,

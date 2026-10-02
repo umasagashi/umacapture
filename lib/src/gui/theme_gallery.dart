@@ -589,6 +589,16 @@ class _BlendSection extends StatelessWidget {
           'HoldToConfirmButton\'s label and icon while disabled, drawn over the 12% fill above; 38% matches a '
           'disabled FilledButton\'s foreground.',
         ),
+        _SwatchRow(
+          _BlendSwatch(
+            'numeric field unit',
+            overlay: cs.onSurfaceVariant.withValues(alpha: 0.6),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'The unit ("px", "%") inside a numeric stepper field (IntStepperField), muted so it reads as secondary to '
+          'the number beside it.',
+        ),
       ],
       note:
           'Left chip = raw translucent over a checkerboard; body = composite over the real background. '
@@ -679,14 +689,16 @@ class _ItemCellSection extends ConsumerWidget {
           _ItemCellSpecimen(
             'omission counter',
             ItemCellData(
-              items: const [CellItem('Item A', ItemState.normal), CellItem('Item B', ItemState.normal)],
-              total: 10,
+              items: [for (final c in 'ABCDEFGHIJ'.split('')) CellItem('Item $c', ItemState.normal)],
               csv: '',
             ),
+            maxCellHeight: oneRowHeight,
           ),
-          'The counter a cell appends when it lists fewer items than it has (the display limit, or too few '
-          'lines): "... shown/total", in disabledColor at a reduced size (itemCounterScale). It is a box of its '
-          'own, so the cut always falls between boxes, never inside one.',
+          'The counter a cell appends when it shows fewer items than it has -- here cut by the table\'s cell height '
+          'cap, one row of boxes; in RowHeightMode.wrap the row height can cut it too: "... shown/total", in '
+          'disabledColor at a reduced size (itemCounterScale). It is a box of its own, so the cut always falls '
+          'between boxes, never inside one. Hovering the mouse over it shows a tooltip in the app\'s tooltip theme '
+          'naming the cause and what lets more show: the row height or the cell height cap.',
         ),
         _SwatchRow(
           _ItemCellSpecimen('wraps across rows', ItemCellData(items: manyItems, csv: '')),
@@ -701,8 +713,9 @@ class _ItemCellSection extends ConsumerWidget {
           ),
           'The same items given only one row of height (itemBoxesMinHeight(1, ...)): the cell shows as many '
           'boxes as that row fits and appends the omission counter for the rest, in RowHeightMode.wrap (the app '
-          'default). An auto row-height mode grows the row to fit its content instead, so under that mode this '
-          'specimen is given no bound either and shows every box, as the table does.',
+          'default). An auto row-height mode grows the row to fit its content, up to the table\'s cell height cap '
+          'for a skill or factor cell, so under that mode this specimen is given no row bound and shows every box '
+          'its unbounded cell height allows, as the table does.',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
@@ -719,28 +732,39 @@ class _ItemCellSection extends ConsumerWidget {
       note:
           'Drawn by ItemCellText, so it honours the current row-height setting: the "cut by a fixed row '
           'height" specimen above is bounded only in RowHeightMode.wrap, to demonstrate that a small row-height '
-          'setting cuts the cell itself and shows a counter for the rest.',
+          'setting cuts the cell itself and shows a counter for the rest. The table\'s cell height cap applies in '
+          'every row-height mode; only the "omission counter" specimen is given one.',
     );
   }
 }
 
 /// A caption over one live [ItemCellText] on the surface it is painted on, in the size of a swatch. When
 /// [itemAreaHeight] is given, the item boxes alone (not the label above them) are bounded to that height,
-/// the way a real cell in [RowHeightMode.wrap] gives its row only a fixed height.
+/// the way a real cell in [RowHeightMode.wrap] gives its row only a fixed height. When [maxCellHeight] is given,
+/// the cell lays its items out under that cell height cap ([ItemColumnBoundsScope]), the way a table bounds its
+/// skill and factor cells.
 class _ItemCellSpecimen extends StatelessWidget {
   final String label;
   final ItemCellData data;
   final double? itemAreaHeight;
+  final double? maxCellHeight;
 
-  const _ItemCellSpecimen(this.label, this.data, {this.itemAreaHeight});
+  const _ItemCellSpecimen(this.label, this.data, {this.itemAreaHeight, this.maxCellHeight});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final itemText = DefaultTextStyle(
-      style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(color: cs.onSurface),
-      child: ItemCellText(data),
+    final itemText = ItemColumnBoundsScope(
+      bounds: ItemColumnBounds(
+        defaultWidth: double.infinity,
+        maxWidth: double.infinity,
+        maxCellHeight: maxCellHeight ?? double.infinity,
+      ),
+      child: DefaultTextStyle(
+        style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(color: cs.onSurface),
+        child: ItemCellText(data),
+      ),
     );
     return Container(
       width: 168,

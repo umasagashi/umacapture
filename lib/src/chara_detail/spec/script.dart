@@ -1577,7 +1577,8 @@ class _PreviewGrid extends StatelessWidget {
             cellTextStyle: theme.textTheme.bodyMedium!,
           ),
         ),
-        onLoaded: (event) => event.stateManager.autoFitColumns(),
+        // A script column takes no table bounds ([ColumnSpec.takesItemColumnBounds]), so the preview needs none.
+        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded),
       ),
     );
     if (!truncated) return grid;

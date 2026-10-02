@@ -17,7 +17,6 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
-import '/src/gui/common.dart';
 
 part 'factor_difference.mapper.dart';
 
@@ -59,9 +58,6 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
   /// item, so the dialog offers only the modes that show the name.
   final FactorNotationMode notationMode;
 
-  /// The display count of a cell while nothing is selected.
-  final int max;
-
   @override
   final bool hideCommonItems;
 
@@ -99,7 +95,6 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
     this.selectByTag = false,
     this.subject = FactorSearchSubjectMode.family,
     this.notationMode = FactorNotationMode.nameStarTotal,
-    this.max = 3,
     this.hideCommonItems = false,
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
@@ -144,7 +139,6 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
     bool? selectByTag,
     FactorSearchSubjectMode? subject,
     FactorNotationMode? notationMode,
-    int? max,
     bool? hideCommonItems,
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
@@ -163,7 +157,6 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
       selectByTag: selectByTag ?? this.selectByTag,
       subject: subject ?? this.subject,
       notationMode: notationMode ?? this.notationMode,
-      max: max ?? this.max,
       hideCommonItems: hideCommonItems ?? this.hideCommonItems,
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
@@ -192,14 +185,12 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
     final own = [
       for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
     ];
-    final limit = itemLimit(ref, max);
-    final data = ItemCellData.limited(
+    final data = ItemCellData.listing(
       differenceItems(own, tally, (id) => placeholderText(ref, id, mode), order),
-      limit,
       hideCommon: hideCommonItems,
       csv: const CsvEncoder().convert([notations]),
     );
-    return TrinaCell(value: (limit == null ? notations : notations.partial(0, limit)).join(", "))..setUserData(data);
+    return TrinaCell(value: notations.join(", "))..setUserData(data);
   }
 
   @override
@@ -314,27 +305,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     );
   }
 
-  Widget notationMaxWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    // A column that selects items shows every one of them, so the limit applies only while nothing is selected.
-    return FormTile(
-      title: Text("$tr_factor.notation.max.label".tr()),
-      description: Text("$tr_factor.notation.max.description".tr()),
-      trailing: Disabled(
-        disabled: spec.hasQuerySelection(ref.base),
-        tooltip: "$tr_common.notation.max_selected_tooltip".tr(),
-        child: IntStepperField(
-          min: 1,
-          max: 100,
-          value: spec.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(max: value));
-          },
-        ),
-      ),
-    );
-  }
-
   Widget notationTitleWidget(WidgetRef ref) {
     return FormTile(
       title: Text("$tr_common.notation.title.label".tr()),
@@ -357,7 +327,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       children: [
         DifferenceCommonItemsSwitch(specId: widget.specId),
         notationChoiceWidget(ref),
-        notationMaxWidget(ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

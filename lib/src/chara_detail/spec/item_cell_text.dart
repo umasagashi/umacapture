@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -64,11 +65,13 @@ const itemCounterScale = 0.85;
 const itemBackgroundRadiusRatio = 0.25;
 
 /// Renders an [ItemCellData] as item boxes: each item one box, a rounded background behind each highlighted one,
-/// then the omission counter box when the cell shows fewer items than it has.
+/// then the omission counter box when the cell shows fewer items than it has, because more do not fit. Hovering the
+/// mouse over the counter box shows a tooltip naming what cut the items ([itemOmissionMessage]).
 ///
 /// The boxes are placed by [arrangeItemBoxes], the function the row-height and column-width passes measure with
-/// ([ItemMeasuredContent]), and their text is laid out the same way. In [RowHeightMode.wrap] the cell shows the
-/// most items that fit, with the counter, in the height its row gives it.
+/// ([ItemMeasuredContent]), and their text is laid out the same way. The cell shows the most items that fit, with
+/// the counter, in the table's cell height cap ([ItemColumnBoundsScope]) and, in [RowHeightMode.wrap], in the
+/// height its row gives it.
 class ItemCellText extends ConsumerWidget {
   const ItemCellText(this.data, {super.key});
 
@@ -95,6 +98,7 @@ class ItemCellText extends ConsumerWidget {
         locale: Localizations.maybeLocaleOf(context),
         textHeightBehavior: defaultStyle.textHeightBehavior ?? DefaultTextHeightBehavior.maybeOf(context),
         wrap: ref.watch(charaDetailRowHeightModeProvider) == RowHeightMode.wrap,
+        maxCellHeight: ItemColumnBoundsScope.of(context).maxCellHeight,
       ),
       theme: theme,
       colors: theme.extension<AppSemanticColors>(),
@@ -103,7 +107,7 @@ class ItemCellText extends ConsumerWidget {
 }
 
 /// How the boxes of an item cell are laid out. [wrap] caps the cell at the height its row gives it
-/// ([RowHeightMode.wrap]).
+/// ([RowHeightMode.wrap]); [maxCellHeight] is the table's cell height cap ([ItemColumnBounds.maxCellHeight]).
 typedef ItemCellLayout = ({
   TextStyle style,
   TextDirection textDirection,
@@ -111,15 +115,25 @@ typedef ItemCellLayout = ({
   Locale? locale,
   TextHeightBehavior? textHeightBehavior,
   bool wrap,
+  double maxCellHeight,
 });
 
-class _ItemCellBoxes extends LeafRenderObjectWidget {
+/// The boxes of an item cell, and as its one child the tooltip over the omission counter box, built at layout from
+/// the [ItemOmission] the arrangement carries: what cut the items is known only once they are placed.
+class _ItemCellBoxes extends AbstractLayoutBuilder<ItemOmission?> {
   const _ItemCellBoxes({required this.data, required this.layout, required this.theme, required this.colors});
 
   final ItemCellData data;
   final ItemCellLayout layout;
   final ThemeData theme;
   final AppSemanticColors? colors;
+
+  @override
+  Widget Function(BuildContext, ItemOmission?) get builder => _counterTooltip;
+
+  /// The child depends on the omission alone, which a relayout passes on whenever it changes.
+  @override
+  bool updateShouldRebuild(_ItemCellBoxes oldWidget) => false;
 
   @override
   RenderItemCellText createRenderObject(BuildContext context) =>
@@ -130,9 +144,25 @@ class _ItemCellBoxes extends LeafRenderObjectWidget {
       renderObject.update(data: data, layout: layout, theme: theme, colors: colors);
 }
 
+/// The tooltip laid over the omission counter box, or an empty child, which takes no room and no hit, when the cell
+/// has no counter. Shown on mouse hover only ([TooltipTriggerMode.manual]): a touch long press in the box stays the
+/// grid's.
+Widget _counterTooltip(BuildContext context, ItemOmission? omission) => omission == null
+    ? const SizedBox.shrink()
+    : Tooltip(
+        message: itemOmissionMessage(omission),
+        triggerMode: TooltipTriggerMode.manual,
+        child: const SizedBox.expand(),
+      );
+
 /// The render object of [ItemCellText]. It decides at layout how many items fit, since a cut for want of room is
-/// only known once the boxes are placed at the cell's width and height.
-class RenderItemCellText extends RenderBox {
+/// only known once the boxes are placed at the cell's width and height. Its child is laid out over the omission
+/// counter box, and takes hits only there.
+class RenderItemCellText extends RenderBox
+    with
+        RenderObjectWithChildMixin<RenderBox>,
+        RenderObjectWithLayoutCallbackMixin,
+        RenderAbstractLayoutBuilderMixin<ItemOmission?, RenderBox> {
   RenderItemCellText({
     required this._data,
     required ItemCellLayout layout,
@@ -147,7 +177,7 @@ class RenderItemCellText extends RenderBox {
   ThemeData _theme;
   AppSemanticColors? _colors;
   _PaintingItemTextMeasurer _measurer;
-  ItemBoxArrangement _arrangement = const ItemBoxArrangement([], null, Size.zero, rows: 0);
+  ItemBoxArrangement _arrangement = const ItemBoxArrangement([], null, Size.zero, rows: 0, omission: null);
 
   /// The boxes placed by the last layout. Its size is the extent of the content, which the size of this render
   /// object is not when the cell is given a tight width or less height than the content takes.
@@ -180,11 +210,16 @@ class RenderItemCellText extends RenderBox {
     markNeedsSemanticsUpdate();
   }
 
-  ItemBoxArrangement _arrange({required double maxWidth, double maxHeight = double.infinity}) =>
-      arrangeItemBoxes(_data.items, _data.total, _measurer, maxWidth: maxWidth, maxHeight: maxHeight);
+  ItemBoxArrangement _arrange({required double maxWidth, double rowHeight = double.infinity}) => arrangeItemBoxes(
+    _data.items,
+    _measurer,
+    maxWidth: maxWidth,
+    rowHeight: rowHeight,
+    maxCellHeight: _layout.maxCellHeight,
+  );
 
   ItemBoxArrangement _arrangeFor(BoxConstraints constraints) =>
-      _arrange(maxWidth: constraints.maxWidth, maxHeight: _layout.wrap ? constraints.maxHeight : double.infinity);
+      _arrange(maxWidth: constraints.maxWidth, rowHeight: _layout.wrap ? constraints.maxHeight : double.infinity);
 
   /// Rows break only between boxes, so the narrowest the cell lays out in is its widest box.
   @override
@@ -205,31 +240,72 @@ class RenderItemCellText extends RenderBox {
   @override
   Size computeDryLayout(covariant BoxConstraints constraints) => constraints.constrain(_arrangeFor(constraints).size);
 
+  /// What the child is built from: the omission of the arrangement [performLayout] has just placed.
+  @override
+  ItemOmission? get layoutInfo => _arrangement.omission;
+
   @override
   void performLayout() {
     _arrangement = _arrangeFor(constraints);
     size = constraints.constrain(_arrangement.size);
+    runLayoutCallback();
+    final child = this.child;
+    if (child != null) {
+      final counter = _arrangement.counter;
+      child.layout(BoxConstraints.tight(counter?.box.size ?? Size.zero));
+      (child.parentData as BoxParentData).offset = counter == null
+          ? Offset.zero
+          : counter.box.topLeft.translate(0, _contentShift);
+    }
+  }
+
+  /// How far the boxes are moved down when drawn: a content taller than the cell is centred vertically.
+  double get _contentShift {
+    final content = _arrangement.size;
+    return content.height > size.height ? (size.height - content.height) / 2 : 0.0;
   }
 
   @override
   bool hitTestSelf(Offset position) => true;
+
+  /// Only the omission counter box reaches the child. [RenderBox.hitTest] already leaves out a point outside the
+  /// cell, where a counter cut at the cell's bounds is not drawn.
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    final child = this.child;
+    if (child == null || _arrangement.counter == null) {
+      return false;
+    }
+    return result.addWithPaintOffset(
+      offset: (child.parentData as BoxParentData).offset,
+      position: position,
+      hitTest: (result, transformed) => child.hitTest(result, position: transformed),
+    );
+  }
 
   @override
   void paint(PaintingContext context, Offset offset) {
     final content = _arrangement.size;
     if (content.width <= size.width && content.height <= size.height) {
       _paintBoxes(context.canvas, offset);
+      _paintChild(context, offset);
       return;
     }
     // One row taller than the cell, or a box wider than a very narrow cell: centred vertically and cut at the
     // cell's bounds, so nothing is drawn over the neighbouring rows.
-    final dy = content.height > size.height ? (size.height - content.height) / 2 : 0.0;
-    context.pushClipRect(
-      needsCompositing,
-      offset,
-      Offset.zero & size,
-      (context, offset) => _paintBoxes(context.canvas, offset + Offset(0, dy)),
-    );
+    final dy = _contentShift;
+    context.pushClipRect(needsCompositing, offset, Offset.zero & size, (context, offset) {
+      _paintBoxes(context.canvas, offset + Offset(0, dy));
+      _paintChild(context, offset);
+    });
+  }
+
+  /// The child draws nothing of its own; it is painted like any child, at the offset layout gave it.
+  void _paintChild(PaintingContext context, Offset offset) {
+    final child = this.child;
+    if (child != null) {
+      context.paintChild(child, offset + (child.parentData as BoxParentData).offset);
+    }
   }
 
   void _paintBoxes(Canvas canvas, Offset offset) {
@@ -251,7 +327,8 @@ class RenderItemCellText extends RenderBox {
   }
 
   /// The label is the drawn texts, shortened ones included, then the counter, joined by `, ` as
-  /// [ItemCellData.csv] joins the items, so a screen reader pauses between items.
+  /// [ItemCellData.csv] joins the items, so a screen reader pauses between items. The counter's tooltip is no node
+  /// of its own: it joins this one as its tooltip.
   @override
   void describeSemanticsConfiguration(SemanticsConfiguration config) {
     super.describeSemanticsConfiguration(config);
@@ -431,16 +508,55 @@ class ItemBoxPlacement {
   String toString() => 'ItemBoxPlacement($text, $box, $textOrigin)';
 }
 
+/// What cut the items of a cell: the height its row gives it in [RowHeightMode.wrap], or the table's cell height cap.
+enum ItemOmissionCause { rowHeight, cellHeightCap }
+
+/// Why an item cell shows fewer items than it holds, as [arrangeItemBoxes] decides it: [shown] of [total] fit the
+/// height [cause] set.
+@immutable
+class ItemOmission {
+  const ItemOmission({required this.shown, required this.total, required this.cause});
+
+  final int shown;
+  final int total;
+  final ItemOmissionCause cause;
+
+  /// The items left out.
+  int get omitted => total - shown;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ItemOmission && other.shown == shown && other.total == total && other.cause == cause;
+
+  @override
+  int get hashCode => Object.hash(shown, total, cause);
+
+  @override
+  String toString() => 'ItemOmission(shown: $shown, total: $total, cause: $cause)';
+}
+
+// ignore: constant_identifier_names
+const tr_item_omission = "pages.chara_detail.item_omission";
+
+/// The tooltip of the omission counter: what cut the items and how many, then on its own line what lets more show.
+String itemOmissionMessage(ItemOmission omission) => switch (omission.cause) {
+  ItemOmissionCause.rowHeight => "$tr_item_omission.row_height",
+  ItemOmissionCause.cellHeightCap => "$tr_item_omission.cell_height",
+}.tr(namedArgs: {"count": "${omission.omitted}"});
+
 /// The boxes of one item cell, as [arrangeItemBoxes] places them.
 @immutable
 class ItemBoxArrangement {
-  const ItemBoxArrangement(this.items, this.counter, this.size, {required this.rows});
+  const ItemBoxArrangement(this.items, this.counter, this.size, {required this.rows, required this.omission});
 
   /// The shown items in order, each with its box.
   final List<(CellItem, ItemBoxPlacement)> items;
 
   /// The omission counter; non-null exactly when fewer items are shown than the cell has.
   final ItemBoxPlacement? counter;
+
+  /// What left items out; non-null exactly when [counter] is.
+  final ItemOmission? omission;
 
   /// The extent of every box plus [ItemBoxSpacing.outerMargin] above and below; zero when there is no box.
   final Size size;
@@ -453,21 +569,27 @@ class ItemBoxArrangement {
 
 /// Places the boxes of an item cell: each item is one box (its text plus the padding), rows break only between
 /// boxes, neighbouring boxes are [ItemBoxSpacing.gap] apart and rows [ItemBoxSpacing.rowGap] apart, with
-/// [ItemBoxSpacing.outerMargin] above the first row and below the last. When fewer
-/// items are shown than [total], an omission counter box follows the last shown one.
+/// [ItemBoxSpacing.outerMargin] above the first row and below the last.
 ///
-/// With a finite [maxHeight] the cell shows the most items that fit together with the counter; one row is always
-/// shown, even when it is taller than [maxHeight]. An item whose box alone is wider than [maxWidth] is shortened to
-/// its longest prefix that fits, followed by [itemEllipsis].
+/// With a finite height — [rowHeight], the height its row gives the cell in [RowHeightMode.wrap], or
+/// [maxCellHeight], the table's cell height cap — the cell shows the most items that fit the lower of the two
+/// together with an omission counter box, which follows the last shown item and counts against every item;
+/// [ItemBoxArrangement.omission] names the height that cut them. One row is always shown, even when it is taller
+/// than that height; when not even a shortened first item shares that row with the counter, the row is the counter
+/// alone. An item whose box alone is wider than [maxWidth] is shortened to its longest prefix that fits, followed by
+/// [itemEllipsis].
 ItemBoxArrangement arrangeItemBoxes(
   List<CellItem> items,
-  int total,
   ItemTextMeasurer measurer, {
   required double maxWidth,
-  double maxHeight = double.infinity,
+  double rowHeight = double.infinity,
+  double maxCellHeight = double.infinity,
   ItemBoxSpacing spacing = const ItemBoxSpacing(),
 }) {
-  final arranger = _ItemBoxArranger(total, measurer, maxWidth, spacing);
+  final maxHeight = math.min(rowHeight, maxCellHeight);
+  // The lower bound is the one that cut; on a tie the row height, which raising the cap alone would not lift.
+  final cause = maxCellHeight < rowHeight ? ItemOmissionCause.cellHeightCap : ItemOmissionCause.rowHeight;
+  final arranger = _ItemBoxArranger(items.length, cause, measurer, maxWidth, spacing);
   final boxes = [for (final item in items) arranger.fitWidth(item, maxWidth)];
   final all = arranger.place(boxes);
   bool fits(ItemBoxArrangement a) => a.rows <= 1 || a.size.height <= maxHeight;
@@ -480,7 +602,13 @@ ItemBoxArrangement arrangeItemBoxes(
   }
   // Not even the first item shares one row with the counter: shorten it so that it does.
   final counterWidth = arranger.counterExtent(1).width;
-  return arranger.place([arranger.fitWidth(items.first, maxWidth - spacing.gap - counterWidth)]);
+  final first = arranger.place([arranger.fitWidth(items.first, maxWidth - spacing.gap - counterWidth)]);
+  if (fits(first)) {
+    return first;
+  }
+  // Not even a shortened first item fits beside the counter: the counter alone, counting every item as cut. It is
+  // drawn whole even when wider than [maxWidth], so the one row it takes keeps its count readable.
+  return arranger.place([]);
 }
 
 /// The largest n in [low]..[high] for which [fits] holds, assuming it holds up to some n and fails beyond; or
@@ -502,9 +630,12 @@ int _largestFittingCount(int low, int high, bool Function(int) fits) {
 typedef _ItemBox = ({CellItem item, String text, ItemTextExtent extent});
 
 class _ItemBoxArranger {
-  _ItemBoxArranger(this.total, this.measurer, this.maxWidth, this.spacing);
+  _ItemBoxArranger(this.total, this.cause, this.measurer, this.maxWidth, this.spacing);
 
   final int total;
+
+  /// The height that cuts the items, should they not all fit.
+  final ItemOmissionCause cause;
   final ItemTextMeasurer measurer;
   final double maxWidth;
   final ItemBoxSpacing spacing;
@@ -559,7 +690,7 @@ class _ItemBoxArranger {
       put(-1, counterExtent.width);
     }
     if (rows.last.isEmpty) {
-      return const ItemBoxArrangement([], null, Size.zero, rows: 0);
+      return const ItemBoxArrangement([], null, Size.zero, rows: 0, omission: null);
     }
 
     // Item boxes are top-aligned in their row; the counter sits on the baseline of the row's last item, kept
@@ -600,6 +731,7 @@ class _ItemBoxArranger {
       counter,
       Size(width, top - spacing.rowGap + spacing.outerMargin),
       rows: rows.length,
+      omission: counter == null ? null : ItemOmission(shown: boxes.length, total: total, cause: cause),
     );
   }
 }
@@ -612,7 +744,7 @@ class ItemMeasuredContent extends MeasuredContent {
   final ItemCellData data;
 
   @override
-  Size measure(CellMeasurement m, {double maxWidth = double.infinity}) {
+  Size measure(CellMeasurement m, {double maxWidth = double.infinity, double maxHeight = double.infinity}) {
     if (maxWidth <= 0) {
       return Size.zero;
     }
@@ -621,7 +753,7 @@ class ItemMeasuredContent extends MeasuredContent {
       () => _MeasuringItemTextMeasurer(m.style, m.textScaler),
       dispose: (e) => e.dispose(),
     );
-    return arrangeItemBoxes(data.items, data.total, measurer, maxWidth: maxWidth).size;
+    return arrangeItemBoxes(data.items, measurer, maxWidth: maxWidth, maxCellHeight: maxHeight).size;
   }
 
   @override

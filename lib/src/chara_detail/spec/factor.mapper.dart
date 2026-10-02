@@ -371,17 +371,12 @@ class FactorNotationMapper extends ClassMapperBase<FactorNotation> {
     'mode',
     _$mode,
   );
-  static int _$max(FactorNotation v) => v.max;
-  static const Field<FactorNotation, int> _f$max = Field('max', _$max);
 
   @override
-  final MappableFields<FactorNotation> fields = const {
-    #mode: _f$mode,
-    #max: _f$max,
-  };
+  final MappableFields<FactorNotation> fields = const {#mode: _f$mode};
 
   static FactorNotation _instantiate(DecodingData data) {
-    return FactorNotation(mode: data.dec(_f$mode), max: data.dec(_f$max));
+    return FactorNotation(mode: data.dec(_f$mode));
   }
 
   @override

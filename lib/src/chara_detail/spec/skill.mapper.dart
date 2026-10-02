@@ -183,22 +183,12 @@ class SkillNotationMapper extends ClassMapperBase<SkillNotation> {
     opt: true,
     def: SkillNotationMode.names,
   );
-  static int _$max(SkillNotation v) => v.max;
-  static const Field<SkillNotation, int> _f$max = Field(
-    'max',
-    _$max,
-    opt: true,
-    def: 3,
-  );
 
   @override
-  final MappableFields<SkillNotation> fields = const {
-    #mode: _f$mode,
-    #max: _f$max,
-  };
+  final MappableFields<SkillNotation> fields = const {#mode: _f$mode};
 
   static SkillNotation _instantiate(DecodingData data) {
-    return SkillNotation(mode: data.dec(_f$mode), max: data.dec(_f$max));
+    return SkillNotation(mode: data.dec(_f$mode));
   }
 
   @override

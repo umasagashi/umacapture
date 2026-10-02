@@ -23,7 +23,7 @@ AggregateFactorSetPredicate _predicate({
     logic: logic,
     subject: subject,
     element: FactorSearchElement(mode: mode, star: star, count: count),
-    notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
+    notation: FactorNotation(mode: FactorNotationMode.nameStarTotal),
   );
 }
 
