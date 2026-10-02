@@ -19,7 +19,8 @@
 #   0 preflight (tools, credentials, archive layout and entry names,
 #     sha256/size, pointer JSON, CORS policy)
 #   1 back up the current pointer and alias from R2
-#   2 confirmation gate ('yes')            <- --dry-run stops here
+#   2 confirmation gate ('yes')            <- --dry-run stops here;
+#                                             --yes answers it without a prompt
 #   3 put the versioned zip (skipped if already present with the same bytes)
 #   4 verify the versioned zip via a public GET
 #   5 put the alias, verify via a public GET (restore the backup on failure)
@@ -31,7 +32,10 @@
 # Rolling back is publishing an older modules.zip with this same script.
 # Versioned zips are never deleted here.
 #
-# Run from Git Bash:  bash tool/cloudflare/publish_modules.sh <modules.zip> [--dry-run]
+# Run from Git Bash:  bash tool/cloudflare/publish_modules.sh <modules.zip> [--dry-run] [--yes]
+# --yes skips only the stage 2 prompt, for a caller that has already decided to
+# publish (umasagashi-trainer's deploy); every other check is unchanged. With
+# --dry-run as well, --dry-run wins: stage 2 still stops before any write.
 # Credentials come from tool/cloudflare/.env (copy .env.example first).
 # Do not run two instances at once; there is no lock.
 #
@@ -67,13 +71,15 @@ fail() { echo "error: $*" >&2; exit 1; }
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 size_of() { wc -c < "$1" | tr -d '[:space:]'; }
 
-usage() { fail "usage: $0 <path/to/modules.zip> [--dry-run]"; }
+usage() { fail "usage: $0 <path/to/modules.zip> [--dry-run] [--yes]"; }
 
 ZIP=""
 DRY_RUN=0
+ASSUME_YES=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --yes) ASSUME_YES=1 ;;
     -*) usage ;;
     *) [[ -z "$ZIP" ]] || usage; ZIP="$arg" ;;
   esac
@@ -228,8 +234,12 @@ if [[ "$DRY_RUN" == 1 ]]; then
   echo "Dry run: stopping before any write. Nothing in R2 was changed."
   exit 0
 fi
-read -r -p "Type 'yes' to publish: " reply
-[[ "$reply" == "yes" ]] || fail "aborted (nothing in R2 was changed)."
+if [[ "$ASSUME_YES" == 1 ]]; then
+  echo "    --yes: publishing without a prompt."
+else
+  read -r -p "Type 'yes' to publish: " reply
+  [[ "$reply" == "yes" ]] || fail "aborted (nothing in R2 was changed)."
+fi
 
 # ---- 3. Versioned zip ------------------------------------------------------
 step "3. Versioned zip $VERSIONED_KEY"
