@@ -616,7 +616,7 @@ final class LongReadNotStartedException implements Exception {
 
 /// The live claims, keyed by the token that will remove them.
 class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
-  /// Callers parked in [holdWhenFree], woken by every [release].
+  /// Callers parked in [holdWhenFree] or [untilFree], woken by every [release].
   ///
   /// A list of completers and not a poll, because a poll picks an interval and
   /// every interval is wrong in one of the two directions: short enough to feel
@@ -677,6 +677,27 @@ class LongReadRegistry extends Notifier<Map<LongReadToken, LongReadClaim>> {
       }
     }
     return null;
+  }
+
+  /// Waits, without claiming anything, until nothing is holding [paths].
+  ///
+  /// For a caller that does not write the paths itself but starts something
+  /// that claims them on its own: the addon's `start_capture`, whose session
+  /// takes its [LongReadKind.liveCapture] claim once the core reports it
+  /// capturing. It parks on the same wakes [holdWhenFree] does, and like it the
+  /// wait is over the paths and not over a kind, so a startup job added later
+  /// defers it without this being edited. Returns at once when nothing holds
+  /// them, and when the registry goes away — the caller then asks its own gate,
+  /// which is where a refusal is worded.
+  ///
+  /// A claim whose kind is in [disregarding] is not waited on, as in [heldBy]:
+  /// the caller's gate refuses it rather than outlasting it.
+  Future<void> untilFree(List<PathEntity> paths, {Set<LongReadKind> disregarding = const {}}) async {
+    while (ref.mounted && heldBy(paths, disregarding: disregarding) != null) {
+      final waiter = Completer<void>();
+      _waiters.add(waiter);
+      await waiter.future;
+    }
   }
 
   /// [hold], but only once nothing is holding [paths]: asked and claimed in one

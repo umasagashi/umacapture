@@ -37,6 +37,14 @@ class BuiltinRunner implements ActionRunner {
         return;
       }
       try {
+        // Outside the backstop: what this waits for is the app becoming able to act at all, which
+        // settles on the app's own schedule (at launch that can include a module download).
+        final waitUntilReady = descriptor.waitUntilReady;
+        if (waitUntilReady != null) {
+          await waitUntilReady(ref, payload);
+          // Cancelled while waiting: the run was withdrawn before it did anything, so it must not act now.
+          if (exec.isFinished) return;
+        }
         await descriptor
             .run(ref, payload, action.argument, action.secondaryArgument)
             .timeout(ref.read(builtinTimeoutProvider));

@@ -1,10 +1,10 @@
-// Byte-level tests for uma::io_util::read / uma::io_util::write.
+// Byte-level tests for uma::io_util::read / uma::io_util::write / uma::io_util::replace.
 //
-// WHAT THESE GUARD. Both helpers open their stream with std::ios::binary. On Windows the CRT
+// WHAT THESE GUARD. All three open their file in binary mode. On Windows the CRT
 // otherwise translates newlines in *both* directions: a text-mode write expands every "\n" to
 // "\r\n", and a text-mode read collapses "\r\n" back to "\n". io_util::write emits the scene
-// definitions that `umacapture_cli build` checks in, plus record.json at runtime, so a text-mode
-// write puts CR into files the repo diffs (and the Dart side writes) as LF.
+// definitions that `umacapture_cli build` checks in, and io_util::replace emits record.json at
+// runtime, so a text-mode write puts CR into files the repo diffs (and the Dart side writes) as LF.
 //
 // WHY NO ROUND TRIP. A test that writes through io_util::write and reads back through
 // io_util::read cannot see this: the two translations are exact inverses, so the round trip
@@ -130,6 +130,23 @@ TEST_CASE("io_util::write does not double the CR of text that already holds CRLF
     const std::string on_disk = readRawBytes(temp.path());
     CHECK(escaped(on_disk) == escaped(text));
     CHECK(on_disk.find("\r\r") == std::string::npos);
+}
+
+TEST_CASE("io_util::replace puts the exact bytes over an existing file and leaves no staging file") {
+    const ScopedTempFile temp("umacapture_io_util_replace.tmp");
+    // The staging name io_util::replace derives, owned here too so a failed case cleans it up.
+    const ScopedTempFile staging("umacapture_io_util_replace.tmp.part");
+    // Longer than the replacement, so a write that reused the old file without truncating it would
+    // leave its tail behind. Re-recognition replaces an existing record.json, so the target existing
+    // is the case that matters: it is what std::filesystem::rename has to overwrite rather than refuse.
+    writeRawBytes(temp.path(), "an older record.json that is longer than the new one\n");
+    const std::string text = "{\n  \"a\": 1\r\n}\n";
+
+    replace(temp.path(), text);
+
+    const std::string on_disk = readRawBytes(temp.path());
+    CHECK(escaped(on_disk) == escaped(text));
+    CHECK_FALSE(std::filesystem::exists(staging.path()));
 }
 
 TEST_CASE("io_util::read hands back the bytes that are on disk, CR included") {

@@ -438,7 +438,7 @@
     },
     "fans": 0,
     "metadata": {
-      "format_version": "1.0.0",
+      "format_version": "2.0.0",
       "record_type": "InheritanceOnly",
       "region": "JPN",
       "stage": "active",
@@ -659,32 +659,32 @@
       {
         "id": 437,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 497,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 519,
         "level": 0,
-        "rank": 3
+        "rank": 2
       },
       {
         "id": 416,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 522,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 507,
         "level": 0,
-        "rank": 5
+        "rank": 4
       }
     ],
     "trained_date": "2026/03/11",

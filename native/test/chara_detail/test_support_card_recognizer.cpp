@@ -1,7 +1,7 @@
 // Behavioral tests for SupportCardRecognizer.
 //
 // The recognizer finds the card row top via searchVertical(loose_bg_color), then predicts six card ids and
-// six ranks and writes them 1-based. Exercised through the injection ctor with fake Predictors on a
+// six ranks and writes them as the model outputs them (the limit-break count). Exercised through the injection ctor with fake Predictors on a
 // hand-built 200x200 frame; this TU links into the onnxruntime-less test target.
 
 #include <doctest/doctest.h>
@@ -70,7 +70,7 @@ SupportCardRecognizer makeRecognizer(
         config,
         common,
         rampPredictor("support_card", 10, 1),  // ids 10..15
-        rampPredictor("support_card_rank", 0, 1),  // ranks 0..5 -> 1..6
+        rampPredictor("support_card_rank", 0, 1),  // ranks 0..5, stored unchanged
     };
 }
 
@@ -90,7 +90,7 @@ TEST_CASE("SupportCardRecognizer leaves cards default and scan_top unchanged whe
     CHECK(scan_top == doctest::Approx(0.33));  // untouched
 }
 
-TEST_CASE("SupportCardRecognizer reads six cards and makes ranks 1-based") {
+TEST_CASE("SupportCardRecognizer reads six cards and stores ranks as the model outputs them") {
     const auto config = supportCardConfig();
     const auto common = commonConfig();
     const auto recognizer = makeRecognizer(config, common);
@@ -105,9 +105,9 @@ TEST_CASE("SupportCardRecognizer reads six cards and makes ranks 1-based") {
     recognizer.recognize(frame, record, scan_top, history);
 
     CHECK(record.support_cards[0].id == 10);
-    CHECK(record.support_cards[0].rank == 1);  // rank 0, 1-based
+    CHECK(record.support_cards[0].rank == 0);  // stored as the model outputs it
     CHECK(record.support_cards[5].id == 15);
-    CHECK(record.support_cards[5].rank == 6);
+    CHECK(record.support_cards[5].rank == 5);
     CHECK(scan_top > 0.0);  // advanced past the card row
 }
 

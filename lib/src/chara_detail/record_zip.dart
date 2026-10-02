@@ -304,7 +304,11 @@ class RecordZipService {
       totalUncompressedBytes += content.length;
 
       final (recordId, fileName) = parsed;
-      files.add((recordId: recordId, relativeSegments: [fileName], bytes: content));
+      files.add((
+        recordId: recordId,
+        relativeSegments: [fileName],
+        bytes: fileName == "record.json" ? _upgradedRecordJson(content) : content,
+      ));
     }
     final grouped = <String, List<RecordPersistenceFile>>{};
     for (final file in files) {
@@ -376,12 +380,28 @@ class RecordZipService {
     for (final file in files) {
       if (file.relativeSegments.last != "record.json") continue;
       try {
-        return CharaDetailRecordMapper.fromJson(utf8.decode(file.bytes));
+        return CharaDetailRecord.fromRecordJson(utf8.decode(file.bytes));
       } catch (_) {
         return null;
       }
     }
     return null;
+  }
+
+  /// [bytes] upgraded to [recordFormatVersion] when they are a record stored in an older format, and
+  /// [bytes] themselves otherwise -- including when they do not decode, which is the loader's to judge.
+  ///
+  /// A zip exported by an older build carries its records in the older format, and this is where they
+  /// enter the store: upgraded here, what is published is already current, and the duplicate rule
+  /// weighs them in the same format as the records the store already holds.
+  static Uint8List _upgradedRecordJson(Uint8List bytes) {
+    try {
+      final stored = CharaDetailRecordMapper.fromJson(utf8.decode(bytes));
+      final upgraded = stored.upgradeFormat();
+      return identical(upgraded, stored) ? bytes : upgraded.toRecordJsonBytes();
+    } catch (_) {
+      return bytes;
+    }
   }
 
   /// The non-committed half of [result], classified into the reasons the import

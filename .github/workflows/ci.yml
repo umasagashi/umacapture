@@ -542,7 +542,7 @@ jobs:
       # tree can never reach `verified` -- the origin:in-tree recognition core is
       # built by emsdk and is legitimately absent here (see flutter-static). The
       # wrapper's other job, --pwa-strategy=none, is passed explicitly instead, so
-      # the unreferenced flutter_service_worker.js is not emitted; a Flutter service
+      # the unreferenced flutter_service_worker.js is emitted with an empty body; a Flutter service
       # worker at scope "/" would replay responses without coi-serviceworker.js's
       # COOP/COEP headers and kill cross-origin isolation (and SharedArrayBuffer).
       #

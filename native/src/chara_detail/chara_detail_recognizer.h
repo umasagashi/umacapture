@@ -28,12 +28,13 @@ namespace uma::chara_detail {
 
 namespace recognizer_impl {
 
+// The module's version_info.json also carries `format_version`; it is not read here, because the record
+// format is the app's (record::kRecordFormatVersion).
 struct VersionInfo {
-    std::string format_version;
     std::string region;
     std::string recognizer_version;
 
-    EXTENDED_JSON_TYPE_NDC(VersionInfo, format_version, region, recognizer_version);
+    EXTENDED_JSON_TYPE_NDC(VersionInfo, region, recognizer_version);
 };
 
 // The recognized value of a Chara/CharaRank prediction: the Result type of Predictor<Chara>, produced by

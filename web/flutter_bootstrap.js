@@ -15,8 +15,8 @@
 // WHAT THIS FILE GUARANTEES. flutter_tools prefers an existing web/flutter_bootstrap.js over its generated
 // default and only substitutes the tokens below, so `_flutter.loader.load()` with no arguments is what ships --
 // registering no service worker -- whatever `--pwa-strategy` the build was given and whoever ran it.
-// tool/build_web.sh additionally pins `--pwa-strategy=none` so the now-unreferenced flutter_service_worker.js
-// is not even emitted into build/web/.
+// tool/build_web.sh additionally pins `--pwa-strategy=none`, so the now-unreferenced flutter_service_worker.js
+// that is still emitted into build/web/ has an empty body and caches nothing.
 //
 // KEEP BOTH TOKENS BELOW: the first inlines flutter.js, the second defines `_flutter.buildConfig`, which
 // `_flutter.loader.load()` throws without. Do not spell either token name in double braces anywhere else in

@@ -231,6 +231,11 @@ inline void write(const std::filesystem::path &path, const json_util::Json &json
     io_util::write(path, json.dump(indent));
 }
 
+// write() through io_util::replace: a crash leaves the old file or the new one whole.
+inline void replace(const std::filesystem::path &path, const json_util::Json &json, int indent = -1) {
+    io_util::replace(path, json.dump(indent));
+}
+
 inline std::filesystem::path decodePath(const json_util::Json &json) {
     return std::filesystem::u8path(json.get<std::string>());
 }

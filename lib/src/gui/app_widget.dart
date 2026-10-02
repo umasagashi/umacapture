@@ -15,6 +15,7 @@ import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/gui/addon.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
@@ -94,10 +95,21 @@ class AppNavigationRail extends ConsumerWidget {
           bottom: 0,
           left: 0,
           right: 0,
-          child: TextButton(
-            style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
-            child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
-            onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
+          // FilledButton takes no tooltip; the Tooltip also gives the icon-only button its semantic label.
+          child: Tooltip(
+            message: (isExtended ? "app.sidebar.collapse" : "app.sidebar.expand").tr(),
+            child: FilledButton.tonal(
+              // A slim strip: 24 px tall (two thirds of the 36 px the themed default gives), exactly the icon's
+              // height. The density is pinned so the theme's density does not shift that height.
+              style: ButtonStyle(
+                shape: WidgetStateProperty.all(const RoundedRectangleBorder()),
+                minimumSize: WidgetStateProperty.all(const Size.fromHeight(24)),
+                padding: WidgetStateProperty.all(EdgeInsets.zero),
+                visualDensity: VisualDensity.standard,
+              ),
+              child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
+              onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
+            ),
           ),
         ),
       ],
@@ -198,6 +210,9 @@ class _ResponsiveScaffold extends StatelessWidget {
               // Invisible sibling that runs addon tasks on app events. Mounted
               // here so it lives for the whole session, like NotificationLayer.
               const AddonDispatcher(),
+              // Its counterpart for the close of the window, which the tasks
+              // bound to it hold open until they end.
+              const AddonExitGate(),
             ],
           ),
         );
@@ -390,8 +405,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // Ensure that the controller is created at app startup.
-    // If not, Auto Start option will not work.
+    // Start building the controller at app startup rather than when the capture page first asks for
+    // it, so capture is ready as early as it can be — and a launch-time `start_capture` addon task,
+    // which waits for this loader, waits no longer than it has to.
     ref.read(platformControllerLoader);
 
     // Also, start up loaders here.

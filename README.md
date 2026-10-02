@@ -40,7 +40,7 @@ under development
 
 Discord: https://discord.gg/Ph9hEGHR4M [Japanese/日本語]
 
-Twitter: https://twitter.com/umasagashi
+X: https://x.com/umasagashi
 
 ## Licence
 

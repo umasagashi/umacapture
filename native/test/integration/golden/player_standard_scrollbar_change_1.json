@@ -350,7 +350,7 @@
     },
     "fans": 263991,
     "metadata": {
-      "format_version": "1.0.0",
+      "format_version": "2.0.0",
       "record_type": "Standard",
       "region": "JPN",
       "stage": "active",
@@ -496,7 +496,7 @@
     "skills": [
       {
         "id": 233,
-        "level": 6
+        "level": 5
       },
       {
         "id": 1135
@@ -633,32 +633,32 @@
       {
         "id": 479,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 496,
         "level": 0,
-        "rank": 1
+        "rank": 0
       },
       {
         "id": 497,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 427,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 437,
         "level": 0,
-        "rank": 5
+        "rank": 4
       },
       {
         "id": 507,
         "level": 0,
-        "rank": 5
+        "rank": 4
       }
     ],
     "trained_date": "2026/02/05",

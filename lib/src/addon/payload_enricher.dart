@@ -72,7 +72,7 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
   final file = directory.filePath(recordJsonName);
   try {
     if (!file.existsSync()) return null;
-    final record = CharaDetailRecordMapper.fromJson(file.readAsStringSync());
+    final record = CharaDetailRecord.fromRecordJson(file.readAsStringSync());
     // The same check the canonical loader applies, called rather than respelled:
     // skipping the quarantine side effect is what this path wants, and that is not
     // a reason to skip the identity check too. Without it a directory whose

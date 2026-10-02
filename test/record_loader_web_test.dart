@@ -264,6 +264,31 @@ void main() {
 
       expect(await scan(), ['C.record_2', 'a-record', 'b-record']);
     });
+
+    // The web store's upgrade runs through the async decode ([CharaDetailRecord.loadAsyncUnlocked]) under
+    // the per-record acquisition, not through the desktop worker, so it needs its own run over async-only
+    // I/O. Same fixture pair as `record_bulk_load_test.dart`.
+    test('a record stored in an older format is upgraded on disk', () async {
+      const id = '9a1e0d66-0654-4416-aa11-5613e7a9f05e';
+      await (activeRoot / id)
+          .filePath('record.json')
+          .writeAsString(File('test/fixtures/chara_detail_record_v1.json').readAsStringSync());
+
+      final (:results, :unavailable) = await loadRecordsUnder(
+        activeRoot,
+        declaration: undeclaredInTest,
+        mutationLock: _lock,
+        recoverRecordUnlocked: (_, _) async {},
+      );
+
+      final expected = CharaDetailRecordMapper.fromJson(
+        File('test/fixtures/chara_detail_record.json').readAsStringSync(),
+      );
+      expect(unavailable, isEmpty);
+      expect(results.whereType<RecordLoaded>().map((e) => e.record), [expected]);
+      final stored = await (activeRoot / id).filePath('record.json').readAsString();
+      expect(CharaDetailRecordMapper.fromJson(stored), expected);
+    });
   });
 }
 

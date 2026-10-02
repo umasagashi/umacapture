@@ -16,7 +16,7 @@ Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 // record-id links); everything else is dummy.
 CharaDetailRecord makeRecord({required String id, String? parent1Id, String? parent2Id}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId(id, parent1Id, parent2Id),
     'trainer',

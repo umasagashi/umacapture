@@ -1,8 +1,9 @@
 // Verifies the bulk record loader that fans record decoding out across worker
 // isolates: every record directory is loaded (regardless of how it is split
 // into chunks), non-directory entries in the root are skipped rather than
-// quarantined, and a corrupt record yields a RecordQuarantined alongside the
-// successfully loaded ones.
+// quarantined, a corrupt record yields a RecordQuarantined alongside the
+// successfully loaded ones, and a record stored in an older format is upgraded
+// on disk.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_bulk_load_test.dart
 import 'dart:convert';
@@ -12,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
@@ -25,7 +27,7 @@ Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
 // Mirrors the minimal builder in factor_probe_match_test.dart.
 CharaDetailRecord makeRecord({required String id}) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId(id, null, null),
     'trainer',
@@ -147,5 +149,110 @@ void main() {
     // The corrupt record was moved aside into the sibling quarantine folder.
     expect(Directory('${activeDir.path}/id-corrupt').existsSync(), isFalse);
     expect(File('${tempRoot.path}/quarantine/id-corrupt/record.json').existsSync(), isTrue);
+  });
+
+  // A major-1 record (the recognizer stored skill levels and support card ranks one above what the game
+  // shows) is upgraded on disk by the scan that finds it. `chara_detail_record_v1.json` is such a record as a
+  // major-1 recognizer wrote it; `chara_detail_record.json` is the same capture in the current format.
+  group('a record stored in an older format', () {
+    const id = '9a1e0d66-0654-4416-aa11-5613e7a9f05e';
+    final v1Json = File('test/fixtures/chara_detail_record_v1.json').readAsStringSync();
+    final current = File('test/fixtures/chara_detail_record.json').readAsStringSync();
+    late DirectoryPath charaDetailDir;
+
+    setUp(() => charaDetailDir = DirectoryPath(tempRoot.path) / 'storage' / 'chara_detail');
+
+    File recordJsonOf(String store) => File('${(charaDetailDir / store / id).path}/record.json');
+
+    void seed(String store, String recordJson) {
+      final dir = Directory((charaDetailDir / store / id).path)..createSync(recursive: true);
+      File('${dir.path}/record.json').writeAsStringSync(recordJson);
+      File('${dir.path}/skill.png').writeAsBytesSync([1, 2, 3]);
+    }
+
+    Future<List<CharaDetailRecord>> scan(String store) async {
+      final (:results, :unavailable) = await loadAllCharaDetailRecord(
+        ProviderContainer.test().read(containerRefProvider),
+        charaDetailDir / store,
+      );
+      expect(unavailable, isEmpty);
+      return results.whereType<RecordLoaded>().map((e) => e.record).toList();
+    }
+
+    CharaDetailRecord onDisk(String store) => CharaDetailRecordMapper.fromJson(recordJsonOf(store).readAsStringSync());
+
+    test('is upgraded on disk by the scan, with its other files kept', () async {
+      seed('active', v1Json);
+
+      final loaded = await scan('active');
+
+      final expected = CharaDetailRecordMapper.fromJson(current);
+      expect(loaded, [expected]);
+      expect(onDisk('active'), expected);
+      expect(onDisk('active').skills.first.level, 5);
+      expect(onDisk('active').supportCards.map((c) => c.rank), [4, 4, 2, 4, 4, 4]);
+      expect(File('${(charaDetailDir / 'active' / id).path}/skill.png').readAsBytesSync(), [1, 2, 3]);
+      // Only record.json was replaced: no staging file beside it and no transaction under the store.
+      final names = Directory((charaDetailDir / 'active' / id).path).listSync().map((e) => e.uri.pathSegments.last);
+      expect(names, unorderedEquals(['record.json', 'skill.png']));
+      expect(
+        Directory('${charaDetailDir.path}/${WebRecordWriteTransaction.transactionRootName}').existsSync(),
+        isFalse,
+      );
+    });
+
+    test('takes over the staging file an interrupted upgrade left', () async {
+      seed('active', v1Json);
+      final staging = File('${(charaDetailDir / 'active' / id).path}/${CharaDetailRecord.recordJsonReplacementName}');
+      staging.writeAsStringSync('{"torn');
+
+      final loaded = await scan('active');
+
+      expect(loaded, [CharaDetailRecordMapper.fromJson(current)]);
+      expect(onDisk('active'), CharaDetailRecordMapper.fromJson(current));
+      expect(staging.existsSync(), isFalse);
+    });
+
+    test('in the current format is left byte for byte', () async {
+      seed('active', current);
+      final before = recordJsonOf('active').readAsBytesSync();
+
+      await scan('active');
+
+      expect(recordJsonOf('active').readAsBytesSync(), before);
+    });
+
+    test('is not taken down a second time by a second scan', () async {
+      seed('active', v1Json);
+
+      await scan('active');
+      final loaded = await scan('active');
+
+      final expected = CharaDetailRecordMapper.fromJson(current);
+      expect(loaded, [expected]);
+      expect(onDisk('active'), expected);
+    });
+
+    test('in the archive store is upgraded by the archive scan', () async {
+      seed('archive', v1Json);
+
+      await scan('archive');
+
+      expect(onDisk('archive'), CharaDetailRecordMapper.fromJson(current));
+    });
+
+    test('keeps rank 0 on the cards the recognizer never read', () async {
+      // The recognizer zeroes all six cards when it cannot find the support card area, without adding one.
+      final map = jsonDecode(v1Json) as Map<String, dynamic>;
+      map['support_cards'] = [
+        for (var i = 0; i < 6; i++) {'id': 0, 'rank': 0, 'level': 0},
+      ];
+      seed('active', jsonEncode(map));
+
+      await scan('active');
+
+      expect(onDisk('active').supportCards.map((c) => c.rank), everyElement(0));
+      expect(onDisk('active').metadata.formatVersion, recordFormatVersion);
+    });
   });
 }

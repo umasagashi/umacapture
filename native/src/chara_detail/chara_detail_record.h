@@ -279,6 +279,15 @@ struct RecordId {
     EXTENDED_JSON_TYPE_NDC(RecordId, self, parent1, parent2);
 };
 
+// The record format this app writes into `metadata.format_version`, on a new recognition and on a
+// re-recognition alike. It is owned by the app, not by the recognizer module: the module's
+// version_info.json still carries a `format_version` key (older apps require it when parsing), but this
+// app never reads it.
+// 2.0.0: a skill level is the level shown on screen (Lv n is stored as n), and a support card rank is
+// its limit-break count (0 to 4), both stored as the models output them. A record whose major version
+// is below 2 stores both one higher.
+inline constexpr auto kRecordFormatVersion = "2.0.0";
+
 struct Metadata {
     std::string format_version;
     std::string region;

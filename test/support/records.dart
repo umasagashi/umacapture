@@ -43,7 +43,7 @@ CharaDetailRecord makeRecord({
   String capturedDate = '2026-01-01T00:00:00+0900',
 }) {
   final metadata = Metadata(
-    '1.0.0',
+    recordFormatVersion,
     'JPN',
     RecordId(id, parent1Id, parent2Id),
     'trainer',

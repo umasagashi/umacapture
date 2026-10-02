@@ -18,10 +18,12 @@ import 'package:umacapture/src/addon/payload_enricher.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
 import 'package:umacapture/src/addon/trigger_catalog.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
+import 'package:umacapture/src/preference/settings_state.dart';
 
 import 'support/hive.dart';
 import 'support/settling.dart';
@@ -185,26 +187,32 @@ void main() {
     RequestOptions options() => RequestOptions(path: 'https://example.test/hook');
     DioException ofType(DioExceptionType type) => DioException(requestOptions: options(), type: type);
 
-    test('maps connect/send/receive timeouts to the timeout status', () {
-      for (final type in [
-        DioExceptionType.connectionTimeout,
-        DioExceptionType.sendTimeout,
-        DioExceptionType.receiveTimeout,
-      ]) {
-        expect(webhookErrorStatus(ofType(type), cancelled: false), ExecutionStatus.timeout);
-      }
+    test('maps the cancel issued by the request deadline to the timeout status', () {
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false, timedOut: true),
+        ExecutionStatus.timeout,
+      );
     });
 
     test('maps a Dio cancel and the cancelled flag to the cancelled status', () {
-      expect(webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false), ExecutionStatus.cancelled);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false, timedOut: false),
+        ExecutionStatus.cancelled,
+      );
       // A user-driven cancel can surface as a non-cancel error type but with the
       // flag set; it must still be classified as cancelled.
-      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: true), ExecutionStatus.cancelled);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: true, timedOut: false),
+        ExecutionStatus.cancelled,
+      );
     });
 
     test('maps other transport/HTTP errors to the failure status', () {
-      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: false), ExecutionStatus.failure);
-      expect(webhookErrorStatus(Exception('boom'), cancelled: false), ExecutionStatus.failure);
+      expect(
+        webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: false, timedOut: false),
+        ExecutionStatus.failure,
+      );
+      expect(webhookErrorStatus(Exception('boom'), cancelled: false, timedOut: false), ExecutionStatus.failure);
     });
   });
 
@@ -357,9 +365,12 @@ void main() {
   });
 
   group('TaskDefinitionsNotifier.build', () {
-    useHiveForTest(['addon']);
+    useHiveForTest(['addon', 'settings']);
 
-    setUp(() => Hive.box('addon').clear());
+    setUp(() async {
+      await Hive.box('addon').clear();
+      await Hive.box('settings').clear();
+    });
 
     TaskDefinition sampleTask(String id) => TaskDefinition(
       id: id,
@@ -422,6 +433,50 @@ void main() {
       // contains(Map) would use identity ==; equals() compares structurally.
       expect(persisted, contains(equals(unknown)));
     });
+
+    test('moves the retired auto-start and auto-copy settings into tasks once, and only then drops them', () async {
+      final settings = Hive.box('settings');
+      final startKey = SettingsEntryKey.autoStartCapture.name;
+      final copyKey = SettingsEntryKey.autoCopyClipboard.name;
+      settings.put(startKey, true);
+      settings.put(copyKey, CharaDetailRecordImageMode.factorPlain);
+
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+      final tasks = container.read(taskDefinitionsProvider);
+
+      final start = tasks.singleWhere((t) => t.id == legacyAutoStartTaskId);
+      expect(start.trigger, TriggerEvent.appStarted);
+      expect((start.action as BuiltinAction).actionKey, 'start_capture');
+      final copy = tasks.singleWhere((t) => t.id == legacyAutoCopyTaskId);
+      expect(copy.trigger, TriggerEvent.recordCaptured);
+      expect((copy.action as BuiltinAction).actionKey, 'copy_image_to_clipboard');
+      expect((copy.action as BuiltinAction).argument, 'factor');
+      expect(tasks, hasLength(2));
+
+      // The tasks are in the addon store while the settings still hold the values they came from:
+      // the keys go only once the task write has completed, so no stop in between loses both.
+      final stored = jsonDecode(Hive.box('addon').get('task_definitions') as String) as List<dynamic>;
+      expect(stored.map((row) => (row as Map)['id']), containsAll([legacyAutoStartTaskId, legacyAutoCopyTaskId]));
+      expect(settings.containsKey(startKey) && settings.containsKey(copyKey), isTrue);
+
+      // A launch that stops before the keys are gone migrates again. It must add nothing and keep
+      // what the user did to the migrated task in the meantime.
+      container.read(taskDefinitionsProvider.notifier).setEnabled(legacyAutoCopyTaskId, false);
+      final relaunch = ProviderContainer.test();
+      addTearDown(relaunch.dispose);
+      final again = relaunch.read(taskDefinitionsProvider);
+      expect(again, hasLength(2));
+      expect(again.singleWhere((t) => t.id == legacyAutoCopyTaskId).enabled, isFalse);
+
+      await waitUntil(
+        () => !settings.containsKey(startKey) && !settings.containsKey(copyKey),
+        describe: 'the retired settings keys to be deleted after the migrated tasks were written',
+      );
+      final settled = ProviderContainer.test();
+      addTearDown(settled.dispose);
+      expect(settled.read(taskDefinitionsProvider).map((t) => t.id), [legacyAutoStartTaskId, legacyAutoCopyTaskId]);
+    });
   });
 
   group('builtin action / trigger compatibility', () {
@@ -442,8 +497,10 @@ void main() {
           .map((entry) => entry.key);
       // A file reference on the clipboard and a write to a host path have no
       // browser counterpart. Copying image bytes does — under a gesture — so it
-      // is not listed here (see the requiresUserGesture test below).
-      expect(unsupported, unorderedEquals(['copy_file_to_clipboard', 'copy_file_to_path']));
+      // is not listed here (see the requiresUserGesture test below). Starting a
+      // capture is: its picker opens only inside a click's own task, which no
+      // addon run reaches.
+      expect(unsupported, unorderedEquals(['copy_file_to_clipboard', 'copy_file_to_path', 'start_capture']));
     });
 
     test('copy_image_to_clipboard states a gesture requirement, not a platform limit', () {

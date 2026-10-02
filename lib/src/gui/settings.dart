@@ -27,7 +27,6 @@ import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/app_widget.dart';
-import '/src/gui/capture.dart';
 import '/src/chara_detail/enhancement_merge.dart';
 import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
 import '/src/gui/chara_detail/enhancement_review_list.dart';
@@ -268,31 +267,6 @@ class CaptureSettingsGroup extends ConsumerWidget {
       title: "$tr_settings.capture.title".tr(),
       padding: EdgeInsets.zero,
       children: [
-        // Both of the settings below need something a browser only grants in
-        // response to a gesture, so neither is offered on web:
-        //
-        // - auto_start: starting a capture on web opens getDisplayMedia, which
-        //   requires transient user activation. A load-time start has none, so it
-        //   is guarded away in platform_controller.dart (the `!kIsWeb &&` next to
-        //   autoStartCaptureStateProvider) and the switch would do nothing here.
-        // - auto_copy: a browser clipboard write requires transient user
-        //   activation too, which the post-capture callback that would perform
-        //   this copy does not have (see CharaDetailRecordStorage.copyToClipboard).
-        //
-        // Same reasoning as the clipboard_paste_image_mode dropdown further down.
-        if (!kIsWeb)
-          SwitchWidget(
-            title: Text("$tr_settings.capture.auto_start.title".tr()),
-            description: Text("$tr_settings.capture.auto_start.description".tr()),
-            provider: autoStartCaptureStateProvider,
-          ),
-        if (!kIsWeb)
-          DropdownButtonWidget<CharaDetailRecordImageMode?>(
-            title: "$tr_settings.capture.auto_copy.title".tr(),
-            description: "$tr_settings.capture.auto_copy.description".tr(),
-            name: (e) => "$tr_settings.capture.auto_copy.choice.${e!.name.snakeCase}".tr(),
-            provider: autoCopyClipboardStateProvider,
-          ),
         // Disabled while capturing for the same reason force_resize is: the core reads
         // `detail_crop_calibration` once, when the pipeline is built, so a mid-session toggle could not
         // take effect and would silently misrepresent what the running session is doing.

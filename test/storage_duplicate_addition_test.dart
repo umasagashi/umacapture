@@ -22,8 +22,6 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
-import 'package:umacapture/src/gui/capture.dart';
-import 'package:umacapture/src/preference/notifier.dart';
 
 import 'support/records.dart';
 
@@ -56,16 +54,6 @@ void main() {
         pathInfoLoader.overrideWith((ref) async => pathInfoFor(root)),
         // Skip the (network/version) module check so build() returns immediately.
         moduleVersionLoader.overrideWith((ref) async => null),
-        // The accepting branch of add() ends in this preference. Its shipped
-        // notifier reads the settings box, which no test has; answering "none"
-        // keeps the branch running to its end without one.
-        autoCopyClipboardStateProvider.overrideWith(
-          () => ExclusiveItemsNotifier<CharaDetailRecordImageMode>(
-            values: CharaDetailRecordImageMode.values,
-            defaultValue: CharaDetailRecordImageMode.none,
-            entryKey: null,
-          ),
-        ),
       ],
     );
   }

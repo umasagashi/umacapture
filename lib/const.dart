@@ -59,8 +59,7 @@ class Const {
 
   /// The project's public home, and the two places its users talk to each other.
   ///
-  /// The same three the README publishes under "Community"; the X account is the one the README
-  /// still lists under its old twitter.com hostname. Kept here rather than beside the card that
+  /// The same three the README publishes under "Community". Kept here rather than beside the card that
   /// links to them, next to [appUrlRoot] which addresses the same repository.
   static String get githubUrl => "https://github.com/umasagashi/umacapture";
 

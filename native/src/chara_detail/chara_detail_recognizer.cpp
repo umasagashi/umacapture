@@ -167,7 +167,7 @@ void SkillTabRecognizer::recognize(
                     frame,
                     anchor.absolute(config.skill_level.rect) + current_column_offset,
                     history);
-                skills.push_back({skill_id, skill_level + 1});  // 1-based.
+                skills.push_back({skill_id, skill_level});  // The model outputs the level shown on screen.
             }
         }
 
@@ -489,7 +489,7 @@ void SupportCardRecognizer::recognize(
 
         support_cards[i] = {
             id[i],
-            rank[i] + 1,  // 1-based
+            rank[i],  // The limit-break count (0 to 4), as the model outputs it.
             level,
         };
     }
@@ -1054,6 +1054,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
 
         if (isUpdateMode) {
             record.metadata = loadOldRecord().metadata;
+            record.metadata.format_version = record::kRecordFormatVersion;
             record.metadata.recognizer_version = version_info.recognizer_version;
 
             std::filesystem::copy_file(
@@ -1066,7 +1067,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             const auto &owner_trainer_id =
                 record::isFriend(record_info.record_type.value()) ? record::kUnknownTrainerId : trainer_id;
             record.metadata = {
-                version_info.format_version,
+                record::kRecordFormatVersion,
                 version_info.region,
                 {record_info.record_id},
                 owner_trainer_id,
@@ -1103,9 +1104,10 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         }
 
         // Write record.json last so its presence implies the sidecars (prediction.json, trainee.jpg) are
-        // already on disk. Writing it first would leave a valid record.json without its sidecars on any throw
-        // in between, which the loader treats as a decode failure and deletes.
-        json_util::write(record_path, record, 4);
+        // already on disk; a throw in between leaves no new record.json behind. Replaced rather than
+        // overwritten: in update mode the file is a listed record's, and the app quarantines a record.json it
+        // cannot decode, so a crash mid-write would take the record off the list.
+        json_util::replace(record_path, record, 4);
 
         if (isUpdateMode) {
             on_update_completed->send(record_info);

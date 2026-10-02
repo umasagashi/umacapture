@@ -29,16 +29,16 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
     return const SizedBox.shrink();
   }
 
-  void _onEvent(TriggerEvent event, PayloadMap payload) {
+  /// Runs the tasks bound to [event] and returns their joint completion, which only the close of the
+  /// window awaits.
+  Future<void> _onEvent(TriggerEvent event, PayloadMap payload) {
     final matched = filterTasksForEvent(event, payload, ref.read(taskDefinitionsProvider));
-    if (matched.isEmpty) return;
+    if (matched.isEmpty) return Future.value();
     // Enrich once per event so all matched tasks share the (possibly disk-backed)
     // record lookup instead of repeating it per task.
     final enriched = enrichPayload(ref.base, payload);
     final controller = ref.read(addonExecutionControllerProvider.notifier);
-    for (final task in matched) {
-      controller.run(task, enriched);
-    }
+    return Future.wait([for (final task in matched) controller.run(task, enriched)]);
   }
 }
 

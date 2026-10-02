@@ -176,7 +176,12 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
           errorBuilder: (context, error, stackTrace) =>
               Icon(Symbols.hide_image_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
         );
-        return record.isFriend ? FriendMarkedIcon(icon: icon) : icon;
+        // The icon is fit to the cell and would otherwise paint over the 1 px row separators at its top and
+        // bottom edges. Row heights are measured from text, never from this icon, so the inset only shrinks it.
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: record.isFriend ? FriendMarkedIcon(icon: icon) : icon,
+        );
       },
     )..setUserData(this);
   }

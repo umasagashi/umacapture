@@ -178,7 +178,12 @@ Future<RecordScanResult> _scanRecordsUnder(DirectoryPath directory) async {
 ///
 /// [initializeMappers] is called here because dart_mappable's global mapper
 /// container is per-isolate and is not inherited by a spawned isolate.
-List<RecordLoadResult> _loadRecordChunk(List<DirectoryPath> directories) {
+///
+/// A record stored in an older format is upgraded on disk here, covered by the
+/// root scope the scan holds (see [CharaDetailRecord.loadUpgradingSyncReadUnlocked]).
+/// [loadRecord] above does not: it runs under no lock, so it only upgrades the
+/// record it returns.
+Future<List<RecordLoadResult>> _loadRecordChunk(List<DirectoryPath> directories) async {
   initializeMappers();
-  return directories.map(CharaDetailRecord.load).toList();
+  return [for (final directory in directories) await CharaDetailRecord.loadUpgradingSyncReadUnlocked(directory)];
 }

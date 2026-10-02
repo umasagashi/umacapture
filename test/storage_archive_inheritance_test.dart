@@ -207,6 +207,32 @@ void main() {
     expect(container.read(charaDetailCaptureStateProvider).error, 'duplicated_character');
   });
 
+  test('a capture writes the parent links it resolves into both stores on disk', () async {
+    final root = DirectoryPath(tempRoot.path);
+    final info = pathInfoFor(root);
+    final activeDir = info.charaDetailActiveDir;
+    final archiveDir = info.charaDetailArchiveDir;
+
+    // One child in each store, both waiting for the parent that is about to be captured.
+    writeRecord(activeDir, makeRecord(id: 'child-active', card: 20, parent1Card: 10, parent1: const [Factor(1, 1)]));
+    writeRecord(archiveDir, makeRecord(id: 'child-archive', card: 30, parent1Card: 10, parent1: const [Factor(1, 1)]));
+
+    final container = makeContainer(root);
+    addTearDown(container.dispose);
+    final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+    await container.read(charaDetailRecordStorageLoaderProvider.future);
+    await container.read(charaDetailArchiveStorageLoaderProvider.future);
+
+    final captured = makeRecord(id: 'parent', card: 10, self: const [Factor(1, 1)]);
+    writeRecord(activeDir, captured); // the recognizer drops the dir before add()
+
+    // The desktop capture path, which writes synchronously.
+    active.add(captured);
+
+    expect(parentOnDisk(activeDir, 'child-active', 1), 'parent');
+    expect(parentOnDisk(archiveDir, 'child-archive', 1), 'parent');
+  });
+
   test('resolveAllInheritance keeps active->archive links when the archive failed to load', () async {
     final root = DirectoryPath(tempRoot.path);
     final info = pathInfoFor(root);
@@ -261,7 +287,8 @@ class _FailingArchiveStorage extends CharaDetailArchiveStorage {
 }
 
 /// Suspends the write of one file until [release] is called, and behaves as the real filesystem
-/// everywhere else.
+/// everywhere else. A record.json is replaced by renaming a staged file over it, so the rename onto
+/// [heldPath] is the moment its contents change, and the one held.
 class _HeldWrite extends IoFsBackend {
   _HeldWrite(this.heldPath);
 
@@ -274,11 +301,11 @@ class _HeldWrite extends IoFsBackend {
   void release() => _gate.complete();
 
   @override
-  Future<void> writeString(String path, String contents) async {
-    if (path == heldPath) {
+  Future<void> rename(String source, String destination) async {
+    if (destination == heldPath) {
       held = true;
       await _gate.future;
     }
-    return super.writeString(path, contents);
+    return super.rename(source, destination);
   }
 }

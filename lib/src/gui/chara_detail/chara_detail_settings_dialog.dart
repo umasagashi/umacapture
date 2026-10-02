@@ -65,8 +65,8 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
   }
 }
 
-/// Display-related table preferences: the row-height mode and its minimum line
-/// count. Grouped under a [FormGroup] header, with each row in the same
+/// Display-related table preferences: the row-height mode, its minimum line
+/// count, and the row-border strength. Grouped under a [FormGroup] header, with each row in the same
 /// list-tile style as the global settings page.
 class _DisplaySettingsGroup extends ConsumerWidget {
   const _DisplaySettingsGroup();
@@ -93,6 +93,12 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           provider: charaDetailMinRowLinesProvider,
           min: 1,
           max: 20,
+        ),
+        const FormTileDivider(),
+        SwitchWidget(
+          title: Text("$tr_table_settings.display.strong_row_borders.title".tr()),
+          description: Text("$tr_table_settings.display.strong_row_borders.description".tr()),
+          provider: charaDetailStrongRowBordersProvider,
         ),
         const FormTileDivider(),
       ],

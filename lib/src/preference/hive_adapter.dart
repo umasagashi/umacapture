@@ -62,6 +62,8 @@ void visitHiveAdapters(AdapterVisitor visit) {
   visit(const JsonAdapter<Size>(0));
   visit(const JsonAdapter<Offset>(1));
   visit(const JsonAdapter<ThemeMode>(2));
+  // Stored only under the retired `autoCopyClipboard` settings key, which the addon task migration
+  // still has to read on an install that predates it.
   visit(const JsonAdapter<CharaDetailRecordImageMode>(3));
   visit(const JsonAdapter<ClipboardPasteImageMode>(4));
   visit(const JsonAdapter<RowHeightMode>(5));

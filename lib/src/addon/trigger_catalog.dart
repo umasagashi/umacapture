@@ -1,3 +1,6 @@
+import 'dart:ui' show AppExitResponse;
+
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/execution/execution_controller.dart';
@@ -5,6 +8,7 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail/export_button.dart';
 
 const _trTrigger = "pages.addon.trigger";
@@ -70,20 +74,142 @@ PayloadMap recordExportedPayload(ExportResult result) {
 }
 
 /// One triggerable event: its [TriggerEvent], a localized label, and a closure
-/// that wires the correct typed event provider via `ref.listen` and emits a
-/// normalized [PayloadMap]. The closure erases the differing provider payload
-/// types behind a uniform emit callback.
+/// that wires the event's source — a typed event provider via `ref.listen`, or
+/// [appLaunchDeliveryProvider] for the launch — and emits a normalized
+/// [PayloadMap]. The closure erases the differing sources behind a uniform emit
+/// callback. It runs on every dispatcher build.
+///
+/// `emit` returns the completion of the tasks it started (see
+/// `AddonExecutionController.run`). Only the close of the window awaits it.
 class TriggerCatalogEntry {
   final TriggerEvent event;
   final String labelKey;
-  final void Function(WidgetRef ref, void Function(PayloadMap payload) emit) subscribe;
+  final void Function(WidgetRef ref, Future<void> Function(PayloadMap payload) emit) subscribe;
 
-  const TriggerCatalogEntry({required this.event, required this.labelKey, required this.subscribe});
+  /// Whether a browser ever delivers this event. False keeps the trigger visible but unselectable
+  /// in the task editor on web, as `BuiltinActionDescriptor.supportsWeb` does for an action; the
+  /// entry states the reason where it sets it.
+  final bool supportsWeb;
+
+  const TriggerCatalogEntry({
+    required this.event,
+    required this.labelKey,
+    required this.subscribe,
+    this.supportsWeb = true,
+  });
 }
+
+/// Whether this process's launch has been handed to the addon dispatcher yet.
+///
+/// The launch is a fact about the process, not an event on a stream: it happens once, before anything
+/// can subscribe, so a broadcast of it would reach no one. It is held here as data instead. The
+/// container holding this provider lives exactly as long as the app — one per process on Windows, one
+/// per page load on web — so its initial `false` *is* "launched and not yet delivered", and [take] turns
+/// it true once, leaving nothing for a rebuilt dispatcher to deliver again.
+class AppLaunchDelivery extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  /// Marks the launch delivered and answers whether this call is the one that did.
+  bool take() {
+    if (state) return false;
+    state = true;
+    return true;
+  }
+}
+
+final appLaunchDeliveryProvider = NotifierProvider<AppLaunchDelivery, bool>(AppLaunchDelivery.new);
+
+/// One close of the window, held open by the tasks bound to [TriggerEvent.appExiting].
+///
+/// The dispatcher [hold]s the completion of every task it starts for the close; the window goes once
+/// [settled] has, which is when each of those tasks has ended — by finishing, by its own timeout, or by
+/// being cancelled — and written its history entry.
+class AppExitRequest {
+  final _held = <Future<void>>[];
+
+  void hold(Future<void> done) => _held.add(done);
+
+  /// Completes when everything held has, whether it succeeded or not: a close that waited for a task
+  /// has nothing left to wait for once that task has ended, however it ended.
+  Future<void> settled() async {
+    try {
+      await Future.wait(_held);
+    } catch (e, s) {
+      logger.w("An app-exit task ended with an error; closing anyway.", e, s);
+    }
+  }
+}
+
+/// The close of the window being answered, or null when none is.
+///
+/// Held as data so that one close is answered at a time — a second close while the first waits
+/// finds it here — and so the dispatcher can subscribe to it like any other event source.
+class AppExitRequests extends Notifier<AppExitRequest?> {
+  @override
+  AppExitRequest? build() => null;
+
+  /// Opens a close, or returns null when one is already open.
+  ///
+  /// Opening it notifies the dispatcher's subscription synchronously, so by the time this returns the
+  /// request holds every task the close started.
+  AppExitRequest? open() {
+    if (state != null) return null;
+    return state = AppExitRequest();
+  }
+
+  /// Closes the request once it has been answered.
+  void close() => state = null;
+
+  /// Answers the platform's request to close the window: opens a close, waits until its tasks have
+  /// settled, and lets the app go. [onHeld] runs between the two, for a view of the wait.
+  ///
+  /// A second close while the first waits is declined: the first already answers it, and a double
+  /// click on the close button must not be read as "stop waiting". Stopping is cancelling the tasks.
+  Future<AppExitResponse> request({void Function()? onHeld}) async {
+    final request = open();
+    if (request == null) return AppExitResponse.cancel;
+    try {
+      onHeld?.call();
+      await request.settled();
+    } finally {
+      close();
+    }
+    return AppExitResponse.exit;
+  }
+}
+
+final appExitRequestsProvider = NotifierProvider<AppExitRequests, AppExitRequest?>(AppExitRequests.new);
 
 /// All automatically-triggerable events. `manual` is intentionally absent: it is
 /// fired directly by the run button, not by an event stream.
 final triggerCatalog = <TriggerCatalogEntry>[
+  TriggerCatalogEntry(
+    event: TriggerEvent.appStarted,
+    labelKey: "$_trTrigger.app_started",
+    subscribe: (ref, emit) {
+      if (ref.read(appLaunchDeliveryProvider)) return;
+      // Taken after this frame rather than here: `subscribe` runs inside the dispatcher's build, and
+      // running a task writes the execution controller's state, which riverpod refuses while the tree
+      // is building. The flag and not the callback is what makes it once — every build before that
+      // frame schedules a callback, and only the first to take the launch emits it. An unmounted
+      // dispatcher takes nothing, so the launch waits for the next one.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!ref.context.mounted) return;
+        if (ref.read(appLaunchDeliveryProvider.notifier).take()) emit({"event": "app_started"});
+      });
+    },
+  ),
+  TriggerCatalogEntry(
+    event: TriggerEvent.appExiting,
+    labelKey: "$_trTrigger.app_exiting",
+    // Not offered on web: a browser gives a closing page no time to finish asynchronous work, and
+    // Flutter web never asks the app whether it may exit, so there is no close to hold open.
+    supportsWeb: false,
+    subscribe: (ref, emit) => ref.listen<AppExitRequest?>(appExitRequestsProvider, (_, request) {
+      request?.hold(emit({"event": "app_exiting"}));
+    }),
+  ),
   TriggerCatalogEntry(
     event: TriggerEvent.captureStarted,
     labelKey: "$_trTrigger.capture_started",
@@ -133,6 +259,13 @@ final triggerCatalog = <TriggerCatalogEntry>[
 String triggerLabelKey(TriggerEvent event) {
   if (event == TriggerEvent.manual) return "$_trTrigger.manual";
   return triggerCatalog.firstWhere((e) => e.event == event).labelKey;
+}
+
+/// Whether a browser ever delivers [event] (see [TriggerCatalogEntry.supportsWeb]). `manual` is the
+/// ▶ button, which every host has.
+bool triggerSupportsWeb(TriggerEvent event) {
+  if (event == TriggerEvent.manual) return true;
+  return triggerCatalog.firstWhere((e) => e.event == event).supportsWeb;
 }
 
 /// The localization key for any [TriggerEvent]'s long description, including

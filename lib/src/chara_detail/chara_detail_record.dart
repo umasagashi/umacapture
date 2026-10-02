@@ -1,12 +1,18 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
+import 'package:version/version.dart';
 
 import '/src/core/json_adapter.dart';
+import '/src/core/fs/fs_backend.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/fs/record_directory_transaction.dart';
 import '/src/core/fs/record_id_safety.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
+import '/src/core/fs/web_record_write_transaction.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
@@ -261,6 +267,18 @@ const String absentValueLabel = "-";
 /// friend's real id. Mirrors `kUnknownTrainerId` in the native recognizer.
 const String unknownTrainerId = "00000000-0000-0000-0000-000000000000";
 
+/// The record format this build reads and writes, as `metadata.format_version`.
+///
+/// The native recognizer stamps the same value on every record it writes, on a first recognition and on
+/// a re-recognition alike (`kRecordFormatVersion` in `chara_detail_record.h`), so the two move together.
+/// Only the major version carries meaning, and it is compared as a version, never as a string: "10.0.0"
+/// sorts before "2.0.0".
+///
+/// Major 2: a skill level is the level the game shows (Lv n is stored as n), and a support card rank is
+/// its number of limit breaks, 0 to 4. A major-1 record stores every skill level and every recognized
+/// support card rank one higher; [CharaDetailRecord.upgradeFormat] converts it.
+const recordFormatVersion = "2.0.0";
+
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Metadata extends JsonEquatable with MetadataMappable {
   final String formatVersion;
@@ -479,15 +497,35 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// failed. This runs on a worker isolate on the bulk/reload paths, so it
   /// performs no UI side effects: surfacing the outcome (a toast) is the
   /// caller's responsibility on the main isolate, driven by the returned value.
+  ///
+  /// A record stored in an older format is returned upgraded ([upgradeFormat]) and is **not** written
+  /// back: this runs with no lock held — the desktop capture merge must finish inside the
+  /// stream-delivery microtask, and the single-record reload takes none — so it has nothing that would
+  /// let it replace the record's directory. The record in memory carries the new values and the new
+  /// `format_version` together, so any later write of it stores a consistent pair; the next store scan
+  /// ([loadUpgradingSyncReadUnlocked] / [loadAsyncUnlocked]) persists the upgrade.
   static RecordLoadResult load(DirectoryPath directory) {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
-      final record = CharaDetailRecordMapper.fromJson(content);
-      validateDirectoryId(directory, record);
-      return RecordLoaded(record);
+      return RecordLoaded(_decodeStored(directory, content).upgraded);
     } catch (exception, stackTrace) {
       return _quarantineOnFailure(directory, exception, stackTrace);
     }
+  }
+
+  /// [load] for a caller that holds the store's root scope, which also persists a format upgrade.
+  ///
+  /// The desktop bulk scan runs this on its worker isolates: they read and decode synchronously, and
+  /// the root scope the scan holds on the UI isolate is what excludes every other writer of the record,
+  /// the same way it covers the quarantine move a decode failure performs here.
+  static Future<RecordLoadResult> loadUpgradingSyncReadUnlocked(DirectoryPath directory) async {
+    final ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded;
+    try {
+      decoded = _decodeStored(directory, directory.filePath("record.json").readAsStringSync());
+    } catch (exception, stackTrace) {
+      return _quarantineOnFailure(directory, exception, stackTrace);
+    }
+    return _persistUpgradeUnlocked(directory, decoded);
   }
 
   /// Asynchronous counterpart of [load] for the web/main-isolate loader.
@@ -517,15 +555,95 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// Variant of [loadAsync] for a caller which already owns [directory]'s
   /// record-mutation lock. Keeping this separate prevents a decode failure
   /// from trying to acquire the same non-reentrant Web Lock a second time.
+  ///
+  /// Holding the lock is also what lets it persist a format upgrade: a record stored in an older format
+  /// is published over itself upgraded before it is returned ([_persistUpgradeUnlocked]).
   static Future<RecordLoadResult> loadAsyncUnlocked(DirectoryPath directory) async {
+    final ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded;
     try {
-      final content = await directory.filePath("record.json").readAsString();
-      final record = CharaDetailRecordMapper.fromJson(content);
-      validateDirectoryId(directory, record);
-      return RecordLoaded(record);
+      decoded = _decodeStored(directory, await directory.filePath("record.json").readAsString());
     } catch (exception, stackTrace) {
       return _quarantineOnFailureAsyncUnlocked(directory, exception, stackTrace);
     }
+    return _persistUpgradeUnlocked(directory, decoded);
+  }
+
+  /// Decodes the `record.json` [content] read from [directory], and upgrades it to [recordFormatVersion].
+  ///
+  /// Throws what the loaders quarantine on: a body that does not decode, one that names another record,
+  /// or a `format_version` that is not a version.
+  static ({CharaDetailRecord stored, CharaDetailRecord upgraded}) _decodeStored(
+    DirectoryPath directory,
+    String content,
+  ) {
+    final stored = CharaDetailRecordMapper.fromJson(content);
+    validateDirectoryId(directory, stored);
+    return (stored: stored, upgraded: stored.upgradeFormat());
+  }
+
+  /// Replaces the stored `record.json` with [decoded]'s upgrade when there is one, and returns the
+  /// upgraded record either way. The caller holds [directory]'s record lock or the store's root scope.
+  ///
+  /// Durably, so an interruption leaves either the stored record or the upgraded one and never a torn
+  /// `record.json`. The new values and the new `format_version` are one file in one replacement, so a
+  /// record is never stored with one of them and not the other, and a second pass over an upgraded
+  /// record finds nothing to do. A replacement that does not happen leaves the stored record as it was;
+  /// the record in memory is upgraded regardless, and the next scan tries again.
+  static Future<RecordLoadResult> _persistUpgradeUnlocked(
+    DirectoryPath directory,
+    ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded,
+  ) async {
+    final upgraded = decoded.upgraded;
+    if (identical(upgraded, decoded.stored)) {
+      return RecordLoaded(upgraded);
+    }
+    try {
+      await replaceRecordJsonUnlocked(directory, upgraded.toRecordJsonBytes());
+      logger.i("Record ${directory.name} was upgraded to format $recordFormatVersion.");
+    } catch (error, stackTrace) {
+      logger.e("Record ${directory.name} could not be upgraded on disk.", error, stackTrace);
+    }
+    return RecordLoaded(upgraded);
+  }
+
+  /// The file [replaceRecordJsonUnlocked] writes before renaming it over `record.json`.
+  ///
+  /// One fixed name, so a file an interrupted replacement left behind is overwritten and renamed away by
+  /// the next one. Nothing reads it as a record: a record is its directory's `record.json`. The native
+  /// recognizer stages its own `record.json` write under the same name (`io_util::replace`).
+  static const recordJsonReplacementName = "record.json.part";
+
+  /// Replaces [directory]'s `record.json` with [bytes] so that a crash at any point leaves the old file or
+  /// the new one whole, never a torn one the next scan would quarantine. Every app write that changes a
+  /// stored record's `record.json` and nothing else goes through here or [replaceRecordJsonSyncUnlocked].
+  /// The caller holds [directory]'s record lock or the store's root scope, and the directory exists.
+  ///
+  /// Throws when the replacement did not happen; the stored `record.json` is then the one that was there.
+  static Future<void> replaceRecordJsonUnlocked(DirectoryPath directory, Uint8List bytes) async {
+    // Only `record.json` changes, and the rest of the directory is megabytes of images. Where a file
+    // rename is an atomic replace, that one file is replaced; OPFS has no rename, so web publishes the
+    // directory through the write transaction, which copies the whole tree to stay recoverable.
+    if (fsBackend.renameReplacesFileAtomically) {
+      final staging = directory.filePath(recordJsonReplacementName);
+      await staging.writeAsBytes(bytes, flush: true);
+      await staging.rename(directory.filePath("record.json"));
+      return;
+    }
+    final result = await WebRecordWriteTransaction().publish(directory.parent.parent, directory.name, [
+      (relativeSegments: const ["record.json"], bytes: bytes),
+    ], store: directory.parent.name);
+    if (!result.isCommitted) {
+      throw StateError("record.json of ${directory.name} was not replaced: the publication returned ${result.name}.");
+    }
+  }
+
+  /// Synchronous counterpart of [replaceRecordJsonUnlocked], for the desktop capture path that has to stay
+  /// synchronous. Sync file access exists on the io backend only, where a rename is the atomic replace, so
+  /// this has no publication arm to fall back on and throws wherever the sync API does.
+  static void replaceRecordJsonSyncUnlocked(DirectoryPath directory, Uint8List bytes) {
+    final staging = directory.filePath(recordJsonReplacementName);
+    staging.writeAsBytesSync(bytes, flush: true);
+    staging.renameSync(directory.filePath("record.json"));
   }
 
   /// Throws [RecordIdMismatch] unless [record] claims the id of the [directory]
@@ -705,6 +823,64 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     }
     return directory.moveAsyncSafe(destination);
   }
+
+  /// Decodes a `record.json` body and upgrades it to [recordFormatVersion], for a reader that is not one
+  /// of the loaders above.
+  ///
+  /// Every record Dart holds is in the current format, whichever way it was read, so a value compared
+  /// against another record ([isSameChara]) or handed on (an add-on payload, a zip import) never mixes
+  /// the two formats.
+  static CharaDetailRecord fromRecordJson(String content) => CharaDetailRecordMapper.fromJson(content).upgradeFormat();
+
+  /// This record in [recordFormatVersion], or this same instance when it is in that format already.
+  ///
+  /// A major-1 record stores values the recognizer derived as the model's class index plus one. Only
+  /// two fields carry one: the skill level (the recognizer reads a level for the first skill only, and
+  /// every level the record holds is such a value) and the support card rank. A rank of 0 in a major-1
+  /// record is not a derived value: the recognizer leaves all six cards zeroed when it cannot find the
+  /// support card area, so a 0 stays 0. The new values and the new `format_version` come out as one
+  /// record, so upgrading an upgraded record changes nothing.
+  CharaDetailRecord upgradeFormat() {
+    if (Version.parse(metadata.formatVersion).major >= 2) {
+      return this;
+    }
+    final m = metadata;
+    return CharaDetailRecord(
+      Metadata(
+        recordFormatVersion,
+        m.region,
+        m.recordId,
+        m.trainerId,
+        m.capturedDate,
+        m.recognizerVersion,
+        m.stage,
+        m.strategy,
+        m.relationBonus,
+        m.recordType,
+      ),
+      trainee,
+      evaluationValue,
+      status,
+      aptitudes,
+      [
+        for (final skill in skills)
+          switch (skill.level) {
+            final int level => Skill(id: skill.id, level: level - 1),
+            null => skill,
+          },
+      ],
+      factors,
+      [for (final card in supportCards) SupportCard(card.id, card.rank > 0 ? card.rank - 1 : 0, card.level)],
+      family,
+      fans,
+      scenario,
+      trainedDate,
+      races,
+    );
+  }
+
+  /// This record as the `record.json` bytes the native recognizer writes: UTF-8, 4-space indent.
+  Uint8List toRecordJsonBytes() => utf8.encode(const JsonEncoder.withIndent('    ').convert(toMap()));
 
   /// Determines if another record represents the same character based on key attributes.
   /// This method partially compares only the attributes necessary for distinguishing records.

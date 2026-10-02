@@ -4,7 +4,9 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/addon_tasks_test.dart
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce_flutter/adapters.dart';
@@ -24,6 +26,7 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
+import 'package:umacapture/src/gui/addon.dart';
 
 import 'support/hive.dart';
 import 'support/records.dart';
@@ -91,7 +94,8 @@ void main() {
   setUpAll(initializeMappers);
 
   group('TaskDefinitionsNotifier mutations', () {
-    useHiveForTest(['addon']);
+    // `settings` too: building the task list reads it for the retired capture settings.
+    useHiveForTest(['addon', 'settings']);
 
     setUp(() => Hive.box('addon').clear());
 
@@ -517,6 +521,62 @@ void main() {
 
       controller.runManual(_task('a'));
       expect(h.runners.single.lastPayload?['record_id'], 'rec-new');
+    });
+  });
+
+  group('closing the window', () {
+    // `settings` too: building the task list reads it for the retired capture settings.
+    useHiveForTest(['addon', 'settings']);
+
+    setUp(() => Hive.box('addon').clear());
+
+    testWidgets('runs the app-exit tasks and lets the app go only once they have ended and been recorded', (
+      tester,
+    ) async {
+      final runners = <String, _FakeRunner>{};
+      final container = ProviderContainer.test(
+        overrides: [
+          actionRunnerFactoryProvider.overrideWithValue((action) {
+            final runner = _FakeRunner();
+            runners[(action as BuiltinAction).argument!] = runner;
+            return runner;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+      TaskDefinition task(String id, TriggerEvent trigger) => _task(id, trigger: trigger).copyWith(
+        action: BuiltinAction(actionKey: 'copy_payload_to_clipboard', argument: id),
+      );
+      container.read(taskDefinitionsProvider.notifier)
+        ..addOrUpdate(task('exit-a', TriggerEvent.appExiting))
+        ..addOrUpdate(task('exit-b', TriggerEvent.appExiting))
+        ..addOrUpdate(task('on-capture', TriggerEvent.captureStarted));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const Stack(textDirection: TextDirection.ltr, children: [AddonDispatcher(), AddonExitGate()]),
+        ),
+      );
+
+      // The platform's question, asked the way the Windows embedder asks it on WM_CLOSE.
+      AppExitResponse? answer;
+      unawaited(tester.binding.handleRequestAppExit().then((r) => answer = r));
+      await tester.pump();
+      expect(runners.keys, unorderedEquals(['exit-a', 'exit-b']));
+      expect(answer, isNull);
+
+      // A second close while the first waits is declined; the first still answers.
+      expect(await tester.binding.handleRequestAppExit(), AppExitResponse.cancel);
+
+      runners['exit-a']!.complete(ExecutionStatus.success);
+      await tester.pump();
+      expect(answer, isNull, reason: 'exit-b is still running');
+
+      runners['exit-b']!.complete(ExecutionStatus.cancelled);
+      await tester.pump();
+      expect(answer, AppExitResponse.exit);
+      final written = Hive.box('addon').get('execution_history') as String;
+      expect(written, allOf(contains('exit-a'), contains('exit-b')));
     });
   });
 }

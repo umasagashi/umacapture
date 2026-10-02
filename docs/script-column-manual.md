@@ -192,7 +192,7 @@ r.aptitudes.distance.long.code >= 5     // C 以上か（S=8,A=7,B=6,C=5,…）
 |---|---|---|
 | `s.id` | int | スキル ID（内部 ID。冒頭の注を参照） |
 | `s.name` | String | スキル名（例 `"スピードスター"`） |
-| `s.level` | int? | レベル（無い場合 `null`） |
+| `s.level` | int? | スキルレベル。画面に表示される Lv と同じ値（Lv3 なら `3`）。レベルが読まれるのは先頭のスキル 1 件だけで、それ以外は `null` |
 | `s.hasTag("nige")` | bool | タグを持つか |
 
 ### 5.5 因子（`r.factors` の各要素）
@@ -239,7 +239,7 @@ r.aptitudes.distance.long.code >= 5     // C 以上か（S=8,A=7,B=6,C=5,…）
 ```dart
 // r.supportCards の各要素
 c.id      // int（内部 ID）
-c.rank    // $Coded（.name が "SSR" など、.code がランクの大きさ）
+c.rank    // $Coded（.code が凸数 0〜4、.name が "0凸"〜"4凸"）
 c.level   // int
 
 // r.scenario
@@ -823,7 +823,7 @@ Skill         id name level(int?) hasTag(name)
 Factor        id name star subject($Coded) hasTag(name)
 FactorGroup   id name totalStar selfStar parent1Star parent2Star hasTag(name)
 Race          title($Coded) place position won(bool) ground/distance/strategy/weather($Coded)
-SupportCard   id rank($Coded) level
+SupportCard   id rank($Coded .name="0凸".."4凸" / .code=凸数 0..4) level
 Scenario      id name
 Family        parent1/parent2 -> Parent{ self, parent1, parent2 ($Coded), rental(bool?) }
 Ratings       get(key) -> double?
