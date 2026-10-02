@@ -27,6 +27,8 @@
 #       mismatched pointer GET, and says so when the restore cannot be verified
 #  (10) an alias put that exits non-zero takes the same restore path as a
 #       stale alias GET, and says so when the restore cannot be verified
+#  (11) --yes publishes with no 'yes' typed; without it that input aborts;
+#       --yes --dry-run still writes nothing
 #
 # Run from Git Bash:  bash tool/cloudflare/test/publish_modules_test.sh
 # Needs python (to build the test archives), jq, unzip, sha256sum.
@@ -139,7 +141,7 @@ new_world() {
 }
 run_scenario() {
   set +e
-  echo yes | PATH="$BIN:$PATH" \
+  printf '%s\n' "${REPLY_UNDER_TEST-yes}" | PATH="$BIN:$PATH" \
     PUBLISH_ENV_FILE="$FIX/.env" PUBLISH_BACKUP_ROOT="$WORLD/backup" \
     PUBLISH_NOT_FOUND_WAIT_SECONDS=0 PUBLISH_RETRY_INTERVAL_SECONDS=0 \
     bash "$SCRIPT" "${ZIP_UNDER_TEST:-$FIX/new.zip}" "$@" > "$WORLD/out.txt" 2>&1
@@ -354,6 +356,22 @@ check "only R2 reads of the pointer and alias" \
   [ "$(tr '\n' ' ' < "$LOG")" = "wrangler get $PKEY wrangler get $AKEY " ]
 check "R2 unchanged" bash -c "cmp -s '$STUB_R2/$PKEY' '$FIX/old_pointer.json' && cmp -s '$STUB_R2/$AKEY' '$FIX/old.zip' && [ \$(find '$STUB_R2' -type f | wc -l) = 2 ]"
 check "prints the versioned key" grep -qF "$VKEY" "$OUT"
+dump_on_failure "$f0"
+
+echo "(11) --yes"
+# The input is an empty line, so only --yes can get past stage 2.
+new_world no_reply; f0=$FAILED; REPLY_UNDER_TEST="" run_scenario
+check "without --yes: exits non-zero" [ "$RC" != 0 ]
+check "without --yes: no put" never "wrangler put"
+dump_on_failure "$f0"
+new_world assume_yes; f0=$FAILED; REPLY_UNDER_TEST="" run_scenario --yes
+check "--yes: exits 0" [ "$RC" = 0 ]
+check "--yes: puts versioned, alias, pointer in that order" \
+  [ "$(grep '^wrangler put ' "$LOG" | cut -d' ' -f3 | tr '\n' ' ')" = "$VKEY $AKEY $PKEY " ]
+dump_on_failure "$f0"
+new_world assume_yes_dry; f0=$FAILED; REPLY_UNDER_TEST="" run_scenario --yes --dry-run
+check "--yes --dry-run: exits 0" [ "$RC" = 0 ]
+check "--yes --dry-run: no put" never "wrangler put"
 dump_on_failure "$f0"
 
 echo
