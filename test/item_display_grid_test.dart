@@ -33,6 +33,8 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/race_grade.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
+import 'package:umacapture/src/chara_detail/spec/rating.dart';
+import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/chara_detail/spec/simple_label.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
@@ -1239,6 +1241,17 @@ void main() {
           ),
           (m, c) => m.install(c, raceGrades: {5: 'grade_g1'}),
         ),
+        'script': (
+          ScriptColumnSpec(
+            id: 'f',
+            title: 'f',
+            source:
+                'bool filter(CharaRecord r) => r.id == "a" && r.trainee.name == "NC0";\n'
+                'dynamic display(CharaRecord r) => "";',
+            hidden: true,
+          ),
+          (m, c) => m.install(c, cardName: 'NC0'),
+        ),
       };
       for (final MapEntry(key: path, value: (filter, install)) in filters.entries) {
         final modules = _Modules();
@@ -1265,6 +1278,40 @@ void main() {
       expect(_read(container).items('a', 'sd'), [('NS1', _common)]);
     });
   });
+
+  group('a script column reads the rating the rating column shows', () {
+    setUpAll(loadAppTranslations);
+
+    // A drag on a rating bar saves without notifying, so the grid is not rebuilt under the finger. The next grid
+    // build, for whatever reason it happens, has to give the script the dragged rating.
+    test('after a drag, a rebuilt grid shows and filters by the dragged rating', () async {
+      final rating = RatingColumnSpec(
+        id: 'rt',
+        title: 'rt',
+        parser: TraineeIdParser(),
+        predicate: IsInRangeRatingPredicate(),
+        storageKey: 'r1',
+      );
+      final script = ScriptColumnSpec(
+        id: 'sc',
+        title: 'sc',
+        source:
+            'bool filter(CharaRecord r) => r.id == "b" || (r.ratings.get("r1") ?? 0.0) >= 4.0;\n'
+            'dynamic display(CharaRecord r) => r.ratings.get("r1") ?? -1.0;',
+      );
+      final container = await _Modules().table([_rec('a'), _rec('b')], [rating, script], ratingKeys: ['r1']);
+      final ref = container.read(containerRefProvider);
+      expect(_read(container).recordIds, ['b']);
+      // The dialog's save: it replaces the storage state, which rebuilds the grid.
+      saveRating(ref, storageKey: 'r1', recordId: 'b', rating: 1.0, notify: true);
+      expect(_read(container).cell('b', 'sc').value.display, '1.0');
+      saveRating(ref, storageKey: 'r1', recordId: 'a', rating: 4.5, notify: false);
+      container.invalidate(currentGridProvider);
+      final rebuilt = _read(container);
+      expect(rebuilt.recordIds, ['b', 'a']);
+      expect(rebuilt.cell('a', 'sc').value.display, '4.5');
+    });
+  });
 }
 
 /// A module directory on disk, read by the app's own module loaders. [install] rewrites its files and invalidates
@@ -1283,19 +1330,33 @@ class _Modules {
   }
 
   /// A container over [records] and [specs] whose module files hold the defaults of [_write], loaded.
-  Future<ProviderContainer> table(List<CharaDetailRecord> records, List<ColumnSpec> specs) async {
+  /// [ratingKeys] lists the rating storages, each empty at first and written to nowhere.
+  Future<ProviderContainer> table(
+    List<CharaDetailRecord> records,
+    List<ColumnSpec> specs, {
+    List<String> ratingKeys = const [],
+  }) async {
     _write();
     final container = ProviderContainer(
       overrides: [
         displayedRecordsProvider.overrideWithValue(records),
+        charaDetailRecordStorageProvider.overrideWithValue(records),
         currentColumnSpecsProvider.overrideWithValue(specs),
         pathInfoLoader.overrideWith((ref) async => _layout),
         pathInfoProvider.overrideWithValue(_layout),
         moduleVersionLoader.overrideWith((ref) async => null),
+        charaDetailRecordRatingStorageDataLoader.overrideWithValue(
+          AsyncData([for (final key in ratingKeys) RatingStorageData(key: key, title: key)]),
+        ),
+        metadataFileWriterProvider.overrideWithValue((_, _) async {}),
+        charaDetailRecordMemoStorageDataLoader.overrideWithValue(const AsyncData(<MemoStorageData>[])),
       ],
     );
     addTearDown(container.dispose);
     await _loaded(container);
+    for (final key in ratingKeys) {
+      await container.read(charaDetailRecordRatingProvider(key).future);
+    }
     return container;
   }
 

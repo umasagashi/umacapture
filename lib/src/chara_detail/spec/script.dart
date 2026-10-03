@@ -67,20 +67,10 @@ class _Enricher {
   final LabelMap labels;
   final Map<int, SkillInfo> skillInfo;
   final Map<int, FactorInfo> factorInfo;
-  final Map<String, Map<String, double>> ratingsByRecord;
-  final Map<String, Map<String, String>> memosByRecord;
   final List<int> charaRankBorder;
   final List<String> charaCardNames;
 
-  _Enricher(
-    this.labels,
-    this.skillInfo,
-    this.factorInfo,
-    this.ratingsByRecord,
-    this.memosByRecord,
-    this.charaRankBorder,
-    this.charaCardNames,
-  );
+  _Enricher(this.labels, this.skillInfo, this.factorInfo, this.charaRankBorder, this.charaCardNames);
 
   Map<String, dynamic> _aptitudeRank(int level) =>
       _coded(level + 1, _label(labels, LabelKeys.aptitude, level), 'aptitude');
@@ -230,8 +220,6 @@ class _Enricher {
       'evaluationValue': record.evaluationValue,
       'fans': record.fans,
       'trainedDate': record.trainedDate,
-      'ratings': ratingsByRecord[record.id] ?? const <String, double>{},
-      'memos': memosByRecord[record.id] ?? const <String, String>{},
       'status': {
         'speed': status.speed,
         'stamina': status.stamina,
@@ -264,22 +252,40 @@ final _enricherProvider = Provider<_Enricher>((ref) {
   final labels = ref.watch(labelMapProvider);
   final skillInfo = {for (final s in ref.watch(skillInfoProvider)) s.sid: s};
   final factorInfo = {for (final f in ref.watch(factorInfoProvider)) f.sid: f};
-  final ratingsByRecord = <String, Map<String, double>>{};
-  for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
-    (ref.watch(charaDetailRecordRatingProvider(storage.key)).value ?? RatingData.empty).data.forEach((recordId, value) {
-      (ratingsByRecord[recordId] ??= {})[storage.key] = value;
-    });
-  }
-  final memosByRecord = <String, Map<String, String>>{};
-  for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
-    (ref.watch(charaDetailRecordMemoProvider(storage.key)).value ?? MemoData.empty).data.forEach((recordId, value) {
-      (memosByRecord[recordId] ??= {})[storage.key] = value;
-    });
-  }
   final charaRankBorder = ref.watch(charaRankBorderProvider);
   final charaCardNames = ref.watch(charaCardInfoProvider).map((e) => e.names.first).toList();
-  return _Enricher(labels, skillInfo, factorInfo, ratingsByRecord, memosByRecord, charaRankBorder, charaCardNames);
+  return _Enricher(labels, skillInfo, factorInfo, charaRankBorder, charaCardNames);
 });
+
+/// Every storage's ratings and memos by record id, read from the same storages the rating and memo columns parse.
+///
+/// Not part of [enrichedRecordProvider]: dragging a rating bar writes its storage in place without notifying (so
+/// the grid is not rebuilt under the finger), and a cached copy would then keep the old rating through every later
+/// grid build. Reading the storages here, at parse time, gives a script the rating the rating column shows.
+class _RecordNotes {
+  final Map<String, Map<String, double>> _ratings = {};
+  final Map<String, Map<String, String>> _memos = {};
+
+  _RecordNotes(RefBase ref) {
+    for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
+      (ref.watch(charaDetailRecordRatingProvider(storage.key)).value ?? RatingData.empty).data.forEach((recordId, v) {
+        (_ratings[recordId] ??= {})[storage.key] = v;
+      });
+    }
+    for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
+      (ref.watch(charaDetailRecordMemoProvider(storage.key)).value ?? MemoData.empty).data.forEach((recordId, v) {
+        (_memos[recordId] ??= {})[storage.key] = v;
+      });
+    }
+  }
+
+  /// [enriched] with this record's `ratings` and `memos` added, the record input a script runs on.
+  Map<String, dynamic> attach(String recordId, Map<String, dynamic> enriched) => {
+    ...enriched,
+    'ratings': _ratings[recordId] ?? const <String, double>{},
+    'memos': _memos[recordId] ?? const <String, String>{},
+  };
+}
 
 final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
   return {for (final r in ref.watch(charaDetailRecordStorageProvider)) r.id: r};
@@ -287,7 +293,7 @@ final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
 
 /// The enriched plain Map for one record, cached and shared across script
 /// columns. Only built when a [ScriptColumnSpec] reads it, so non-script users
-/// pay nothing.
+/// pay nothing. It carries no ratings or memos; [_RecordNotes] adds those.
 final enrichedRecordProvider = Provider.family<Map<String, dynamic>, String>((ref, recordId) {
   final record = ref.watch(_recordIndexProvider)[recordId];
   if (record == null) return const <String, dynamic>{};
@@ -574,13 +580,17 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     }
     final runtime = compiled.runtime!;
     // Make the name→code tables visible to codeOf/atLeast/atMost for this run.
-    scriptCodeTables = ref.read(scriptCodeTablesProvider);
+    scriptCodeTables = ref.watch(scriptCodeTablesProvider);
+    // The module data every record is enriched with, watched once for the column: the per-record maps below are
+    // read, so without this a module install would leave a hidden script filter's rows as they were.
+    ref.watch(_enricherProvider);
     // Production has no hard per-call timeout: dart_eval exposes no instruction
     // hook, so a single runaway record cannot be interrupted here. The save-time
     // check runs the whole record set under [_previewExecutionBudget], which is what
     // guarantees no such script is committed. As a softer secondary guard against
     // cumulative cost (e.g. far more records than existed at check time), abort
     // once the looser [_productionBudget] is spent and mark the remaining rows.
+    final notes = _RecordNotes(ref);
     final stopwatch = Stopwatch()..start();
     final results = <ScriptCellResult>[];
     var aborted = false;
@@ -589,7 +599,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
         results.add(const ScriptCellResult(visible: true, display: '', error: _budgetError));
         continue;
       }
-      results.add(_run(ref, runtime, record));
+      results.add(_run(ref, runtime, notes, record));
       if (stopwatch.elapsedMicroseconds > _productionBudget.inMicroseconds) aborted = true;
     }
     _applyHints(results.where((r) => r.visible));
@@ -614,11 +624,11 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     _hasIcon = hints.hasIcon;
   }
 
-  ScriptCellResult _run(RefBase ref, Runtime runtime, CharaDetailRecord record) {
+  ScriptCellResult _run(RefBase ref, Runtime runtime, _RecordNotes notes, CharaDetailRecord record) {
     try {
       // [_evalRecord] already maps a throwing script to an error cell; this catch
       // only covers the record lookup that precedes it.
-      return _evalRecord(runtime, ref.read(enrichedRecordProvider(record.id)));
+      return _evalRecord(runtime, notes.attach(record.id, ref.read(enrichedRecordProvider(record.id))));
     } catch (e) {
       return ScriptCellResult(visible: true, display: '', error: e.toString());
     }
@@ -1325,9 +1335,10 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     // Validate against every record, not a sample: the full-set run (bounded by
     // [_previewExecutionBudget]) is the real guard that no committed script hangs
     // the grid.
+    final notes = _RecordNotes(ref.base.readOnly);
     final records = ref
         .read(charaDetailRecordStorageProvider)
-        .map((r) => ref.read(enrichedRecordProvider(r.id)))
+        .map((r) => notes.attach(r.id, ref.read(enrichedRecordProvider(r.id))))
         .toList();
     final result = await runScriptPreview(source, records, tables: ref.read(scriptCodeTablesProvider));
     if (!mounted) return;
