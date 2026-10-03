@@ -115,7 +115,7 @@ mixin DifferenceItemColumnSpec<T> on ItemColumnSpec<T> {
   @override
   CellBuilder<T> cellBuilder(RefBase ref) {
     final cells = differenceCells(ref);
-    return CellBuilder((value) => cells.cell(value, ItemTally.of([cells.heldItemStrengths(value)])));
+    return CellBuilder((value) => cells.against(ItemTally.of([cells.heldItemStrengths(value)]))(value));
   }
 }
 
@@ -127,8 +127,9 @@ abstract interface class DifferenceCells<T> {
   /// strength a cell shades the row's own items by.
   Map<int, int> heldItemStrengths(T value);
 
-  /// The cell of [value] compared against [tally], the item holdings of every displayed row.
-  TrinaCell cell(T value, ItemTally tally);
+  /// The cells compared against [tally], the item holdings of every displayed row. What the cells share, the
+  /// placeholders among them, is made here once for every row.
+  CellBuilder<T> against(ItemTally tally);
 }
 
 /// Whether the column [specId] is a root of the column forest, as opposed to one nested under a container.

@@ -1152,6 +1152,31 @@ void main() {
       }
     });
 
+    test('factor master: a difference cell interleaves held items and placeholders in the new master order', () {
+      // F1 is common, F2 a placeholder for a, F3 held by a alone. Only F1 and F2 swap ranks, so the placeholders
+      // keep their order and a's own items stay the same.
+      final records = [
+        _rec('a', self: [const Factor(1, 1), const Factor(3, 1)]),
+        _rec('b', self: [const Factor(1, 1), const Factor(2, 1)]),
+      ];
+      final container = _live(records, [_factorDiff('fd')]);
+      final before = _read(container).data('a', 'fd');
+      expect(
+        [for (final item in before.items) (item.text.whole, item.state)],
+        [('F1 (1)', _common), ('F2 (0)', _partialMissing), ('F3 (1)', _partialHeld)],
+      );
+      container.read(_factorMasterSource.notifier).set([_factorInfo(2, 0), _factorInfo(1, 10), _factorInfo(3, 20)]);
+      final cell = _read(container).data('a', 'fd');
+      // The table replaces a live row only when its cells' paint state is unequal.
+      expect(cell.paintState, isNot(before.paintState));
+      expect(
+        [for (final item in cell.items) (item.text.whole, item.state)],
+        [('F2 (0)', _partialMissing), ('F1 (1)', _common), ('F3 (1)', _partialHeld)],
+      );
+      // The omission counter counts against this length.
+      expect(cell.items.length, 3);
+    });
+
     test('skill master: the cell lists skills in the new master order', () {
       final records = [
         _rec('a', skills: [1, 2]),

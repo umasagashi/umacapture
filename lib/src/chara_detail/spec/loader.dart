@@ -1033,24 +1033,18 @@ Grid _buildGrid(
   final cellBuilders = <String, CellBuilder>{
     for (final spec in visibleSpecs)
       if (spec is! ContainerColumnSpec && spec is! DifferenceItemColumnSpec) spec.id: spec.cellBuilder(ref),
-  };
-
-  // A difference column compares each displayed row against every displayed row, pinned or not.
-  final tallies = <String, ItemTally>{
+    // A difference column compares each displayed row against every displayed row, pinned or not.
     for (final MapEntry(key: id, value: cells) in differenceCells.entries)
-      id: ItemTally.of(visibleIndices.map((rowIndex) => cells.heldItemStrengths(parsedById[id]![rowIndex]))),
+      id: cells.against(
+        ItemTally.of(visibleIndices.map((rowIndex) => cells.heldItemStrengths(parsedById[id]![rowIndex]))),
+      ),
   };
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
     if (spec is ContainerColumnSpec) {
       return spec.conditionCell(conditionsById[spec.id]![rowIndex]);
     }
-    final value = parsedById[spec.id]![rowIndex];
-    final cells = differenceCells[spec.id];
-    if (cells != null) {
-      return cells.cell(value, tallies[spec.id]!);
-    }
-    return cellBuilders[spec.id]!(value);
+    return cellBuilders[spec.id]!(parsedById[spec.id]![rowIndex]);
   }
 
   final rows = visibleIndices

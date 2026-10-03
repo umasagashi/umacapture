@@ -320,22 +320,26 @@ class _SkillDifferenceCells implements DifferenceCells<List<Skill>> {
   Map<int, int> heldItemStrengths(List<Skill> value) => spec.heldStrengths(inputs.query, value);
 
   @override
-  TrinaCell cell(List<Skill> value, ItemTally tally) {
+  CellBuilder<List<Skill>> against(ItemTally tally) {
     final labels = inputs.labels;
     final order = inputs.order;
-    final skills = order.sort(spec.heldSkills(inputs.query, value), (e) => e.id);
     // A skill id beyond a lagging module label list degrades to the raw id for that cell.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
-    final names = skills.map((e) => nameOf(e.id)).toList();
-    final strengths = heldItemStrengths(value);
-    final own = [
-      for (final (i, skill) in skills.indexed) OwnItem(skill.id, ItemText(names[i]), strength: strengths[skill.id]!),
-    ];
-    final data = ItemCellData.listing(
-      differenceItems(own, tally, (id) => ItemText(nameOf(id)), order),
-      hideCommon: spec.hideCommonItems,
-      csv: const CsvEncoder().convert([names]),
-    );
-    return TrinaCell(value: names.join(", "))..setUserData(data);
+    final placeholders = DifferencePlaceholders.of(tally, order, (id) => ItemText(nameOf(id)));
+    return CellBuilder((value) {
+      final skills = order.sort(spec.heldSkills(inputs.query, value), (e) => e.id);
+      final names = skills.map((e) => nameOf(e.id)).toList();
+      final strengths = heldItemStrengths(value);
+      final own = [
+        for (final (i, skill) in skills.indexed) OwnItem(skill.id, ItemText(names[i]), strength: strengths[skill.id]!),
+      ];
+      final data = ItemCellData.difference(
+        own,
+        placeholders,
+        hideCommon: spec.hideCommonItems,
+        csv: const CsvEncoder().convert([names]),
+      );
+      return TrinaCell(value: names.join(", "))..setUserData(data);
+    });
   }
 }

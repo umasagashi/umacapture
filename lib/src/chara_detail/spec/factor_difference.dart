@@ -362,24 +362,32 @@ class _FactorDifferenceCells implements DifferenceCells<FactorSet> {
   Map<int, int> heldItemStrengths(FactorSet value) => spec.heldStrengths(inputs.query, value);
 
   @override
-  TrinaCell cell(FactorSet value, ItemTally tally) {
+  CellBuilder<FactorSet> against(ItemTally tally) {
     final labels = inputs.labels;
     // A factor id beyond a lagging module label list degrades to the raw id for that cell.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = spec.notationMode.named;
     final order = inputs.order;
-    final factors = order.sort(spec.heldFactors(inputs.query, value), (e) => e.id);
-    final notations = [for (final factor in factors) FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode)];
-    final strengths = heldItemStrengths(value);
-    final own = [
-      for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
-    ];
-    final drawn = [for (final text in notations) text.whole];
-    final data = ItemCellData.listing(
-      differenceItems(own, tally, (id) => FactorItemsColumnSpec.placeholderText(labels, id, mode), order),
-      hideCommon: spec.hideCommonItems,
-      csv: const CsvEncoder().convert([drawn]),
+    final placeholders = DifferencePlaceholders.of(
+      tally,
+      order,
+      (id) => FactorItemsColumnSpec.placeholderText(labels, id, mode),
     );
-    return TrinaCell(value: drawn.join(", "))..setUserData(data);
+    return CellBuilder((value) {
+      final factors = order.sort(spec.heldFactors(inputs.query, value), (e) => e.id);
+      final notations = [for (final factor in factors) FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode)];
+      final strengths = heldItemStrengths(value);
+      final own = [
+        for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
+      ];
+      final drawn = [for (final text in notations) text.whole];
+      final data = ItemCellData.difference(
+        own,
+        placeholders,
+        hideCommon: spec.hideCommonItems,
+        csv: const CsvEncoder().convert([drawn]),
+      );
+      return TrinaCell(value: drawn.join(", "))..setUserData(data);
+    });
   }
 }
