@@ -374,11 +374,12 @@ class _FactorDifferenceCells implements DifferenceCells<FactorSet> {
     final own = [
       for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
     ];
+    final drawn = [for (final text in notations) text.whole];
     final data = ItemCellData.listing(
       differenceItems(own, tally, (id) => FactorItemsColumnSpec.placeholderText(labels, id, mode), order),
       hideCommon: spec.hideCommonItems,
-      csv: const CsvEncoder().convert([notations]),
+      csv: const CsvEncoder().convert([drawn]),
     );
-    return TrinaCell(value: notations.join(", "))..setUserData(data);
+    return TrinaCell(value: drawn.join(", "))..setUserData(data);
   }
 }

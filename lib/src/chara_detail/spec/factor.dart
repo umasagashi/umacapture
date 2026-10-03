@@ -425,12 +425,12 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   }
 
   /// The text of [factor] named [name] in [mode]: the name, followed by the value when [mode] shows one.
-  static String itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
-      mode.showsValue ? "$name (${factor.notation(mode.metric, mode.granularity)})" : name;
+  static ItemText itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
+      mode.showsValue ? ItemText.valued(name, " (${factor.notation(mode.metric, mode.granularity)})") : ItemText(name);
 
   /// The text of a factor a record lacks: drawn in [mode] with every slot 0, so that it takes the shape of a held
   /// factor.
-  static String placeholderText(List<String> labels, int id, FactorNotationMode mode) {
+  static ItemText placeholderText(List<String> labels, int id, FactorNotationMode mode) {
     final name = labels.getOrNull(id) ?? id.toString();
     return itemText(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), name, mode);
   }
@@ -679,8 +679,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final notations = factors
         .map((q) => FactorItemsColumnSpec.itemText(q, labels.getOrNull(q.id) ?? q.id.toString(), mode))
         .toList();
-    final desc = notations.join(", ");
-    final csv = const CsvEncoder().convert([notations]);
+    final drawn = [for (final text in notations) text.whole];
+    final desc = drawn.join(", ");
+    final csv = const CsvEncoder().convert([drawn]);
     final data = marksMissing
         ? _markedCell(inputs, predicate, value, csv: csv)
         : ItemCellData.listing(
@@ -703,7 +704,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final labels = inputs.labels;
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = predicate.notation.mode.named;
-    String placeholderOf(int id) => FactorItemsColumnSpec.placeholderText(labels, id, mode);
+    ItemText placeholderOf(int id) => FactorItemsColumnSpec.placeholderText(labels, id, mode);
     final perItemThreshold = marksShortItems;
     final own = [
       for (final factor in heldFactors(inputs.query, factorSet))

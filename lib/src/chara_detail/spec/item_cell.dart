@@ -29,11 +29,42 @@ enum ItemState {
   partialMissing,
 }
 
+/// The text of one item: what is drawn, and the segments it is measured in. A factor drawn with its value is its
+/// name followed by the value, measured apart so that a name is measured once for every value it is drawn with;
+/// every other text is one segment. [whole] is made from the segments here and nowhere else, so what is drawn is
+/// always what is measured.
+@immutable
+class ItemText {
+  /// A text measured as one segment.
+  const ItemText(this.whole) : name = whole, value = null;
+
+  /// [name] followed by [value], which carries its own separator (e.g. ` (3)`).
+  const ItemText.valued(this.name, String this.value) : whole = '$name$value';
+
+  /// What is drawn: [name] followed by [value].
+  final String whole;
+
+  /// The first segment; the whole text when there is no [value].
+  final String name;
+
+  /// The second segment, measured apart from [name].
+  final String? value;
+
+  @override
+  bool operator ==(Object other) => other is ItemText && other.name == name && other.value == value;
+
+  @override
+  int get hashCode => Object.hash(name, value);
+
+  @override
+  String toString() => whole;
+}
+
 /// One item drawn in a cell, compared by value.
 @immutable
 class CellItem {
-  /// The text drawn: the name, or the name with its notation (e.g. `name(3)`).
-  final String text;
+  /// The text drawn: the name, or the name with its notation (e.g. `name (3)`).
+  final ItemText text;
   final ItemState state;
 
   /// Input to the green shade of [ItemState.common] and [ItemState.partialHeld]; 0 for every other state.
@@ -66,7 +97,7 @@ class OwnItem {
   final int id;
 
   /// The text drawn, notation included.
-  final String text;
+  final ItemText text;
 
   /// Whether the item passes the per-item threshold of the query (always true where there is none).
   final bool meetsQuery;
@@ -213,7 +244,7 @@ class ItemOrder {
 List<CellItem> missingMarkedItems(
   List<OwnItem> own,
   Iterable<int> query,
-  String Function(int) placeholderOf,
+  ItemText Function(int) placeholderOf,
   ItemOrder order, {
   required bool perItemThreshold,
 }) {
@@ -235,7 +266,7 @@ List<CellItem> missingMarkedItems(
 List<CellItem> differenceItems(
   List<OwnItem> own,
   ItemTally tally,
-  String Function(int) placeholderOf,
+  ItemText Function(int) placeholderOf,
   ItemOrder order,
 ) {
   final ownIds = {for (final item in own) item.id};

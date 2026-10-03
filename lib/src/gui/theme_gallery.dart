@@ -629,15 +629,16 @@ class _ItemCellSection extends ConsumerWidget {
     final measurement = CellMeasurement(
       style: Theme.of(context).textTheme.bodySmall ?? const TextStyle(),
       textScaler: MediaQuery.textScalerOf(context),
+      itemTextExtents: ref.watch(itemTextExtentsProvider),
     );
     final oneRowHeight = itemBoxesMinHeight(1, measurement);
     const manyItems = [
-      CellItem('Item A', ItemState.normal),
-      CellItem('Item B', ItemState.normal),
-      CellItem('Item C', ItemState.normal),
-      CellItem('Item D', ItemState.normal),
-      CellItem('Item E', ItemState.normal),
-      CellItem('Item F', ItemState.normal),
+      CellItem(ItemText('Item A'), ItemState.normal),
+      CellItem(ItemText('Item B'), ItemState.normal),
+      CellItem(ItemText('Item C'), ItemState.normal),
+      CellItem(ItemText('Item D'), ItemState.normal),
+      CellItem(ItemText('Item E'), ItemState.normal),
+      CellItem(ItemText('Item F'), ItemState.normal),
     ];
     return _Section(
       'Record table item cell (live widget)',
@@ -647,9 +648,9 @@ class _ItemCellSection extends ConsumerWidget {
             'filtering column',
             ItemCellData(
               items: const [
-                CellItem('Item A', ItemState.normal),
-                CellItem('Item B', ItemState.normal),
-                CellItem('Item C', ItemState.normal),
+                CellItem(ItemText('Item A'), ItemState.normal),
+                CellItem(ItemText('Item B'), ItemState.normal),
+                CellItem(ItemText('Item C'), ItemState.normal),
               ],
               csv: '',
             ),
@@ -663,9 +664,9 @@ class _ItemCellSection extends ConsumerWidget {
             'marking missing items',
             ItemCellData(
               items: const [
-                CellItem('Item A (3)', ItemState.normal),
-                CellItem('Item B (1)', ItemState.short),
-                CellItem('Item C (0)', ItemState.missing),
+                CellItem(ItemText.valued('Item A', ' (3)'), ItemState.normal),
+                CellItem(ItemText.valued('Item B', ' (1)'), ItemState.short),
+                CellItem(ItemText.valued('Item C', ' (0)'), ItemState.missing),
               ],
               csv: '',
             ),
@@ -680,10 +681,10 @@ class _ItemCellSection extends ConsumerWidget {
             'difference column',
             ItemCellData(
               items: const [
-                CellItem('Item A', ItemState.common, strength: 6, strengthMax: 6),
-                CellItem('Item B', ItemState.partialHeld, strength: 2, strengthMax: 9),
-                CellItem('Item C', ItemState.partialHeld, strength: 9, strengthMax: 9),
-                CellItem('Item D', ItemState.partialMissing),
+                CellItem(ItemText('Item A'), ItemState.common, strength: 6, strengthMax: 6),
+                CellItem(ItemText('Item B'), ItemState.partialHeld, strength: 2, strengthMax: 9),
+                CellItem(ItemText('Item C'), ItemState.partialHeld, strength: 9, strengthMax: 9),
+                CellItem(ItemText('Item D'), ItemState.partialMissing),
               ],
               csv: '',
             ),
@@ -698,7 +699,7 @@ class _ItemCellSection extends ConsumerWidget {
           _ItemCellSpecimen(
             'omission counter',
             ItemCellData(
-              items: [for (final c in 'ABCDEFGHIJ'.split('')) CellItem('Item $c', ItemState.normal)],
+              items: [for (final c in 'ABCDEFGHIJ'.split('')) CellItem(ItemText('Item $c'), ItemState.normal)],
               csv: '',
             ),
             maxCellHeight: oneRowHeight,
@@ -730,7 +731,7 @@ class _ItemCellSection extends ConsumerWidget {
           _ItemCellSpecimen(
             'one item wider than the column',
             ItemCellData(
-              items: const [CellItem('A Very Long Item Name That Cannot Fit In One Box', ItemState.normal)],
+              items: const [CellItem(ItemText('A Very Long Item Name That Cannot Fit In One Box'), ItemState.normal)],
               csv: '',
             ),
           ),

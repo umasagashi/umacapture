@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/script_facade.dart';
 import '/src/chara_detail/storage.dart';
@@ -1517,7 +1518,7 @@ class _PreviewPanel extends StatelessWidget {
 /// like the production data table, so the preview is the actual table widget —
 /// not an approximation — including header, sorting, alternating rows, and the
 /// cell renderer (colors, icons, backgrounds, ⚠ markers).
-class _PreviewGrid extends StatelessWidget {
+class _PreviewGrid extends ConsumerWidget {
   final RefBase refBase;
   final String title;
   final List<ScriptCellResult> rows;
@@ -1525,7 +1526,8 @@ class _PreviewGrid extends StatelessWidget {
   const _PreviewGrid({required this.refBase, required this.title, required this.rows});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final itemTextExtents = ref.watch(itemTextExtentsProvider);
     final theme = Theme.of(context);
     // Production hides filtered-out rows; mirror that. Error rows stay visible
     // (they render a ⚠ marker), matching the grid.
@@ -1584,7 +1586,7 @@ class _PreviewGrid extends StatelessWidget {
           ),
         ),
         // A script column takes no table bounds ([ColumnSpec.takesItemColumnBounds]), so the preview needs none.
-        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded),
+        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded, itemTextExtents),
       ),
     );
     if (!truncated) return grid;

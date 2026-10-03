@@ -10,6 +10,7 @@ import 'package:trina_grid/trina_grid.dart';
 import '/const.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
@@ -109,6 +110,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   // size of the table's visible area. What the auto-fit, the row heights, the drag clamp and the cells (through
   // ItemColumnBoundsScope) all read, so the drawing and the measuring use one value.
   ItemColumnBounds _itemBounds = ItemColumnBounds.unbounded;
+
+  // The extents of item texts the cells and the auto-fit and row-height passes share, watched by build so they live
+  // as long as the table.
+  late ItemTextExtents _itemTextExtents;
 
   // The current theme and selection purpose, mirrored here so the long-lived
   // rowColorCallback/rowWrapper closures (captured once at grid init) read fresh
@@ -516,7 +521,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     }
     final mode = ref.read(charaDetailRowHeightModeProvider);
     final minLines = ref.read(charaDetailMinRowLinesProvider);
-    if (stateManager.applyRowHeights(mode: mode, minLines: minLines, bounds: _itemBounds)) {
+    if (stateManager.applyRowHeights(
+      mode: mode,
+      minLines: minLines,
+      bounds: _itemBounds,
+      itemTextExtents: _itemTextExtents,
+    )) {
       _indexPinnedRows();
       stateManager.notifyListeners();
     }
@@ -527,7 +537,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   /// column's title changed, when a column is reverted to auto width, and when the table's bounds change
   /// ([ItemColumnBounds], the table resized or a bound setting edited).
   void _refitColumns() {
-    stateManager.autoFitColumns(_itemBounds);
+    stateManager.autoFitColumns(_itemBounds, _itemTextExtents);
     _snapshotColumnWidths();
     _applyRowHeights();
   }
@@ -831,6 +841,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       _hasTheme = true;
     }
     final theme = _theme;
+    _itemTextExtents = ref.watch(itemTextExtentsProvider);
     final grid = ref.watch(currentGridProvider);
     // Drives the per-row overlay's color/label so a checked row reads as either
     // "archive" or "export". Non-null whenever the checkbox column is present.

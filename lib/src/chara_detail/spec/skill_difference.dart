@@ -328,9 +328,11 @@ class _SkillDifferenceCells implements DifferenceCells<List<Skill>> {
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final names = skills.map((e) => nameOf(e.id)).toList();
     final strengths = heldItemStrengths(value);
-    final own = [for (final (i, skill) in skills.indexed) OwnItem(skill.id, names[i], strength: strengths[skill.id]!)];
+    final own = [
+      for (final (i, skill) in skills.indexed) OwnItem(skill.id, ItemText(names[i]), strength: strengths[skill.id]!),
+    ];
     final data = ItemCellData.listing(
-      differenceItems(own, tally, nameOf, order),
+      differenceItems(own, tally, (id) => ItemText(nameOf(id)), order),
       hideCommon: spec.hideCommonItems,
       csv: const CsvEncoder().convert([names]),
     );

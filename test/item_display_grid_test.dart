@@ -181,7 +181,7 @@ class _Built {
   ItemCellData data(String recordId, String specId) => cell(recordId, specId).getUserData<ItemCellData>()!;
 
   List<(String, ItemState)> items(String recordId, String specId) => [
-    for (final item in data(recordId, specId).items) (item.text, item.state),
+    for (final item in data(recordId, specId).items) (item.text.whole, item.state),
   ];
 
   /// What the row-height and column-width passes measure for the cell: the string of a text content, or the
@@ -191,7 +191,7 @@ class _Built {
     final cell = this.cell(recordId, specId);
     return switch (spec.measuredContent(cell, cell.value.toString())) {
       TextMeasuredContent(:final text) => text,
-      ItemMeasuredContent(:final data) => (texts: [for (final item in data.items) item.text].join('|')),
+      ItemMeasuredContent(:final data) => (texts: [for (final item in data.items) item.text.whole].join('|')),
       final other => other,
     };
   }
@@ -269,8 +269,8 @@ void main() {
       test('common items shown', () {
         final g = _build(records, [_factorDiff('f')]);
         expect(g.data('a', 'f').items, [
-          const CellItem('F1 (3)', _common, strength: 3, strengthMax: 3),
-          const CellItem('F2 (1)', _partialHeld, strength: 1, strengthMax: 3),
+          CellItem(ItemText.valued('F1', ' (3)'), _common, strength: 3, strengthMax: 3),
+          CellItem(ItemText.valued('F2', ' (1)'), _partialHeld, strength: 1, strengthMax: 3),
         ]);
         expect(g.items('b', 'f'), [('F1 (3)', _common), ('F2 (3)', _partialHeld)]);
       });
@@ -293,11 +293,14 @@ void main() {
       final g = _build(records, [_factorDiff('f')], pinned: {'a', 'b'});
       // Unpinned c's F1 shade is scaled by pinned b's 5.
       expect(g.data('c', 'f').items, [
-        const CellItem('F1 (2)', _partialHeld, strength: 2, strengthMax: 5),
-        const CellItem('F3 (1)', _partialHeld, strength: 1, strengthMax: 1),
+        CellItem(ItemText.valued('F1', ' (2)'), _partialHeld, strength: 2, strengthMax: 5),
+        CellItem(ItemText.valued('F3', ' (1)'), _partialHeld, strength: 1, strengthMax: 1),
       ]);
       expect(g.items('a', 'f'), [('F1 (1)', _partialHeld), ('F3 (0)', _partialMissing)]);
-      expect(g.data('b', 'f').items.first, const CellItem('F1 (5)', _partialHeld, strength: 5, strengthMax: 5));
+      expect(
+        g.data('b', 'f').items.first,
+        CellItem(ItemText.valued('F1', ' (5)'), _partialHeld, strength: 5, strengthMax: 5),
+      );
     });
   });
 
@@ -428,7 +431,9 @@ void main() {
       _rec('b', parent1: [const Factor(5, 3)]),
     ];
     final g = _build(records, [_factorDiff('f', subject: FactorSearchSubjectMode.trainee)]);
-    expect(g.data('a', 'f').items, [const CellItem('F5 (2)', _partialHeld, strength: 2, strengthMax: 2)]);
+    expect(g.data('a', 'f').items, [
+      CellItem(ItemText.valued('F5', ' (2)'), _partialHeld, strength: 2, strengthMax: 2),
+    ]);
     expect(g.items('b', 'f'), [('F5 (0)', _partialMissing)]);
   });
 
@@ -821,6 +826,108 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('a cell whose text scale changes places its items at the new scale', (tester) async {
+    // The cell keeps its table's item text extents across the change, so they have to tell the two scales apart: at
+    // twice the size, fewer of the five boxes fit the 180 px row.
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, 3, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    Widget cell(Key key, double scale) => ProviderScope(
+      key: key,
+      overrides: [
+        charaDetailRowHeightModeProvider.overrideWith(
+          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+        ),
+      ],
+      child: MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: Material(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ItemColumnBoundsScope(
+              bounds: const ItemColumnBounds(
+                defaultWidth: double.infinity,
+                maxWidth: double.infinity,
+                maxCellHeight: 40,
+              ),
+              child: SizedBox(width: 180, child: ItemCellText(g.data('r', 's'))),
+            ),
+          ),
+        ),
+      ),
+    );
+    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(cell(const ValueKey('kept'), 1));
+    final before = label();
+    await tester.pumpWidget(cell(const ValueKey('kept'), 2));
+    final after = label();
+
+    await tester.pumpWidget(cell(const ValueKey('fresh'), 2));
+    expect(after, isNot(before));
+    expect(after, label());
+    semantics.dispose();
+  });
+
+  testWidgets('a factor drawn with its value takes the room of its whole text', (tester) async {
+    // A factor's text is measured as its name and its value apart; the cell places the boxes exactly as it places
+    // the same texts measured whole. 300 px holds two of the five boxes beside the counter.
+    final g = _build(
+      [
+        _rec('r', self: [for (var id = 1; id <= 5; id++) Factor(id, 2)]),
+      ],
+      [
+        _factor('f', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    final valued = g.data('r', 'f');
+    final whole = ItemCellData(
+      items: [for (final item in valued.items) CellItem(ItemText(item.text.whole), item.state)],
+      csv: valued.csv,
+    );
+    Widget cell(Key key, ItemCellData data) => ProviderScope(
+      key: key,
+      overrides: [
+        charaDetailRowHeightModeProvider.overrideWith(
+          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+        ),
+      ],
+      child: MaterialApp(
+        home: Material(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ItemColumnBoundsScope(
+              bounds: const ItemColumnBounds(
+                defaultWidth: double.infinity,
+                maxWidth: double.infinity,
+                maxCellHeight: 40,
+              ),
+              child: SizedBox(width: 300, child: ItemCellText(data)),
+            ),
+          ),
+        ),
+      ),
+    );
+    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(cell(const ValueKey('valued'), valued));
+    final split = label();
+    await tester.pumpWidget(cell(const ValueKey('whole'), whole));
+
+    expect(valued.items.first.text.value, ' (2)');
+    expect(split, contains(itemEllipsis));
+    expect(split, label());
+    semantics.dispose();
+  });
+
   testWidgets('a cell too narrow to set even a shortened first item beside the counter shows the counter alone '
       'within its height cap', (tester) async {
     // 80 px holds the counter but not the counter beside a shortened item; the 40 px cap fits one row of boxes.
@@ -952,6 +1059,58 @@ void main() {
       ),
     );
     expect(find.bySemanticsLabel('S1, S2, ${itemCounterText(2, 5)}'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('a cell keeps a row [itemWidthErrorBound] short of its width, so a box ending within it breaks onto the '
+      'next row', (tester) async {
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2]),
+      ],
+      [
+        _skill('s', query: {1, 2}),
+      ],
+    );
+    Future<String> labelAt(double width, double maxCellHeight) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            charaDetailRowHeightModeProvider.overrideWith(
+              () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+            ),
+          ],
+          child: MaterialApp(
+            home: Material(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: ItemColumnBoundsScope(
+                  bounds: ItemColumnBounds(
+                    defaultWidth: double.infinity,
+                    maxWidth: double.infinity,
+                    maxCellHeight: maxCellHeight,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: width),
+                    child: ItemCellText(g.data('r', 's')),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      return tester.getSemantics(find.byType(ItemCellText)).label;
+    }
+
+    final semantics = tester.ensureSemantics();
+    // Laid out with room to spare, the two boxes share one row; the cell is then capped at that one row.
+    await labelAt(1000, double.infinity);
+    final oneRow = tester.getSize(find.byType(ItemCellText));
+    expect(await labelAt(oneRow.width + itemWidthErrorBound, oneRow.height), 'S1, S2');
+    // Exactly as wide as the row, the second box ends within the bound and breaks onto a second row, which the
+    // one-row cap leaves no room for: only the counter is shown.
+    expect(await labelAt(oneRow.width, oneRow.height), '... 0/2');
     semantics.dispose();
   });
 
