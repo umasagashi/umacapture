@@ -877,6 +877,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // here on change.
     ref.listen(charaDetailRowHeightModeProvider, (_, _) => _afterFrame(_applyRowHeights));
     ref.listen(charaDetailMinRowLinesProvider, (_, _) => _afterFrame(_applyRowHeights));
+    // New extents mean the registered fonts changed (itemTextExtentsProvider), so every auto-sized width and row
+    // height was measured in a font no longer drawn; re-fit them with the extents the watch above just took.
+    ref.listen(itemTextExtentsProvider, (_, _) => _afterFrame(_refitColumns));
     // The new border colour reaches the stateManager in the rebuild above, but the
     // rows (and the pinned-row separators in rowWrapper) repaint only when it
     // notifies, as with a theme change.

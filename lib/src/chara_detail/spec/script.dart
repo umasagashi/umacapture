@@ -1569,11 +1569,15 @@ class _PreviewGrid extends ConsumerWidget {
       child: TrinaGrid(
         // Key on every rendered field: TrinaGrid caches its rows in the state
         // manager and won't refresh unless the key changes, so any styling tweak
-        // (e.g. background only) must alter the key.
+        // (e.g. background only) must alter the key. New extents mean the registered fonts changed
+        // ([itemTextExtentsProvider]), so they key it too: the rebuilt grid re-fits its width in the font now drawn.
         key: ValueKey(
-          Object.hashAll(
-            shown.map(
-              (r) => '${r.display}|${r.sortValue}|${r.color}|${r.background}|${r.icon}|${r.iconColor}|${r.error}',
+          Object.hash(
+            identityHashCode(itemTextExtents),
+            Object.hashAll(
+              shown.map(
+                (r) => '${r.display}|${r.sortValue}|${r.color}|${r.background}|${r.icon}|${r.iconColor}|${r.error}',
+              ),
             ),
           ),
         ),

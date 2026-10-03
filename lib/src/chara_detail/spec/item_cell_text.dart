@@ -249,7 +249,7 @@ class RenderItemCellText extends RenderBox
 
   /// A font loaded or changed after the painters were laid out leaves them laid out in the font the text fell back
   /// to; they are dropped like a [RenderParagraph]'s, so the boxes are placed again in the font now registered. The
-  /// shared extents were dropped already, when the change was announced ([itemTextExtentsProvider]).
+  /// shared extents are replaced on the same change ([itemTextExtentsProvider]).
   @override
   void systemFontsDidChange() {
     super.systemFontsDidChange();
@@ -530,7 +530,7 @@ const itemTextExtentsCapacity = 16384;
 
 /// The extent of each text laid out in each [ItemTextFormat], shared by every item cell of a table and the passes
 /// that measure them. The least recently used extent is dropped beyond [capacity]. Nothing in it says which fonts
-/// were registered when it was measured, so [itemTextExtentsProvider] clears it whenever the fonts change.
+/// were registered when it was measured, so [itemTextExtentsProvider] replaces it whenever the fonts change.
 class ItemTextExtents {
   ItemTextExtents({this.capacity = itemTextExtentsCapacity});
 
@@ -557,20 +557,36 @@ class ItemTextExtents {
     }
     return extent;
   }
-
-  void clear() => _extents.clear();
 }
 
 /// The [ItemTextExtents] of the item cells and measuring passes drawn under one [ProviderScope]: alive while a table
-/// (or any item cell) watches it, and cleared whenever the registered fonts change, the change every [TextPainter]
-/// measure is told to be redone on — a font loaded at run time such as the app's own included.
+/// (or any item cell) watches it, and replaced by a new, empty instance whenever the registered fonts change, the
+/// change every [TextPainter] measure is told to be redone on — a font loaded at run time such as the app's own
+/// included. A new instance is the fact its watchers act on: the cells measure against it, and the table re-fits its
+/// auto-sized column widths and row heights with it.
 final itemTextExtentsProvider = Provider.autoDispose<ItemTextExtents>((ref) {
-  final extents = ItemTextExtents();
-  final fonts = PaintingBinding.instance.systemFonts;
-  fonts.addListener(extents.clear);
-  ref.onDispose(() => fonts.removeListener(extents.clear));
-  return extents;
+  ref.watch(_systemFontsGenerationProvider);
+  return ItemTextExtents();
 });
+
+/// How many times the registered fonts have changed since this was first watched. Its own provider so the listener
+/// on [PaintingBinding.systemFonts] stays registered across the rebuilds it causes: a provider that invalidated itself
+/// from that listener would remove and add the listener while the fonts notifier iterates its listeners.
+final _systemFontsGenerationProvider = NotifierProvider.autoDispose<_SystemFontsGeneration, int>(
+  _SystemFontsGeneration.new,
+);
+
+class _SystemFontsGeneration extends Notifier<int> {
+  @override
+  int build() {
+    final fonts = PaintingBinding.instance.systemFonts;
+    fonts.addListener(_bump);
+    ref.onDispose(() => fonts.removeListener(_bump));
+    return 0;
+  }
+
+  void _bump() => state++;
+}
 
 /// Space between an item's text and the left and right edges of its box.
 const itemBoxPaddingHorizontal = 3.5;
