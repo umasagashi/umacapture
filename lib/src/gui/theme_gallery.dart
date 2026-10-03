@@ -663,9 +663,9 @@ class _ItemCellSection extends ConsumerWidget {
             'marking missing items',
             ItemCellData(
               items: const [
-                CellItem('Item A(3)', ItemState.normal),
-                CellItem('Item B(1)', ItemState.short),
-                CellItem('Item C(0)', ItemState.missing),
+                CellItem('Item A (3)', ItemState.normal),
+                CellItem('Item B (1)', ItemState.short),
+                CellItem('Item C (0)', ItemState.missing),
               ],
               csv: '',
             ),

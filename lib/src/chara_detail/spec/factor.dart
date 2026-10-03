@@ -426,7 +426,7 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
 
   /// The text of [factor] named [name] in [mode]: the name, followed by the value when [mode] shows one.
   static String itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
-      mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
+      mode.showsValue ? "$name (${factor.notation(mode.metric, mode.granularity)})" : name;
 
   /// The text of a factor a record lacks: drawn in [mode] with every slot 0, so that it takes the shape of a held
   /// factor.

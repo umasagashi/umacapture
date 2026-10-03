@@ -269,16 +269,16 @@ void main() {
       test('common items shown', () {
         final g = _build(records, [_factorDiff('f')]);
         expect(g.data('a', 'f').items, [
-          const CellItem('F1(3)', _common, strength: 3, strengthMax: 3),
-          const CellItem('F2(1)', _partialHeld, strength: 1, strengthMax: 3),
+          const CellItem('F1 (3)', _common, strength: 3, strengthMax: 3),
+          const CellItem('F2 (1)', _partialHeld, strength: 1, strengthMax: 3),
         ]);
-        expect(g.items('b', 'f'), [('F1(3)', _common), ('F2(3)', _partialHeld)]);
+        expect(g.items('b', 'f'), [('F1 (3)', _common), ('F2 (3)', _partialHeld)]);
       });
 
       test('common items hidden', () {
         final g = _build(records, [_factorDiff('f', hideCommon: true)]);
-        expect(g.items('a', 'f'), [('F2(1)', _partialHeld)]);
-        expect(g.items('b', 'f'), [('F2(3)', _partialHeld)]);
+        expect(g.items('a', 'f'), [('F2 (1)', _partialHeld)]);
+        expect(g.items('b', 'f'), [('F2 (3)', _partialHeld)]);
       });
     });
 
@@ -293,11 +293,11 @@ void main() {
       final g = _build(records, [_factorDiff('f')], pinned: {'a', 'b'});
       // Unpinned c's F1 shade is scaled by pinned b's 5.
       expect(g.data('c', 'f').items, [
-        const CellItem('F1(2)', _partialHeld, strength: 2, strengthMax: 5),
-        const CellItem('F3(1)', _partialHeld, strength: 1, strengthMax: 1),
+        const CellItem('F1 (2)', _partialHeld, strength: 2, strengthMax: 5),
+        const CellItem('F3 (1)', _partialHeld, strength: 1, strengthMax: 1),
       ]);
-      expect(g.items('a', 'f'), [('F1(1)', _partialHeld), ('F3(0)', _partialMissing)]);
-      expect(g.data('b', 'f').items.first, const CellItem('F1(5)', _partialHeld, strength: 5, strengthMax: 5));
+      expect(g.items('a', 'f'), [('F1 (1)', _partialHeld), ('F3 (0)', _partialMissing)]);
+      expect(g.data('b', 'f').items.first, const CellItem('F1 (5)', _partialHeld, strength: 5, strengthMax: 5));
     });
   });
 
@@ -312,9 +312,9 @@ void main() {
           _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee),
         ],
       );
-      expect(g.items('r', 'f'), [('F1(2)', _normal), ('F2(0)', _missing), ('F3(0)', _missing)]);
-      expect(g.cell('r', 'f').value, 'F1(2)');
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(0)|F3(0)'));
+      expect(g.items('r', 'f'), [('F1 (2)', _normal), ('F2 (0)', _missing), ('F3 (0)', _missing)]);
+      expect(g.cell('r', 'f').value, 'F1 (2)');
+      expect(g.measured('r', 'f'), (texts: 'F1 (2)|F2 (0)|F3 (0)'));
     });
 
     test('family subject: a factor a parent holds is held', () {
@@ -324,21 +324,21 @@ void main() {
           _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 'f'), [('F1(2)', _normal), ('F2(3)', _normal), ('F3(0)', _missing)]);
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)|F3(0)'));
+      expect(g.items('r', 'f'), [('F1 (2)', _normal), ('F2 (3)', _normal), ('F3 (0)', _missing)]);
+      expect(g.measured('r', 'f'), (texts: 'F1 (2)|F2 (3)|F3 (0)'));
     });
 
     // A placeholder takes the notation of a held factor with every slot 0, so every row places its factors alike.
     for (final (notation, held, placeholder) in [
       (FactorNotationMode.nameOnly, 'F1', 'F3'),
-      (FactorNotationMode.nameStarTotal, 'F1(2)', 'F3(0)'),
-      (FactorNotationMode.nameStarEach, 'F1(2/0/0)', 'F3(0/0/0)'),
-      (FactorNotationMode.nameCountTotal, 'F1(1)', 'F3(0)'),
-      (FactorNotationMode.nameCountEach, 'F1(1/0/0)', 'F3(0/0/0)'),
-      (FactorNotationMode.starTotal, 'F1(2)', 'F3(0)'),
-      (FactorNotationMode.starEach, 'F1(2/0/0)', 'F3(0/0/0)'),
-      (FactorNotationMode.countTotal, 'F1(1)', 'F3(0)'),
-      (FactorNotationMode.countEach, 'F1(1/0/0)', 'F3(0/0/0)'),
+      (FactorNotationMode.nameStarTotal, 'F1 (2)', 'F3 (0)'),
+      (FactorNotationMode.nameStarEach, 'F1 (2/0/0)', 'F3 (0/0/0)'),
+      (FactorNotationMode.nameCountTotal, 'F1 (1)', 'F3 (0)'),
+      (FactorNotationMode.nameCountEach, 'F1 (1/0/0)', 'F3 (0/0/0)'),
+      (FactorNotationMode.starTotal, 'F1 (2)', 'F3 (0)'),
+      (FactorNotationMode.starEach, 'F1 (2/0/0)', 'F3 (0/0/0)'),
+      (FactorNotationMode.countTotal, 'F1 (1)', 'F3 (0)'),
+      (FactorNotationMode.countEach, 'F1 (1/0/0)', 'F3 (0/0/0)'),
     ]) {
       for (final subject in FactorSearchSubjectMode.values) {
         test('${notation.name}, ${subject.name}: a placeholder is drawn as a held factor with value 0', () {
@@ -381,8 +381,8 @@ void main() {
           count: 2,
         ),
       ]);
-      expect(g.items('one', 'f'), [('F1(3)', _short)]);
-      expect(g.items('two', 'f'), [('F1(2)', _normal)]);
+      expect(g.items('one', 'f'), [('F1 (3)', _short)]);
+      expect(g.items('two', 'f'), [('F1 (2)', _normal)]);
     });
 
     test('an empty query marks no factor short, whatever the lower bound', () {
@@ -393,8 +393,8 @@ void main() {
         _factor('star', unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee, star: 3),
         _factor('count', unmetRows: UnmetRows.markMissing, element: FactorSearchElementMode.countOnly, count: 2),
       ]);
-      expect(g.items('r', 'star'), [('F1(1)', _normal)]);
-      expect(g.items('r', 'count'), [('F1(1)', _normal), ('F2(1)', _normal)]);
+      expect(g.items('r', 'star'), [('F1 (1)', _normal)]);
+      expect(g.items('r', 'count'), [('F1 (1)', _normal), ('F2 (1)', _normal)]);
     });
 
     test('a column with a query selection holds every item, placeholders included', () {
@@ -428,8 +428,8 @@ void main() {
       _rec('b', parent1: [const Factor(5, 3)]),
     ];
     final g = _build(records, [_factorDiff('f', subject: FactorSearchSubjectMode.trainee)]);
-    expect(g.data('a', 'f').items, [const CellItem('F5(2)', _partialHeld, strength: 2, strengthMax: 2)]);
-    expect(g.items('b', 'f'), [('F5(0)', _partialMissing)]);
+    expect(g.data('a', 'f').items, [const CellItem('F5 (2)', _partialHeld, strength: 2, strengthMax: 2)]);
+    expect(g.items('b', 'f'), [('F5 (0)', _partialMissing)]);
   });
 
   test('difference: a factor placeholder takes the per-slot notation of a held factor with value 0', () {
@@ -438,9 +438,9 @@ void main() {
       _rec('b', self: [const Factor(6, 1)]),
     ];
     final g = _build(records, [_factorDiff('f', notation: FactorNotationMode.nameStarEach)]);
-    expect(g.items('a', 'f'), [('F5(2/1/0)', _partialHeld), ('F6(0/0/0)', _partialMissing)]);
-    expect(g.items('b', 'f'), [('F5(0/0/0)', _partialMissing), ('F6(1/0/0)', _partialHeld)]);
-    expect(g.measured('b', 'f'), (texts: 'F5(0/0/0)|F6(1/0/0)'));
+    expect(g.items('a', 'f'), [('F5 (2/1/0)', _partialHeld), ('F6 (0/0/0)', _partialMissing)]);
+    expect(g.items('b', 'f'), [('F5 (0/0/0)', _partialMissing), ('F6 (1/0/0)', _partialHeld)]);
+    expect(g.measured('b', 'f'), (texts: 'F5 (0/0/0)|F6 (1/0/0)'));
   });
 
   group('normal display cells keep their value, CSV and measured text', () {
@@ -478,9 +478,9 @@ void main() {
         ],
         [_factor('f')],
       );
-      expect(g.cell('r', 'f').value, 'F1(2), F2(3)');
-      expect(g.data('r', 'f').csv, 'F1(2),F2(3)');
-      expect(g.measured('r', 'f'), (texts: 'F1(2)|F2(3)'));
+      expect(g.cell('r', 'f').value, 'F1 (2), F2 (3)');
+      expect(g.data('r', 'f').csv, 'F1 (2),F2 (3)');
+      expect(g.measured('r', 'f'), (texts: 'F1 (2)|F2 (3)'));
     });
 
     test('factor star total', () {
@@ -499,9 +499,9 @@ void main() {
     test('trainee subject with an empty query lists only the factors the trainee holds', () {
       final record = _rec('r', self: [const Factor(1, 2)], parent1: [const Factor(2, 3)]);
       final named = _build([record], [_factor('f', subject: FactorSearchSubjectMode.trainee)]);
-      expect(named.cell('r', 'f').value, 'F1(2)');
-      expect(named.data('r', 'f').csv, 'F1(2)');
-      expect(named.measured('r', 'f'), (texts: 'F1(2)'));
+      expect(named.cell('r', 'f').value, 'F1 (2)');
+      expect(named.data('r', 'f').csv, 'F1 (2)');
+      expect(named.measured('r', 'f'), (texts: 'F1 (2)'));
       final nameOnly = _build(
         [record],
         [_factor('f', subject: FactorSearchSubjectMode.trainee, notation: FactorNotationMode.nameOnly)],
@@ -519,11 +519,16 @@ void main() {
         parent1: [const Factor(1, 3), const Factor(2, 3), const Factor(3, 3)],
       );
       final g = _build([record], [_factor('trainee', subject: FactorSearchSubjectMode.trainee), _factor('family')]);
-      expect(g.items('r', 'trainee'), [('F5(3)', _normal)]);
-      expect(g.cell('r', 'trainee').value, 'F5(3)');
-      expect(g.data('r', 'trainee').csv, 'F5(3)');
-      expect(g.items('r', 'family'), [('F1(3)', _normal), ('F2(3)', _normal), ('F3(3)', _normal), ('F5(3)', _normal)]);
-      expect(g.data('r', 'family').csv, 'F1(3),F2(3),F3(3),F5(3)');
+      expect(g.items('r', 'trainee'), [('F5 (3)', _normal)]);
+      expect(g.cell('r', 'trainee').value, 'F5 (3)');
+      expect(g.data('r', 'trainee').csv, 'F5 (3)');
+      expect(g.items('r', 'family'), [
+        ('F1 (3)', _normal),
+        ('F2 (3)', _normal),
+        ('F3 (3)', _normal),
+        ('F5 (3)', _normal),
+      ]);
+      expect(g.data('r', 'family').csv, 'F1 (3),F2 (3),F3 (3),F5 (3)');
     });
   });
 
@@ -605,10 +610,10 @@ void main() {
         ],
         factorMaster: master,
       );
-      expect(g.items('r', 'normal'), [('F1(3)', _normal), ('F2(1)', _normal)]);
-      expect(g.cell('r', 'normal').value, 'F1(3), F2(1)');
-      expect(g.data('r', 'normal').csv, 'F1(3),F2(1)');
-      expect(g.items('r', 'absence'), [('F3(0)', _missing), ('F2(1)', _normal), ('F1(3)', _normal)]);
+      expect(g.items('r', 'normal'), [('F1 (3)', _normal), ('F2 (1)', _normal)]);
+      expect(g.cell('r', 'normal').value, 'F1 (3), F2 (1)');
+      expect(g.data('r', 'normal').csv, 'F1 (3),F2 (1)');
+      expect(g.items('r', 'absence'), [('F3 (0)', _missing), ('F2 (1)', _normal), ('F1 (3)', _normal)]);
     });
 
     test('an id the master does not list sorts after every listed one, without throwing', () {
@@ -656,14 +661,14 @@ void main() {
       expect(g.data('r', 'all').csv, 'S1,S2,S3,S4');
       for (final id in ['fpicked', 'fall', 'fmark']) {
         expect(g.items('r', id), [
-          ('F1(1)', _normal),
-          ('F2(1)', _normal),
-          ('F3(1)', _normal),
-          ('F4(1)', _normal),
+          ('F1 (1)', _normal),
+          ('F2 (1)', _normal),
+          ('F3 (1)', _normal),
+          ('F4 (1)', _normal),
         ], reason: id);
       }
-      expect(g.cell('r', 'fpicked').value, 'F1(1), F2(1), F3(1), F4(1)');
-      expect(g.cell('r', 'fall').value, 'F1(1), F2(1), F3(1), F4(1)');
+      expect(g.cell('r', 'fpicked').value, 'F1 (1), F2 (1), F3 (1), F4 (1)');
+      expect(g.cell('r', 'fall').value, 'F1 (1), F2 (1), F3 (1), F4 (1)');
     });
 
     test('a tag-driven column holds the items its tags resolve to', () {
@@ -959,8 +964,8 @@ void main() {
         _rec('b', skills: [2], self: [const Factor(2, 1)]),
       ];
       final cases = <(ColumnSpec, List<(String, ItemState)>)>[
-        (_factor('f', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NF1(3)', _normal), ('NF2(0)', _missing)]),
-        (_factorDiff('fd'), [('NF1(3)', _partialHeld), ('NF2(0)', _partialMissing)]),
+        (_factor('f', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NF1 (3)', _normal), ('NF2 (0)', _missing)]),
+        (_factorDiff('fd'), [('NF1 (3)', _partialHeld), ('NF2 (0)', _partialMissing)]),
         (_skill('s', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NS1', _normal), ('NS2', _missing)]),
         (_skillDiff('sd'), [('NS1', _partialHeld), ('NS2', _partialMissing)]),
       ];
@@ -978,11 +983,11 @@ void main() {
       ];
       for (final spec in [_factor('f'), _factorDiff('fd')]) {
         final container = _live(records, [spec]);
-        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['F1(1)', 'F2(1)']);
+        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['F1 (1)', 'F2 (1)']);
         container.read(_factorMasterSource.notifier).set([_factorInfo(2, 0), _factorInfo(1, 10)]);
         expect(
           [for (final (text, _) in _read(container).items('a', spec.id)) text],
-          ['F2(1)', 'F1(1)'],
+          ['F2 (1)', 'F1 (1)'],
           reason: spec.id,
         );
       }
