@@ -590,13 +590,29 @@ ItemBoxArrangement arrangeItemBoxes(
   // The lower bound is the one that cut; on a tie the row height, which raising the cap alone would not lift.
   final cause = maxCellHeight < rowHeight ? ItemOmissionCause.cellHeightCap : ItemOmissionCause.rowHeight;
   final arranger = _ItemBoxArranger(items.length, cause, measurer, maxWidth, spacing);
-  final boxes = [for (final item in items) arranger.fitWidth(item, maxWidth)];
-  final all = arranger.place(boxes);
   bool fits(ItemBoxArrangement a) => a.rows <= 1 || a.size.height <= maxHeight;
-  if (fits(all)) {
-    return all;
+  bool overflows(_RowCursor c) => c.rows > 1 && c.height > maxHeight;
+  // Measures items in order and stops at the first prefix whose items alone overflow. [place] lays every box out
+  // with the same cursor arithmetic, so a box stays where this prefix put it whatever follows it, and its row only
+  // grows: no arrangement that holds the whole prefix fits, and the items after it are never shown.
+  final boxes = <_ItemBox>[];
+  final cursor = _RowCursor(maxWidth, spacing);
+  for (final item in items) {
+    final box = arranger.fitWidth(item, maxWidth);
+    boxes.add(box);
+    arranger.putItem(cursor, box);
+    if (overflows(cursor)) {
+      break;
+    }
   }
-  final count = _largestFittingCount(1, boxes.length - 1, (k) => fits(arranger.place(boxes.sublist(0, k))));
+  if (!overflows(cursor)) {
+    return arranger.place(boxes);
+  }
+  final count = _largestFittingCount(
+    1,
+    items.length - 1,
+    (k) => k < boxes.length && fits(arranger.place(boxes.sublist(0, k))),
+  );
   if (count > 0) {
     return arranger.place(boxes.sublist(0, count));
   }
@@ -665,31 +681,28 @@ class _ItemBoxArranger {
     return (item: item, text: text, extent: measurer.item(item, text));
   }
 
+  /// Puts [box] after the boxes already in [cursor] and returns its left.
+  double putItem(_RowCursor cursor, _ItemBox box) => cursor.put(_itemWidth(box.extent), _itemHeight(box.extent));
+
   ItemBoxArrangement place(List<_ItemBox> boxes) {
     final counterExtent = boxes.length < total ? this.counterExtent(boxes.length) : null;
+    final cursor = _RowCursor(maxWidth, spacing);
     // Rows of (index into boxes, or -1 for the counter; left; width).
-    final rows = <List<(int, double, double)>>[[]];
-    var x = 0.0;
-    void put(int index, double width) {
-      if (rows.last.isNotEmpty) {
-        if (x + spacing.gap + width > maxWidth) {
-          rows.add([]);
-          x = 0;
-        } else {
-          x += spacing.gap;
-        }
+    final rows = <List<(int, double, double)>>[];
+    void put(int index, double left, double width) {
+      if (rows.length < cursor.rows) {
+        rows.add([]);
       }
-      rows.last.add((index, x, width));
-      x += width;
+      rows.last.add((index, left, width));
     }
 
     for (final (i, b) in boxes.indexed) {
-      put(i, _itemWidth(b.extent));
+      put(i, putItem(cursor, b), _itemWidth(b.extent));
     }
     if (counterExtent != null) {
-      put(-1, counterExtent.width);
+      put(-1, cursor.put(counterExtent.width, _counterHeight(counterExtent)), counterExtent.width);
     }
-    if (rows.last.isEmpty) {
+    if (rows.isEmpty) {
       return const ItemBoxArrangement([], null, Size.zero, rows: 0, omission: null);
     }
 
@@ -697,13 +710,10 @@ class _ItemBoxArranger {
     // inside the row.
     final placed = <(CellItem, ItemBoxPlacement)>[];
     ItemBoxPlacement? counter;
-    var top = spacing.outerMargin;
     var width = 0.0;
-    for (final row in rows) {
-      var height = 0.0;
-      for (final (i, _, _) in row) {
-        height = math.max(height, i < 0 ? _counterHeight(counterExtent!) : _itemHeight(boxes[i].extent));
-      }
+    for (final (r, row) in rows.indexed) {
+      final top = cursor.tops[r];
+      final height = cursor.heights[r];
       double? baseline;
       for (final (i, left, w) in row) {
         if (i >= 0) {
@@ -724,15 +734,58 @@ class _ItemBoxArranger {
       }
       final (_, lastLeft, lastWidth) = row.last;
       width = math.max(width, lastLeft + lastWidth);
-      top += height + spacing.rowGap;
     }
     return ItemBoxArrangement(
       placed,
       counter,
-      Size(width, top - spacing.rowGap + spacing.outerMargin),
+      Size(width, cursor.height),
       rows: rows.length,
       omission: counter == null ? null : ItemOmission(shown: boxes.length, total: total, cause: cause),
     );
+  }
+}
+
+/// Lays boxes out left to right in the order they are put, breaking a row only between boxes, and accumulates the
+/// rows' tops and heights. A box's left, row and top depend only on the boxes put before it, and a row's height only
+/// grows as boxes join it.
+class _RowCursor {
+  _RowCursor(this.maxWidth, this.spacing) : _top = spacing.outerMargin;
+
+  final double maxWidth;
+  final ItemBoxSpacing spacing;
+
+  /// The top of each row, [ItemBoxSpacing.outerMargin] for the first.
+  final tops = <double>[];
+
+  /// The height of each row: the tallest box in it so far.
+  final heights = <double>[];
+
+  double _top;
+  double _x = 0.0;
+
+  int get rows => tops.length;
+
+  /// The extent of the rows so far with [ItemBoxSpacing.outerMargin] above and below.
+  double get height => (_top + (heights.last + spacing.rowGap)) - spacing.rowGap + spacing.outerMargin;
+
+  /// Puts a box of [width] × [height] after the previous one, on a new row when it would pass [maxWidth], and
+  /// returns its left.
+  double put(double width, double height) {
+    if (tops.isEmpty) {
+      tops.add(_top);
+      heights.add(0.0);
+    } else if (_x + spacing.gap + width > maxWidth) {
+      _top += heights.last + spacing.rowGap;
+      tops.add(_top);
+      heights.add(0.0);
+      _x = 0;
+    } else {
+      _x += spacing.gap;
+    }
+    final left = _x;
+    heights.last = math.max(heights.last, height);
+    _x += width;
+    return left;
   }
 }
 

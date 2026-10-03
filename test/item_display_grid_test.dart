@@ -847,6 +847,49 @@ void main() {
     expect(find.text(said), findsOneWidget);
   });
 
+  testWidgets('a cell whose third item breaks onto a second row past its height cap shows the two before it beside '
+      'the counter', (tester) async {
+    // 170 px holds the two short boxes and the counter on one row, but not the long third box after them; the 20 px
+    // cap is below even one row, which is still shown.
+    const long = 1000000000;
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, long, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, long, 4, 5}),
+      ],
+      skillMaster: [1, 2, long, 4, 5],
+    );
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          charaDetailRowHeightModeProvider.overrideWith(
+            () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+          ),
+        ],
+        child: MaterialApp(
+          home: Material(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ItemColumnBoundsScope(
+                bounds: const ItemColumnBounds(
+                  defaultWidth: double.infinity,
+                  maxWidth: double.infinity,
+                  maxCellHeight: 20,
+                ),
+                child: SizedBox(width: 170, child: ItemCellText(g.data('r', 's'))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.bySemanticsLabel('S1, S2, ${itemCounterText(2, 5)}'), findsOneWidget);
+    semantics.dispose();
+  });
+
   // Each cell dependency is updated alone, in a table of the one column, so another column's dependency cannot
   // stand in for a missing one.
   group('the grid follows each module dependency of its cells', () {
