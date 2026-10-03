@@ -7,12 +7,15 @@
 // It also updates each module dependency of the cells (labels, masters, character cards, tag resolution) in a
 // running container and reads the grid again, and checks that a grid built while selecting is kept until the
 // selection ends.
-// Three widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
-// counter alone in a cell too narrow for even a shortened first item, and one hovers the counter for its tooltip
-// naming the cause.
+// Widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
+// counter alone in a cell too narrow for even a shortened first item, one hovers the counter for its tooltip
+// naming the cause, and one loads the cell's font after the cell is laid out.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_grid_test.dart
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -753,6 +756,63 @@ void main() {
       ),
     );
     expect(find.bySemanticsLabel('S1, S2, ${itemCounterText(2, 5)}'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('a cell laid out before its font was loaded places its items again in the loaded font', (tester) async {
+    // The family is not registered when the cell is first laid out, so its text falls back to the test font, whose
+    // glyphs are as wide as the font size; Roboto, loaded under that family afterwards, is narrower, so more of the
+    // five boxes fit on the one row the 40 px cap allows.
+    const family = 'ItemCellLateFont';
+    final g = _build(
+      [
+        _rec('r', skills: [1, 2, 3, 4, 5]),
+      ],
+      [
+        _skill('s', query: {1, 2, 3, 4, 5}),
+      ],
+    );
+    Widget cell(Key key) => ProviderScope(
+      key: key,
+      overrides: [
+        charaDetailRowHeightModeProvider.overrideWith(
+          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
+        ),
+      ],
+      child: MaterialApp(
+        home: Material(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: DefaultTextStyle(
+              style: const TextStyle(fontFamily: family, fontSize: 14),
+              child: ItemColumnBoundsScope(
+                bounds: const ItemColumnBounds(
+                  defaultWidth: double.infinity,
+                  maxWidth: double.infinity,
+                  maxCellHeight: 40,
+                ),
+                child: SizedBox(width: 180, child: ItemCellText(g.data('r', 's'))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(cell(const ValueKey('before')));
+    final before = label();
+
+    final roboto = File(
+      '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts/roboto-regular.ttf',
+    ).readAsBytesSync();
+    await tester.runAsync(() => (FontLoader(family)..addFont(Future.value(ByteData.sublistView(roboto)))).load());
+    await tester.pump();
+    final after = label();
+
+    await tester.pumpWidget(cell(const ValueKey('fresh')));
+    expect(after, isNot(before));
+    expect(after, label());
     semantics.dispose();
   });
 

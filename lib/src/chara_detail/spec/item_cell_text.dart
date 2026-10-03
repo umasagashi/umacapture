@@ -162,7 +162,8 @@ class RenderItemCellText extends RenderBox
     with
         RenderObjectWithChildMixin<RenderBox>,
         RenderObjectWithLayoutCallbackMixin,
-        RenderAbstractLayoutBuilderMixin<ItemOmission?, RenderBox> {
+        RenderAbstractLayoutBuilderMixin<ItemOmission?, RenderBox>,
+        RelayoutWhenSystemFontsChangeMixin {
   RenderItemCellText({
     required this._data,
     required ItemCellLayout layout,
@@ -200,12 +201,25 @@ class RenderItemCellText extends RenderBox
     if (data == _data && layout == _layout && identical(theme, _theme) && identical(colors, _colors)) {
       return;
     }
-    _measurer.dispose();
-    _measurer = _PaintingItemTextMeasurer(layout, theme);
     _data = data;
     _layout = layout;
     _theme = theme;
     _colors = colors;
+    _remeasure();
+  }
+
+  /// A font loaded or changed after the painters were laid out leaves them measured in the font the text fell back
+  /// to; they are dropped like a [RenderParagraph]'s, so the boxes are placed again in the font now registered.
+  @override
+  void systemFontsDidChange() {
+    super.systemFontsDidChange();
+    _remeasure();
+  }
+
+  /// Drops every painter, so the next layout lays the texts out again and places the boxes anew.
+  void _remeasure() {
+    _measurer.dispose();
+    _measurer = _PaintingItemTextMeasurer(_layout, _theme);
     markNeedsLayout();
     markNeedsSemanticsUpdate();
   }
