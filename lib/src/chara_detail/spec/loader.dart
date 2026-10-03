@@ -40,12 +40,11 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       // consumer and cannot fall behind the set of module files the app loads.
       ...moduleFileLoaders.map((loader) => ref.watch(loader.future)),
       // Not module files: these two read the user's own rating and memo stores,
-      // and are awaited here only because the column specs below need them.
+      // and are awaited here only because the rating and memo columns read them
+      // synchronously (`.value!`) once the table is up.
       ref.watch(charaDetailRecordRatingStorageDataLoader.future),
       ref.watch(charaDetailRecordMemoStorageDataLoader.future),
-    ]).then((_) {
-      return Future.wait([ref.watch(currentColumnSpecsLoaderProvider.future)]);
-    });
+    ]);
   });
 });
 

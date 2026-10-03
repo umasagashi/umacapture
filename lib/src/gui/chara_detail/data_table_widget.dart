@@ -1807,6 +1807,18 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
         child: RecordStoreOutageBanner(outage: outage),
       );
     }
+    // The table and its column chips read the column specs synchronously
+    // (`requireValue`), so a spec selection that failed to build is shown here as
+    // the page's error rather than thrown from inside the grid. Watched beside the
+    // initial loader, not inside it: a column edit then rebuilds only this page,
+    // and does not re-run the module and record loaders it has no bearing on.
+    final specs = ref.watch(currentColumnSpecsLoaderProvider);
+    if (specs.hasError) {
+      return error(specs.error, specs.stackTrace);
+    }
+    if (!specs.hasValue) {
+      return loading();
+    }
     return loader.when(
       // A background reload of an upstream loader (path/module/record storage)
       // must not tear down the whole table subtree: doing so remounts the grid,
