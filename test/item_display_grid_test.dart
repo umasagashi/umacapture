@@ -4,13 +4,15 @@
 // red marks of a column that keeps its unmet rows, the factors counted as held
 // under the trainee subject, a filtering column's value, CSV and measured text,
 // and the item order (query, then master) and every item a cell holds, whether it selects or not.
-// It also updates each module dependency of the cells (labels, masters, character cards, tag resolution) in a
-// running container and reads the grid again, and checks that a grid built while selecting is kept until the
-// selection ends.
+// It also installs module files (labels, masters, character cards, skill and factor tags, race grades) into a
+// running container the way a manual module install does, and reads the grid again: shown cells take the new data,
+// a hidden tag or grade filter re-filters the rows, and a grid built while selecting is kept until the selection
+// ends.
 // Widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
 // counter alone in a cell too narrow for even a shortened first item, one hovers the counter for its tooltip
 // naming the cause, and one loads the cell's font after the cell is laid out.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_grid_test.dart
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -29,6 +31,8 @@ import 'package:umacapture/src/chara_detail/spec/item_cell_text.dart';
 import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
+import 'package:umacapture/src/chara_detail/spec/race_grade.dart';
+import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/simple_label.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
@@ -36,6 +40,7 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/preference/notifier.dart';
 
 import 'support/localization.dart';
@@ -71,9 +76,17 @@ CharaDetailRecord _rec(
   List<int> skills = const [],
   List<Factor> self = const [],
   List<Factor> parent1 = const [],
+  List<Race> races = const [],
 }) {
   final minute = (_dateSeq++).toString().padLeft(2, '0');
-  final base = makeRecord(id: id, card: 0, self: self, parent1: parent1, capturedDate: '2026-01-01T00:$minute:00+0900');
+  final base = makeRecord(
+    id: id,
+    card: 0,
+    self: self,
+    parent1: parent1,
+    races: races,
+    capturedDate: '2026-01-01T00:$minute:00+0900',
+  );
   return CharaDetailRecord(
     base.metadata,
     base.trainee,
@@ -175,6 +188,8 @@ class _Built {
 
   TrinaRow? rowOf(String recordId) =>
       grid.rows.where((r) => r.getUserData<CharaDetailRecord>()?.id == recordId).firstOrNull;
+
+  List<String> get recordIds => [for (final row in grid.rows) row.getUserData<CharaDetailRecord>()!.id];
 
   TrinaCell cell(String recordId, String specId) => rowOf(recordId)!.cells[specId]!;
 
@@ -1114,97 +1129,45 @@ void main() {
     semantics.dispose();
   });
 
-  // Each cell dependency is updated alone, in a table of the one column, so another column's dependency cannot
-  // stand in for a missing one.
-  group('the grid follows each module dependency of its cells', () {
-    test('labels: held items and placeholders take the new names', () {
-      final records = [
-        _rec('a', skills: [1], self: [const Factor(1, 3)]),
-        _rec('b', skills: [2], self: [const Factor(2, 1)]),
-      ];
-      final cases = <(ColumnSpec, List<(String, ItemState)>)>[
-        (_factor('f', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NF1 (3)', _normal), ('NF2 (0)', _missing)]),
-        (_factorDiff('fd'), [('NF1 (3)', _partialHeld), ('NF2 (0)', _partialMissing)]),
-        (_skill('s', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NS1', _normal), ('NS2', _missing)]),
-        (_skillDiff('sd'), [('NS1', _partialHeld), ('NS2', _partialMissing)]),
-      ];
-      for (final (spec, expected) in cases) {
-        final container = _live(records, [spec]);
-        _read(container);
-        container.read(_labelSource.notifier).set(_renamed());
-        expect(_read(container).items('a', spec.id), expected, reason: spec.id);
-      }
-    });
+  // Each table holds only the column under test beside columns that read no module data, so another column's
+  // dependency cannot stand in for a missing one.
+  group('a module install rebuilds the grid from the new module files', () {
+    setUpAll(loadAppTranslations);
 
-    test('factor master: the cell lists factors in the new master order', () {
-      final records = [
-        _rec('a', self: [const Factor(1, 1), const Factor(2, 1)]),
-      ];
-      for (final spec in [_factor('f'), _factorDiff('fd')]) {
-        final container = _live(records, [spec]);
-        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['F1 (1)', 'F2 (1)']);
-        container.read(_factorMasterSource.notifier).set([_factorInfo(2, 0), _factorInfo(1, 10)]);
-        expect(
-          [for (final (text, _) in _read(container).items('a', spec.id)) text],
-          ['F2 (1)', 'F1 (1)'],
-          reason: spec.id,
-        );
-      }
-    });
-
-    test('factor master: a difference cell interleaves held items and placeholders in the new master order', () {
-      // F1 is common, F2 a placeholder for a, F3 held by a alone. Only F1 and F2 swap ranks, so the placeholders
-      // keep their order and a's own items stay the same.
-      final records = [
-        _rec('a', self: [const Factor(1, 1), const Factor(3, 1)]),
-        _rec('b', self: [const Factor(1, 1), const Factor(2, 1)]),
-      ];
-      final container = _live(records, [_factorDiff('fd')]);
-      final before = _read(container).data('a', 'fd');
-      expect(
-        [for (final item in before.items) (item.text.whole, item.state)],
-        [('F1 (1)', _common), ('F2 (0)', _partialMissing), ('F3 (1)', _partialHeld)],
+    test('shown item cells take the new names and master order', () async {
+      // F1 is common, F2 a placeholder for a, F3 held by a alone. F1 and F2 swap ranks, and S1 and S2.
+      final modules = _Modules();
+      final container = await modules.table(
+        [
+          _rec('a', skills: [1, 2], self: [const Factor(1, 1), const Factor(3, 1)]),
+          _rec('b', skills: [1], self: [const Factor(1, 1), const Factor(2, 1)]),
+        ],
+        [_skill('s'), _factorDiff('fd')],
       );
-      container.read(_factorMasterSource.notifier).set([_factorInfo(2, 0), _factorInfo(1, 10), _factorInfo(3, 20)]);
-      final cell = _read(container).data('a', 'fd');
-      // The table replaces a live row only when its cells' paint state is unequal.
-      expect(cell.paintState, isNot(before.paintState));
-      expect(
-        [for (final item in cell.items) (item.text.whole, item.state)],
-        [('F2 (0)', _partialMissing), ('F1 (1)', _common), ('F3 (1)', _partialHeld)],
-      );
-      // The omission counter counts against this length.
-      expect(cell.items.length, 3);
+      final before = _read(container);
+      expect(before.items('a', 's'), [('S1', _normal), ('S2', _normal)]);
+      expect(before.items('a', 'fd'), [('F1 (1)', _common), ('F2 (0)', _partialMissing), ('F3 (1)', _partialHeld)]);
+      await modules.install(container, labels: _renamed(), skillOrder: [2, 1, 0], factorOrder: [2, 1, 3]);
+      final after = _read(container);
+      expect(after.items('a', 's'), [('NS2', _normal), ('NS1', _normal)]);
+      expect(after.items('a', 'fd'), [('NF2 (0)', _partialMissing), ('NF1 (1)', _common), ('NF3 (1)', _partialHeld)]);
     });
 
-    test('skill master: the cell lists skills in the new master order', () {
-      final records = [
-        _rec('a', skills: [1, 2]),
-      ];
-      for (final spec in [_skill('s'), _skillDiff('sd')]) {
-        final container = _live(records, [spec]);
-        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['S1', 'S2']);
-        container.read(_skillMasterSource.notifier).set([_skillInfo(2, 0), _skillInfo(1, 10)]);
-        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['S2', 'S1'], reason: spec.id);
-      }
-    });
-
-    test('character cards: the cell takes the new card name', () {
+    test('a shown character card takes the new card name', () async {
       final spec = CharacterCardColumnSpec(
         id: 'c',
         title: 'c',
         parser: CharaCardParser(),
         predicate: CharacterCardPredicate.any(),
       );
-      final container = _live([_rec('a')], [spec]);
+      final modules = _Modules();
+      final container = await modules.table([_rec('a')], [spec]);
       expect(_read(container).cell('a', 'c').getUserData<CharacterCardCellData>()!.name, 'C0');
-      container.read(_cardSource.notifier).set([
-        CharaCardInfo(0, 0, ['NC0']),
-      ]);
+      await modules.install(container, cardName: 'NC0');
       expect(_read(container).cell('a', 'c').getUserData<CharacterCardCellData>()!.name, 'NC0');
     });
 
-    test('a table of label columns alone follows the labels', () {
+    test('a table of label columns alone follows the labels', () async {
       final spec = SimpleLabelColumnSpec(
         id: 'l',
         title: 'l',
@@ -1212,44 +1175,83 @@ void main() {
         labelKey: 'card_label',
         predicate: SimpleLabelPredicate.any(),
       );
-      final container = _live([_rec('a')], [spec]);
-      final labels = container.read(_labelSource.notifier);
-      labels.set({
-        ..._labels,
-        'card_label': ['L0'],
-      });
+      final modules = _Modules();
+      final container = await modules.table([_rec('a')], [spec]);
       expect(_read(container).cell('a', 'l').value, 'L0');
-      labels.set({
-        ..._labels,
-        'card_label': ['NL0'],
-      });
+      await modules.install(container, labels: _renamed());
       expect(_read(container).cell('a', 'l').value, 'NL0');
     });
 
-    test('a shown tag column with no row is rebuilt when its tags resolve anew', () {
-      // The master rank is pinned, so only the tag resolution follows the skill master.
-      final container = _live(
+    test('a shown tag column with no row is rebuilt when its tags resolve anew', () async {
+      final modules = _Modules();
+      final container = await modules.table(
         [
           _rec('a', skills: [3]),
         ],
         [
           _skill('s', tags: {'gold'}),
         ],
-        overrides: [
-          skillMasterRankProvider.overrideWithValue({for (final (i, sid) in _idOrder.indexed) sid: i}),
-        ],
       );
       expect(_read(container).grid.rows, isEmpty);
-      container.read(_skillMasterSource.notifier).set([
-        _skillInfo(3, 0, tags: {'gold'}),
-      ]);
+      await modules.install(container, skillTags: {3: 'gold'});
       final g = _read(container);
       expect(g.grid.rows, hasLength(1));
       expect(g.items('a', 's'), [('S3', _normal)]);
     });
 
-    test('while selecting, the grid is kept; after selecting, it takes the new data', () {
-      final container = _live(
+    test('a hidden filter beside columns that read no module data re-filters the rows when what it selects '
+        'resolves anew', () async {
+      // a holds skill 3, factor 3 and a win of race 5; b holds none of them. Before the install nothing carries the
+      // tag or the grade, so every filter lists no row; after it, each lists a.
+      final records = [
+        _rec('a', skills: [3], self: [const Factor(3, 1)], races: [race(5)]),
+        _rec('b', skills: [2], self: [const Factor(2, 1)], races: [race(6)]),
+      ];
+      final shown = RangedIntegerColumnSpec(
+        id: 'eval',
+        title: 'eval',
+        parser: EvaluationValueParser(),
+        predicate: IsInRangeIntegerPredicate(),
+      );
+      final filters = <String, (ColumnSpec, Future<void> Function(_Modules, ProviderContainer))>{
+        'skill tag': (_skill('f', tags: {'gold'}).withHidden(true), (m, c) => m.install(c, skillTags: {3: 'gold'})),
+        'factor tag': (
+          FactorColumnSpec(
+            id: 'f',
+            title: 'f',
+            parser: FactorSetParser(),
+            predicate: AggregateFactorSetPredicate(
+              element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
+              notation: FactorNotation(mode: FactorNotationMode.nameStarTotal),
+              factorTags: {'gold'},
+            ),
+            selectByTag: true,
+            hidden: true,
+          ),
+          (m, c) => m.install(c, factorTags: {3: 'gold'}),
+        ),
+        'race grade': (
+          RaceGradeWinningCountColumnSpec(
+            id: 'f',
+            title: 'f',
+            predicate: IsInRangeIntegerPredicate(min: 1),
+            hidden: true,
+          ),
+          (m, c) => m.install(c, raceGrades: {5: 'grade_g1'}),
+        ),
+      };
+      for (final MapEntry(key: path, value: (filter, install)) in filters.entries) {
+        final modules = _Modules();
+        final container = await modules.table(records, [shown, filter]);
+        expect(_read(container).recordIds, isEmpty, reason: path);
+        await install(modules, container);
+        expect(_read(container).recordIds, ['a'], reason: path);
+      }
+    });
+
+    test('while selecting, the grid is kept; after selecting, it takes the new data', () async {
+      final modules = _Modules();
+      final container = await modules.table(
         [
           _rec('a', skills: [1]),
         ],
@@ -1257,8 +1259,7 @@ void main() {
       );
       container.read(selectionModeProvider.notifier).set(SelectionPurpose.export);
       final selecting = container.read(currentGridProvider);
-      container.read(_labelSource.notifier).set(_renamed());
-      container.read(_skillMasterSource.notifier).set([_skillInfo(1, 0)]);
+      await modules.install(container, labels: _renamed(), skillOrder: [1, 0]);
       expect(identical(container.read(currentGridProvider), selecting), isTrue);
       container.read(selectionModeProvider.notifier).set(null);
       expect(_read(container).items('a', 'sd'), [('NS1', _common)]);
@@ -1266,39 +1267,120 @@ void main() {
   });
 }
 
-// The module data the following group updates in a running container, one source per independent dependency of
-// the cells.
-final _labelSource = settableNotifierProvider<LabelMap>(_labels);
-final _skillMasterSource = settableNotifierProvider<List<SkillInfo>>([
-  for (final (i, sid) in _idOrder.indexed) _skillInfo(sid, i * 10),
-]);
-final _factorMasterSource = settableNotifierProvider<List<FactorInfo>>([
-  for (final (i, sid) in _idOrder.indexed) _factorInfo(sid, i * 10),
-]);
-final _cardSource = settableNotifierProvider<List<CharaCardInfo>>([
-  CharaCardInfo(0, 0, ['C0']),
-]);
-
-/// A container whose module data the test updates through the sources above, and whose grid it reads again after.
-/// [overrides] go after the sources', so a test can pin a provider the sources would otherwise drive.
-ProviderContainer _live(List<CharaDetailRecord> records, List<ColumnSpec> specs, {List overrides = const []}) {
-  final dir = DirectoryPath('unused');
-  final container = ProviderContainer(
-    overrides: [
-      displayedRecordsProvider.overrideWithValue(records),
-      currentColumnSpecsProvider.overrideWithValue(specs),
-      pathInfoProvider.overrideWithValue(
-        PathInfo(documentDir: dir, supportDir: dir, executableDir: dir, downloadDir: dir),
-      ),
-      labelMapProvider.overrideWith((ref) => ref.watch(_labelSource)),
-      skillInfoProvider.overrideWith((ref) => ref.watch(_skillMasterSource)),
-      factorInfoProvider.overrideWith((ref) => ref.watch(_factorMasterSource)),
-      charaCardInfoProvider.overrideWith((ref) => ref.watch(_cardSource)),
-      ...overrides.cast(),
-    ],
+/// A module directory on disk, read by the app's own module loaders. [install] rewrites its files and invalidates
+/// [moduleVersionLoader], as the module update dialog does after a manual install.
+class _Modules {
+  final Directory _root = Directory.systemTemp.createTempSync('uma_grid_modules');
+  late final PathInfo _layout = PathInfo(
+    documentDir: DirectoryPath('${_root.path}/documents'),
+    supportDir: DirectoryPath('${_root.path}/support'),
+    executableDir: DirectoryPath('${_root.path}/exe'),
+    downloadDir: DirectoryPath('${_root.path}/downloads'),
   );
-  addTearDown(container.dispose);
-  return container;
+
+  _Modules() {
+    addTearDown(() => _root.deleteSync(recursive: true));
+  }
+
+  /// A container over [records] and [specs] whose module files hold the defaults of [_write], loaded.
+  Future<ProviderContainer> table(List<CharaDetailRecord> records, List<ColumnSpec> specs) async {
+    _write();
+    final container = ProviderContainer(
+      overrides: [
+        displayedRecordsProvider.overrideWithValue(records),
+        currentColumnSpecsProvider.overrideWithValue(specs),
+        pathInfoLoader.overrideWith((ref) async => _layout),
+        pathInfoProvider.overrideWithValue(_layout),
+        moduleVersionLoader.overrideWith((ref) async => null),
+      ],
+    );
+    addTearDown(container.dispose);
+    await _loaded(container);
+    return container;
+  }
+
+  /// Installs module files built from the arguments (see [_write]) and waits until every module loader has read them.
+  Future<void> install(
+    ProviderContainer container, {
+    LabelMap? labels,
+    List<int> skillOrder = _idOrder,
+    List<int> factorOrder = _idOrder,
+    Map<int, String> skillTags = const {},
+    Map<int, String> factorTags = const {},
+    Map<int, String> raceGrades = const {},
+    String cardName = 'C0',
+  }) async {
+    _write(
+      labels: labels,
+      skillOrder: skillOrder,
+      factorOrder: factorOrder,
+      skillTags: skillTags,
+      factorTags: factorTags,
+      raceGrades: raceGrades,
+      cardName: cardName,
+    );
+    container.invalidate(moduleVersionLoader);
+    await _loaded(container);
+  }
+
+  Future<void> _loaded(ProviderContainer container) =>
+      Future.wait([for (final loader in moduleFileLoaders) container.read(loader.future)]);
+
+  /// Writes every file [moduleFileLoaders] reads. The masters list [skillOrder] / [factorOrder] in `sortKey` order;
+  /// the tag maps give an id its one tag; races 5 and 6 are listed, with the grade [raceGrades] gives them.
+  void _write({
+    LabelMap? labels,
+    List<int> skillOrder = _idOrder,
+    List<int> factorOrder = _idOrder,
+    Map<int, String> skillTags = const {},
+    Map<int, String> factorTags = const {},
+    Map<int, String> raceGrades = const {},
+    String cardName = 'C0',
+  }) {
+    final dir = Directory(_layout.modulesDir.path)..createSync(recursive: true);
+    void put(String name, String json) => File('${dir.path}/$name').writeAsStringSync(json);
+    String list(Iterable<String> items) => '[${items.join(',')}]';
+    Set<String> tagOf(Map<int, String> tags, int sid) => {?tags[sid]};
+    put(
+      'labels.json',
+      jsonEncode({
+        ...labels ?? _labels,
+        'card_label': [labels == null ? 'L0' : 'NL0'],
+      }),
+    );
+    put(
+      'skill_info.json',
+      list([for (final (i, sid) in skillOrder.indexed) _skillInfo(sid, i * 10, tags: tagOf(skillTags, sid)).toJson()]),
+    );
+    put(
+      'factor_info.json',
+      list([
+        for (final (i, sid) in factorOrder.indexed)
+          FactorInfo(
+            sid: sid,
+            sortKey: i * 10,
+            names: ['F$sid'],
+            descriptions: [''],
+            tags: tagOf(factorTags, sid),
+          ).toJson(),
+      ]),
+    );
+    put(
+      'character_card_info.json',
+      list([
+        CharaCardInfo(0, 0, [cardName]).toJson(),
+      ]),
+    );
+    put(
+      'race_title_info.json',
+      list([
+        for (final sid in [5, 6]) RaceTitleInfo(sid, sid, ['R$sid'], [''], tagOf(raceGrades, sid)).toJson(),
+      ]),
+    );
+    put('skill_tag.json', '[]');
+    put('factor_tag.json', '[]');
+    put('rank_border.json', '[]');
+  }
 }
 
 /// [_labels] with every skill and factor name prefixed by "N".

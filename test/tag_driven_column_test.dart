@@ -1,7 +1,7 @@
 // Tests the tag-driven skill/factor columns (selectByTag). Unlike the frozen-id
-// presets, these store only the selected tags; the queried sids are resolved live
-// from the skill/factor master at evaluation time, so a master update that adds a
-// newly tagged skill/factor is picked up automatically.
+// presets, these store only the selected tags; the queried sids are resolved from
+// the skill/factor master at evaluation time. That a module install re-filters a
+// running grid is tested in item_display_grid_test.dart.
 // Run: .fvm/flutter_sdk/bin/flutter test test/tag_driven_column_test.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,37 +70,6 @@ void main() {
     ]);
 
     expect(results, [true, false, true]);
-  });
-
-  test('skill column follows the master: a newly tagged skill is matched without editing the column', () {
-    final spec = _tagSkillSpec({'green'});
-    final values = [
-      [Skill(id: 3)],
-    ];
-
-    // Master where skill 3 is NOT green yet.
-    final before = ProviderContainer.test(
-      overrides: [
-        skillInfoProvider.overrideWithValue([
-          _skillInfo(1, {'green'}),
-          _skillInfo(3, {'red'}),
-        ]),
-      ],
-    );
-    addTearDown(before.dispose);
-    expect(spec.evaluate(before.read(containerRefProvider), values), [false]);
-
-    // Same spec, updated master where skill 3 has gained the green tag.
-    final after = ProviderContainer.test(
-      overrides: [
-        skillInfoProvider.overrideWithValue([
-          _skillInfo(1, {'green'}),
-          _skillInfo(3, {'green'}),
-        ]),
-      ],
-    );
-    addTearDown(after.dispose);
-    expect(spec.evaluate(after.read(containerRefProvider), values), [true]);
   });
 
   test('factor column resolves both tag axes (factor tag AND linked skill tag) from the master', () {

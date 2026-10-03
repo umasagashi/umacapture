@@ -159,7 +159,8 @@ mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
 
   /// The selected skill ids: the tags resolved against the current skill master while [selectByTag], the
   /// hand-picked ones otherwise. The resolution is read, unless [watch] makes it a dependency of [ref]'s owner: the
-  /// cells of a displayed column ([cellInputs]) watch it, [ColumnSpec.evaluate] and the tooltip read it.
+  /// cells of a displayed column ([cellInputs]) and [ColumnSpec.evaluate] watch it, so a module update rebuilds the
+  /// grid and re-filters its rows even when the column is hidden; the tooltip reads it.
   Set<int> resolvedSkillIds(RefBase ref, {bool watch = false}) {
     if (!selectByTag) {
       return selectedSkillIds;
@@ -358,17 +359,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
-  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
-  /// the query is resolved live from the current skill master so newly tagged skills
-  /// are picked up automatically; otherwise the stored predicate is used as-is.
-  AggregateSkillPredicate _resolved(RefBase ref) => _withQuery(resolvedSkillIds(ref));
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]), the query is resolved from the
+  /// current skill master, as a dependency of [ref]'s owner when [watch] (see [resolvedSkillIds]); otherwise the
+  /// stored predicate is used as-is.
+  AggregateSkillPredicate _resolved(RefBase ref, {bool watch = false}) =>
+      _withQuery(resolvedSkillIds(ref, watch: watch));
 
   /// The stored predicate, its query replaced by the resolved [query] for a tag-driven column.
   AggregateSkillPredicate _withQuery(Set<int> query) => selectByTag ? predicate.copyWith(query: query) : predicate;
 
   @override
   List<bool> evaluate(RefBase ref, List<List<Skill>> values) {
-    final resolved = _resolved(ref);
+    final resolved = _resolved(ref, watch: true);
     if (selectByTag && resolved.query.isEmpty && predicate.tags.isNotEmpty) {
       // Tags are selected but resolve to no skill in the current master: nothing can
       // match, so every row is filtered out instead of falling through to apply()'s
@@ -457,7 +459,8 @@ String _skillTagsKey(Set<String> tags) => (tags.toList()..sort()).join(',');
 
 // Resolves a tag set to the sids of every skill in the current master that carries
 // all of them (AND). Memoized per tag-key and recomputed when [skillInfoProvider]
-// changes, so a tag-driven column automatically follows game-data updates.
+// changes; a grid follows a game-data update through the column calls that watch
+// it ([SkillItemsColumnSpec.resolvedSkillIds]).
 final _skillTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
   if (key.isEmpty) {
     return const <int>{};

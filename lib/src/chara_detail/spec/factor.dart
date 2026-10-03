@@ -391,7 +391,8 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
 
   /// The selected factor ids: the two tag axes resolved against the current factor master while [selectByTag],
   /// the hand-picked ones otherwise. The resolution is read, unless [watch] makes it a dependency of [ref]'s owner:
-  /// the cells of a displayed column ([cellInputs]) watch it, [ColumnSpec.evaluate] and the tooltip read it.
+  /// the cells of a displayed column ([cellInputs]) and [ColumnSpec.evaluate] watch it, so a module update rebuilds
+  /// the grid and re-filters its rows even when the column is hidden; the tooltip reads it.
   Set<int> resolvedFactorIds(RefBase ref, {bool watch = false}) {
     if (!selectByTag) {
       return selectedFactorIds;
@@ -624,17 +625,18 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
-  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
-  /// the query is resolved live from the current factor master so newly tagged
-  /// factors are picked up automatically; otherwise the stored predicate is used.
-  AggregateFactorSetPredicate _resolved(RefBase ref) => _withQuery(resolvedFactorIds(ref));
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]), the query is resolved from the
+  /// current factor master, as a dependency of [ref]'s owner when [watch] (see [resolvedFactorIds]); otherwise the
+  /// stored predicate is used.
+  AggregateFactorSetPredicate _resolved(RefBase ref, {bool watch = false}) =>
+      _withQuery(resolvedFactorIds(ref, watch: watch));
 
   /// The stored predicate, its query replaced by the resolved [query] for a tag-driven column.
   AggregateFactorSetPredicate _withQuery(Set<int> query) => selectByTag ? predicate.copyWith(query: query) : predicate;
 
   @override
   List<bool> evaluate(RefBase ref, List<FactorSet> values) {
-    final resolved = _resolved(ref);
+    final resolved = _resolved(ref, watch: true);
     if (selectByTag && resolved.query.isEmpty && (predicate.factorTags.isNotEmpty || predicate.skillTags.isNotEmpty)) {
       // Tags are selected but resolve to no factor in the current master (e.g. the
       // "gold skill" tag, which has no inheritable factor): nothing can match, so
@@ -796,8 +798,9 @@ String _factorTagsKey(Set<String> factorTags, Set<String> skillTags) {
 
 // Resolves the two tag axes to the sids of every factor in the current master that
 // carries all selected factor tags and whose skill carries all selected skill tags
-// (AND). Memoized per tag-key and recomputed when [factorInfoProvider] changes, so a
-// tag-driven column automatically follows game-data updates.
+// (AND). Memoized per tag-key and recomputed when [factorInfoProvider] changes; a
+// grid follows a game-data update through the column calls that watch it
+// ([FactorItemsColumnSpec.resolvedFactorIds]).
 final _factorTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
   final parts = key.split(';');
   final factorTags = parts[0].isEmpty ? <String>{} : parts[0].split(',').toSet();

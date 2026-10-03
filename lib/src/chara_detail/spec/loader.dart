@@ -211,7 +211,8 @@ final moduleFileLoaders = <FutureProvider<Object?>>[
 
 // Resolves a grade tag (e.g. "grade_g1") to the sids of every race title that
 // carries it. Memoized per grade and recomputed when [raceTitleInfoProvider]
-// changes, so a grade-driven column automatically follows game-data updates.
+// changes; a grid follows a game-data update because the grade-driven column
+// watches it when it parses.
 final raceGradeSidProvider = Provider.family<Set<int>, String>((ref, grade) {
   return ref.watch(raceTitleInfoProvider).where((e) => e.tags.contains(grade)).map((e) => e.sid).toSet();
 });
