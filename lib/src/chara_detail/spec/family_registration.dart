@@ -231,7 +231,9 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, FamilyRegistrationStatus value) {
+  CellBuilder<FamilyRegistrationStatus> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(FamilyRegistrationStatus value) {
     // The plain text doubles as the sort key: the count is a single digit, so
     // lexicographic order equals count order, and autoFitColumns() measures a
     // string whose width matches the rendered cell.

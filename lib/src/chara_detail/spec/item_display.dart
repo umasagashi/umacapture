@@ -23,11 +23,6 @@ enum UnmetRows {
 /// `is ItemColumnSpec` test, like [ContainerColumnSpec]. How the items are compared is the business of
 /// [QueryItemColumnSpec] (against the column's query) or [DifferenceItemColumnSpec] (row against row).
 mixin ItemColumnSpec<T> on ColumnSpec<T> {
-  /// The items [value] holds within the column's comparison scope (the query, and for factors the subject), as
-  /// item id to strength (for a factor the star sum, for a skill 1). A row's contribution to an [ItemTally], and the
-  /// strength a difference cell shades the row's own items by.
-  Map<int, int> heldItemStrengths(RefBase ref, T value);
-
   @override
   bool get takesItemColumnBounds => true;
 
@@ -112,13 +107,28 @@ mixin DifferenceItemColumnSpec<T> on ItemColumnSpec<T> {
   @override
   List<bool> evaluate(RefBase ref, List<T> values) => List<bool>.filled(values.length, true);
 
-  /// The cell of [value] compared against [tally], the item holdings of every displayed row.
-  TrinaCell differenceCell(RefBase ref, T value, ItemTally tally);
+  /// Reads through [ref], once, what this column's cells depend on, and returns its cells for one grid build. The
+  /// grid build takes this in place of [cellBuilder], since a cell needs the [ItemTally] of every displayed row.
+  DifferenceCells<T> differenceCells(RefBase ref);
 
   /// Outside the grid build there is no group to compare against, so the cell is drawn against the row alone.
   @override
-  TrinaCell plutoCell(RefBase ref, T value) =>
-      differenceCell(ref, value, ItemTally.of([heldItemStrengths(ref, value)]));
+  CellBuilder<T> cellBuilder(RefBase ref) {
+    final cells = differenceCells(ref);
+    return CellBuilder((value) => cells.cell(value, ItemTally.of([cells.heldItemStrengths(value)])));
+  }
+}
+
+/// The cells of a difference column for one grid build, made by [DifferenceItemColumnSpec.differenceCells]. It holds
+/// the data the cells need, never a ref.
+abstract interface class DifferenceCells<T> {
+  /// The items [value] holds within the column's comparison scope (the query, and for factors the subject), as item
+  /// id to strength (for a factor the star sum, for a skill 1). A row's contribution to an [ItemTally], and the
+  /// strength a cell shades the row's own items by.
+  Map<int, int> heldItemStrengths(T value);
+
+  /// The cell of [value] compared against [tally], the item holdings of every displayed row.
+  TrinaCell cell(T value, ItemTally tally);
 }
 
 /// Whether the column [specId] is a root of the column forest, as opposed to one nested under a container.

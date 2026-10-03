@@ -175,25 +175,7 @@ class FactorDifferenceColumnSpec extends ColumnSpec<FactorSet>
   }
 
   @override
-  TrinaCell differenceCell(RefBase ref, FactorSet value, ItemTally tally) {
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
-    // A factor id beyond a lagging module label list degrades to the raw id for that cell.
-    String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
-    final mode = notationMode.named;
-    final order = itemOrder(ref);
-    final factors = order.sort(heldFactors(ref, value), (e) => e.id);
-    final notations = [for (final factor in factors) FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode)];
-    final strengths = heldItemStrengths(ref, value);
-    final own = [
-      for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
-    ];
-    final data = ItemCellData.listing(
-      differenceItems(own, tally, (id) => placeholderText(ref, id, mode), order),
-      hideCommon: hideCommonItems,
-      csv: const CsvEncoder().convert([notations]),
-    );
-    return TrinaCell(value: notations.join(", "))..setUserData(data);
-  }
+  DifferenceCells<FactorSet> differenceCells(RefBase ref) => _FactorDifferenceCells(this, cellInputs(ref));
 
   @override
   String tooltip(RefBase ref) {
@@ -368,3 +350,35 @@ ColumnDescription _typeDescription({required bool selectByTag}) => (
           .tr(),
   truthTable: null,
 );
+
+/// The cells of a [FactorDifferenceColumnSpec] for one grid build.
+class _FactorDifferenceCells implements DifferenceCells<FactorSet> {
+  final FactorDifferenceColumnSpec spec;
+  final FactorCellInputs inputs;
+
+  const _FactorDifferenceCells(this.spec, this.inputs);
+
+  @override
+  Map<int, int> heldItemStrengths(FactorSet value) => spec.heldStrengths(inputs.query, value);
+
+  @override
+  TrinaCell cell(FactorSet value, ItemTally tally) {
+    final labels = inputs.labels;
+    // A factor id beyond a lagging module label list degrades to the raw id for that cell.
+    String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
+    final mode = spec.notationMode.named;
+    final order = inputs.order;
+    final factors = order.sort(spec.heldFactors(inputs.query, value), (e) => e.id);
+    final notations = [for (final factor in factors) FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode)];
+    final strengths = heldItemStrengths(value);
+    final own = [
+      for (final (i, factor) in factors.indexed) OwnItem(factor.id, notations[i], strength: strengths[factor.id]!),
+    ];
+    final data = ItemCellData.listing(
+      differenceItems(own, tally, (id) => FactorItemsColumnSpec.placeholderText(labels, id, mode), order),
+      hideCommon: spec.hideCommonItems,
+      csv: const CsvEncoder().convert([notations]),
+    );
+    return TrinaCell(value: notations.join(", "))..setUserData(data);
+  }
+}

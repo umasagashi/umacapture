@@ -173,7 +173,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   List<bool> combineChildren(List<List<bool>> childConditions, int rowCount) => combine(childConditions, rowCount);
 
   @override
-  TrinaCell conditionCell(RefBase ref, bool passed) => plutoCell(ref, passed);
+  TrinaCell conditionCell(bool passed) => _cell(passed);
 
   @override
   List<bool> parse(RefBase ref, List<CharaDetailRecord> records) {
@@ -185,7 +185,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   List<bool> evaluate(RefBase ref, List<bool> values) => values;
 
   @override
-  TrinaCell plutoCell(RefBase ref, bool value) {
+  CellBuilder<bool> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(bool value) {
     return TrinaCell(value: value ? 1 : 0)..setUserData(LogicCellData(value));
   }
 

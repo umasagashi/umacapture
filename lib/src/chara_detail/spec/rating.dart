@@ -227,7 +227,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, double? value) {
+  CellBuilder<double?> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(double? value) {
     return TrinaCell(value: "M" * 7 + ratingFormatter.format(value ?? 6.0))..setUserData(RatingCellData(value));
   }
 

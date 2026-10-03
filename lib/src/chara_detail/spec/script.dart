@@ -94,7 +94,7 @@ class _Enricher {
   }
 
   /// A character (trainee or inheritance ancestor) as a coded card index + name.
-  /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.plutoCell].
+  /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.cellBuilder].
   Map<String, dynamic> _chara(int card) =>
       _coded(card, card >= 0 && card < charaCardNames.length ? charaCardNames[card] : card.toString(), 'trainee');
 
@@ -344,7 +344,7 @@ const _displayObjectError =
 const _budgetError = 'Execution budget exceeded; this and the remaining rows were not evaluated.';
 
 /// The per-record outcome of running filter + display, computed once in
-/// [ScriptColumnSpec.parse] and shared by evaluate / plutoCell / plutoColumn.
+/// [ScriptColumnSpec.parse] and shared by evaluate / cellBuilder / plutoColumn.
 class ScriptCellResult {
   final bool visible;
   final String display;
@@ -495,12 +495,12 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
 
   // Render-phase scratch state: whether every visible row carried a numeric sort
   // key, and whether any cell renders a leading icon. Derived from the parsed
-  // results and read by plutoColumn/plutoCell, which receive only `ref` (no column
+  // results and read by plutoColumn/cellBuilder, which receive only `ref` (no column
   // aggregate). They are set ONLY through [_applyHints]; they are not constructor
   // fields, so dart_mappable never serializes them. Fully immutable handling would
   // require threading the aggregate through the shared ColumnSpec interface.
   //
-  // Invariant: [parse]/[_applyHints] MUST run on the same instance before plutoColumn/plutoCell.
+  // Invariant: [parse]/[_applyHints] MUST run on the same instance before plutoColumn/cellBuilder.
   // _buildGrid does this in one synchronous pass; do not reuse a spec across grids or build a column
   // from a spec that was never parsed, or these hints will be stale/default.
   bool _numericSort = false;
@@ -639,7 +639,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, ScriptCellResult value) {
+  CellBuilder<ScriptCellResult> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(ScriptCellResult value) {
     // The full result is the cell value (see [_ScriptColumnType]); the renderer
     // and formatter read it for display/measurement, sorting for the sort key.
     return TrinaCell(value: value)..setUserData(ScriptCellData(value));
@@ -1511,7 +1513,7 @@ class _PreviewPanel extends StatelessWidget {
 }
 
 /// Renders the visible preview rows in a real [TrinaGrid], built from the spec's
-/// own [ScriptColumnSpec.plutoColumn]/[ScriptColumnSpec.plutoCell] and styled
+/// own [ScriptColumnSpec.plutoColumn]/[ScriptColumnSpec.cellBuilder] and styled
 /// like the production data table, so the preview is the actual table widget —
 /// not an approximation — including header, sorting, alternating rows, and the
 /// cell renderer (colors, icons, backgrounds, ⚠ markers).
@@ -1539,13 +1541,14 @@ class _PreviewGrid extends StatelessWidget {
     final truncated = visible.length > _previewDisplayLimit;
     final shown = truncated ? visible.take(_previewDisplayLimit).toList() : visible;
 
-    // A throwaway spec drives the production rendering path. plutoColumn/plutoCell
+    // A throwaway spec drives the production rendering path. plutoColumn/cellBuilder
     // for a script column read no providers, so the RefBase is only a pass-through.
     final spec = ScriptColumnSpec(id: 'preview', title: title, source: '');
     spec._applyHints(shown);
     final column = spec.plutoColumn(refBase);
+    final cellOf = spec.cellBuilder(refBase);
     final trinaRows = [
-      for (final result in shown) TrinaRow(cells: {spec.id: spec.plutoCell(refBase, result)}),
+      for (final result in shown) TrinaRow(cells: {spec.id: cellOf(result)}),
     ];
 
     final grid = SizedBox(

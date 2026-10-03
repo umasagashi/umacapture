@@ -4,6 +4,9 @@
 // red marks of a column that keeps its unmet rows, the factors counted as held
 // under the trainee subject, a filtering column's value, CSV and measured text,
 // and the item order (query, then master) and every item a cell holds, whether it selects or not.
+// It also updates each module dependency of the cells (labels, masters, character cards, tag resolution) in a
+// running container and reads the grid again, and checks that a grid built while selecting is kept until the
+// selection ends.
 // Three widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
 // counter alone in a cell too narrow for even a shortened first item, and one hovers the counter for its tooltip
 // naming the cause.
@@ -15,6 +18,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
+import 'package:umacapture/src/chara_detail/spec/character.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/factor_difference.dart';
 import 'package:umacapture/src/chara_detail/spec/item_cell.dart';
@@ -22,10 +26,13 @@ import 'package:umacapture/src/chara_detail/spec/item_cell_text.dart';
 import 'package:umacapture/src/chara_detail/spec/item_display.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
+import 'package:umacapture/src/chara_detail/spec/simple_label.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:umacapture/src/chara_detail/spec/skill_difference.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/preference/notifier.dart';
 
 import 'support/localization.dart';
@@ -839,4 +846,173 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(said), findsOneWidget);
   });
+
+  // Each cell dependency is updated alone, in a table of the one column, so another column's dependency cannot
+  // stand in for a missing one.
+  group('the grid follows each module dependency of its cells', () {
+    test('labels: held items and placeholders take the new names', () {
+      final records = [
+        _rec('a', skills: [1], self: [const Factor(1, 3)]),
+        _rec('b', skills: [2], self: [const Factor(2, 1)]),
+      ];
+      final cases = <(ColumnSpec, List<(String, ItemState)>)>[
+        (_factor('f', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NF1(3)', _normal), ('NF2(0)', _missing)]),
+        (_factorDiff('fd'), [('NF1(3)', _partialHeld), ('NF2(0)', _partialMissing)]),
+        (_skill('s', query: {1, 2}, unmetRows: UnmetRows.markMissing), [('NS1', _normal), ('NS2', _missing)]),
+        (_skillDiff('sd'), [('NS1', _partialHeld), ('NS2', _partialMissing)]),
+      ];
+      for (final (spec, expected) in cases) {
+        final container = _live(records, [spec]);
+        _read(container);
+        container.read(_labelSource.notifier).set(_renamed());
+        expect(_read(container).items('a', spec.id), expected, reason: spec.id);
+      }
+    });
+
+    test('factor master: the cell lists factors in the new master order', () {
+      final records = [
+        _rec('a', self: [const Factor(1, 1), const Factor(2, 1)]),
+      ];
+      for (final spec in [_factor('f'), _factorDiff('fd')]) {
+        final container = _live(records, [spec]);
+        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['F1(1)', 'F2(1)']);
+        container.read(_factorMasterSource.notifier).set([_factorInfo(2, 0), _factorInfo(1, 10)]);
+        expect(
+          [for (final (text, _) in _read(container).items('a', spec.id)) text],
+          ['F2(1)', 'F1(1)'],
+          reason: spec.id,
+        );
+      }
+    });
+
+    test('skill master: the cell lists skills in the new master order', () {
+      final records = [
+        _rec('a', skills: [1, 2]),
+      ];
+      for (final spec in [_skill('s'), _skillDiff('sd')]) {
+        final container = _live(records, [spec]);
+        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['S1', 'S2']);
+        container.read(_skillMasterSource.notifier).set([_skillInfo(2, 0), _skillInfo(1, 10)]);
+        expect([for (final (text, _) in _read(container).items('a', spec.id)) text], ['S2', 'S1'], reason: spec.id);
+      }
+    });
+
+    test('character cards: the cell takes the new card name', () {
+      final spec = CharacterCardColumnSpec(
+        id: 'c',
+        title: 'c',
+        parser: CharaCardParser(),
+        predicate: CharacterCardPredicate.any(),
+      );
+      final container = _live([_rec('a')], [spec]);
+      expect(_read(container).cell('a', 'c').getUserData<CharacterCardCellData>()!.name, 'C0');
+      container.read(_cardSource.notifier).set([
+        CharaCardInfo(0, 0, ['NC0']),
+      ]);
+      expect(_read(container).cell('a', 'c').getUserData<CharacterCardCellData>()!.name, 'NC0');
+    });
+
+    test('a table of label columns alone follows the labels', () {
+      final spec = SimpleLabelColumnSpec(
+        id: 'l',
+        title: 'l',
+        parser: CharaCardParser(),
+        labelKey: 'card_label',
+        predicate: SimpleLabelPredicate.any(),
+      );
+      final container = _live([_rec('a')], [spec]);
+      final labels = container.read(_labelSource.notifier);
+      labels.set({
+        ..._labels,
+        'card_label': ['L0'],
+      });
+      expect(_read(container).cell('a', 'l').value, 'L0');
+      labels.set({
+        ..._labels,
+        'card_label': ['NL0'],
+      });
+      expect(_read(container).cell('a', 'l').value, 'NL0');
+    });
+
+    test('a shown tag column with no row is rebuilt when its tags resolve anew', () {
+      // The master rank is pinned, so only the tag resolution follows the skill master.
+      final container = _live(
+        [
+          _rec('a', skills: [3]),
+        ],
+        [
+          _skill('s', tags: {'gold'}),
+        ],
+        overrides: [
+          skillMasterRankProvider.overrideWithValue({for (final (i, sid) in _idOrder.indexed) sid: i}),
+        ],
+      );
+      expect(_read(container).grid.rows, isEmpty);
+      container.read(_skillMasterSource.notifier).set([
+        _skillInfo(3, 0, tags: {'gold'}),
+      ]);
+      final g = _read(container);
+      expect(g.grid.rows, hasLength(1));
+      expect(g.items('a', 's'), [('S3', _normal)]);
+    });
+
+    test('while selecting, the grid is kept; after selecting, it takes the new data', () {
+      final container = _live(
+        [
+          _rec('a', skills: [1]),
+        ],
+        [_skillDiff('sd')],
+      );
+      container.read(selectionModeProvider.notifier).set(SelectionPurpose.export);
+      final selecting = container.read(currentGridProvider);
+      container.read(_labelSource.notifier).set(_renamed());
+      container.read(_skillMasterSource.notifier).set([_skillInfo(1, 0)]);
+      expect(identical(container.read(currentGridProvider), selecting), isTrue);
+      container.read(selectionModeProvider.notifier).set(null);
+      expect(_read(container).items('a', 'sd'), [('NS1', _common)]);
+    });
+  });
 }
+
+// The module data the following group updates in a running container, one source per independent dependency of
+// the cells.
+final _labelSource = settableNotifierProvider<LabelMap>(_labels);
+final _skillMasterSource = settableNotifierProvider<List<SkillInfo>>([
+  for (final (i, sid) in _idOrder.indexed) _skillInfo(sid, i * 10),
+]);
+final _factorMasterSource = settableNotifierProvider<List<FactorInfo>>([
+  for (final (i, sid) in _idOrder.indexed) _factorInfo(sid, i * 10),
+]);
+final _cardSource = settableNotifierProvider<List<CharaCardInfo>>([
+  CharaCardInfo(0, 0, ['C0']),
+]);
+
+/// A container whose module data the test updates through the sources above, and whose grid it reads again after.
+/// [overrides] go after the sources', so a test can pin a provider the sources would otherwise drive.
+ProviderContainer _live(List<CharaDetailRecord> records, List<ColumnSpec> specs, {List overrides = const []}) {
+  final dir = DirectoryPath('unused');
+  final container = ProviderContainer(
+    overrides: [
+      displayedRecordsProvider.overrideWithValue(records),
+      currentColumnSpecsProvider.overrideWithValue(specs),
+      pathInfoProvider.overrideWithValue(
+        PathInfo(documentDir: dir, supportDir: dir, executableDir: dir, downloadDir: dir),
+      ),
+      labelMapProvider.overrideWith((ref) => ref.watch(_labelSource)),
+      skillInfoProvider.overrideWith((ref) => ref.watch(_skillMasterSource)),
+      factorInfoProvider.overrideWith((ref) => ref.watch(_factorMasterSource)),
+      charaCardInfoProvider.overrideWith((ref) => ref.watch(_cardSource)),
+      ...overrides.cast(),
+    ],
+  );
+  addTearDown(container.dispose);
+  return container;
+}
+
+/// [_labels] with every skill and factor name prefixed by "N".
+LabelMap _renamed() => {
+  for (final MapEntry(:key, :value) in _labels.entries) key: [for (final name in value) 'N$name'],
+};
+
+_Built _read(ProviderContainer container) =>
+    _Built(container.read(currentGridProvider), container.read(currentColumnSpecsProvider));

@@ -140,7 +140,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, int value) {
+  CellBuilder<int> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(int value) {
     return TrinaCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 

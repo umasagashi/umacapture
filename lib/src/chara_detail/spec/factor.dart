@@ -390,12 +390,24 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   FactorItemsColumnSpec withSubject(FactorSearchSubjectMode subject);
 
   /// The selected factor ids: the two tag axes resolved against the current factor master while [selectByTag],
-  /// the hand-picked ones otherwise.
-  Set<int> resolvedFactorIds(RefBase ref) {
+  /// the hand-picked ones otherwise. The resolution is read, unless [watch] makes it a dependency of [ref]'s owner:
+  /// the cells of a displayed column ([cellInputs]) watch it, [ColumnSpec.evaluate] and the tooltip read it.
+  Set<int> resolvedFactorIds(RefBase ref, {bool watch = false}) {
     if (!selectByTag) {
       return selectedFactorIds;
     }
-    return ref.read(_factorTagQueryProvider(_factorTagsKey(factorTags, skillTags)));
+    final provider = _factorTagQueryProvider(_factorTagsKey(factorTags, skillTags));
+    return watch ? ref.watch(provider) : ref.read(provider);
+  }
+
+  /// What this column's cells depend on, watched through [ref] once per grid build.
+  FactorCellInputs cellInputs(RefBase ref) {
+    final query = resolvedFactorIds(ref, watch: true);
+    return FactorCellInputs(
+      query: query,
+      order: ItemOrder(query: query, masterRank: ref.watch(factorMasterRankProvider)),
+      labels: ref.watch(labelMapProvider)[labelKey]!,
+    );
   }
 
   /// The factors [factorSet] holds within the subject: the selected ones, or for an empty selection every factor
@@ -403,8 +415,7 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   ///
   /// Under the trainee subject a factor only a parent holds extracts as an all-zero entry; it is not held, so it
   /// is dropped here, for every display alike.
-  List<QueriedFactor> heldFactors(RefBase ref, FactorSet factorSet) {
-    final query = resolvedFactorIds(ref);
+  List<QueriedFactor> heldFactors(Set<int> query, FactorSet factorSet) {
     final traineeOnly = subject == FactorSearchSubjectMode.trainee;
     if (query.isEmpty && !showAllWhenQueryIsEmpty) {
       return [];
@@ -413,26 +424,36 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
     return QueriedFactor.extract(ids, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
   }
 
-  /// The order the cell lists factors in: the selection's order first, then the master's.
-  ItemOrder itemOrder(RefBase ref) =>
-      ItemOrder(query: resolvedFactorIds(ref), masterRank: ref.watch(factorMasterRankProvider));
-
   /// The text of [factor] named [name] in [mode]: the name, followed by the value when [mode] shows one.
   static String itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
       mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
 
   /// The text of a factor a record lacks: drawn in [mode] with every slot 0, so that it takes the shape of a held
   /// factor.
-  String placeholderText(RefBase ref, int id, FactorNotationMode mode) {
-    final name = ref.watch(labelMapProvider)[labelKey]!.getOrNull(id) ?? id.toString();
+  static String placeholderText(List<String> labels, int id, FactorNotationMode mode) {
+    final name = labels.getOrNull(id) ?? id.toString();
     return itemText(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), name, mode);
   }
 
-  @override
-  @override
-  Map<int, int> heldItemStrengths(RefBase ref, FactorSet value) => {
-    for (final factor in heldFactors(ref, value)) factor.id: factor.sum(),
+  /// The factors [value] holds within [query] and the subject, as factor id to star sum.
+  Map<int, int> heldStrengths(Set<int> query, FactorSet value) => {
+    for (final factor in heldFactors(query, value)) factor.id: factor.sum(),
   };
+}
+
+/// What the cells of a factor column read from the modules, resolved once per grid build by
+/// [FactorItemsColumnSpec.cellInputs].
+class FactorCellInputs {
+  /// The selected factor ids, the tags resolved.
+  final Set<int> query;
+
+  /// The order the cell lists factors in: the selection's order first, then the master's.
+  final ItemOrder order;
+
+  /// The factor names of the column's label key.
+  final List<String> labels;
+
+  const FactorCellInputs({required this.query, required this.order, required this.labels});
 }
 
 @MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
@@ -606,12 +627,10 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
   /// the query is resolved live from the current factor master so newly tagged
   /// factors are picked up automatically; otherwise the stored predicate is used.
-  AggregateFactorSetPredicate _resolved(RefBase ref) {
-    if (!selectByTag) {
-      return predicate;
-    }
-    return predicate.copyWith(query: resolvedFactorIds(ref));
-  }
+  AggregateFactorSetPredicate _resolved(RefBase ref) => _withQuery(resolvedFactorIds(ref));
+
+  /// The stored predicate, its query replaced by the resolved [query] for a tag-driven column.
+  AggregateFactorSetPredicate _withQuery(Set<int> query) => selectByTag ? predicate.copyWith(query: query) : predicate;
 
   @override
   List<bool> evaluate(RefBase ref, List<FactorSet> values) {
@@ -630,11 +649,16 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   bool get notatesValueOnly => !predicate.notation.mode.showsName;
 
   @override
-  TrinaCell plutoCell(RefBase ref, FactorSet value) {
-    final predicate = _resolved(ref);
+  CellBuilder<FactorSet> cellBuilder(RefBase ref) {
+    final inputs = cellInputs(ref);
+    final predicate = _withQuery(inputs.query);
+    return CellBuilder((value) => _cell(inputs, predicate, value));
+  }
+
+  TrinaCell _cell(FactorCellInputs inputs, AggregateFactorSetPredicate predicate, FactorSet value) {
     final mode = predicate.notation.mode;
-    final order = itemOrder(ref);
-    final factors = order.sort(heldFactors(ref, value), (e) => e.id);
+    final order = inputs.order;
+    final factors = order.sort(heldFactors(inputs.query, value), (e) => e.id);
 
     // Value-only modes render a single aggregate value across all factors, with
     // no factor names.
@@ -646,11 +670,11 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
       }
       // While marking missing factors they are drawn named, since a red mark belongs to an item; the value
       // (sorting) and the CSV stay those of the value-only notation.
-      return TrinaCell(value: display)..setUserData(_markedCell(ref, predicate, order, value, csv: summary));
+      return TrinaCell(value: display)..setUserData(_markedCell(inputs, predicate, value, csv: summary));
     }
 
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
-    // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
+    final labels = inputs.labels;
+    // A factor id beyond a lagging module label list would throw out of a cell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
     final notations = factors
         .map((q) => FactorItemsColumnSpec.itemText(q, labels.getOrNull(q.id) ?? q.id.toString(), mode))
@@ -658,7 +682,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final desc = notations.join(", ");
     final csv = const CsvEncoder().convert([notations]);
     final data = marksMissing
-        ? _markedCell(ref, predicate, order, value, csv: csv)
+        ? _markedCell(inputs, predicate, value, csv: csv)
         : ItemCellData.listing(
             [for (final text in notations) CellItem(text, ItemState.normal)],
             hideCommon: false,
@@ -671,19 +695,18 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// of the stored notation, and the placeholders of the queried factors the record lacks, drawn in the same
   /// notation with every slot 0 so that a placeholder takes the shape of a held factor.
   ItemCellData _markedCell(
-    RefBase ref,
+    FactorCellInputs inputs,
     AggregateFactorSetPredicate predicate,
-    ItemOrder order,
     FactorSet factorSet, {
     required String csv,
   }) {
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
+    final labels = inputs.labels;
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = predicate.notation.mode.named;
-    String placeholderOf(int id) => placeholderText(ref, id, mode);
+    String placeholderOf(int id) => FactorItemsColumnSpec.placeholderText(labels, id, mode);
     final perItemThreshold = marksShortItems;
     final own = [
-      for (final factor in heldFactors(ref, factorSet))
+      for (final factor in heldFactors(inputs.query, factorSet))
         OwnItem(
           factor.id,
           FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode),
@@ -691,7 +714,13 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
           strength: factor.sum(),
         ),
     ];
-    final items = missingMarkedItems(own, predicate.query, placeholderOf, order, perItemThreshold: perItemThreshold);
+    final items = missingMarkedItems(
+      own,
+      predicate.query,
+      placeholderOf,
+      inputs.order,
+      perItemThreshold: perItemThreshold,
+    );
     return ItemCellData.listing(items, hideCommon: false, csv: csv);
   }
 

@@ -178,8 +178,10 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 
   @override
-  TrinaCell plutoCell(RefBase _, String? value) {
-    // The onSelected closure must NOT capture this build-scoped grid ref: it is
+  CellBuilder<String?> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(String? value) {
+    // The onSelected closure must NOT capture the build-scoped grid ref [cellBuilder] receives: it is
     // disposed when [currentGridProvider] rebuilds (a column resize, a memo save),
     // and a kept cell would then read through a dead ref. The table passes a live
     // ref in at tap time instead (see [CellSelectedCallback]).

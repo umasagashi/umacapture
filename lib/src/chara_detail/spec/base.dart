@@ -37,6 +37,19 @@ typedef ColumnDescription = ({String text, List<List<String>>? truthTable});
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
+/// Builds the cell of one row's value. [ColumnSpec.cellBuilder] makes it once per column per grid build; it holds
+/// the data the cells need, never a ref.
+///
+/// A class rather than a function type: the grid build holds its columns as `ColumnSpec<dynamic>`, and a function
+/// taking `T` does not pass as one taking `dynamic`, while a method's `T` parameter is checked per call.
+final class CellBuilder<T> {
+  final TrinaCell Function(T value) _build;
+
+  const CellBuilder(this._build);
+
+  TrinaCell call(T value) => _build(value);
+}
+
 /// How table rows size themselves to their text. A global display preference,
 /// persisted in settings and watched by [CellText] and the row-height pass.
 ///
@@ -523,7 +536,9 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
 
   List<bool> evaluate(RefBase ref, List<T> values);
 
-  TrinaCell plutoCell(RefBase ref, T value);
+  /// Reads through [ref], once, what this column's cells depend on, and returns the builder of its cells. The grid
+  /// build calls it once per visible column, so a watch here is one dependency of the grid whatever the row count.
+  CellBuilder<T> cellBuilder(RefBase ref);
 
   TrinaColumn plutoColumn(RefBase ref);
 
@@ -544,8 +559,8 @@ mixin ContainerColumnSpec<T> on ColumnSpec<T> {
   List<bool> combineChildren(List<List<bool>> childConditions, int rowCount);
 
   /// Builds the cell for this container from its combined per-row condition
-  /// (a pass/fail cell), in place of a leaf column's parsed-value [plutoCell].
-  TrinaCell conditionCell(RefBase ref, bool passed);
+  /// (a pass/fail cell), in place of a leaf column's parsed-value [cellBuilder].
+  TrinaCell conditionCell(bool passed);
 }
 
 // Translation prefix for the "broken column" UI (chip tooltip, placeholder text).
@@ -730,9 +745,7 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, Null value) {
-    return TrinaCell(value: "");
-  }
+  CellBuilder<Null> cellBuilder(RefBase ref) => CellBuilder((_) => TrinaCell(value: ""));
 
   @override
   TrinaColumn plutoColumn(RefBase ref) {

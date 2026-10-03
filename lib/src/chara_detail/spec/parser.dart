@@ -11,7 +11,7 @@ part 'parser.mapper.dart';
 /// minimum. Real evaluation values (and derived rank indices) are non-negative,
 /// so -1 never collides with a genuine value.
 ///
-/// Note the asymmetry: display (`plutoCell`) and the range-selector UI strip this
+/// Note the asymmetry: display (`cellBuilder`) and the range-selector UI strip this
 /// sentinel, but filter evaluation deliberately does not. Range predicates treat
 /// -1 as a genuine below-minimum value (see `IsInRangeIntegerPredicate.apply`), so
 /// a "less than X" filter intentionally keeps value-less records rather than
