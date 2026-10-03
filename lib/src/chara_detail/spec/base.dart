@@ -1300,6 +1300,21 @@ class ItemColumnBoundsScope extends InheritedWidget {
   bool updateShouldNotify(ItemColumnBoundsScope oldWidget) => bounds != oldWidget.bounds;
 }
 
+/// Hands the table's theme to the item cells drawn under it. The table keeps one instance per theme value, so a cell
+/// tells an unchanged theme by identity; [Theme.of] can return a new, equal instance on any rebuild. A cell outside
+/// any scope draws with [Theme.of].
+class ItemCellThemeScope extends InheritedWidget {
+  const ItemCellThemeScope({super.key, required this.theme, required super.child});
+
+  final ThemeData theme;
+
+  static ThemeData of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ItemCellThemeScope>()?.theme ?? Theme.of(context);
+
+  @override
+  bool updateShouldNotify(ItemCellThemeScope oldWidget) => !identical(theme, oldWidget.theme);
+}
+
 /// What a cell lays out, compared by value so a pass measures equal contents once.
 @immutable
 abstract class MeasuredContent {

@@ -83,7 +83,7 @@ class ItemCellText extends ConsumerWidget {
     if (summary != null) {
       return CellText(summary);
     }
-    final theme = Theme.of(context);
+    final theme = ItemCellThemeScope.of(context);
     // Resolved the way Text resolves its style.
     final defaultStyle = DefaultTextStyle.of(context);
     final style = MediaQuery.boldTextOf(context)
