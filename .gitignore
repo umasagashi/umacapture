@@ -59,6 +59,10 @@ lib/*.g.dart
 # Cloudflare R2 setup credentials (real token/account id; scripts are tracked,
 # the secrets file is not). Copy tool/cloudflare/.env.example to .env.
 /tool/cloudflare/.env
+# wrangler's local state and bundling scratch (`wrangler dev`, `wrangler deploy --dry-run`),
+# written next to the config and in the working directory. tool/cloudflare/deploy_web.sh
+# refuses a dirty tree, so these must not show up as untracked files.
+.wrangler/
 # Pointer/alias backups written by tool/cloudflare/publish_modules.sh.
 /tool/cloudflare/.publish-backup/
 

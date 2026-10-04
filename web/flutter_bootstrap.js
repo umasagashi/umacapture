@@ -9,8 +9,9 @@
 // refuses the session outright ("crossOriginIsolated is false", web/worker.js handleInit). It is a failure that
 // only reproduces on a SECOND load, which is the worst kind to leave to a flag someone has to remember.
 //
-// Cross-origin isolation is provided solely by coi-serviceworker.js (registered from index.html). A second
-// service worker at the same scope would fight it.
+// Cross-origin isolation comes from the server's COOP/COEP headers where it sends them (the deployed site, via
+// web/_headers) and otherwise from coi-serviceworker.js (registered from index.html). A second service worker at
+// the same scope would fight that shim.
 //
 // WHAT THIS FILE GUARANTEES. flutter_tools prefers an existing web/flutter_bootstrap.js over its generated
 // default and only substitutes the tokens below, so `_flutter.loader.load()` with no arguments is what ships --
