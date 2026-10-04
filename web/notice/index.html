@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>試験公開について — umacapture</title>
+  <!-- Self-contained on purpose: the site is served with COEP require-corp, so anything fetched
+       from another origin without CORP would be blocked. System fonts only, inline style only. -->
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+      font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+      line-height: 1.8;
+    }
+    h1 { font-size: 1.5rem; line-height: 1.4; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid; padding-bottom: .2rem; }
+  </style>
+</head>
+<body>
+  <h1>umacapture（web 版）をお使いの方へ</h1>
+
+  <h2>試験公開です</h2>
+  <p>この web 版は試験公開中です。誰でも使えますが、正式な運用ではなく、動作は保証しません。</p>
+  <p>予告なく止まったり、仕様が変わったりすることがあります。</p>
+  <p>保存されたデータは、予告なく消えることがあります。試験公開を終えるときには、すべて消すことがあります。</p>
+
+  <h2>画面や動画はサーバーに送りません</h2>
+  <p>画面や動画の認識はお使いのブラウザの中で行い、サーバーには送りません。</p>
+
+  <h2>外部への送信</h2>
+  <p><strong>エラー報告</strong>: アプリで起きたエラーの情報を Sentry に送ります。初回の起動から送信されます。「設定」画面の「プライバシー設定」にある「利用環境情報の送信許可」をオフにすると送らなくなります（次にアプリを開いたときから反映されます）。</p>
+  <p>送る内容は、エラーの内容と発生箇所、その直前のアプリの動作記録、アプリの版、ブラウザと OS の種類などです。ファイルの場所に含まれる名前は伏せて送ります。送信元の区別には、この端末で作った無作為の番号を使います（オフにすると消えます）。</p>
+  <p>エラー報告の仕組みは、Sentry の配信元（browser.sentry-cdn.com）から読み込みます。</p>
+  <p>フィードバックを送るときは、スクリーンショットが付くことがあります。</p>
+  <p><strong>フォント</strong>: 文字を表示するためのフォントを Google（fonts.gstatic.com）から取得します。このとき IP アドレスなどが Google に渡ります。</p>
+  <p><strong>認識モジュール・お知らせ</strong>: data.umacapture.com から取得します。</p>
+  <p><strong>Cloudflare</strong>: このサイトの配信に使っています。配信事業者として、アクセスの情報（IP アドレスなど）を処理します。</p>
+  <p><strong>アドオン</strong>: アドオンの webhook を設定した場合は、あなたが指定した宛先へ送ります。</p>
+
+  <h2>その他</h2>
+  <p>umacapture は非公式のツールです。スキル名などゲーム内のテキストの権利は、それぞれの権利者にあります。</p>
+  <p>権利者の方からのご連絡も下記の連絡先で受け付けます。</p>
+
+  <h2>お問い合わせ</h2>
+  <p>運営: umasagashi</p>
+  <p>連絡先:</p>
+  <ul>
+    <li>GitHub: <a href="https://github.com/umasagashi/umacapture/issues">https://github.com/umasagashi/umacapture/issues</a></li>
+    <li>Discord: <a href="https://discord.gg/Ph9hEGHR4M">https://discord.gg/Ph9hEGHR4M</a></li>
+    <li>X: <a href="https://x.com/umasagashi">https://x.com/umasagashi</a></li>
+  </ul>
+
+  <p>最終更新: 2026-10-05</p>
+</body>
+</html>

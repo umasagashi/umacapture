@@ -1,0 +1,6 @@
+# Files under build/web/ that Cloudflare Workers Static Assets must not publish (.gitignore syntax).
+#
+# Source maps are uploaded to Sentry for symbolication and are not public.
+*.map
+# Flutter's incremental-build marker; meaningless to a visitor.
+.last_build_id

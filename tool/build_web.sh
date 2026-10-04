@@ -14,8 +14,8 @@
 #   tool/build_web.sh
 #   tool/build_web.sh --source-maps
 #
-# --pwa-strategy=none is injected (see below), so it no longer has to be passed; passing it
-# explicitly is still accepted, and any OTHER value is refused.
+# --pwa-strategy=none and --no-web-resources-cdn are injected (see below), so neither has to be
+# passed; passing either explicitly is still accepted, and the opposite value is refused.
 #
 # It deliberately does NOT run build_runner: regenerating the disclosure as part of the build
 # would let the build define its own truth. The artifact must already exist, say `verified`,
@@ -79,4 +79,23 @@ for arg in "$@"; do
   esac
 done
 
-exec "$FLUTTER" build web ${pwa_strategy:+"$pwa_strategy"} "$@"
+# CanvasKit is served from this bundle's own canvaskit/, never from www.gstatic.com. The payload is
+# already in build/web/ either way; the flag only decides where flutter_bootstrap.js's buildConfig
+# tells the loader to fetch it from. Loading it locally keeps startup independent of Google's CDN
+# and removes one third-party origin every visitor would otherwise contact. Injected here, like
+# --pwa-strategy=none, so a local playtest and a deployed build load the same files.
+# An explicit --no-web-resources-cdn is accepted; --web-resources-cdn is refused.
+cdn="--no-web-resources-cdn"
+for arg in "$@"; do
+  case "$arg" in
+    --no-web-resources-cdn)
+      cdn=""
+      ;;
+    --web-resources-cdn)
+      echo "✖ Refusing to build: $arg. CanvasKit must be served from this bundle, not www.gstatic.com." >&2
+      exit 1
+      ;;
+  esac
+done
+
+exec "$FLUTTER" build web ${pwa_strategy:+"$pwa_strategy"} ${cdn:+"$cdn"} "$@"

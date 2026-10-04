@@ -101,6 +101,7 @@
     ],
     "files": [
       "index.html",
+      "notice/index.html",
       "flutter_bootstrap.js",
       "frame_shaping.mjs",
       "video_import.mjs",
@@ -112,7 +113,9 @@
       "icons/Icon-maskable-192.png",
       "icons/Icon-maskable-512.png",
       "splash/splash.js",
-      "splash/style.css"
+      "splash/style.css",
+      "_headers",
+      ".assetsignore"
     ]
   },
   "files": {

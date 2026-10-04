@@ -22,11 +22,15 @@
     The Wasm recognition core is built -pthread and therefore requires
     SharedArrayBuffer, which browsers gate behind cross-origin isolation
     (crossOriginIsolated === true, via COOP: same-origin + COEP: require-corp).
+    The deployed site gets those headers from the server: web/_headers is copied
+    into build/web/ and Cloudflare attaches COOP/COEP to every static response,
+    so the page is isolated on the first load and this shim returns before
+    registering anything (it checks window.crossOriginIsolated first).
     Flutter's dev server (flutter run, 3.44.4) cannot inject those headers, so
-    this service-worker shim re-serves every response with them and reloads once
-    into the isolated context. It works uniformly under `flutter run -d chrome`,
-    `flutter run -d web-server`, and any static host, using only cross-engine
-    standards (Service Worker + COOP/COEP) -- no Chrome-only API.
+    there this service-worker shim re-serves every response with them and
+    reloads once into the isolated context. It works under `flutter run -d
+    chrome`, `flutter run -d web-server`, and any static host that sends no
+    headers, using only cross-engine standards (Service Worker + COOP/COEP).
 
     Third-party vendored file (tracked in git):
       coi-serviceworker v0.1.7, MIT (c) Guido Zuidhof and contributors
@@ -74,9 +78,10 @@
     whole file, so a token merely quoted in prose inlines the entire contents
     of flutter.js right here.
 
-    Cross-origin isolation is provided solely by the coi-serviceworker shim
-    loaded in <head>; a second (offline-first) Flutter service worker at scope
-    "/" would fight the shim and cause COI flip-flop.
+    Cross-origin isolation comes from the server's COOP/COEP headers when it
+    sends them, and otherwise from the coi-serviceworker shim loaded in <head>;
+    a second (offline-first) Flutter service worker at scope "/" would fight the
+    shim and cause COI flip-flop.
   -->
   <script src="flutter_bootstrap.js" async></script>
 </body>

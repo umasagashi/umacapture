@@ -134,7 +134,18 @@ fi
 
 # Modern debug-id workflow: no --url-prefix, no --dist. The debug IDs injected
 # above tie the .map to the .js regardless of the served path.
-"$SENTRY_CLI" sourcemaps upload --release "$RELEASE" "$WEB_DIR"
+upload_log="$("$SENTRY_CLI" sourcemaps upload --release "$RELEASE" "$WEB_DIR" 2>&1)" || {
+  echo "$upload_log" >&2
+  exit 1
+}
+echo "$upload_log"
+# The id of the bundle this run uploaded, so the check below confirms this upload
+# rather than any earlier bundle of the same release.
+BUNDLE_ID="$(sed -n 's/.*Bundle ID: *\([0-9a-f-]*\).*/\1/p' <<<"$upload_log" | head -1)"
+if [ -z "$BUNDLE_ID" ]; then
+  echo "error: sentry-cli did not report a bundle id for this upload." >&2
+  exit 1
+fi
 
 # Verify the artifact bundle actually landed and is associated with this exact
 # release. The modern debug-id workflow stores an *artifact bundle* rather than
@@ -144,18 +155,29 @@ fi
 ORG="$(sed -n 's/^org=//p' .sentryclirc | head -1)"
 PROJECT="$(sed -n 's/^project=//p' .sentryclirc | head -1)"
 
-echo "==> verifying the artifact bundle landed for release $RELEASE"
-bundles="$(curl -sf -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
-  "https://sentry.io/api/0/projects/$ORG/$PROJECT/files/artifact-bundles/?query=$RELEASE")"
+echo "==> verifying artifact bundle $BUNDLE_ID landed for release $RELEASE"
+# sentry-cli returns while the server is still processing the upload ("processing
+# pending on server"), so the bundle shows up in this API a little later. Poll
+# until it does, up to 120 seconds.
 # Strip all whitespace first, then fixed-string match, so a pretty-printed
 # response (space after the JSON colon) still matches. `grep -F` keeps the dots
-# in a release like 0.2.1 literal, and the "release":"..." shape stays specific
-# enough not to match an unrelated release.
-if ! tr -d ' \t\r\n' <<<"$bundles" | grep -qF "\"release\":\"$RELEASE\""; then
-  echo "error: Sentry holds no artifact bundle associated with release $RELEASE." >&2
-  echo "       response: $bundles" >&2
-  exit 1
-fi
+# in a release like 0.2.1 literal.
+deadline=$((SECONDS + 120))
+while :; do
+  bundles="$(curl -sf -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+    "https://sentry.io/api/0/projects/$ORG/$PROJECT/files/artifact-bundles/?query=$BUNDLE_ID" || true)"
+  compact="$(tr -d ' \t\r\n' <<<"$bundles")"
+  if grep -qF "\"bundleId\":\"$BUNDLE_ID\"" <<<"$compact" &&
+    grep -qF "\"release\":\"$RELEASE\"" <<<"$compact"; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "error: Sentry holds no artifact bundle $BUNDLE_ID for release $RELEASE after 120 s." >&2
+    echo "       response: $bundles" >&2
+    exit 1
+  fi
+  sleep 5
+done
 files="$(sed -n 's/.*"fileCount":\([0-9]*\).*/\1/p' <<<"$bundles" | head -1)"
 
 echo "==> done: release $RELEASE has an artifact bundle with $files files (source maps included)."

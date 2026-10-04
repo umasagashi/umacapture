@@ -1,0 +1,30 @@
+// Static-assets-only deployment of the web app: build/web/ served by Workers Static Assets, with
+// no Worker script at all.
+//
+// Two uses:
+//   * The first public release, before the record-sharing server exists.
+//   * Switching every sharing endpoint off later. With no script, /r/*, /api/* and any path that
+//     matches no file are answered by the static 404 and use none of the Worker request quota.
+//
+// It deliberately has no `main`. A Worker script, if present, is invoked for every path that
+// matches no static file -- not only for the paths a `run_worker_first` list names -- so leaving
+// a script in place is not a way to switch it off.
+//
+// Deploy with tool/cloudflare/deploy_web.sh, never with a bare `wrangler deploy`: the script is
+// what guarantees build/web/ was built from this commit in the same run.
+{
+  "name": "umacapture-web",
+  // No later than the newest date wrangler's local runtime accepts, so `wrangler dev` can serve
+  // this config for a local check (wrangler 4.113.0 accepts up to 2026-07-28).
+  "compatibility_date": "2026-07-28",
+  "assets": {
+    "directory": "../build/web",
+    // Unknown paths answer 404. The app uses hash routing and serves nothing but "/", so a SPA
+    // fallback would only turn every mistyped URL into a 73 MiB app download.
+    "not_found_handling": "none"
+  },
+  // The custom domain is the only entrance: the zone's WAF applies to it and to nothing else.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "umacapture.com", "custom_domain": true }]
+}

@@ -1,0 +1,19 @@
+# Response headers Cloudflare Workers Static Assets attaches to every file under build/web/.
+#
+# COOP + COEP make the document cross-origin isolated on the FIRST load, which the -pthread
+# recognition core needs for SharedArrayBuffer (web/worker.js refuses the session without it).
+# With these present, coi-serviceworker.js sees `window.crossOriginIsolated` already true and
+# returns before registering, so no service worker is installed on this origin at all.
+# `require-corp`, not `credentialless`: it is the value coi-serviceworker.js itself uses in
+# Chrome and Firefox, i.e. the condition the app has already been verified under.
+#
+# These headers only apply to responses served from static assets. A response a Worker script
+# builds itself does not get them.
+#
+# Cache-Control is deliberately left at the platform default (max-age=0, must-revalidate, ETag):
+# main.dart.js, worker.js, *.mjs and wasm/* have fixed names, so a long max-age would let an old
+# script run against a new wasm module with nothing to notice it.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  X-Content-Type-Options: nosniff

@@ -541,7 +541,8 @@ jobs:
       # NOT tool/build_web.sh: that wrapper passes --require-verified, and a CI
       # tree can never reach `verified` -- the origin:in-tree recognition core is
       # built by emsdk and is legitimately absent here (see flutter-static). The
-      # wrapper's other job, --pwa-strategy=none, is passed explicitly instead, so
+      # wrapper's other flags are passed explicitly instead: --no-web-resources-cdn
+      # (CanvasKit from the bundle, not www.gstatic.com), and --pwa-strategy=none, so
       # the unreferenced flutter_service_worker.js is emitted with an empty body; a Flutter service
       # worker at scope "/" would replay responses without coi-serviceworker.js's
       # COOP/COEP headers and kill cross-origin isolation (and SharedArrayBuffer).
@@ -560,7 +561,7 @@ jobs:
       # "Check wasm source drift" gate in the native job, which catches the failure
       # mode that actually recurs (a pipeline source nobody added to build.sh).
       - name: Flutter web release build
-        run: flutter build web --release --pwa-strategy=none
+        run: flutter build web --release --pwa-strategy=none --no-web-resources-cdn
 
   browser-tests:
     name: Browser tests
