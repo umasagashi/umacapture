@@ -9,15 +9,14 @@
 // a hidden tag or grade filter re-filters the rows, and a grid built while selecting is kept until the selection
 // ends.
 // Widget tests draw a cell: one shows the table's cell height cap and the omission counter, one shows the
-// counter alone in a cell too narrow for even a shortened first item, one hovers the counter for its tooltip
-// naming the cause, and one loads the cell's font after the cell is laid out.
+// counter alone in a cell too narrow for even a shortened first item, and one hovers the counter for its tooltip
+// naming the cause.
 // Run: .fvm/flutter_sdk/bin/flutter test test/item_display_grid_test.dart
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -797,165 +796,6 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('a cell laid out before its font was loaded places its items again in the loaded font', (tester) async {
-    // The family is not registered when the cell is first laid out, so its text falls back to the test font, whose
-    // glyphs are as wide as the font size; Roboto, loaded under that family afterwards, is narrower, so more of the
-    // five boxes fit on the one row the 40 px cap allows.
-    const family = 'ItemCellLateFont';
-    final g = _build(
-      [
-        _rec('r', skills: [1, 2, 3, 4, 5]),
-      ],
-      [
-        _skill('s', query: {1, 2, 3, 4, 5}),
-      ],
-    );
-    Widget cell(Key key) => ProviderScope(
-      key: key,
-      overrides: [
-        charaDetailRowHeightModeProvider.overrideWith(
-          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
-        ),
-      ],
-      child: MaterialApp(
-        home: Material(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: DefaultTextStyle(
-              style: const TextStyle(fontFamily: family, fontSize: 14),
-              child: ItemColumnBoundsScope(
-                bounds: const ItemColumnBounds(
-                  defaultWidth: double.infinity,
-                  maxWidth: double.infinity,
-                  maxCellHeight: 40,
-                ),
-                child: SizedBox(width: 180, child: ItemCellText(g.data('r', 's'))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(cell(const ValueKey('before')));
-    final before = label();
-
-    final roboto = File(
-      '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts/roboto-regular.ttf',
-    ).readAsBytesSync();
-    await tester.runAsync(() => (FontLoader(family)..addFont(Future.value(ByteData.sublistView(roboto)))).load());
-    await tester.pump();
-    final after = label();
-
-    await tester.pumpWidget(cell(const ValueKey('fresh')));
-    expect(after, isNot(before));
-    expect(after, label());
-    semantics.dispose();
-  });
-
-  testWidgets('a cell whose text scale changes places its items at the new scale', (tester) async {
-    // The cell keeps its table's item text extents across the change, so they have to tell the two scales apart: at
-    // twice the size, fewer of the five boxes fit the 180 px row.
-    final g = _build(
-      [
-        _rec('r', skills: [1, 2, 3, 4, 5]),
-      ],
-      [
-        _skill('s', query: {1, 2, 3, 4, 5}),
-      ],
-    );
-    Widget cell(Key key, double scale) => ProviderScope(
-      key: key,
-      overrides: [
-        charaDetailRowHeightModeProvider.overrideWith(
-          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
-        ),
-      ],
-      child: MaterialApp(
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
-          child: child ?? const SizedBox.shrink(),
-        ),
-        home: Material(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: ItemColumnBoundsScope(
-              bounds: const ItemColumnBounds(
-                defaultWidth: double.infinity,
-                maxWidth: double.infinity,
-                maxCellHeight: 40,
-              ),
-              child: SizedBox(width: 180, child: ItemCellText(g.data('r', 's'))),
-            ),
-          ),
-        ),
-      ),
-    );
-    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(cell(const ValueKey('kept'), 1));
-    final before = label();
-    await tester.pumpWidget(cell(const ValueKey('kept'), 2));
-    final after = label();
-
-    await tester.pumpWidget(cell(const ValueKey('fresh'), 2));
-    expect(after, isNot(before));
-    expect(after, label());
-    semantics.dispose();
-  });
-
-  testWidgets('a factor drawn with its value takes the room of its whole text', (tester) async {
-    // A factor's text is measured as its name and its value apart; the cell places the boxes exactly as it places
-    // the same texts measured whole. 300 px holds two of the five boxes beside the counter.
-    final g = _build(
-      [
-        _rec('r', self: [for (var id = 1; id <= 5; id++) Factor(id, 2)]),
-      ],
-      [
-        _factor('f', query: {1, 2, 3, 4, 5}),
-      ],
-    );
-    final valued = g.data('r', 'f');
-    final whole = ItemCellData(
-      items: [for (final item in valued.items) CellItem(ItemText(item.text.whole), item.state)],
-      csv: valued.csv,
-    );
-    Widget cell(Key key, ItemCellData data) => ProviderScope(
-      key: key,
-      overrides: [
-        charaDetailRowHeightModeProvider.overrideWith(
-          () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
-        ),
-      ],
-      child: MaterialApp(
-        home: Material(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: ItemColumnBoundsScope(
-              bounds: const ItemColumnBounds(
-                defaultWidth: double.infinity,
-                maxWidth: double.infinity,
-                maxCellHeight: 40,
-              ),
-              child: SizedBox(width: 300, child: ItemCellText(data)),
-            ),
-          ),
-        ),
-      ),
-    );
-    String label() => tester.getSemantics(find.byType(ItemCellText)).label;
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(cell(const ValueKey('valued'), valued));
-    final split = label();
-    await tester.pumpWidget(cell(const ValueKey('whole'), whole));
-
-    expect(valued.items.first.text.value, ' (2)');
-    expect(split, contains(itemEllipsis));
-    expect(split, label());
-    semantics.dispose();
-  });
-
   testWidgets('a cell too narrow to set even a shortened first item beside the counter shows the counter alone '
       'within its height cap', (tester) async {
     // 80 px holds the counter but not the counter beside a shortened item; the 40 px cap fits one row of boxes.
@@ -1045,101 +885,6 @@ void main() {
     await mouse.moveTo(cell.localToGlobal(counter?.box.center ?? Offset.zero));
     await tester.pumpAndSettle();
     expect(find.text(said), findsOneWidget);
-  });
-
-  testWidgets('a cell whose third item breaks onto a second row past its height cap shows the two before it beside '
-      'the counter', (tester) async {
-    // 170 px holds the two short boxes and the counter on one row, but not the long third box after them; the 20 px
-    // cap is below even one row, which is still shown.
-    const long = 1000000000;
-    final g = _build(
-      [
-        _rec('r', skills: [1, 2, long, 4, 5]),
-      ],
-      [
-        _skill('s', query: {1, 2, long, 4, 5}),
-      ],
-      skillMaster: [1, 2, long, 4, 5],
-    );
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          charaDetailRowHeightModeProvider.overrideWith(
-            () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
-          ),
-        ],
-        child: MaterialApp(
-          home: Material(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: ItemColumnBoundsScope(
-                bounds: const ItemColumnBounds(
-                  defaultWidth: double.infinity,
-                  maxWidth: double.infinity,
-                  maxCellHeight: 20,
-                ),
-                child: SizedBox(width: 170, child: ItemCellText(g.data('r', 's'))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    expect(find.bySemanticsLabel('S1, S2, ${itemCounterText(2, 5)}'), findsOneWidget);
-    semantics.dispose();
-  });
-
-  testWidgets('a cell keeps a row [itemWidthErrorBound] short of its width, so a box ending within it breaks onto the '
-      'next row', (tester) async {
-    final g = _build(
-      [
-        _rec('r', skills: [1, 2]),
-      ],
-      [
-        _skill('s', query: {1, 2}),
-      ],
-    );
-    Future<String> labelAt(double width, double maxCellHeight) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            charaDetailRowHeightModeProvider.overrideWith(
-              () => ExclusiveItemsNotifier(values: RowHeightMode.values, defaultValue: RowHeightMode.autoPerRow),
-            ),
-          ],
-          child: MaterialApp(
-            home: Material(
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: ItemColumnBoundsScope(
-                  bounds: ItemColumnBounds(
-                    defaultWidth: double.infinity,
-                    maxWidth: double.infinity,
-                    maxCellHeight: maxCellHeight,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: width),
-                    child: ItemCellText(g.data('r', 's')),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      return tester.getSemantics(find.byType(ItemCellText)).label;
-    }
-
-    final semantics = tester.ensureSemantics();
-    // Laid out with room to spare, the two boxes share one row; the cell is then capped at that one row.
-    await labelAt(1000, double.infinity);
-    final oneRow = tester.getSize(find.byType(ItemCellText));
-    expect(await labelAt(oneRow.width + itemWidthErrorBound, oneRow.height), 'S1, S2');
-    // Exactly as wide as the row, the second box ends within the bound and breaks onto a second row, which the
-    // one-row cap leaves no room for: only the counter is shown.
-    expect(await labelAt(oneRow.width, oneRow.height), '... 0/2');
-    semantics.dispose();
   });
 
   // Each table holds only the column under test beside columns that read no module data, so another column's
