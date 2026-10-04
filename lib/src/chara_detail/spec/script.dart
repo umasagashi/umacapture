@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/script_facade.dart';
 import '/src/chara_detail/storage.dart';
@@ -66,20 +67,10 @@ class _Enricher {
   final LabelMap labels;
   final Map<int, SkillInfo> skillInfo;
   final Map<int, FactorInfo> factorInfo;
-  final Map<String, Map<String, double>> ratingsByRecord;
-  final Map<String, Map<String, String>> memosByRecord;
   final List<int> charaRankBorder;
   final List<String> charaCardNames;
 
-  _Enricher(
-    this.labels,
-    this.skillInfo,
-    this.factorInfo,
-    this.ratingsByRecord,
-    this.memosByRecord,
-    this.charaRankBorder,
-    this.charaCardNames,
-  );
+  _Enricher(this.labels, this.skillInfo, this.factorInfo, this.charaRankBorder, this.charaCardNames);
 
   Map<String, dynamic> _aptitudeRank(int level) =>
       _coded(level + 1, _label(labels, LabelKeys.aptitude, level), 'aptitude');
@@ -94,7 +85,7 @@ class _Enricher {
   }
 
   /// A character (trainee or inheritance ancestor) as a coded card index + name.
-  /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.plutoCell].
+  /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.cellBuilder].
   Map<String, dynamic> _chara(int card) =>
       _coded(card, card >= 0 && card < charaCardNames.length ? charaCardNames[card] : card.toString(), 'trainee');
 
@@ -229,8 +220,6 @@ class _Enricher {
       'evaluationValue': record.evaluationValue,
       'fans': record.fans,
       'trainedDate': record.trainedDate,
-      'ratings': ratingsByRecord[record.id] ?? const <String, double>{},
-      'memos': memosByRecord[record.id] ?? const <String, String>{},
       'status': {
         'speed': status.speed,
         'stamina': status.stamina,
@@ -263,22 +252,40 @@ final _enricherProvider = Provider<_Enricher>((ref) {
   final labels = ref.watch(labelMapProvider);
   final skillInfo = {for (final s in ref.watch(skillInfoProvider)) s.sid: s};
   final factorInfo = {for (final f in ref.watch(factorInfoProvider)) f.sid: f};
-  final ratingsByRecord = <String, Map<String, double>>{};
-  for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
-    (ref.watch(charaDetailRecordRatingProvider(storage.key)).value ?? RatingData.empty).data.forEach((recordId, value) {
-      (ratingsByRecord[recordId] ??= {})[storage.key] = value;
-    });
-  }
-  final memosByRecord = <String, Map<String, String>>{};
-  for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
-    (ref.watch(charaDetailRecordMemoProvider(storage.key)).value ?? MemoData.empty).data.forEach((recordId, value) {
-      (memosByRecord[recordId] ??= {})[storage.key] = value;
-    });
-  }
   final charaRankBorder = ref.watch(charaRankBorderProvider);
   final charaCardNames = ref.watch(charaCardInfoProvider).map((e) => e.names.first).toList();
-  return _Enricher(labels, skillInfo, factorInfo, ratingsByRecord, memosByRecord, charaRankBorder, charaCardNames);
+  return _Enricher(labels, skillInfo, factorInfo, charaRankBorder, charaCardNames);
 });
+
+/// Every storage's ratings and memos by record id, read from the same storages the rating and memo columns parse.
+///
+/// Not part of [enrichedRecordProvider]: dragging a rating bar writes its storage in place without notifying (so
+/// the grid is not rebuilt under the finger), and a cached copy would then keep the old rating through every later
+/// grid build. Reading the storages here, at parse time, gives a script the rating the rating column shows.
+class _RecordNotes {
+  final Map<String, Map<String, double>> _ratings = {};
+  final Map<String, Map<String, String>> _memos = {};
+
+  _RecordNotes(RefBase ref) {
+    for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
+      (ref.watch(charaDetailRecordRatingProvider(storage.key)).value ?? RatingData.empty).data.forEach((recordId, v) {
+        (_ratings[recordId] ??= {})[storage.key] = v;
+      });
+    }
+    for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
+      (ref.watch(charaDetailRecordMemoProvider(storage.key)).value ?? MemoData.empty).data.forEach((recordId, v) {
+        (_memos[recordId] ??= {})[storage.key] = v;
+      });
+    }
+  }
+
+  /// [enriched] with this record's `ratings` and `memos` added, the record input a script runs on.
+  Map<String, dynamic> attach(String recordId, Map<String, dynamic> enriched) => {
+    ...enriched,
+    'ratings': _ratings[recordId] ?? const <String, double>{},
+    'memos': _memos[recordId] ?? const <String, String>{},
+  };
+}
 
 final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
   return {for (final r in ref.watch(charaDetailRecordStorageProvider)) r.id: r};
@@ -286,7 +293,7 @@ final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
 
 /// The enriched plain Map for one record, cached and shared across script
 /// columns. Only built when a [ScriptColumnSpec] reads it, so non-script users
-/// pay nothing.
+/// pay nothing. It carries no ratings or memos; [_RecordNotes] adds those.
 final enrichedRecordProvider = Provider.family<Map<String, dynamic>, String>((ref, recordId) {
   final record = ref.watch(_recordIndexProvider)[recordId];
   if (record == null) return const <String, dynamic>{};
@@ -344,7 +351,7 @@ const _displayObjectError =
 const _budgetError = 'Execution budget exceeded; this and the remaining rows were not evaluated.';
 
 /// The per-record outcome of running filter + display, computed once in
-/// [ScriptColumnSpec.parse] and shared by evaluate / plutoCell / plutoColumn.
+/// [ScriptColumnSpec.parse] and shared by evaluate / cellBuilder / plutoColumn.
 class ScriptCellResult {
   final bool visible;
   final String display;
@@ -495,12 +502,12 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
 
   // Render-phase scratch state: whether every visible row carried a numeric sort
   // key, and whether any cell renders a leading icon. Derived from the parsed
-  // results and read by plutoColumn/plutoCell, which receive only `ref` (no column
+  // results and read by plutoColumn/cellBuilder, which receive only `ref` (no column
   // aggregate). They are set ONLY through [_applyHints]; they are not constructor
   // fields, so dart_mappable never serializes them. Fully immutable handling would
   // require threading the aggregate through the shared ColumnSpec interface.
   //
-  // Invariant: [parse]/[_applyHints] MUST run on the same instance before plutoColumn/plutoCell.
+  // Invariant: [parse]/[_applyHints] MUST run on the same instance before plutoColumn/cellBuilder.
   // _buildGrid does this in one synchronous pass; do not reuse a spec across grids or build a column
   // from a spec that was never parsed, or these hints will be stale/default.
   bool _numericSort = false;
@@ -573,13 +580,17 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     }
     final runtime = compiled.runtime!;
     // Make the name→code tables visible to codeOf/atLeast/atMost for this run.
-    scriptCodeTables = ref.read(scriptCodeTablesProvider);
+    scriptCodeTables = ref.watch(scriptCodeTablesProvider);
+    // The module data every record is enriched with, watched once for the column: the per-record maps below are
+    // read, so without this a module install would leave a hidden script filter's rows as they were.
+    ref.watch(_enricherProvider);
     // Production has no hard per-call timeout: dart_eval exposes no instruction
     // hook, so a single runaway record cannot be interrupted here. The save-time
     // check runs the whole record set under [_previewExecutionBudget], which is what
     // guarantees no such script is committed. As a softer secondary guard against
     // cumulative cost (e.g. far more records than existed at check time), abort
     // once the looser [_productionBudget] is spent and mark the remaining rows.
+    final notes = _RecordNotes(ref);
     final stopwatch = Stopwatch()..start();
     final results = <ScriptCellResult>[];
     var aborted = false;
@@ -588,7 +599,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
         results.add(const ScriptCellResult(visible: true, display: '', error: _budgetError));
         continue;
       }
-      results.add(_run(ref, runtime, record));
+      results.add(_run(ref, runtime, notes, record));
       if (stopwatch.elapsedMicroseconds > _productionBudget.inMicroseconds) aborted = true;
     }
     _applyHints(results.where((r) => r.visible));
@@ -613,11 +624,11 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     _hasIcon = hints.hasIcon;
   }
 
-  ScriptCellResult _run(RefBase ref, Runtime runtime, CharaDetailRecord record) {
+  ScriptCellResult _run(RefBase ref, Runtime runtime, _RecordNotes notes, CharaDetailRecord record) {
     try {
       // [_evalRecord] already maps a throwing script to an error cell; this catch
       // only covers the record lookup that precedes it.
-      return _evalRecord(runtime, ref.read(enrichedRecordProvider(record.id)));
+      return _evalRecord(runtime, notes.attach(record.id, ref.read(enrichedRecordProvider(record.id))));
     } catch (e) {
       return ScriptCellResult(visible: true, display: '', error: e.toString());
     }
@@ -639,7 +650,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, ScriptCellResult value) {
+  CellBuilder<ScriptCellResult> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(ScriptCellResult value) {
     // The full result is the cell value (see [_ScriptColumnType]); the renderer
     // and formatter read it for display/measurement, sorting for the sort key.
     return TrinaCell(value: value)..setUserData(ScriptCellData(value));
@@ -1322,9 +1335,10 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     // Validate against every record, not a sample: the full-set run (bounded by
     // [_previewExecutionBudget]) is the real guard that no committed script hangs
     // the grid.
+    final notes = _RecordNotes(ref.base.readOnly);
     final records = ref
         .read(charaDetailRecordStorageProvider)
-        .map((r) => ref.read(enrichedRecordProvider(r.id)))
+        .map((r) => notes.attach(r.id, ref.read(enrichedRecordProvider(r.id))))
         .toList();
     final result = await runScriptPreview(source, records, tables: ref.read(scriptCodeTablesProvider));
     if (!mounted) return;
@@ -1511,11 +1525,11 @@ class _PreviewPanel extends StatelessWidget {
 }
 
 /// Renders the visible preview rows in a real [TrinaGrid], built from the spec's
-/// own [ScriptColumnSpec.plutoColumn]/[ScriptColumnSpec.plutoCell] and styled
+/// own [ScriptColumnSpec.plutoColumn]/[ScriptColumnSpec.cellBuilder] and styled
 /// like the production data table, so the preview is the actual table widget —
 /// not an approximation — including header, sorting, alternating rows, and the
 /// cell renderer (colors, icons, backgrounds, ⚠ markers).
-class _PreviewGrid extends StatelessWidget {
+class _PreviewGrid extends ConsumerWidget {
   final RefBase refBase;
   final String title;
   final List<ScriptCellResult> rows;
@@ -1523,7 +1537,8 @@ class _PreviewGrid extends StatelessWidget {
   const _PreviewGrid({required this.refBase, required this.title, required this.rows});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final itemTextExtents = ref.watch(itemTextExtentsProvider);
     final theme = Theme.of(context);
     // Production hides filtered-out rows; mirror that. Error rows stay visible
     // (they render a ⚠ marker), matching the grid.
@@ -1539,13 +1554,14 @@ class _PreviewGrid extends StatelessWidget {
     final truncated = visible.length > _previewDisplayLimit;
     final shown = truncated ? visible.take(_previewDisplayLimit).toList() : visible;
 
-    // A throwaway spec drives the production rendering path. plutoColumn/plutoCell
+    // A throwaway spec drives the production rendering path. plutoColumn/cellBuilder
     // for a script column read no providers, so the RefBase is only a pass-through.
     final spec = ScriptColumnSpec(id: 'preview', title: title, source: '');
     spec._applyHints(shown);
     final column = spec.plutoColumn(refBase);
+    final cellOf = spec.cellBuilder(refBase);
     final trinaRows = [
-      for (final result in shown) TrinaRow(cells: {spec.id: spec.plutoCell(refBase, result)}),
+      for (final result in shown) TrinaRow(cells: {spec.id: cellOf(result)}),
     ];
 
     final grid = SizedBox(
@@ -1553,11 +1569,15 @@ class _PreviewGrid extends StatelessWidget {
       child: TrinaGrid(
         // Key on every rendered field: TrinaGrid caches its rows in the state
         // manager and won't refresh unless the key changes, so any styling tweak
-        // (e.g. background only) must alter the key.
+        // (e.g. background only) must alter the key. New extents mean the registered fonts changed
+        // ([itemTextExtentsProvider]), so they key it too: the rebuilt grid re-fits its width in the font now drawn.
         key: ValueKey(
-          Object.hashAll(
-            shown.map(
-              (r) => '${r.display}|${r.sortValue}|${r.color}|${r.background}|${r.icon}|${r.iconColor}|${r.error}',
+          Object.hash(
+            identityHashCode(itemTextExtents),
+            Object.hashAll(
+              shown.map(
+                (r) => '${r.display}|${r.sortValue}|${r.color}|${r.background}|${r.icon}|${r.iconColor}|${r.error}',
+              ),
             ),
           ),
         ),
@@ -1581,7 +1601,7 @@ class _PreviewGrid extends StatelessWidget {
           ),
         ),
         // A script column takes no table bounds ([ColumnSpec.takesItemColumnBounds]), so the preview needs none.
-        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded),
+        onLoaded: (event) => event.stateManager.autoFitColumns(ItemColumnBounds.unbounded, itemTextExtents),
       ),
     );
     if (!truncated) return grid;

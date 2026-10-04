@@ -145,7 +145,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, DateTime value) {
+  CellBuilder<DateTime> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(DateTime value) {
     final dateString = value.toDateString();
     return TrinaCell(value: dateString)..setUserData(DateTimeCellData(dateString));
   }

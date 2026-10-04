@@ -200,7 +200,9 @@ class RelationBonusColumnSpec extends ColumnSpec<RelationBonusStatus> with Relat
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, RelationBonusStatus value) {
+  CellBuilder<RelationBonusStatus> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(RelationBonusStatus value) {
     // The cell value is the numeric bonus so sorting stays numeric; the renderer
     // and measuredText use the marked label from the attached cell data.
     return TrinaCell(value: value.filterValue)..setUserData(RelationBonusCellData(value));

@@ -53,6 +53,22 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   /// Neutral indicator for inactive/not-started state.
   final Color mutedIndicator;
 
+  /// Fill of the odd rows of the record table's alternating stripe (even rows are `colorScheme.surface`).
+  final Color tableRowStripe;
+
+  /// How far [tableRowStripe] is lerped from `secondaryContainer` toward `surface`, per brightness. Dark sits
+  /// closer to the surface because the same blue cast reads much stronger on a dark surface.
+  static const _lightTableRowStripeMix = 0.65;
+  static const _darkTableRowStripeMix = 0.85;
+
+  /// Translucent `primaryContainer` laid over the row's own fill (`surface` or [tableRowStripe]) to mark the
+  /// record table's current row (the one picked by clicking it). The table composes it with `Color.alphaBlend`.
+  final Color tableRowCurrentOverlay;
+
+  /// Opacity of [tableRowCurrentOverlay], per brightness.
+  static const _lightTableRowCurrentAlpha = 0.4;
+  static const _darkTableRowCurrentAlpha = 0.4;
+
   const AppSemanticColors({
     required this.success,
     required this.warning,
@@ -65,6 +81,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     required this.brandBanner,
     required this.onBrandBanner,
     required this.mutedIndicator,
+    required this.tableRowStripe,
+    required this.tableRowCurrentOverlay,
   });
 
   factory AppSemanticColors.light(ColorScheme scheme) => AppSemanticColors(
@@ -79,6 +97,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     brandBanner: const Color(0xFFEC6A8E),
     onBrandBanner: Colors.white,
     mutedIndicator: Colors.grey.shade500,
+    tableRowStripe: Color.lerp(scheme.secondaryContainer, scheme.surface, _lightTableRowStripeMix)!,
+    tableRowCurrentOverlay: scheme.primaryContainer.withValues(alpha: _lightTableRowCurrentAlpha),
   );
 
   factory AppSemanticColors.dark(ColorScheme scheme) => AppSemanticColors(
@@ -93,6 +113,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     brandBanner: const Color(0xFFEC6A8E),
     onBrandBanner: Colors.white,
     mutedIndicator: Colors.grey.shade500,
+    tableRowStripe: Color.lerp(scheme.secondaryContainer, scheme.surface, _darkTableRowStripeMix)!,
+    tableRowCurrentOverlay: scheme.primaryContainer.withValues(alpha: _darkTableRowCurrentAlpha),
   );
 
   @override
@@ -108,6 +130,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     Color? brandBanner,
     Color? onBrandBanner,
     Color? mutedIndicator,
+    Color? tableRowStripe,
+    Color? tableRowCurrentOverlay,
   }) {
     return AppSemanticColors(
       success: success ?? this.success,
@@ -121,6 +145,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       brandBanner: brandBanner ?? this.brandBanner,
       onBrandBanner: onBrandBanner ?? this.onBrandBanner,
       mutedIndicator: mutedIndicator ?? this.mutedIndicator,
+      tableRowStripe: tableRowStripe ?? this.tableRowStripe,
+      tableRowCurrentOverlay: tableRowCurrentOverlay ?? this.tableRowCurrentOverlay,
     );
   }
 
@@ -139,6 +165,8 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       brandBanner: Color.lerp(brandBanner, other.brandBanner, t)!,
       onBrandBanner: Color.lerp(onBrandBanner, other.onBrandBanner, t)!,
       mutedIndicator: Color.lerp(mutedIndicator, other.mutedIndicator, t)!,
+      tableRowStripe: Color.lerp(tableRowStripe, other.tableRowStripe, t)!,
+      tableRowCurrentOverlay: Color.lerp(tableRowCurrentOverlay, other.tableRowCurrentOverlay, t)!,
     );
   }
 }

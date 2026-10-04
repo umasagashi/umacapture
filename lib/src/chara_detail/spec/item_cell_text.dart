@@ -13,7 +13,7 @@ import '/src/gui/theme_extensions.dart';
 const itemNormalAlpha = 0.3;
 
 /// Alpha of the red background ([ItemState.missing], [ItemState.short], [ItemState.partialMissing]).
-const itemMissingAlpha = 0.15;
+const itemMissingAlpha = 0.10;
 
 /// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the weakest strength (1).
 const itemPartialHeldAlphaMin = 0.1125;
@@ -21,6 +21,10 @@ const itemPartialHeldAlphaMin = 0.1125;
 /// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the strongest strength
 /// (== strengthMax, the strongest holding of the item among the compared rows).
 const itemPartialHeldAlphaMax = 0.375;
+
+/// Alpha of the green background of [ItemState.met], the same for every item that passes: the middle of the
+/// difference column's green range ([itemPartialHeldAlphaMin] to [itemPartialHeldAlphaMax]).
+const itemMetAlpha = (itemPartialHeldAlphaMin + itemPartialHeldAlphaMax) / 2;
 
 /// Alpha of the green background for [strength] out of [strengthMax], linear between the two ends.
 /// A scale of a single step (strengthMax <= 1, e.g. every compared row holds the item at the same strength 1)
@@ -37,6 +41,7 @@ double itemPartialHeldAlpha(int strength, int strengthMax) {
 Color itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item) {
   return switch (item.state) {
     ItemState.normal => scheme.outline.withValues(alpha: itemNormalAlpha),
+    ItemState.met => colors.success.withValues(alpha: itemMetAlpha),
     ItemState.missing ||
     ItemState.short ||
     ItemState.partialMissing => colors.danger.withValues(alpha: itemMissingAlpha),
@@ -50,7 +55,7 @@ Color itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item
 Color? itemForeground(ThemeData theme, CellItem item) {
   return switch (item.state) {
     ItemState.missing || ItemState.partialMissing => theme.disabledColor,
-    ItemState.normal || ItemState.short || ItemState.common || ItemState.partialHeld => null,
+    ItemState.normal || ItemState.met || ItemState.short || ItemState.common || ItemState.partialHeld => null,
   };
 }
 
@@ -83,7 +88,7 @@ class ItemCellText extends ConsumerWidget {
     if (summary != null) {
       return CellText(summary);
     }
-    final theme = Theme.of(context);
+    final theme = ItemCellThemeScope.of(context);
     // Resolved the way Text resolves its style.
     final defaultStyle = DefaultTextStyle.of(context);
     final style = MediaQuery.boldTextOf(context)
@@ -102,6 +107,7 @@ class ItemCellText extends ConsumerWidget {
       ),
       theme: theme,
       colors: theme.extension<AppSemanticColors>(),
+      extents: ref.watch(itemTextExtentsProvider),
     );
   }
 }
@@ -121,12 +127,19 @@ typedef ItemCellLayout = ({
 /// The boxes of an item cell, and as its one child the tooltip over the omission counter box, built at layout from
 /// the [ItemOmission] the arrangement carries: what cut the items is known only once they are placed.
 class _ItemCellBoxes extends AbstractLayoutBuilder<ItemOmission?> {
-  const _ItemCellBoxes({required this.data, required this.layout, required this.theme, required this.colors});
+  const _ItemCellBoxes({
+    required this.data,
+    required this.layout,
+    required this.theme,
+    required this.colors,
+    required this.extents,
+  });
 
   final ItemCellData data;
   final ItemCellLayout layout;
   final ThemeData theme;
   final AppSemanticColors? colors;
+  final ItemTextExtents extents;
 
   @override
   Widget Function(BuildContext, ItemOmission?) get builder => _counterTooltip;
@@ -137,11 +150,11 @@ class _ItemCellBoxes extends AbstractLayoutBuilder<ItemOmission?> {
 
   @override
   RenderItemCellText createRenderObject(BuildContext context) =>
-      RenderItemCellText(data: data, layout: layout, theme: theme, colors: colors);
+      RenderItemCellText(data: data, layout: layout, theme: theme, colors: colors, extents: extents);
 
   @override
   void updateRenderObject(BuildContext context, RenderItemCellText renderObject) =>
-      renderObject.update(data: data, layout: layout, theme: theme, colors: colors);
+      renderObject.update(data: data, layout: layout, theme: theme, colors: colors, extents: extents);
 }
 
 /// The tooltip laid over the omission counter box, or an empty child, which takes no room and no hit, when the cell
@@ -162,22 +175,43 @@ class RenderItemCellText extends RenderBox
     with
         RenderObjectWithChildMixin<RenderBox>,
         RenderObjectWithLayoutCallbackMixin,
-        RenderAbstractLayoutBuilderMixin<ItemOmission?, RenderBox> {
+        RenderAbstractLayoutBuilderMixin<ItemOmission?, RenderBox>,
+        RelayoutWhenSystemFontsChangeMixin {
   RenderItemCellText({
     required this._data,
     required ItemCellLayout layout,
-    required ThemeData theme,
+    required this._theme,
     required this._colors,
+    required ItemTextExtents extents,
   }) : _layout = layout,
-       _theme = theme,
-       _measurer = _PaintingItemTextMeasurer(layout, theme);
+       _extents = extents,
+       _measurer = _measurerOf(layout, extents);
 
   ItemCellData _data;
   ItemCellLayout _layout;
   ThemeData _theme;
   AppSemanticColors? _colors;
-  _PaintingItemTextMeasurer _measurer;
+  ItemTextExtents _extents;
+  ItemTextMeasurer _measurer;
   ItemBoxArrangement _arrangement = const ItemBoxArrangement([], null, Size.zero, rows: 0, omission: null);
+
+  /// The painter of each drawn item text, by its text and colour, kept across layouts while the text stays drawn.
+  var _itemPainters = <(String, Color?), TextPainter>{};
+
+  /// The items of [_arrangement] with the painter each is drawn with.
+  List<(CellItem, ItemBoxPlacement, TextPainter)> _drawnItems = const [];
+
+  /// The counter of [_arrangement] with the painter it is drawn with and that painter's colour.
+  (ItemBoxPlacement, TextPainter, Color)? _drawnCounter;
+
+  static ItemTextMeasurer _measurerOf(ItemCellLayout layout, ItemTextExtents extents) => ItemTextMeasurer(
+    extents,
+    style: layout.style,
+    textDirection: layout.textDirection,
+    textScaler: layout.textScaler,
+    locale: layout.locale,
+    textHeightBehavior: layout.textHeightBehavior,
+  );
 
   /// The boxes placed by the last layout. Its size is the extent of the content, which the size of this render
   /// object is not when the cell is given a tight width or less height than the content takes.
@@ -186,28 +220,86 @@ class RenderItemCellText extends RenderBox
 
   /// The painters the boxes of the last layout are drawn with, in drawing order: the items, then the counter.
   @visibleForTesting
-  List<TextPainter> get drawnPainters => [
-    for (final (item, placement) in _arrangement.items) _measurer.itemPainter(item, placement.text),
-    if (_arrangement.counter case final counter?) _measurer.counterPainter(counter.text),
-  ];
+  List<TextPainter> get drawnPainters => [for (final (_, _, painter) in _drawnItems) painter, ?_drawnCounter?.$2];
 
   void update({
     required ItemCellData data,
     required ItemCellLayout layout,
     required ThemeData theme,
     required AppSemanticColors? colors,
+    required ItemTextExtents extents,
   }) {
-    if (data == _data && layout == _layout && identical(theme, _theme) && identical(colors, _colors)) {
+    if (data == _data &&
+        layout == _layout &&
+        identical(theme, _theme) &&
+        identical(colors, _colors) &&
+        identical(extents, _extents)) {
       return;
     }
-    _measurer.dispose();
-    _measurer = _PaintingItemTextMeasurer(layout, theme);
+    if (layout != _layout) {
+      // The painters are laid out in the layout's style, direction, scaler, locale and line height.
+      _disposePainters();
+    }
+    if (layout != _layout || !identical(extents, _extents)) {
+      _measurer = _measurerOf(layout, extents);
+    }
     _data = data;
     _layout = layout;
     _theme = theme;
     _colors = colors;
+    _extents = extents;
     markNeedsLayout();
     markNeedsSemanticsUpdate();
+  }
+
+  /// A font loaded or changed after the painters were laid out leaves them laid out in the font the text fell back
+  /// to; they are dropped like a [RenderParagraph]'s, so the boxes are placed again in the font now registered. The
+  /// shared extents are replaced on the same change ([itemTextExtentsProvider]).
+  @override
+  void systemFontsDidChange() {
+    super.systemFontsDidChange();
+    _disposePainters();
+    markNeedsLayout();
+    markNeedsSemanticsUpdate();
+  }
+
+  void _disposePainters() {
+    for (final painter in [..._itemPainters.values, ?_drawnCounter?.$2]) {
+      painter.dispose();
+    }
+    _itemPainters = {};
+    _drawnItems = const [];
+    _drawnCounter = null;
+  }
+
+  /// Lays out the painters of the texts [_arrangement] draws, keeping those already laid out, and disposes the
+  /// painters of texts it no longer draws. A painter is keyed by its text and colour, the inputs a layout of one
+  /// [ItemCellLayout] leaves free.
+  void _layOutDrawnTexts() {
+    final previous = _itemPainters;
+    final kept = <(String, Color?), TextPainter>{};
+    TextPainter painterOf(String text, Color? color) =>
+        kept[(text, color)] ??= previous.remove((text, color)) ?? _measurer.itemFormat.layOut(text, color: color);
+    _drawnItems = [
+      for (final (item, placement) in _arrangement.items)
+        (item, placement, painterOf(placement.text, itemForeground(_theme, item))),
+    ];
+    for (final painter in previous.values) {
+      painter.dispose();
+    }
+    _itemPainters = kept;
+
+    final previousCounter = _drawnCounter;
+    final counter = _arrangement.counter;
+    final color = _theme.disabledColor;
+    _drawnCounter = counter == null
+        ? null
+        : previousCounter != null && previousCounter.$1.text == counter.text && previousCounter.$3 == color
+        ? (counter, previousCounter.$2, color)
+        : (counter, _measurer.counterFormat.layOut(counter.text, color: color), color);
+    if (previousCounter != null && !identical(previousCounter.$2, _drawnCounter?.$2)) {
+      previousCounter.$2.dispose();
+    }
   }
 
   ItemBoxArrangement _arrange({required double maxWidth, double rowHeight = double.infinity}) => arrangeItemBoxes(
@@ -247,6 +339,7 @@ class RenderItemCellText extends RenderBox
   @override
   void performLayout() {
     _arrangement = _arrangeFor(constraints);
+    _layOutDrawnTexts();
     size = constraints.constrain(_arrangement.size);
     runLayoutCallback();
     final child = this.child;
@@ -310,7 +403,7 @@ class RenderItemCellText extends RenderBox
 
   void _paintBoxes(Canvas canvas, Offset offset) {
     final colors = _colors;
-    for (final (item, placement) in _arrangement.items) {
+    for (final (item, placement, painter) in _drawnItems) {
       final background = colors == null ? null : itemBackground(_theme.colorScheme, colors, item);
       if (background != null) {
         final box = placement.box.shift(offset);
@@ -319,10 +412,10 @@ class RenderItemCellText extends RenderBox
           Paint()..color = background,
         );
       }
-      _measurer.itemPainter(item, placement.text).paint(canvas, offset + placement.textOrigin);
+      painter.paint(canvas, offset + placement.textOrigin);
     }
-    if (_arrangement.counter case final counter?) {
-      _measurer.counterPainter(counter.text).paint(canvas, offset + counter.textOrigin);
+    if (_drawnCounter case (final counter, final painter, _)?) {
+      painter.paint(canvas, offset + counter.textOrigin);
     }
   }
 
@@ -343,7 +436,7 @@ class RenderItemCellText extends RenderBox
 
   @override
   void dispose() {
-    _measurer.dispose();
+    _disposePainters();
     super.dispose();
   }
 }
@@ -360,55 +453,144 @@ ItemTextExtent _extentOf(TextPainter painter) => (
   baseline: painter.computeDistanceToActualBaseline(TextBaseline.alphabetic),
 );
 
-/// The [ItemTextMeasurer] of [RenderItemCellText]. It keeps the painter of every text it lays out, in the colour
-/// it is drawn in, so a relayout at another width places the boxes again without laying out any text again.
-class _PaintingItemTextMeasurer implements ItemTextMeasurer {
-  _PaintingItemTextMeasurer(this.layout, this.theme);
+/// Everything besides the text that sizes one line of item text: what a [TextPainter] is given. Compared by value
+/// over the style's layout properties only — colours, paints, shadows and decorations move no glyph — so texts drawn
+/// in different colours, and the frames of a theme animation that only recolours, share one measure.
+@immutable
+class ItemTextFormat {
+  ItemTextFormat({
+    required TextStyle style,
+    required TextDirection textDirection,
+    required TextScaler textScaler,
+    Locale? locale,
+    TextHeightBehavior? textHeightBehavior,
+  }) : this._(style, _layoutOf(style), textDirection, textScaler, locale, textHeightBehavior);
 
-  final ItemCellLayout layout;
-  final ThemeData theme;
-  final _items = <(String, Color?), TextPainter>{};
-  final _counters = <String, TextPainter>{};
+  ItemTextFormat._(this.style, this._layout, this.textDirection, this.textScaler, this.locale, this.textHeightBehavior)
+    : hashCode = Object.hash(_layout, textDirection, textScaler, locale, textHeightBehavior);
 
-  TextPainter itemPainter(CellItem item, String text) {
-    final foreground = itemForeground(theme, item);
-    return _items[(text, foreground)] ??= _laidOut(
-      TextSpan(
-        style: foreground == null ? layout.style : layout.style.copyWith(color: foreground),
-        text: text,
-      ),
-    );
-  }
-
-  TextPainter counterPainter(String text) => _counters[text] ??= _laidOut(
-    TextSpan(
-      style: _counterStyle(layout.style).copyWith(color: theme.disabledColor),
-      text: text,
-    ),
+  /// The properties of [style] that a [TextPainter] lays a line out by. Left out: the colours and paints, shadows
+  /// and decorations, which are only painted; `inherit`, which matters only when merging and this style is the root
+  /// of the span; `overflow`, which [TextPainter] does not read; and `debugLabel`.
+  static TextStyle _layoutOf(TextStyle style) => TextStyle(
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    letterSpacing: style.letterSpacing,
+    wordSpacing: style.wordSpacing,
+    textBaseline: style.textBaseline,
+    height: style.height,
+    leadingDistribution: style.leadingDistribution,
+    locale: style.locale,
+    fontFamily: style.fontFamily,
+    fontFamilyFallback: style.fontFamilyFallback,
+    fontFeatures: style.fontFeatures,
+    fontVariations: style.fontVariations,
   );
 
-  @override
-  ItemTextExtent item(CellItem item, String text) => _extentOf(itemPainter(item, text));
+  /// The style the text is drawn in, colour included.
+  final TextStyle style;
+  final TextDirection textDirection;
+  final TextScaler textScaler;
+  final Locale? locale;
+  final TextHeightBehavior? textHeightBehavior;
 
-  @override
-  ItemTextExtent counter(String text) => _extentOf(counterPainter(text));
+  /// The layout properties of [style] ([_layoutOf]): what two formats are compared by.
+  final TextStyle _layout;
 
-  TextPainter _laidOut(TextSpan span) => TextPainter(
-    text: span,
-    textDirection: layout.textDirection,
-    textScaler: layout.textScaler,
+  /// Lays [text] out on one line in this format, drawn in [color] when given, else in [style]'s colour. Both the
+  /// shared measure and the painters of a cell are laid out here, so a text is drawn as it was measured.
+  TextPainter layOut(String text, {Color? color}) => TextPainter(
+    text: TextSpan(
+      style: color == null ? style : style.copyWith(color: color),
+      text: text,
+    ),
+    textDirection: textDirection,
+    textScaler: textScaler,
     maxLines: 1,
-    locale: layout.locale,
-    textHeightBehavior: layout.textHeightBehavior,
+    locale: locale,
+    textHeightBehavior: textHeightBehavior,
   )..layout();
 
-  void dispose() {
-    for (final painter in [..._items.values, ..._counters.values]) {
-      painter.dispose();
+  @override
+  bool operator ==(Object other) =>
+      identical(other, this) ||
+      other is ItemTextFormat &&
+          other.hashCode == hashCode &&
+          other._layout == _layout &&
+          other.textDirection == textDirection &&
+          other.textScaler == textScaler &&
+          other.locale == locale &&
+          other.textHeightBehavior == textHeightBehavior;
+
+  @override
+  final int hashCode;
+}
+
+/// How many extents [ItemTextExtents] keeps. The texts a table measures are its item names, each factor value
+/// segment, the shortened forms of long items and the omission counters, under two formats (the cells' and the
+/// measuring passes'). The names are bounded by the master — a few thousand factor and skill names — so this holds
+/// them all several times over while it bounds what dragging a column through many widths adds in shortened forms.
+const itemTextExtentsCapacity = 16384;
+
+/// The extent of each text laid out in each [ItemTextFormat], shared by every item cell of a table and the passes
+/// that measure them. The least recently used extent is dropped beyond [capacity]. Nothing in it says which fonts
+/// were registered when it was measured, so [itemTextExtentsProvider] replaces it whenever the fonts change.
+class ItemTextExtents {
+  ItemTextExtents({this.capacity = itemTextExtentsCapacity});
+
+  final int capacity;
+  final _extents = <(ItemTextFormat, String), ItemTextExtent>{};
+
+  /// How many extents are kept.
+  int get length => _extents.length;
+
+  /// The extent of [text] laid out in [format].
+  ItemTextExtent of(ItemTextFormat format, String text) {
+    final key = (format, text);
+    final kept = _extents.remove(key);
+    if (kept != null) {
+      _extents[key] = kept;
+      return kept;
     }
-    _items.clear();
-    _counters.clear();
+    final painter = format.layOut(text);
+    final extent = _extentOf(painter);
+    painter.dispose();
+    _extents[key] = extent;
+    if (_extents.length > capacity) {
+      _extents.remove(_extents.keys.first);
+    }
+    return extent;
   }
+}
+
+/// The [ItemTextExtents] of the item cells and measuring passes drawn under one [ProviderScope]: alive while a table
+/// (or any item cell) watches it, and replaced by a new, empty instance whenever the registered fonts change, the
+/// change every [TextPainter] measure is told to be redone on — a font loaded at run time such as the app's own
+/// included. A new instance is the fact its watchers act on: the cells measure against it, and the table re-fits its
+/// auto-sized column widths and row heights with it.
+final itemTextExtentsProvider = Provider.autoDispose<ItemTextExtents>((ref) {
+  ref.watch(_systemFontsGenerationProvider);
+  return ItemTextExtents();
+});
+
+/// How many times the registered fonts have changed since this was first watched. Its own provider so the listener
+/// on [PaintingBinding.systemFonts] stays registered across the rebuilds it causes: a provider that invalidated itself
+/// from that listener would remove and add the listener while the fonts notifier iterates its listeners.
+final _systemFontsGenerationProvider = NotifierProvider.autoDispose<_SystemFontsGeneration, int>(
+  _SystemFontsGeneration.new,
+);
+
+class _SystemFontsGeneration extends Notifier<int> {
+  @override
+  int build() {
+    final fonts = PaintingBinding.instance.systemFonts;
+    fonts.addListener(_bump);
+    ref.onDispose(() => fonts.removeListener(_bump));
+    return 0;
+  }
+
+  void _bump() => state++;
 }
 
 /// Space between an item's text and the left and right edges of its box.
@@ -478,14 +660,60 @@ class ItemBoxSpacing {
 /// [top] and [bottom] bound the part the box encloses; [baseline] is the alphabetic baseline.
 typedef ItemTextExtent = ({double width, double top, double bottom, double baseline});
 
-/// Lays out the text of item boxes, each on one line.
-abstract interface class ItemTextMeasurer {
-  /// The extent of [text] drawn for [item]: the item's own text, or a shortened form of it.
-  ItemTextExtent item(CellItem item, String text);
+/// Measures the texts of item boxes, each on one line, through the shared [extents]: item texts in [itemFormat],
+/// omission counters in [counterFormat], the same format at [itemCounterScale] of the size.
+class ItemTextMeasurer {
+  ItemTextMeasurer(
+    this.extents, {
+    required TextStyle style,
+    required TextDirection textDirection,
+    required TextScaler textScaler,
+    Locale? locale,
+    TextHeightBehavior? textHeightBehavior,
+  }) : itemFormat = ItemTextFormat(
+         style: style,
+         textDirection: textDirection,
+         textScaler: textScaler,
+         locale: locale,
+         textHeightBehavior: textHeightBehavior,
+       ),
+       counterFormat = ItemTextFormat(
+         style: _counterStyle(style),
+         textDirection: textDirection,
+         textScaler: textScaler,
+         locale: locale,
+         textHeightBehavior: textHeightBehavior,
+       );
 
-  /// The extent of the omission counter [text], at [itemCounterScale] of the size.
-  ItemTextExtent counter(String text);
+  final ItemTextExtents extents;
+  final ItemTextFormat itemFormat;
+  final ItemTextFormat counterFormat;
+
+  /// The extent of [text] on one line: of its one segment, or of its name followed by its value, each segment
+  /// measured on its own.
+  ItemTextExtent item(ItemText text) {
+    final name = extents.of(itemFormat, text.name);
+    final value = text.value;
+    return value == null ? name : _followedBy(name, extents.of(itemFormat, value));
+  }
+
+  /// The extent of the omission counter [text].
+  ItemTextExtent counter(String text) => extents.of(counterFormat, text);
 }
+
+/// The bound, in logical pixels, on how far the widths [ItemTextMeasurer.item] sums from separately measured
+/// segments may stray from the width of the whole text laid out as one line, accumulated along one row of boxes.
+/// [arrangeItemBoxes] keeps every row and every box within its width less this bound, so that the boxes still fit
+/// when the measured widths fall short of the drawn ones by less than it.
+const itemWidthErrorBound = 1.0;
+
+/// The extent of one line holding [first] then [second]: as wide as both together, as tall as the taller.
+ItemTextExtent _followedBy(ItemTextExtent first, ItemTextExtent second) => (
+  width: first.width + second.width,
+  top: math.min(first.top, second.top),
+  bottom: math.max(first.bottom, second.bottom),
+  baseline: math.max(first.baseline, second.baseline),
+);
 
 /// One laid-out box: [box] in cell coordinates, [textOrigin] where its painter paints from.
 @immutable
@@ -576,8 +804,8 @@ class ItemBoxArrangement {
 /// together with an omission counter box, which follows the last shown item and counts against every item;
 /// [ItemBoxArrangement.omission] names the height that cut them. One row is always shown, even when it is taller
 /// than that height; when not even a shortened first item shares that row with the counter, the row is the counter
-/// alone. An item whose box alone is wider than [maxWidth] is shortened to its longest prefix that fits, followed by
-/// [itemEllipsis].
+/// alone. Rows are filled to [maxWidth] less [itemWidthErrorBound]; an item whose box alone is wider than that is
+/// shortened to its longest prefix that fits, followed by [itemEllipsis].
 ItemBoxArrangement arrangeItemBoxes(
   List<CellItem> items,
   ItemTextMeasurer measurer, {
@@ -590,13 +818,29 @@ ItemBoxArrangement arrangeItemBoxes(
   // The lower bound is the one that cut; on a tie the row height, which raising the cap alone would not lift.
   final cause = maxCellHeight < rowHeight ? ItemOmissionCause.cellHeightCap : ItemOmissionCause.rowHeight;
   final arranger = _ItemBoxArranger(items.length, cause, measurer, maxWidth, spacing);
-  final boxes = [for (final item in items) arranger.fitWidth(item, maxWidth)];
-  final all = arranger.place(boxes);
   bool fits(ItemBoxArrangement a) => a.rows <= 1 || a.size.height <= maxHeight;
-  if (fits(all)) {
-    return all;
+  bool overflows(_RowCursor c) => c.rows > 1 && c.height > maxHeight;
+  // Measures items in order and stops at the first prefix whose items alone overflow. [place] lays every box out
+  // with the same cursor arithmetic, so a box stays where this prefix put it whatever follows it, and its row only
+  // grows: no arrangement that holds the whole prefix fits, and the items after it are never shown.
+  final boxes = <_ItemBox>[];
+  final cursor = _RowCursor(maxWidth, spacing);
+  for (final item in items) {
+    final box = arranger.fitWidth(item, maxWidth);
+    boxes.add(box);
+    arranger.putItem(cursor, box);
+    if (overflows(cursor)) {
+      break;
+    }
   }
-  final count = _largestFittingCount(1, boxes.length - 1, (k) => fits(arranger.place(boxes.sublist(0, k))));
+  if (!overflows(cursor)) {
+    return arranger.place(boxes);
+  }
+  final count = _largestFittingCount(
+    1,
+    items.length - 1,
+    (k) => k < boxes.length && fits(arranger.place(boxes.sublist(0, k))),
+  );
   if (count > 0) {
     return arranger.place(boxes.sublist(0, count));
   }
@@ -648,48 +892,46 @@ class _ItemBoxArranger {
 
   ItemTextExtent counterExtent(int shown) => measurer.counter(itemCounterText(shown, total));
 
-  /// [item]'s box, its text shortened when the box would otherwise be wider than [width].
+  /// [item]'s box, its text shortened when the box would otherwise be wider than [width] less [itemWidthErrorBound].
   _ItemBox fitWidth(CellItem item, double width) {
-    final extent = measurer.item(item, item.text);
-    if (_itemWidth(extent) <= width) {
-      return (item: item, text: item.text, extent: extent);
+    final extent = measurer.item(item.text);
+    if (_itemWidth(extent) <= width - itemWidthErrorBound) {
+      return (item: item, text: item.text.whole, extent: extent);
     }
-    final characters = item.text.characters;
-    String shortened(int length) => '${characters.take(length)}$itemEllipsis';
+    // A shortened text is one segment: it no longer ends in the item's value.
+    final characters = item.text.whole.characters;
+    ItemText shortened(int length) => ItemText('${characters.take(length)}$itemEllipsis');
     final length = _largestFittingCount(
       1,
       characters.length - 1,
-      (c) => _itemWidth(measurer.item(item, shortened(c))) <= width,
+      (c) => _itemWidth(measurer.item(shortened(c))) <= width - itemWidthErrorBound,
     );
     final text = shortened(length);
-    return (item: item, text: text, extent: measurer.item(item, text));
+    return (item: item, text: text.whole, extent: measurer.item(text));
   }
+
+  /// Puts [box] after the boxes already in [cursor] and returns its left.
+  double putItem(_RowCursor cursor, _ItemBox box) => cursor.put(_itemWidth(box.extent), _itemHeight(box.extent));
 
   ItemBoxArrangement place(List<_ItemBox> boxes) {
     final counterExtent = boxes.length < total ? this.counterExtent(boxes.length) : null;
+    final cursor = _RowCursor(maxWidth, spacing);
     // Rows of (index into boxes, or -1 for the counter; left; width).
-    final rows = <List<(int, double, double)>>[[]];
-    var x = 0.0;
-    void put(int index, double width) {
-      if (rows.last.isNotEmpty) {
-        if (x + spacing.gap + width > maxWidth) {
-          rows.add([]);
-          x = 0;
-        } else {
-          x += spacing.gap;
-        }
+    final rows = <List<(int, double, double)>>[];
+    void put(int index, double left, double width) {
+      if (rows.length < cursor.rows) {
+        rows.add([]);
       }
-      rows.last.add((index, x, width));
-      x += width;
+      rows.last.add((index, left, width));
     }
 
     for (final (i, b) in boxes.indexed) {
-      put(i, _itemWidth(b.extent));
+      put(i, putItem(cursor, b), _itemWidth(b.extent));
     }
     if (counterExtent != null) {
-      put(-1, counterExtent.width);
+      put(-1, cursor.put(counterExtent.width, _counterHeight(counterExtent)), counterExtent.width);
     }
-    if (rows.last.isEmpty) {
+    if (rows.isEmpty) {
       return const ItemBoxArrangement([], null, Size.zero, rows: 0, omission: null);
     }
 
@@ -697,13 +939,10 @@ class _ItemBoxArranger {
     // inside the row.
     final placed = <(CellItem, ItemBoxPlacement)>[];
     ItemBoxPlacement? counter;
-    var top = spacing.outerMargin;
     var width = 0.0;
-    for (final row in rows) {
-      var height = 0.0;
-      for (final (i, _, _) in row) {
-        height = math.max(height, i < 0 ? _counterHeight(counterExtent!) : _itemHeight(boxes[i].extent));
-      }
+    for (final (r, row) in rows.indexed) {
+      final top = cursor.tops[r];
+      final height = cursor.heights[r];
       double? baseline;
       for (final (i, left, w) in row) {
         if (i >= 0) {
@@ -724,20 +963,64 @@ class _ItemBoxArranger {
       }
       final (_, lastLeft, lastWidth) = row.last;
       width = math.max(width, lastLeft + lastWidth);
-      top += height + spacing.rowGap;
     }
     return ItemBoxArrangement(
       placed,
       counter,
-      Size(width, top - spacing.rowGap + spacing.outerMargin),
+      Size(width, cursor.height),
       rows: rows.length,
       omission: counter == null ? null : ItemOmission(shown: boxes.length, total: total, cause: cause),
     );
   }
 }
 
+/// Lays boxes out left to right in the order they are put, breaking a row only between boxes, and accumulates the
+/// rows' tops and heights. A box's left, row and top depend only on the boxes put before it, and a row's height only
+/// grows as boxes join it.
+class _RowCursor {
+  _RowCursor(this.maxWidth, this.spacing) : _top = spacing.outerMargin;
+
+  final double maxWidth;
+  final ItemBoxSpacing spacing;
+
+  /// The top of each row, [ItemBoxSpacing.outerMargin] for the first.
+  final tops = <double>[];
+
+  /// The height of each row: the tallest box in it so far.
+  final heights = <double>[];
+
+  double _top;
+  double _x = 0.0;
+
+  int get rows => tops.length;
+
+  /// The extent of the rows so far with [ItemBoxSpacing.outerMargin] above and below.
+  double get height => (_top + (heights.last + spacing.rowGap)) - spacing.rowGap + spacing.outerMargin;
+
+  /// Puts a box of [width] × [height] after the previous one, on a new row when it would pass [maxWidth] less
+  /// [itemWidthErrorBound], and returns its left.
+  double put(double width, double height) {
+    if (tops.isEmpty) {
+      tops.add(_top);
+      heights.add(0.0);
+    } else if (_x + spacing.gap + width > maxWidth - itemWidthErrorBound) {
+      _top += heights.last + spacing.rowGap;
+      tops.add(_top);
+      heights.add(0.0);
+      _x = 0;
+    } else {
+      _x += spacing.gap;
+    }
+    final left = _x;
+    heights.last = math.max(heights.last, height);
+    _x += width;
+    return left;
+  }
+}
+
 /// The item boxes of [data] as the row-height pass and the column-width auto-fit measure them: laid out by
-/// [arrangeItemBoxes] with the default spacing, the text in the pass's style and text scaler.
+/// [arrangeItemBoxes] with the default spacing, the text in the pass's style and text scaler, measured through the
+/// pass's [CellMeasurement.itemTextExtents].
 class ItemMeasuredContent extends MeasuredContent {
   const ItemMeasuredContent(this.data);
 
@@ -749,9 +1032,13 @@ class ItemMeasuredContent extends MeasuredContent {
       return Size.zero;
     }
     final measurer = m.memo(
-      _MeasuringItemTextMeasurer,
-      () => _MeasuringItemTextMeasurer(m.style, m.textScaler),
-      dispose: (e) => e.dispose(),
+      ItemTextMeasurer,
+      () => ItemTextMeasurer(
+        m.itemTextExtents,
+        style: m.style,
+        textDirection: TextDirection.ltr,
+        textScaler: m.textScaler,
+      ),
     );
     return arrangeItemBoxes(data.items, measurer, maxWidth: maxWidth, maxCellHeight: maxHeight).size;
   }
@@ -761,32 +1048,4 @@ class ItemMeasuredContent extends MeasuredContent {
 
   @override
   int get hashCode => data.hashCode;
-}
-
-/// The [ItemTextMeasurer] of one measuring pass. Its painter is its own, not [CellMeasurement.painter]: it lays
-/// out on one line, and `maxLines` set on a shared painter would carry over to the text measured after it. A
-/// colour moves no glyph, so the text is laid out uncoloured and each extent is kept per string for the pass.
-class _MeasuringItemTextMeasurer implements ItemTextMeasurer {
-  _MeasuringItemTextMeasurer(this.style, TextScaler textScaler)
-    : _painter = TextPainter(textDirection: TextDirection.ltr, textScaler: textScaler, maxLines: 1);
-
-  final TextStyle style;
-  final TextPainter _painter;
-  final _items = <String, ItemTextExtent>{};
-  final _counters = <String, ItemTextExtent>{};
-
-  @override
-  ItemTextExtent item(CellItem item, String text) => _items[text] ??= _extent(TextSpan(style: style, text: text));
-
-  @override
-  ItemTextExtent counter(String text) => _counters[text] ??= _extent(TextSpan(style: _counterStyle(style), text: text));
-
-  ItemTextExtent _extent(TextSpan span) {
-    _painter
-      ..text = span
-      ..layout();
-    return _extentOf(_painter);
-  }
-
-  void dispose() => _painter.dispose();
 }

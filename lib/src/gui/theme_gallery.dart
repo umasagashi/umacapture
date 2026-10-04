@@ -425,8 +425,20 @@ class _BlendSection extends StatelessWidget {
             baseLabel: 'surface',
           ),
           'Rounded background behind each skill or factor of the record table cell, in the '
-          'outline role, including a held item in a column that marks missing items. A difference column paints its '
-          'held items green instead (the item green rows below). See the item cell rows below.',
+          'outline role, including a held item a column that marks missing items does not judge on its own (a '
+          'factor under mixed or an empty query). A difference column paints its held items green instead (the item '
+          'green rows below). See the item cell rows below.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item met',
+            overlay: s.success.withValues(alpha: itemMetAlpha),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Background of an item a column that marks missing items judges as meeting the query: a held queried skill, '
+          'or a factor that reaches the per-item threshold. One fixed strength, not shaded by stars. See the item '
+          'cell rows below.',
         ),
         _SwatchRow(
           _BlendSwatch(
@@ -599,6 +611,20 @@ class _BlendSection extends StatelessWidget {
           'disabled FilledButton\'s foreground.',
         ),
         _SwatchRow(
+          _BlendSwatch('current row (even)', overlay: s.tableRowCurrentOverlay, base: cs.surface, baseLabel: 'surface'),
+          'The record table\'s current row when it is an even row, scrolling or pinned: tableRowCurrentOverlay over '
+          'the surface fill the row would otherwise have.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'current row (odd)',
+            overlay: s.tableRowCurrentOverlay,
+            base: s.tableRowStripe,
+            baseLabel: 'tableRowStripe',
+          ),
+          'The record table\'s current row when it is an odd row: tableRowCurrentOverlay over the stripe fill.',
+        ),
+        _SwatchRow(
           _BlendSwatch(
             'numeric field unit',
             overlay: cs.onSurfaceVariant.withValues(alpha: 0.6),
@@ -629,15 +655,16 @@ class _ItemCellSection extends ConsumerWidget {
     final measurement = CellMeasurement(
       style: Theme.of(context).textTheme.bodySmall ?? const TextStyle(),
       textScaler: MediaQuery.textScalerOf(context),
+      itemTextExtents: ref.watch(itemTextExtentsProvider),
     );
     final oneRowHeight = itemBoxesMinHeight(1, measurement);
     const manyItems = [
-      CellItem('Item A', ItemState.normal),
-      CellItem('Item B', ItemState.normal),
-      CellItem('Item C', ItemState.normal),
-      CellItem('Item D', ItemState.normal),
-      CellItem('Item E', ItemState.normal),
-      CellItem('Item F', ItemState.normal),
+      CellItem(ItemText('Item A'), ItemState.normal),
+      CellItem(ItemText('Item B'), ItemState.normal),
+      CellItem(ItemText('Item C'), ItemState.normal),
+      CellItem(ItemText('Item D'), ItemState.normal),
+      CellItem(ItemText('Item E'), ItemState.normal),
+      CellItem(ItemText('Item F'), ItemState.normal),
     ];
     return _Section(
       'Record table item cell (live widget)',
@@ -647,9 +674,9 @@ class _ItemCellSection extends ConsumerWidget {
             'filtering column',
             ItemCellData(
               items: const [
-                CellItem('Item A', ItemState.normal),
-                CellItem('Item B', ItemState.normal),
-                CellItem('Item C', ItemState.normal),
+                CellItem(ItemText('Item A'), ItemState.normal),
+                CellItem(ItemText('Item B'), ItemState.normal),
+                CellItem(ItemText('Item C'), ItemState.normal),
               ],
               csv: '',
             ),
@@ -663,27 +690,29 @@ class _ItemCellSection extends ConsumerWidget {
             'marking missing items',
             ItemCellData(
               items: const [
-                CellItem('Item A(3)', ItemState.normal),
-                CellItem('Item B(1)', ItemState.short),
-                CellItem('Item C(0)', ItemState.missing),
+                CellItem(ItemText.valued('Item A', ' (3)'), ItemState.met),
+                CellItem(ItemText.valued('Item B', ' (1)'), ItemState.short),
+                CellItem(ItemText.valued('Item D', ' (2)'), ItemState.normal),
+                CellItem(ItemText.valued('Item C', ' (0)'), ItemState.missing),
               ],
               csv: '',
             ),
           ),
           'A queried list as a column that marks missing items shows it, in factor notation: an item the record '
-          'has (the same outline background as a filtering column), a factor below the per-item threshold (red background, normal text), and a factor the '
-          'record lacks (red background, text dimmed to disabledColor, drawn with a value of 0 so every row '
-          'lines its factors up alike). Check that the dimmed text stays legible on the red in both themes.',
+          'has and that meets the query (green background), a factor below the per-item threshold (red background, '
+          'normal text), a factor the record lacks (red background, text dimmed to disabledColor, drawn with a value '
+          'of 0 so every row lines its factors up alike), and a held factor nothing judges on its own (mixed; the '
+          'same outline background as a filtering column). Check that the dimmed text stays legible on the red in both themes.',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
             'difference column',
             ItemCellData(
               items: const [
-                CellItem('Item A', ItemState.common, strength: 6, strengthMax: 6),
-                CellItem('Item B', ItemState.partialHeld, strength: 2, strengthMax: 9),
-                CellItem('Item C', ItemState.partialHeld, strength: 9, strengthMax: 9),
-                CellItem('Item D', ItemState.partialMissing),
+                CellItem(ItemText('Item A'), ItemState.common, strength: 6, strengthMax: 6),
+                CellItem(ItemText('Item B'), ItemState.partialHeld, strength: 2, strengthMax: 9),
+                CellItem(ItemText('Item C'), ItemState.partialHeld, strength: 9, strengthMax: 9),
+                CellItem(ItemText('Item D'), ItemState.partialMissing),
               ],
               csv: '',
             ),
@@ -698,7 +727,7 @@ class _ItemCellSection extends ConsumerWidget {
           _ItemCellSpecimen(
             'omission counter',
             ItemCellData(
-              items: [for (final c in 'ABCDEFGHIJ'.split('')) CellItem('Item $c', ItemState.normal)],
+              items: [for (final c in 'ABCDEFGHIJ'.split('')) CellItem(ItemText('Item $c'), ItemState.normal)],
               csv: '',
             ),
             maxCellHeight: oneRowHeight,
@@ -730,7 +759,7 @@ class _ItemCellSection extends ConsumerWidget {
           _ItemCellSpecimen(
             'one item wider than the column',
             ItemCellData(
-              items: const [CellItem('A Very Long Item Name That Cannot Fit In One Box', ItemState.normal)],
+              items: const [CellItem(ItemText('A Very Long Item Name That Cannot Fit In One Box'), ItemState.normal)],
               csv: '',
             ),
           ),
@@ -815,7 +844,8 @@ class _SemanticSection extends StatelessWidget {
         null,
         'Toast success, capture requirement OK, addon success, a finished tab\'s progress ring, the "safe to switch '
             'characters" arrows, every CaptureStatusTone.success line of the capture card, and the green '
-            'difference shades of the record table\'s skill and factor cells (see the item green rows above).',
+            'difference shades of the record table\'s skill and factor cells (see the item green rows above), and the '
+            'green of an item a column that marks missing items finds meeting the query (the item met row above).',
       ),
       (
         'warning',
@@ -857,6 +887,21 @@ class _SemanticSection extends StatelessWidget {
       ('brandBanner', s.brandBanner, s.onBrandBanner, 'Character-name banner background.'),
       ('onBrandBanner', s.onBrandBanner, s.brandBanner, 'Text on the character banner.'),
       ('mutedIndicator', s.mutedIndicator, null, 'Capture progress "not started" indicator.'),
+      (
+        'tableRowStripe',
+        s.tableRowStripe,
+        null,
+        'Odd rows of the record table\'s alternating stripe, scrolling and pinned alike (even rows are surface). '
+            'Lerped from secondaryContainer toward surface, paler in dark than in light.',
+      ),
+      (
+        'tableRowCurrentOverlay',
+        s.tableRowCurrentOverlay,
+        null,
+        'Translucent primaryContainer laid over the record table\'s current row (the one picked by clicking it), '
+            'scrolling and pinned alike. The row\'s own fill (surface or tableRowStripe) shows through; the '
+            'checked-row amber overlay is drawn on top of both. See the current row composites below.',
+      ),
     ];
     return _Section(
       'Semantic / brand tokens (AppSemanticColors)',
@@ -919,7 +964,8 @@ const Map<String, String> _roleUsages = {
       'button label, gauge and keyboard-focus ring).',
   'primaryContainer':
       'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
-      'column-builder group borders; character avatar; table/stat accents; settings pending-count badge.',
+      'column-builder group borders; character avatar; selector action chips; statistics card border; settings pending-count badge. '
+      'It is also the source of tableRowCurrentOverlay.',
   'onPrimaryContainer': 'Count text on the settings "resolve inheritance" pending-count badge.',
   'secondaryContainer':
       'Subtle highlight backgrounds: dashboard and data-table avatars; tag chip drag highlight. Also the '
@@ -944,8 +990,7 @@ const Map<String, String> _roleUsages = {
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
   'surfaceBright': 'Pale water-blue tint filling the NoteCard body (paired with a primaryContainer border).',
-  'surfaceContainerLowest':
-      'Pale water-blue tint: logic-column and column-builder group backgrounds; data-table striped rows.',
+  'surfaceContainerLowest': 'Pale water-blue tint: logic-column and column-builder group backgrounds.',
   'surfaceContainerLow':
       'Script name-copy chips; recolored to a pale water-blue tint. Also the enhancement merge dialog\'s '
       'selected record card background.',

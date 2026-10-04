@@ -40,7 +40,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     return List<int>.from(
       records.map(parser.parse).map((evaluation) {
         // Records with no evaluation value (inheritance-only / friend-inheritance)
-        // have no rank either: pass the sentinel through so plutoCell renders an
+        // have no rank either: pass the sentinel through so the cell renders an
         // empty cell instead of the lowest rank.
         if (evaluation == evaluationValueAbsent) {
           return evaluationValueAbsent;
@@ -55,13 +55,15 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, int value) {
+  CellBuilder<int> cellBuilder(RefBase ref) {
+    final labelCell = super.cellBuilder(ref);
     // The rank sentinel is not a valid label index, so it must not reach the base
-    // `labels[value]` lookup (which would throw). Render an empty cell instead.
-    if (value == evaluationValueAbsent) {
-      return TrinaCell(value: value)..setUserData(RangedLabelCellData(absentValueLabel));
-    }
-    return super.plutoCell(ref, value);
+    // label lookup. Render an empty cell instead.
+    return CellBuilder(
+      (value) => value == evaluationValueAbsent
+          ? (TrinaCell(value: value)..setUserData(RangedLabelCellData(absentValueLabel)))
+          : labelCell(value),
+    );
   }
 
   @override

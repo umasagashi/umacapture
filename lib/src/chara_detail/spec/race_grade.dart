@@ -113,9 +113,10 @@ class RaceGradeWinningCountColumnSpec extends ColumnSpec<int> with RaceGradeWinn
   /// Race title sids actually counted: the selected subset narrowed to [grade],
   /// or every race of [grade] when nothing is selected. Intersecting with the
   /// grade set keeps a stale selection (after a module update) from counting
-  /// races that are no longer of this grade.
+  /// races that are no longer of this grade. Watched, so a module update
+  /// rebuilds the grid that parsed this column, hidden or not.
   Set<int> _targets(RefBase ref) {
-    final gradeSids = ref.read(raceGradeSidProvider(grade));
+    final gradeSids = ref.watch(raceGradeSidProvider(grade));
     if (selection.isEmpty) {
       return gradeSids;
     }
@@ -134,7 +135,9 @@ class RaceGradeWinningCountColumnSpec extends ColumnSpec<int> with RaceGradeWinn
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, int value) {
+  CellBuilder<int> cellBuilder(RefBase ref) => CellBuilder(_cell);
+
+  TrinaCell _cell(int value) {
     return TrinaCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 

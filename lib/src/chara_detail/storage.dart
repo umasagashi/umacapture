@@ -3147,8 +3147,10 @@ Future<void> runArchiveGeometryMigrationIfNeeded(
     if (error is! RecordMutationLockBusy && error is! RecordMutationLockUnavailable) {
       rethrow;
     }
-    // The flag is deliberately left unset, so the next launch retries instead of
-    // recording a pass that never ran. Returning rather than rethrowing keeps a
+    // The flag is deliberately left unset, so the pass is retried the next time
+    // [charaDetailInitialDataLoader] runs (the next launch, or sooner when a module
+    // update or a record store reload re-runs it) instead of recording a pass that
+    // never ran. Returning rather than rethrowing keeps a
     // cosmetic, best-effort repair from putting [charaDetailInitialDataLoader]
     // — and with it the whole record page — into an error state; the pass is
     // already best-effort per record (see [_migrateArchivedRecord]), and this is

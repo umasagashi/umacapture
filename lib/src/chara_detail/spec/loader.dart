@@ -40,12 +40,11 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       // consumer and cannot fall behind the set of module files the app loads.
       ...moduleFileLoaders.map((loader) => ref.watch(loader.future)),
       // Not module files: these two read the user's own rating and memo stores,
-      // and are awaited here only because the column specs below need them.
+      // and are awaited here only because the rating and memo columns read them
+      // synchronously (`.value!`) once the table is up.
       ref.watch(charaDetailRecordRatingStorageDataLoader.future),
       ref.watch(charaDetailRecordMemoStorageDataLoader.future),
-    ]).then((_) {
-      return Future.wait([ref.watch(currentColumnSpecsLoaderProvider.future)]);
-    });
+    ]);
   });
 });
 
@@ -211,7 +210,8 @@ final moduleFileLoaders = <FutureProvider<Object?>>[
 
 // Resolves a grade tag (e.g. "grade_g1") to the sids of every race title that
 // carries it. Memoized per grade and recomputed when [raceTitleInfoProvider]
-// changes, so a grade-driven column automatically follows game-data updates.
+// changes; a grid follows a game-data update because the grade-driven column
+// watches it when it parses.
 final raceGradeSidProvider = Provider.family<Set<int>, String>((ref, grade) {
   return ref.watch(raceTitleInfoProvider).where((e) => e.tags.contains(grade)).map((e) => e.sid).toSet();
 });
@@ -1024,24 +1024,27 @@ Grid _buildGrid(
 
   final visibleIndices = rowConditions.indexed.where((e) => e.$2).map((e) => e.$1).toList();
 
-  // A difference column compares each displayed row against every displayed row, pinned or not.
-  final tallies = <String, ItemTally>{
+  // What each visible column's cells depend on is read through [ref] here, once per column, so the grid's
+  // dependencies follow which columns are shown and not how many rows. No row below touches [ref].
+  final differenceCells = <String, DifferenceCells>{
     for (final spec in visibleSpecs)
-      if (spec is DifferenceItemColumnSpec)
-        spec.id: ItemTally.of(
-          visibleIndices.map((rowIndex) => spec.heldItemStrengths(ref, parsedById[spec.id]![rowIndex])),
-        ),
+      if (spec is DifferenceItemColumnSpec) spec.id: spec.differenceCells(ref),
+  };
+  final cellBuilders = <String, CellBuilder>{
+    for (final spec in visibleSpecs)
+      if (spec is! ContainerColumnSpec && spec is! DifferenceItemColumnSpec) spec.id: spec.cellBuilder(ref),
+    // A difference column compares each displayed row against every displayed row, pinned or not.
+    for (final MapEntry(key: id, value: cells) in differenceCells.entries)
+      id: cells.against(
+        ItemTally.of(visibleIndices.map((rowIndex) => cells.heldItemStrengths(parsedById[id]![rowIndex]))),
+      ),
   };
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
     if (spec is ContainerColumnSpec) {
-      return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
+      return spec.conditionCell(conditionsById[spec.id]![rowIndex]);
     }
-    final value = parsedById[spec.id]![rowIndex];
-    if (spec is DifferenceItemColumnSpec) {
-      return spec.differenceCell(ref, value, tallies[spec.id]!);
-    }
-    return spec.plutoCell(ref, value);
+    return cellBuilders[spec.id]!(parsedById[spec.id]![rowIndex]);
   }
 
   final rows = visibleIndices
@@ -1066,7 +1069,7 @@ final currentGridProvider = Provider<Grid>((ref) {
   final selectionMode = ref.watch(selectionModeProvider) != null;
   // While selecting, build the whole grid through a read-only ref so NONE of the
   // providers touched during the build (records, specs, and the rating/memo/label
-  // providers that plutoColumn/cellOf watch deep inside) register a dependency.
+  // providers that plutoColumn/cellBuilder watch deep inside) register a dependency.
   // Any such rebuild would reset TrinaGrid's checkboxes while selectedRecordIdsProvider
   // kept the stale ids, so a confirm would act on rows the user no longer sees
   // checked. Only selectionModeProvider stays a real watch above, so the grid is

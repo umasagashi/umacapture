@@ -122,11 +122,18 @@ void main() {
       expect(_rankSpec().parse(ref, records), [2, evaluationValueAbsent, 0, evaluationValueAbsent, 3]);
     });
 
-    test('renders an empty cell for the sentinel without touching the label map', () {
-      final ref = _refWithBorder();
-      // The sentinel path must short-circuit before the base `labels[value]`
-      // lookup, so no labelMapProvider override is needed here.
-      final cell = _rankSpec().plutoCell(ref, evaluationValueAbsent);
+    test('renders an empty cell for the sentinel instead of a label', () {
+      // The label list is empty, so a sentinel that reached the base label lookup would degrade to its raw
+      // index instead of the empty label.
+      final container = ProviderContainer.test(
+        overrides: [
+          charaRankBorderProvider.overrideWithValue(_rankBorder),
+          labelMapProvider.overrideWithValue({LabelKeys.charaRank: const []}),
+        ],
+      );
+      addTearDown(container.dispose);
+      final ref = container.read(containerRefProvider);
+      final cell = _rankSpec().cellBuilder(ref)(evaluationValueAbsent);
       expect(cell.getUserData<RangedLabelCellData>()!.label, absentValueLabel);
     });
   });

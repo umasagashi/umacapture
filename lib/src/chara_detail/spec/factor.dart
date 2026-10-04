@@ -390,12 +390,25 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   FactorItemsColumnSpec withSubject(FactorSearchSubjectMode subject);
 
   /// The selected factor ids: the two tag axes resolved against the current factor master while [selectByTag],
-  /// the hand-picked ones otherwise.
-  Set<int> resolvedFactorIds(RefBase ref) {
+  /// the hand-picked ones otherwise. The resolution is read, unless [watch] makes it a dependency of [ref]'s owner:
+  /// the cells of a displayed column ([cellInputs]) and [ColumnSpec.evaluate] watch it, so a module update rebuilds
+  /// the grid and re-filters its rows even when the column is hidden; the tooltip reads it.
+  Set<int> resolvedFactorIds(RefBase ref, {bool watch = false}) {
     if (!selectByTag) {
       return selectedFactorIds;
     }
-    return ref.read(_factorTagQueryProvider(_factorTagsKey(factorTags, skillTags)));
+    final provider = _factorTagQueryProvider(_factorTagsKey(factorTags, skillTags));
+    return watch ? ref.watch(provider) : ref.read(provider);
+  }
+
+  /// What this column's cells depend on, watched through [ref] once per grid build.
+  ItemCellInputs cellInputs(RefBase ref) {
+    final query = resolvedFactorIds(ref, watch: true);
+    return ItemCellInputs(
+      query: query,
+      order: ItemOrder(query: query, masterRank: ref.watch(factorMasterRankProvider)),
+      labels: ref.watch(labelMapProvider)[labelKey]!,
+    );
   }
 
   /// The factors [factorSet] holds within the subject: the selected ones, or for an empty selection every factor
@@ -403,8 +416,7 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   ///
   /// Under the trainee subject a factor only a parent holds extracts as an all-zero entry; it is not held, so it
   /// is dropped here, for every display alike.
-  List<QueriedFactor> heldFactors(RefBase ref, FactorSet factorSet) {
-    final query = resolvedFactorIds(ref);
+  List<QueriedFactor> heldFactors(Set<int> query, FactorSet factorSet) {
     final traineeOnly = subject == FactorSearchSubjectMode.trainee;
     if (query.isEmpty && !showAllWhenQueryIsEmpty) {
       return [];
@@ -413,25 +425,20 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
     return QueriedFactor.extract(ids, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
   }
 
-  /// The order the cell lists factors in: the selection's order first, then the master's.
-  ItemOrder itemOrder(RefBase ref) =>
-      ItemOrder(query: resolvedFactorIds(ref), masterRank: ref.watch(factorMasterRankProvider));
-
   /// The text of [factor] named [name] in [mode]: the name, followed by the value when [mode] shows one.
-  static String itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
-      mode.showsValue ? "$name(${factor.notation(mode.metric, mode.granularity)})" : name;
+  static ItemText itemText(QueriedFactor factor, String name, FactorNotationMode mode) =>
+      mode.showsValue ? ItemText.valued(name, " (${factor.notation(mode.metric, mode.granularity)})") : ItemText(name);
 
   /// The text of a factor a record lacks: drawn in [mode] with every slot 0, so that it takes the shape of a held
   /// factor.
-  String placeholderText(RefBase ref, int id, FactorNotationMode mode) {
-    final name = ref.watch(labelMapProvider)[labelKey]!.getOrNull(id) ?? id.toString();
+  static ItemText placeholderText(List<String> labels, int id, FactorNotationMode mode) {
+    final name = labels.getOrNull(id) ?? id.toString();
     return itemText(QueriedFactor(id: id, self: 0, parent1: 0, parent2: 0), name, mode);
   }
 
-  @override
-  @override
-  Map<int, int> heldItemStrengths(RefBase ref, FactorSet value) => {
-    for (final factor in heldFactors(ref, value)) factor.id: factor.sum(),
+  /// The factors [value] holds within [query] and the subject, as factor id to star sum.
+  Map<int, int> heldStrengths(Set<int> query, FactorSet value) => {
+    for (final factor in heldFactors(query, value)) factor.id: factor.sum(),
   };
 }
 
@@ -541,14 +548,14 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// query as a whole, as it is under mixed.
   bool get judgesEachItem => predicate.logic != FactorSetLogicMode.mixed;
 
-  /// Whether a marked cell judges each factor against the threshold. Under mixed the threshold applies to the query
-  /// as a whole, so no single factor is short of it; an empty query accepts every record, so no factor is short of
-  /// it either.
-  bool get marksShortItems => predicate.query.isNotEmpty && judgesEachItem;
+  /// Whether a marked cell judges each factor against the threshold, marking it met or short. Under mixed the
+  /// threshold applies to the query as a whole, so no single factor meets or falls short of it; an empty query
+  /// accepts every record, so no factor is judged either.
+  bool get judgesHeldItems => predicate.query.isNotEmpty && judgesEachItem;
 
   /// Whether the element mode and the lower bounds apply: while marking missing factors they decide which factors
-  /// are short, which only [marksShortItems] does.
-  bool get usesPerItemThreshold => !marksMissing || marksShortItems;
+  /// are met or short, which only [judgesHeldItems] does.
+  bool get usesPerItemThreshold => !marksMissing || judgesHeldItems;
 
   @override
   bool get hasFilter => true;
@@ -603,19 +610,18 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
-  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
-  /// the query is resolved live from the current factor master so newly tagged
-  /// factors are picked up automatically; otherwise the stored predicate is used.
-  AggregateFactorSetPredicate _resolved(RefBase ref) {
-    if (!selectByTag) {
-      return predicate;
-    }
-    return predicate.copyWith(query: resolvedFactorIds(ref));
-  }
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]), the query is resolved from the
+  /// current factor master, as a dependency of [ref]'s owner when [watch] (see [resolvedFactorIds]); otherwise the
+  /// stored predicate is used.
+  AggregateFactorSetPredicate _resolved(RefBase ref, {bool watch = false}) =>
+      _withQuery(resolvedFactorIds(ref, watch: watch));
+
+  /// The stored predicate, its query replaced by the resolved [query] for a tag-driven column.
+  AggregateFactorSetPredicate _withQuery(Set<int> query) => selectByTag ? predicate.copyWith(query: query) : predicate;
 
   @override
   List<bool> evaluate(RefBase ref, List<FactorSet> values) {
-    final resolved = _resolved(ref);
+    final resolved = _resolved(ref, watch: true);
     if (selectByTag && resolved.query.isEmpty && (predicate.factorTags.isNotEmpty || predicate.skillTags.isNotEmpty)) {
       // Tags are selected but resolve to no factor in the current master (e.g. the
       // "gold skill" tag, which has no inheritable factor): nothing can match, so
@@ -630,11 +636,16 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   bool get notatesValueOnly => !predicate.notation.mode.showsName;
 
   @override
-  TrinaCell plutoCell(RefBase ref, FactorSet value) {
-    final predicate = _resolved(ref);
+  CellBuilder<FactorSet> cellBuilder(RefBase ref) {
+    final inputs = cellInputs(ref);
+    final predicate = _withQuery(inputs.query);
+    return CellBuilder((value) => _cell(inputs, predicate, value));
+  }
+
+  TrinaCell _cell(ItemCellInputs inputs, AggregateFactorSetPredicate predicate, FactorSet value) {
     final mode = predicate.notation.mode;
-    final order = itemOrder(ref);
-    final factors = order.sort(heldFactors(ref, value), (e) => e.id);
+    final order = inputs.order;
+    final factors = order.sort(heldFactors(inputs.query, value), (e) => e.id);
 
     // Value-only modes render a single aggregate value across all factors, with
     // no factor names.
@@ -646,24 +657,21 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
       }
       // While marking missing factors they are drawn named, since a red mark belongs to an item; the value
       // (sorting) and the CSV stay those of the value-only notation.
-      return TrinaCell(value: display)..setUserData(_markedCell(ref, predicate, order, value, csv: summary));
+      return TrinaCell(value: display)..setUserData(_markedCell(inputs, predicate, value, csv: summary));
     }
 
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
-    // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
+    final labels = inputs.labels;
+    // A factor id beyond a lagging module label list would throw out of a cell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
     final notations = factors
         .map((q) => FactorItemsColumnSpec.itemText(q, labels.getOrNull(q.id) ?? q.id.toString(), mode))
         .toList();
-    final desc = notations.join(", ");
-    final csv = const CsvEncoder().convert([notations]);
+    final drawn = [for (final text in notations) text.whole];
+    final desc = drawn.join(", ");
+    final csv = const CsvEncoder().convert([drawn]);
     final data = marksMissing
-        ? _markedCell(ref, predicate, order, value, csv: csv)
-        : ItemCellData.listing(
-            [for (final text in notations) CellItem(text, ItemState.normal)],
-            hideCommon: false,
-            csv: csv,
-          );
+        ? _markedCell(inputs, predicate, value, csv: csv)
+        : ItemCellData(items: [for (final text in notations) CellItem(text, ItemState.normal)], csv: csv);
     return TrinaCell(value: desc)..setUserData(data);
   }
 
@@ -671,28 +679,27 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// of the stored notation, and the placeholders of the queried factors the record lacks, drawn in the same
   /// notation with every slot 0 so that a placeholder takes the shape of a held factor.
   ItemCellData _markedCell(
-    RefBase ref,
+    ItemCellInputs inputs,
     AggregateFactorSetPredicate predicate,
-    ItemOrder order,
     FactorSet factorSet, {
     required String csv,
   }) {
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
+    final labels = inputs.labels;
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = predicate.notation.mode.named;
-    String placeholderOf(int id) => placeholderText(ref, id, mode);
-    final perItemThreshold = marksShortItems;
+    ItemText placeholderOf(int id) => FactorItemsColumnSpec.placeholderText(labels, id, mode);
+    final judges = judgesHeldItems;
     final own = [
-      for (final factor in heldFactors(ref, factorSet))
+      for (final factor in heldFactors(inputs.query, factorSet))
         OwnItem(
           factor.id,
           FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode),
-          meetsQuery: !perItemThreshold || predicate.acceptsItem(factor),
+          meetsQuery: judges ? predicate.acceptsItem(factor) : null,
           strength: factor.sum(),
         ),
     ];
-    final items = missingMarkedItems(own, predicate.query, placeholderOf, order, perItemThreshold: perItemThreshold);
-    return ItemCellData.listing(items, hideCommon: false, csv: csv);
+    final items = missingMarkedItems(own, predicate.query, placeholderOf, inputs.order);
+    return ItemCellData(items: items, csv: csv);
   }
 
   @override
@@ -766,8 +773,9 @@ String _factorTagsKey(Set<String> factorTags, Set<String> skillTags) {
 
 // Resolves the two tag axes to the sids of every factor in the current master that
 // carries all selected factor tags and whose skill carries all selected skill tags
-// (AND). Memoized per tag-key and recomputed when [factorInfoProvider] changes, so a
-// tag-driven column automatically follows game-data updates.
+// (AND). Memoized per tag-key and recomputed when [factorInfoProvider] changes; a
+// grid follows a game-data update through the column calls that watch it
+// ([FactorItemsColumnSpec.resolvedFactorIds]).
 final _factorTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
   final parts = key.split(';');
   final factorTags = parts[0].isEmpty ? <String>{} : parts[0].split(',').toSet();

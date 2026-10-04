@@ -1,3 +1,4 @@
+import 'dart:collection' show ListBase;
 import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
@@ -7,9 +8,13 @@ import '/src/chara_detail/spec/base.dart';
 
 /// How one item of a skill or factor cell is painted.
 enum ItemState {
-  /// The record has the item (outline background). Every item of a query column, missing-marked or not, that
-  /// the record holds and that meets the query.
+  /// The record has the item (outline background), and nothing judges it on its own: every held item of a column
+  /// that does not mark missing items, and a held item a marking column has no per-item judgement for.
   normal,
+
+  /// The record has a queried item that passes the per-item judgement (green). A column that marks missing items:
+  /// a held skill, or a factor that reaches the per-item threshold.
+  met,
 
   /// The record lacks a queried item (red placeholder). A column that marks missing items.
   missing,
@@ -29,11 +34,42 @@ enum ItemState {
   partialMissing,
 }
 
+/// The text of one item: what is drawn, and the segments it is measured in. A factor drawn with its value is its
+/// name followed by the value, measured apart so that a name is measured once for every value it is drawn with;
+/// every other text is one segment. [whole] is made from the segments here and nowhere else, so what is drawn is
+/// always what is measured.
+@immutable
+class ItemText {
+  /// A text measured as one segment.
+  const ItemText(this.whole) : name = whole, value = null;
+
+  /// [name] followed by [value], which carries its own separator (e.g. ` (3)`).
+  const ItemText.valued(this.name, String this.value) : whole = '$name$value';
+
+  /// What is drawn: [name] followed by [value].
+  final String whole;
+
+  /// The first segment; the whole text when there is no [value].
+  final String name;
+
+  /// The second segment, measured apart from [name].
+  final String? value;
+
+  @override
+  bool operator ==(Object other) => other is ItemText && other.name == name && other.value == value;
+
+  @override
+  int get hashCode => Object.hash(name, value);
+
+  @override
+  String toString() => whole;
+}
+
 /// One item drawn in a cell, compared by value.
 @immutable
 class CellItem {
-  /// The text drawn: the name, or the name with its notation (e.g. `name(3)`).
-  final String text;
+  /// The text drawn: the name, or the name with its notation (e.g. `name (3)`).
+  final ItemText text;
   final ItemState state;
 
   /// Input to the green shade of [ItemState.common] and [ItemState.partialHeld]; 0 for every other state.
@@ -66,15 +102,15 @@ class OwnItem {
   final int id;
 
   /// The text drawn, notation included.
-  final String text;
+  final ItemText text;
 
-  /// Whether the item passes the per-item threshold of the query (always true where there is none).
-  final bool meetsQuery;
+  /// Whether the item passes the per-item judgement of the query, or null where nothing judges it on its own.
+  final bool? meetsQuery;
 
   /// Strength within the comparison scope (the star sum for a factor).
   final int strength;
 
-  const OwnItem(this.id, this.text, {this.meetsQuery = true, this.strength = 0});
+  const OwnItem(this.id, this.text, {this.meetsQuery, this.strength = 0});
 }
 
 /// How many of the compared rows hold each item of one column, the strongest holding of each, and which items
@@ -123,6 +159,12 @@ class ItemTally {
 
   bool isCommon(int id) => common.contains(id);
 
+  /// Whether some but not all compared rows hold [id]: the items a difference cell marks where a row lacks them.
+  bool isPartial(int id) {
+    final count = holdersOf(id);
+    return count > 0 && count < rowCount;
+  }
+
   int maxStrengthOf(int id) => maxStrengths[id] ?? 0;
 }
 
@@ -144,11 +186,18 @@ class ItemCellData implements RenderedCellData {
     : items = List.unmodifiable(items),
       assert(summary == null || items.isEmpty);
 
-  /// [items], less the [ItemState.common] ones when [hideCommon]. Every remaining item is kept, placeholders
-  /// included; how many are shown is decided when the cell is drawn.
-  factory ItemCellData.listing(List<CellItem> items, {required bool hideCommon, required String csv}) {
-    return ItemCellData(items: hideCommon ? items.where((e) => e.state != ItemState.common).toList() : items, csv: csv);
-  }
+  /// A difference-display cell: the record's [own] items against the compared rows' tally, as
+  /// [ItemState.common] or [ItemState.partialHeld], both shaded by the item's strength against the strongest holding
+  /// of that item among them ([ItemTally.maxStrengthOf]), and the column's [placeholders] the record does not hold,
+  /// together in the placeholders' order, so a row's cell does not depend on the row order. The common items are
+  /// left out when [hideCommon]. The placeholders are shared with every row of the build, not copied into [items].
+  ItemCellData.difference(
+    List<OwnItem> own,
+    DifferencePlaceholders placeholders, {
+    required bool hideCommon,
+    required this.csv,
+  }) : items = _DifferenceItems(own, placeholders, hideCommon: hideCommon),
+       summary = null;
 
   @override
   Object get paintState => this;
@@ -156,17 +205,153 @@ class ItemCellData implements RenderedCellData {
   @override
   CellSelectedCallback? get onSelected => null;
 
-  static const _itemsEquality = ListEquality<CellItem>();
-
   @override
   bool operator ==(Object other) =>
-      other is ItemCellData &&
-      other.summary == summary &&
-      other.csv == csv &&
-      _itemsEquality.equals(other.items, items);
+      other is ItemCellData && other.summary == summary && other.csv == csv && _itemsEqual(other.items, items);
+
+  /// Hashes [items] less the [ItemState.partialMissing] ones: equal lists have equal such subsequences, and a
+  /// difference cell's is its own items, so it hashes without reading the placeholders it shares.
+  @override
+  int get hashCode => Object.hash(
+    summary,
+    csv,
+    Object.hashAll(switch (items) {
+      final _DifferenceItems difference => difference._own.map((e) => e.$2),
+      final other => other.where((e) => e.state != ItemState.partialMissing),
+    }),
+  );
+
+  /// Two difference cells over equal placeholders with equal own items are equal without walking either; any
+  /// other pair is compared item by item.
+  static bool _itemsEqual(List<CellItem> a, List<CellItem> b) {
+    if (a is _DifferenceItems && b is _DifferenceItems && a._equalsByParts(b)) {
+      return true;
+    }
+    return a.length == b.length && const IterableEquality<CellItem>().equals(a, b);
+  }
+}
+
+/// The placeholders of one difference column for one grid build: an [ItemState.partialMissing] item for each item
+/// some but not all rows of [tally] hold ([ItemTally.isPartial]), in [order]. A row's cell shows the ones the row does
+/// not hold itself ([ItemCellData.difference]), so every row of the build shares these, made once for the column.
+@immutable
+class DifferencePlaceholders {
+  final ItemTally tally;
+  final ItemOrder order;
+
+  /// The placeholder ids in [order], and the placeholder of each at the same index.
+  final List<int> _ids;
+  final List<CellItem> _items;
+
+  /// Placeholders this one was compared with by value ([_equals]), to the result. A rebuild compares every row of
+  /// the new build with the previous build's, all with the same two placeholders, so the comparison is made once.
+  final _compared = Expando<bool>();
+
+  DifferencePlaceholders._(this.tally, this.order, this._ids, this._items);
+
+  /// [placeholderOf] gives a placeholder's text.
+  factory DifferencePlaceholders.of(ItemTally tally, ItemOrder order, ItemText Function(int) placeholderOf) {
+    final ids = order.sort(tally.holders.keys.where(tally.isPartial), (id) => id);
+    return DifferencePlaceholders._(
+      tally,
+      order,
+      List.unmodifiable(ids),
+      List.unmodifiable([for (final id in ids) CellItem(placeholderOf(id), ItemState.partialMissing)]),
+    );
+  }
+
+  /// Whether [other] has the same placeholders in an order that ranks every id alike, so that the same own items
+  /// make the same cell against either.
+  bool _equals(DifferencePlaceholders other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return _compared[other] ??= other._compared[this] =
+        const ListEquality<int>().equals(_ids, other._ids) &&
+        const ListEquality<CellItem>().equals(_items, other._items) &&
+        order._ranksAlike(other.order);
+  }
+}
+
+/// The items of a difference-display cell: the record's own items merged with the column's [DifferencePlaceholders]
+/// the record does not hold, in their order. Each read walks the two sorted lists; no item is copied per row.
+class _DifferenceItems extends ListBase<CellItem> {
+  _DifferenceItems._(this._own, this._placeholders, this._length);
+
+  factory _DifferenceItems(List<OwnItem> own, DifferencePlaceholders placeholders, {required bool hideCommon}) {
+    final tally = placeholders.tally;
+    final shown = [
+      for (final item in placeholders.order.sort(own, (e) => e.id))
+        if (!(hideCommon && tally.isCommon(item.id)))
+          (
+            item.id,
+            CellItem(
+              item.text,
+              tally.isCommon(item.id) ? ItemState.common : ItemState.partialHeld,
+              strength: item.strength,
+              strengthMax: tally.maxStrengthOf(item.id),
+            ),
+          ),
+    ];
+    final heldPlaceholders = {
+      for (final (id, _) in shown)
+        if (tally.isPartial(id)) id,
+    };
+    return _DifferenceItems._(shown, placeholders, shown.length + placeholders._ids.length - heldPlaceholders.length);
+  }
+
+  /// The record's own items in the placeholders' order, each with its id, the common ones left out when hidden.
+  final List<(int, CellItem)> _own;
+  final DifferencePlaceholders _placeholders;
+  final int _length;
+
+  /// Every item, made on the first read by index; drawing and measuring read the items in order instead.
+  late final List<CellItem> _all = List.unmodifiable(_merged());
 
   @override
-  int get hashCode => Object.hash(summary, csv, _itemsEquality.hash(items));
+  int get length => _length;
+
+  @override
+  set length(int newLength) => throw UnsupportedError('Cannot change the length of an unmodifiable list');
+
+  @override
+  CellItem operator [](int index) => _all[index];
+
+  @override
+  void operator []=(int index, CellItem value) => throw UnsupportedError('Cannot modify an unmodifiable list');
+
+  @override
+  Iterator<CellItem> get iterator => _merged().iterator;
+
+  @override
+  CellItem get first => _merged().first;
+
+  bool _equalsByParts(_DifferenceItems other) =>
+      _placeholders._equals(other._placeholders) && const ListEquality<(int, CellItem)>().equals(_own, other._own);
+
+  /// A placeholder is skipped where the record holds its id: the order ranks no two ids alike, so the id is the one
+  /// it compares equal to.
+  Iterable<CellItem> _merged() sync* {
+    final order = _placeholders.order;
+    final ids = _placeholders._ids;
+    final placeholders = _placeholders._items;
+    var next = 0;
+    for (final (id, item) in _own) {
+      for (; next < ids.length; next++) {
+        final c = order.compare(ids[next], id);
+        if (c > 0) {
+          break;
+        }
+        if (c < 0) {
+          yield placeholders[next];
+        }
+      }
+      yield item;
+    }
+    for (; next < ids.length; next++) {
+      yield placeholders[next];
+    }
+  }
 }
 
 /// The order of the items in a skill or factor cell, held and placeholder alike: position in the query first,
@@ -191,6 +376,12 @@ class ItemOrder {
     return byMaster != 0 ? byMaster : a.compareTo(b);
   }
 
+  /// Whether [other] ranks every id as this one does.
+  bool _ranksAlike(ItemOrder other) =>
+      identical(this, other) ||
+      (const MapEquality<int, int>().equals(_queryRank, other._queryRank) &&
+          const MapEquality<int, int>().equals(masterRank, other.masterRank));
+
   /// [items] sorted by the id [idOf] gives each, stably.
   List<T> sort<T>(Iterable<T> items, int Function(T) idOf) {
     final sorted = items.toList();
@@ -206,36 +397,30 @@ class ItemOrder {
   }
 }
 
+/// What the cells of a skill or factor column read from the modules, resolved once per grid build by the column's
+/// `cellInputs`.
+class ItemCellInputs {
+  /// The selected item ids, the tags resolved.
+  final Set<int> query;
+
+  /// The order the cell lists items in: the selection's order first, then the master's.
+  final ItemOrder order;
+
+  /// The item names of the column's label key.
+  final List<String> labels;
+
+  const ItemCellInputs({required this.query, required this.order, required this.labels});
+}
+
 /// Items of a cell that marks missing items: the record's own items and a [ItemState.missing] placeholder for each
 /// queried item it lacks, together in [order]. [placeholderOf] gives a placeholder's text.
 ///
-/// With [perItemThreshold], an own item that fails its threshold is [ItemState.short].
+/// An own item is [ItemState.met] or [ItemState.short] by its [OwnItem.meetsQuery], and [ItemState.normal] where
+/// nothing judges it.
 List<CellItem> missingMarkedItems(
   List<OwnItem> own,
   Iterable<int> query,
-  String Function(int) placeholderOf,
-  ItemOrder order, {
-  required bool perItemThreshold,
-}) {
-  final ownIds = {for (final item in own) item.id};
-  final items = [
-    for (final item in own)
-      (item.id, CellItem(item.text, perItemThreshold && !item.meetsQuery ? ItemState.short : ItemState.normal)),
-    for (final id in query)
-      if (!ownIds.contains(id)) (id, CellItem(placeholderOf(id), ItemState.missing)),
-  ];
-  return [for (final (_, item) in order.sort(items, (e) => e.$1)) item];
-}
-
-/// Items of a difference-display cell against the compared rows' [tally]: the record's own items as
-/// [ItemState.common] (the tally's [ItemTally.common]) or [ItemState.partialHeld], both shaded by the item's
-/// strength against the strongest holding of that item among them ([ItemTally.maxStrengthOf]), and a
-/// [ItemState.partialMissing] placeholder for each item some but not all compared rows hold, together in
-/// [order], so a row's cell does not depend on the row order. [placeholderOf] gives a placeholder's text.
-List<CellItem> differenceItems(
-  List<OwnItem> own,
-  ItemTally tally,
-  String Function(int) placeholderOf,
+  ItemText Function(int) placeholderOf,
   ItemOrder order,
 ) {
   final ownIds = {for (final item in own) item.id};
@@ -243,16 +428,14 @@ List<CellItem> differenceItems(
     for (final item in own)
       (
         item.id,
-        CellItem(
-          item.text,
-          tally.isCommon(item.id) ? ItemState.common : ItemState.partialHeld,
-          strength: item.strength,
-          strengthMax: tally.maxStrengthOf(item.id),
-        ),
+        CellItem(item.text, switch (item.meetsQuery) {
+          null => ItemState.normal,
+          true => ItemState.met,
+          false => ItemState.short,
+        }),
       ),
-    for (final id in tally.holders.keys)
-      if (!ownIds.contains(id) && tally.holdersOf(id) < tally.rowCount)
-        (id, CellItem(placeholderOf(id), ItemState.partialMissing)),
+    for (final id in query)
+      if (!ownIds.contains(id)) (id, CellItem(placeholderOf(id), ItemState.missing)),
   ];
   return [for (final (_, item) in order.sort(items, (e) => e.$1)) item];
 }

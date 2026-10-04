@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/item_cell_text.dart';
 import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/core/json_adapter.dart';
@@ -36,6 +37,19 @@ typedef ColumnDescription = ({String text, List<List<String>>? truthTable});
 
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
+
+/// Builds the cell of one row's value. [ColumnSpec.cellBuilder] makes it once per column per grid build; it holds
+/// the data the cells need, never a ref.
+///
+/// A class rather than a function type: the grid build holds its columns as `ColumnSpec<dynamic>`, and a function
+/// taking `T` does not pass as one taking `dynamic`, while a method's `T` parameter is checked per call.
+final class CellBuilder<T> {
+  final TrinaCell Function(T value) _build;
+
+  const CellBuilder(this._build);
+
+  TrinaCell call(T value) => _build(value);
+}
 
 /// How table rows size themselves to their text. A global display preference,
 /// persisted in settings and watched by [CellText] and the row-height pass.
@@ -523,7 +537,9 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
 
   List<bool> evaluate(RefBase ref, List<T> values);
 
-  TrinaCell plutoCell(RefBase ref, T value);
+  /// Reads through [ref], once, what this column's cells depend on, and returns the builder of its cells. The grid
+  /// build calls it once per visible column, so a watch here is one dependency of the grid whatever the row count.
+  CellBuilder<T> cellBuilder(RefBase ref);
 
   TrinaColumn plutoColumn(RefBase ref);
 
@@ -544,8 +560,8 @@ mixin ContainerColumnSpec<T> on ColumnSpec<T> {
   List<bool> combineChildren(List<List<bool>> childConditions, int rowCount);
 
   /// Builds the cell for this container from its combined per-row condition
-  /// (a pass/fail cell), in place of a leaf column's parsed-value [plutoCell].
-  TrinaCell conditionCell(RefBase ref, bool passed);
+  /// (a pass/fail cell), in place of a leaf column's parsed-value [cellBuilder].
+  TrinaCell conditionCell(bool passed);
 }
 
 // Translation prefix for the "broken column" UI (chip tooltip, placeholder text).
@@ -730,9 +746,7 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, Null value) {
-    return TrinaCell(value: "");
-  }
+  CellBuilder<Null> cellBuilder(RefBase ref) => CellBuilder((_) => TrinaCell(value: ""));
 
   @override
   TrinaColumn plutoColumn(RefBase ref) {
@@ -1151,14 +1165,18 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
 const _bulkReconcileThreshold = 32;
 
 /// What one measuring pass (the row-height pass, the column-width auto-fit) lays
-/// cell content out with: a text style and the pass's text scaler. It owns a
+/// cell content out with: a text style, the pass's text scaler and the table's
+/// shared item text extents ([itemTextExtentsProvider]). It owns a
 /// painter [TextMeasuredContent] reuses across the pass and a memo that lives as
 /// long as the pass; [dispose] it when the pass ends.
 class CellMeasurement {
-  CellMeasurement({required this.style, required this.textScaler});
+  CellMeasurement({required this.style, required this.textScaler, required this.itemTextExtents});
 
   final TextStyle style;
   final TextScaler textScaler;
+
+  /// The extents item boxes ([ItemMeasuredContent]) are measured with, shared with the item cells the pass sizes.
+  final ItemTextExtents itemTextExtents;
 
   TextPainter? _painter;
   double? _preferredLineHeight;
@@ -1287,6 +1305,21 @@ class ItemColumnBoundsScope extends InheritedWidget {
   bool updateShouldNotify(ItemColumnBoundsScope oldWidget) => bounds != oldWidget.bounds;
 }
 
+/// Hands the table's theme to the item cells drawn under it. The table keeps one instance per theme value, so a cell
+/// tells an unchanged theme by identity; [Theme.of] can return a new, equal instance on any rebuild. A cell outside
+/// any scope draws with [Theme.of].
+class ItemCellThemeScope extends InheritedWidget {
+  const ItemCellThemeScope({super.key, required this.theme, required super.child});
+
+  final ThemeData theme;
+
+  static ThemeData of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ItemCellThemeScope>()?.theme ?? Theme.of(context);
+
+  @override
+  bool updateShouldNotify(ItemCellThemeScope oldWidget) => !identical(theme, oldWidget.theme);
+}
+
 /// What a cell lays out, compared by value so a pass measures equal contents once.
 @immutable
 abstract class MeasuredContent {
@@ -1339,8 +1372,12 @@ typedef _WrapColumn = ({TrinaColumn col, ColumnSpec spec, double maxWidth, doubl
 // [CellMeasurement], so a single painter serves every text cell instead of one
 // per measurement. Call [dispose] when the pass ends.
 class _RowHeightMeasurer {
-  _RowHeightMeasurer({required this._columns, required TextStyle style, required TextScaler textScaler})
-    : _measurement = CellMeasurement(style: style, textScaler: textScaler);
+  _RowHeightMeasurer({
+    required this._columns,
+    required TextStyle style,
+    required TextScaler textScaler,
+    required ItemTextExtents itemTextExtents,
+  }) : _measurement = CellMeasurement(style: style, textScaler: textScaler, itemTextExtents: itemTextExtents);
 
   final List<_WrapColumn> _columns;
   final CellMeasurement _measurement;
@@ -1395,7 +1432,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   // ([ColumnSpec.takesItemColumnBounds]) is bounded by [ItemColumnBounds.autoFitWidth]:
   // its cells are measured wrapped within that width and within the cell height cap,
   // as they are drawn, and its title is clipped at it too.
-  void autoFitColumnPrecise(BuildContext context, TrinaColumn column, ItemColumnBounds bounds) {
+  void autoFitColumnPrecise(
+    BuildContext context,
+    TrinaColumn column,
+    ItemColumnBounds bounds,
+    ItemTextExtents itemTextExtents,
+  ) {
     if (refRows.isEmpty) {
       return;
     }
@@ -1415,8 +1457,16 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     // Both measurements lay out under the grid's text scaler, as the cells and the title (a plain `Text.rich`)
     // are drawn.
     final textScaler = MediaQuery.textScalerOf(context);
-    final cellMeasurement = CellMeasurement(style: DefaultTextStyle.of(context).style, textScaler: textScaler);
-    final titleMeasurement = CellMeasurement(style: configuration.style.columnTextStyle, textScaler: textScaler);
+    final cellMeasurement = CellMeasurement(
+      style: DefaultTextStyle.of(context).style,
+      textScaler: textScaler,
+      itemTextExtents: itemTextExtents,
+    );
+    final titleMeasurement = CellMeasurement(
+      style: configuration.style.columnTextStyle,
+      textScaler: textScaler,
+      itemTextExtents: itemTextExtents,
+    );
     // The widest line of the cells laid out within the cap, so a column with few items stays narrow.
     final contentMaxWidth = cap - cellPadding.horizontal - 8;
     final cellWidth = contents
@@ -1441,8 +1491,9 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     resizeColumn(column, target - column.width);
   }
 
-  /// Sizes every column for [bounds], the table's bounds on skill and factor columns.
-  void autoFitColumns(ItemColumnBounds bounds) {
+  /// Sizes every column for [bounds], the table's bounds on skill and factor columns, measuring item boxes through
+  /// [itemTextExtents].
+  void autoFitColumns(ItemColumnBounds bounds, ItemTextExtents itemTextExtents) {
     if (refRows.isEmpty) {
       return;
     }
@@ -1467,7 +1518,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         // autoFitColumnPrecise sizes the column to max(title, widest cell) in one
         // row scan, bounded by the table's bounds on skill and factor columns
         // ([ItemColumnBounds]) when the column takes them.
-        autoFitColumnPrecise(context, col, bounds);
+        autoFitColumnPrecise(context, col, bounds, itemTextExtents);
         // A column wider than the grid is halved, unless the table bounds it: its cap is the bound it declares.
         if (columnMaxWidth.isInfinite && maxWidth != null && col.width > maxWidth!) {
           resizeColumn(col, -(col.width / 2 - 24));
@@ -1525,7 +1576,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   // pass — carrying over cells, key, flags, and the record user-data — and the
   // caller notifies once. Returns whether anything changed. [bounds] holds the
   // measured content of a skill or factor cell to the table's cell height cap.
-  bool applyRowHeights({required RowHeightMode mode, required int minLines, required ItemColumnBounds bounds}) {
+  bool applyRowHeights({
+    required RowHeightMode mode,
+    required int minLines,
+    required ItemColumnBounds bounds,
+    required ItemTextExtents itemTextExtents,
+  }) {
     final context = gridKey.currentContext;
     if (context == null) {
       return false;
@@ -1533,12 +1589,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     final style = DefaultTextStyle.of(context).style;
     final textScaler = MediaQuery.textScalerOf(context);
     final columns = _wrappingColumns(bounds);
-    final floorMeasurement = CellMeasurement(style: style, textScaler: textScaler);
+    final floorMeasurement = CellMeasurement(style: style, textScaler: textScaler, itemTextExtents: itemTextExtents);
     double floor(TrinaRow row) => _minRowHeight(row, columns, floorMeasurement, minLines);
     // The auto modes measure wrapped text; wrap fills the floor without measuring.
     final measurer = mode == RowHeightMode.wrap
         ? null
-        : _RowHeightMeasurer(columns: columns, style: style, textScaler: textScaler);
+        : _RowHeightMeasurer(columns: columns, style: style, textScaler: textScaler, itemTextExtents: itemTextExtents);
     final List<double> targets;
     try {
       switch (mode) {

@@ -670,7 +670,7 @@
                         },
                         "mark_missing": {
                             "label": "不適合表示",
-                            "tooltip": "持っていない項目と、条件に届かない因子を赤で示します",
+                            "tooltip": "持っていない項目と、条件に届かない因子を赤で、条件を満たす項目を緑で示します",
                             "disabled_tooltip": "タグ指定の列と論理列の中の列では使えません"
                         },
                         "unused_while_marking": "【@:pages.chara_detail.column_predicate.common.unmet_rows.mark_missing.label】の間は使いません",

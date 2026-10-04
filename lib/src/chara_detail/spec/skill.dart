@@ -158,33 +158,40 @@ mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
   SkillItemsColumnSpec withSkillSelection({Set<int>? ids, Set<String>? tags});
 
   /// The selected skill ids: the tags resolved against the current skill master while [selectByTag], the
-  /// hand-picked ones otherwise.
-  Set<int> resolvedSkillIds(RefBase ref) {
+  /// hand-picked ones otherwise. The resolution is read, unless [watch] makes it a dependency of [ref]'s owner: the
+  /// cells of a displayed column ([cellInputs]) and [ColumnSpec.evaluate] watch it, so a module update rebuilds the
+  /// grid and re-filters its rows even when the column is hidden; the tooltip reads it.
+  Set<int> resolvedSkillIds(RefBase ref, {bool watch = false}) {
     if (!selectByTag) {
       return selectedSkillIds;
     }
-    return ref.read(_skillTagQueryProvider(_skillTagsKey(skillTags)));
+    final provider = _skillTagQueryProvider(_skillTagsKey(skillTags));
+    return watch ? ref.watch(provider) : ref.read(provider);
+  }
+
+  /// What this column's cells depend on, watched through [ref] once per grid build.
+  ItemCellInputs cellInputs(RefBase ref) {
+    final query = resolvedSkillIds(ref, watch: true);
+    return ItemCellInputs(
+      query: query,
+      order: ItemOrder(query: query, masterRank: ref.watch(skillMasterRankProvider)),
+      labels: ref.watch(labelMapProvider)[labelKey]!,
+    );
   }
 
   /// The skills [value] holds within the selection. An empty selection yields every skill when
   /// [showAllWhenQueryIsEmpty] and none otherwise (e.g. a tag-driven column with no tag selected yet), mirroring
   /// [FactorItemsColumnSpec.heldFactors].
-  List<Skill> heldSkills(RefBase ref, List<Skill> value) {
-    final ids = resolvedSkillIds(ref);
+  List<Skill> heldSkills(Set<int> ids, List<Skill> value) {
     if (ids.isEmpty) {
       return showAllWhenQueryIsEmpty ? value : [];
     }
     return value.where((e) => ids.contains(e.id)).toList();
   }
 
-  /// The order the cell lists skills in: the selection's order first, then the master's.
-  ItemOrder itemOrder(RefBase ref) =>
-      ItemOrder(query: resolvedSkillIds(ref), masterRank: ref.watch(skillMasterRankProvider));
-
-  @override
-  @override
-  Map<int, int> heldItemStrengths(RefBase ref, List<Skill> value) => {
-    for (final skill in heldSkills(ref, value)) skill.id: 1,
+  /// The skills [value] holds within [ids], each at strength 1.
+  Map<int, int> heldStrengths(Set<int> ids, List<Skill> value) => {
+    for (final skill in heldSkills(ids, value)) skill.id: 1,
   };
 }
 
@@ -337,19 +344,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
-  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
-  /// the query is resolved live from the current skill master so newly tagged skills
-  /// are picked up automatically; otherwise the stored predicate is used as-is.
-  AggregateSkillPredicate _resolved(RefBase ref) {
-    if (!selectByTag) {
-      return predicate;
-    }
-    return predicate.copyWith(query: resolvedSkillIds(ref));
-  }
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]), the query is resolved from the
+  /// current skill master, as a dependency of [ref]'s owner when [watch] (see [resolvedSkillIds]); otherwise the
+  /// stored predicate is used as-is.
+  AggregateSkillPredicate _resolved(RefBase ref, {bool watch = false}) =>
+      _withQuery(resolvedSkillIds(ref, watch: watch));
+
+  /// The stored predicate, its query replaced by the resolved [query] for a tag-driven column.
+  AggregateSkillPredicate _withQuery(Set<int> query) => selectByTag ? predicate.copyWith(query: query) : predicate;
 
   @override
   List<bool> evaluate(RefBase ref, List<List<Skill>> values) {
-    final resolved = _resolved(ref);
+    final resolved = _resolved(ref, watch: true);
     if (selectByTag && resolved.query.isEmpty && predicate.tags.isNotEmpty) {
       // Tags are selected but resolve to no skill in the current master: nothing can
       // match, so every row is filtered out instead of falling through to apply()'s
@@ -363,12 +369,17 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
   bool get notatesValueOnly => predicate.notation.mode == SkillNotationMode.count;
 
   @override
-  TrinaCell plutoCell(RefBase ref, List<Skill> value) {
-    final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final predicate = _resolved(ref);
-    final order = itemOrder(ref);
-    final foundSkills = order.sort(heldSkills(ref, value), (e) => e.id);
-    // A skill id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
+  CellBuilder<List<Skill>> cellBuilder(RefBase ref) {
+    final inputs = cellInputs(ref);
+    final predicate = _withQuery(inputs.query);
+    return CellBuilder((value) => _cell(inputs, predicate, value));
+  }
+
+  TrinaCell _cell(ItemCellInputs inputs, AggregateSkillPredicate predicate, List<Skill> value) {
+    final labels = inputs.labels;
+    final order = inputs.order;
+    final foundSkills = order.sort(heldSkills(inputs.query, value), (e) => e.id);
+    // A skill id beyond a lagging module label list would throw out of a cell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final skillNames = foundSkills.map((e) => nameOf(e.id)).toList();
@@ -377,14 +388,22 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     final cellValue = notatesValueOnly ? foundSkills.length.toString().padLeft(3, "0") : skillNames.join(", ");
 
     // While marking missing skills the count is drawn as the names, since a red mark belongs to an item.
-    final own = [for (final (i, skill) in foundSkills.indexed) OwnItem(skill.id, skillNames[i], strength: 1)];
+    // A skill has no per-item threshold: holding a queried skill is meeting it.
+    final own = [
+      for (final (i, skill) in foundSkills.indexed)
+        OwnItem(
+          skill.id,
+          ItemText(skillNames[i]),
+          meetsQuery: predicate.query.contains(skill.id) ? true : null,
+          strength: 1,
+        ),
+    ];
     final ItemCellData data = drawsSummary
         ? ItemCellData(items: const [], summary: foundSkills.length.toString(), csv: csv)
-        : ItemCellData.listing(
-            marksMissing
-                ? missingMarkedItems(own, predicate.query, nameOf, order, perItemThreshold: false)
+        : ItemCellData(
+            items: marksMissing
+                ? missingMarkedItems(own, predicate.query, (id) => ItemText(nameOf(id)), order)
                 : [for (final item in own) CellItem(item.text, ItemState.normal)],
-            hideCommon: false,
             csv: csv,
           );
     return TrinaCell(value: cellValue)..setUserData(data);
@@ -433,7 +452,8 @@ String _skillTagsKey(Set<String> tags) => (tags.toList()..sort()).join(',');
 
 // Resolves a tag set to the sids of every skill in the current master that carries
 // all of them (AND). Memoized per tag-key and recomputed when [skillInfoProvider]
-// changes, so a tag-driven column automatically follows game-data updates.
+// changes; a grid follows a game-data update through the column calls that watch
+// it ([SkillItemsColumnSpec.resolvedSkillIds]).
 final _skillTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
   if (key.isEmpty) {
     return const <int>{};
