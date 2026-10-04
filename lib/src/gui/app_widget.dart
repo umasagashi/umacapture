@@ -95,18 +95,11 @@ class AppNavigationRail extends ConsumerWidget {
           bottom: 0,
           left: 0,
           right: 0,
-          // FilledButton takes no tooltip; the Tooltip also gives the icon-only button its semantic label.
+          // TextButton takes no tooltip; the Tooltip also gives the icon-only button its semantic label.
           child: Tooltip(
             message: (isExtended ? "app.sidebar.collapse" : "app.sidebar.expand").tr(),
-            child: FilledButton.tonal(
-              // A slim strip: 24 px tall (two thirds of the 36 px the themed default gives), exactly the icon's
-              // height. The density is pinned so the theme's density does not shift that height.
-              style: ButtonStyle(
-                shape: WidgetStateProperty.all(const RoundedRectangleBorder()),
-                minimumSize: WidgetStateProperty.all(const Size.fromHeight(24)),
-                padding: WidgetStateProperty.all(EdgeInsets.zero),
-                visualDensity: VisualDensity.standard,
-              ),
+            child: TextButton(
+              style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
               child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
               onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
             ),
