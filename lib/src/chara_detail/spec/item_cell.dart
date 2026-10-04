@@ -186,12 +186,6 @@ class ItemCellData implements RenderedCellData {
     : items = List.unmodifiable(items),
       assert(summary == null || items.isEmpty);
 
-  /// [items], less the [ItemState.common] ones when [hideCommon]. Every remaining item is kept, placeholders
-  /// included; how many are shown is decided when the cell is drawn.
-  factory ItemCellData.listing(List<CellItem> items, {required bool hideCommon, required String csv}) {
-    return ItemCellData(items: hideCommon ? items.where((e) => e.state != ItemState.common).toList() : items, csv: csv);
-  }
-
   /// A difference-display cell: the record's [own] items against the compared rows' tally, as
   /// [ItemState.common] or [ItemState.partialHeld], both shaded by the item's strength against the strongest holding
   /// of that item among them ([ItemTally.maxStrengthOf]), and the column's [placeholders] the record does not hold,
@@ -401,6 +395,21 @@ class ItemOrder {
     }
     return a.compareTo(b);
   }
+}
+
+/// What the cells of a skill or factor column read from the modules, resolved once per grid build by the column's
+/// `cellInputs`.
+class ItemCellInputs {
+  /// The selected item ids, the tags resolved.
+  final Set<int> query;
+
+  /// The order the cell lists items in: the selection's order first, then the master's.
+  final ItemOrder order;
+
+  /// The item names of the column's label key.
+  final List<String> labels;
+
+  const ItemCellInputs({required this.query, required this.order, required this.labels});
 }
 
 /// Items of a cell that marks missing items: the record's own items and a [ItemState.missing] placeholder for each

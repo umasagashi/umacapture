@@ -170,9 +170,9 @@ mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
   }
 
   /// What this column's cells depend on, watched through [ref] once per grid build.
-  SkillCellInputs cellInputs(RefBase ref) {
+  ItemCellInputs cellInputs(RefBase ref) {
     final query = resolvedSkillIds(ref, watch: true);
-    return SkillCellInputs(
+    return ItemCellInputs(
       query: query,
       order: ItemOrder(query: query, masterRank: ref.watch(skillMasterRankProvider)),
       labels: ref.watch(labelMapProvider)[labelKey]!,
@@ -193,21 +193,6 @@ mixin SkillItemsColumnSpec on ItemColumnSpec<List<Skill>> {
   Map<int, int> heldStrengths(Set<int> ids, List<Skill> value) => {
     for (final skill in heldSkills(ids, value)) skill.id: 1,
   };
-}
-
-/// What the cells of a skill column read from the modules, resolved once per grid build by
-/// [SkillItemsColumnSpec.cellInputs].
-class SkillCellInputs {
-  /// The selected skill ids, the tags resolved.
-  final Set<int> query;
-
-  /// The order the cell lists skills in: the selection's order first, then the master's.
-  final ItemOrder order;
-
-  /// The skill names of the column's label key.
-  final List<String> labels;
-
-  const SkillCellInputs({required this.query, required this.order, required this.labels});
 }
 
 @MappableClass(discriminatorValue: 'SkillColumnSpec', ignoreNull: true)
@@ -390,7 +375,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     return CellBuilder((value) => _cell(inputs, predicate, value));
   }
 
-  TrinaCell _cell(SkillCellInputs inputs, AggregateSkillPredicate predicate, List<Skill> value) {
+  TrinaCell _cell(ItemCellInputs inputs, AggregateSkillPredicate predicate, List<Skill> value) {
     final labels = inputs.labels;
     final order = inputs.order;
     final foundSkills = order.sort(heldSkills(inputs.query, value), (e) => e.id);
@@ -415,11 +400,10 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     ];
     final ItemCellData data = drawsSummary
         ? ItemCellData(items: const [], summary: foundSkills.length.toString(), csv: csv)
-        : ItemCellData.listing(
-            marksMissing
+        : ItemCellData(
+            items: marksMissing
                 ? missingMarkedItems(own, predicate.query, (id) => ItemText(nameOf(id)), order)
                 : [for (final item in own) CellItem(item.text, ItemState.normal)],
-            hideCommon: false,
             csv: csv,
           );
     return TrinaCell(value: cellValue)..setUserData(data);

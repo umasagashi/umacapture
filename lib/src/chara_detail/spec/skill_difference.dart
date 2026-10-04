@@ -312,7 +312,7 @@ ColumnDescription _typeDescription({required bool selectByTag}) => (
 /// The cells of a [SkillDifferenceColumnSpec] for one grid build.
 class _SkillDifferenceCells implements DifferenceCells<List<Skill>> {
   final SkillDifferenceColumnSpec spec;
-  final SkillCellInputs inputs;
+  final ItemCellInputs inputs;
 
   const _SkillDifferenceCells(this.spec, this.inputs);
 

@@ -402,9 +402,9 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   }
 
   /// What this column's cells depend on, watched through [ref] once per grid build.
-  FactorCellInputs cellInputs(RefBase ref) {
+  ItemCellInputs cellInputs(RefBase ref) {
     final query = resolvedFactorIds(ref, watch: true);
-    return FactorCellInputs(
+    return ItemCellInputs(
       query: query,
       order: ItemOrder(query: query, masterRank: ref.watch(factorMasterRankProvider)),
       labels: ref.watch(labelMapProvider)[labelKey]!,
@@ -440,21 +440,6 @@ mixin FactorItemsColumnSpec on ItemColumnSpec<FactorSet> {
   Map<int, int> heldStrengths(Set<int> query, FactorSet value) => {
     for (final factor in heldFactors(query, value)) factor.id: factor.sum(),
   };
-}
-
-/// What the cells of a factor column read from the modules, resolved once per grid build by
-/// [FactorItemsColumnSpec.cellInputs].
-class FactorCellInputs {
-  /// The selected factor ids, the tags resolved.
-  final Set<int> query;
-
-  /// The order the cell lists factors in: the selection's order first, then the master's.
-  final ItemOrder order;
-
-  /// The factor names of the column's label key.
-  final List<String> labels;
-
-  const FactorCellInputs({required this.query, required this.order, required this.labels});
 }
 
 @MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
@@ -657,7 +642,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     return CellBuilder((value) => _cell(inputs, predicate, value));
   }
 
-  TrinaCell _cell(FactorCellInputs inputs, AggregateFactorSetPredicate predicate, FactorSet value) {
+  TrinaCell _cell(ItemCellInputs inputs, AggregateFactorSetPredicate predicate, FactorSet value) {
     final mode = predicate.notation.mode;
     final order = inputs.order;
     final factors = order.sort(heldFactors(inputs.query, value), (e) => e.id);
@@ -686,11 +671,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     final csv = const CsvEncoder().convert([drawn]);
     final data = marksMissing
         ? _markedCell(inputs, predicate, value, csv: csv)
-        : ItemCellData.listing(
-            [for (final text in notations) CellItem(text, ItemState.normal)],
-            hideCommon: false,
-            csv: csv,
-          );
+        : ItemCellData(items: [for (final text in notations) CellItem(text, ItemState.normal)], csv: csv);
     return TrinaCell(value: desc)..setUserData(data);
   }
 
@@ -698,7 +679,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// of the stored notation, and the placeholders of the queried factors the record lacks, drawn in the same
   /// notation with every slot 0 so that a placeholder takes the shape of a held factor.
   ItemCellData _markedCell(
-    FactorCellInputs inputs,
+    ItemCellInputs inputs,
     AggregateFactorSetPredicate predicate,
     FactorSet factorSet, {
     required String csv,
@@ -718,7 +699,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
         ),
     ];
     final items = missingMarkedItems(own, predicate.query, placeholderOf, inputs.order);
-    return ItemCellData.listing(items, hideCommon: false, csv: csv);
+    return ItemCellData(items: items, csv: csv);
   }
 
   @override

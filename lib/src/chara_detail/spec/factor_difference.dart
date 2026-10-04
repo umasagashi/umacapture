@@ -354,7 +354,7 @@ ColumnDescription _typeDescription({required bool selectByTag}) => (
 /// The cells of a [FactorDifferenceColumnSpec] for one grid build.
 class _FactorDifferenceCells implements DifferenceCells<FactorSet> {
   final FactorDifferenceColumnSpec spec;
-  final FactorCellInputs inputs;
+  final ItemCellInputs inputs;
 
   const _FactorDifferenceCells(this.spec, this.inputs);
 
