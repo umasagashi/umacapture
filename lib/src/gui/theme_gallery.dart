@@ -611,6 +611,20 @@ class _BlendSection extends StatelessWidget {
           'disabled FilledButton\'s foreground.',
         ),
         _SwatchRow(
+          _BlendSwatch('current row (even)', overlay: s.tableRowCurrentOverlay, base: cs.surface, baseLabel: 'surface'),
+          'The record table\'s current row when it is an even row, scrolling or pinned: tableRowCurrentOverlay over '
+          'the surface fill the row would otherwise have.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'current row (odd)',
+            overlay: s.tableRowCurrentOverlay,
+            base: s.tableRowStripe,
+            baseLabel: 'tableRowStripe',
+          ),
+          'The record table\'s current row when it is an odd row: tableRowCurrentOverlay over the stripe fill.',
+        ),
+        _SwatchRow(
           _BlendSwatch(
             'numeric field unit',
             overlay: cs.onSurfaceVariant.withValues(alpha: 0.6),
@@ -873,6 +887,21 @@ class _SemanticSection extends StatelessWidget {
       ('brandBanner', s.brandBanner, s.onBrandBanner, 'Character-name banner background.'),
       ('onBrandBanner', s.onBrandBanner, s.brandBanner, 'Text on the character banner.'),
       ('mutedIndicator', s.mutedIndicator, null, 'Capture progress "not started" indicator.'),
+      (
+        'tableRowStripe',
+        s.tableRowStripe,
+        null,
+        'Odd rows of the record table\'s alternating stripe, scrolling and pinned alike (even rows are surface). '
+            'Lerped from secondaryContainer toward surface, paler in dark than in light.',
+      ),
+      (
+        'tableRowCurrentOverlay',
+        s.tableRowCurrentOverlay,
+        null,
+        'Translucent primaryContainer laid over the record table\'s current row (the one picked by clicking it), '
+            'scrolling and pinned alike. The row\'s own fill (surface or tableRowStripe) shows through; the '
+            'checked-row amber overlay is drawn on top of both. See the current row composites below.',
+      ),
     ];
     return _Section(
       'Semantic / brand tokens (AppSemanticColors)',
@@ -935,7 +964,8 @@ const Map<String, String> _roleUsages = {
       'button label, gauge and keyboard-focus ring).',
   'primaryContainer':
       'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
-      'column-builder group borders; character avatar; table/stat accents; settings pending-count badge.',
+      'column-builder group borders; character avatar; selector action chips; statistics card border; settings pending-count badge. '
+      'It is also the source of tableRowCurrentOverlay.',
   'onPrimaryContainer': 'Count text on the settings "resolve inheritance" pending-count badge.',
   'secondaryContainer':
       'Subtle highlight backgrounds: dashboard and data-table avatars; tag chip drag highlight. Also the '
@@ -960,8 +990,7 @@ const Map<String, String> _roleUsages = {
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
   'surfaceBright': 'Pale water-blue tint filling the NoteCard body (paired with a primaryContainer border).',
-  'surfaceContainerLowest':
-      'Pale water-blue tint: logic-column and column-builder group backgrounds; data-table striped rows.',
+  'surfaceContainerLowest': 'Pale water-blue tint: logic-column and column-builder group backgrounds.',
   'surfaceContainerLow':
       'Script name-copy chips; recolored to a pale water-blue tint. Also the enhancement merge dialog\'s '
       'selected record card background.',

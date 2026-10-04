@@ -71,6 +71,16 @@ final charaDetailInitialDataLoader = FutureProvider(retry: retryUnlessStoreOutag
   return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
 });
 
+/// The fill of a row at [displayIdx] within its block (scrolling rows, or the pinned block): even rows are
+/// `surface`, odd rows [AppSemanticColors.tableRowStripe]. Scrolling and pinned rows both paint through this.
+Color _tableRowFill(ThemeData theme, int displayIdx) =>
+    displayIdx.isEven ? theme.colorScheme.surface : theme.semantic.tableRowStripe;
+
+/// The fill of the current row: [AppSemanticColors.tableRowCurrentOverlay] over the row's own [_tableRowFill].
+/// Composited here into an opaque color so what is painted does not depend on what the grid draws beneath it.
+Color _tableCurrentRowFill(ThemeData theme, int displayIdx) =>
+    Color.alphaBlend(theme.semantic.tableRowCurrentOverlay, _tableRowFill(theme, displayIdx));
+
 class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
   const _CharaDetailDataTableWidget();
 
@@ -988,11 +998,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         // (frozen rows render in a separate block), so an index compare
                         // would highlight the wrong row.
                         if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
-                          return theme.colorScheme.primaryContainer;
+                          return _tableCurrentRowFill(theme, rowContext.rowIdx);
                         }
-                        return rowContext.rowIdx.isEven
-                            ? theme.colorScheme.surface
-                            : theme.colorScheme.surfaceContainerLowest;
+                        return _tableRowFill(theme, rowContext.rowIdx);
                       },
                       // Checked rows get a translucent amber overlay that dims the
                       // cells and is labeled "archive", so the destructive (lossy,
@@ -1016,12 +1024,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                           final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
                           if (pinnedIdx >= 0) {
                             final isLast = pinnedIdx == _pinnedRowCount - 1;
-                            // The stripe and separator don't depend on the selection, so
-                            // compute them once; only the current-row highlight below is
-                            // recomputed per notify.
-                            final stripe = pinnedIdx.isEven
-                                ? theme.colorScheme.surface
-                                : theme.colorScheme.surfaceContainerLowest;
+                            // The fills and separator don't depend on the selection, so
+                            // compute them once; only the choice between the fills below is
+                            // made per notify.
+                            final fill = _tableRowFill(theme, pinnedIdx);
+                            final currentFill = _tableCurrentRowFill(theme, pinnedIdx);
                             final separator = isLast
                                 ? BorderSide(color: theme.colorScheme.outline, width: 3)
                                 : BorderSide(
@@ -1046,9 +1053,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                             row = ListenableBuilder(
                               listenable: stateManager,
                               builder: (context, child) {
-                                final background = stateManager.isCurrentRecord(rowData)
-                                    ? theme.colorScheme.primaryContainer
-                                    : stripe;
+                                final background = stateManager.isCurrentRecord(rowData) ? currentFill : fill;
                                 return DecoratedBox(
                                   decoration: BoxDecoration(color: background),
                                   child: child,
