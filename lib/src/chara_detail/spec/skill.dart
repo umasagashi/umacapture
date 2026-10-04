@@ -403,12 +403,21 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>>
     final cellValue = notatesValueOnly ? foundSkills.length.toString().padLeft(3, "0") : skillNames.join(", ");
 
     // While marking missing skills the count is drawn as the names, since a red mark belongs to an item.
-    final own = [for (final (i, skill) in foundSkills.indexed) OwnItem(skill.id, ItemText(skillNames[i]), strength: 1)];
+    // A skill has no per-item threshold: holding a queried skill is meeting it.
+    final own = [
+      for (final (i, skill) in foundSkills.indexed)
+        OwnItem(
+          skill.id,
+          ItemText(skillNames[i]),
+          meetsQuery: predicate.query.contains(skill.id) ? true : null,
+          strength: 1,
+        ),
+    ];
     final ItemCellData data = drawsSummary
         ? ItemCellData(items: const [], summary: foundSkills.length.toString(), csv: csv)
         : ItemCellData.listing(
             marksMissing
-                ? missingMarkedItems(own, predicate.query, (id) => ItemText(nameOf(id)), order, perItemThreshold: false)
+                ? missingMarkedItems(own, predicate.query, (id) => ItemText(nameOf(id)), order)
                 : [for (final item in own) CellItem(item.text, ItemState.normal)],
             hideCommon: false,
             csv: csv,

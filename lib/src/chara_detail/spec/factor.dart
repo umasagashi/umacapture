@@ -563,14 +563,14 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
   /// query as a whole, as it is under mixed.
   bool get judgesEachItem => predicate.logic != FactorSetLogicMode.mixed;
 
-  /// Whether a marked cell judges each factor against the threshold. Under mixed the threshold applies to the query
-  /// as a whole, so no single factor is short of it; an empty query accepts every record, so no factor is short of
-  /// it either.
-  bool get marksShortItems => predicate.query.isNotEmpty && judgesEachItem;
+  /// Whether a marked cell judges each factor against the threshold, marking it met or short. Under mixed the
+  /// threshold applies to the query as a whole, so no single factor meets or falls short of it; an empty query
+  /// accepts every record, so no factor is judged either.
+  bool get judgesHeldItems => predicate.query.isNotEmpty && judgesEachItem;
 
   /// Whether the element mode and the lower bounds apply: while marking missing factors they decide which factors
-  /// are short, which only [marksShortItems] does.
-  bool get usesPerItemThreshold => !marksMissing || marksShortItems;
+  /// are met or short, which only [judgesHeldItems] does.
+  bool get usesPerItemThreshold => !marksMissing || judgesHeldItems;
 
   @override
   bool get hasFilter => true;
@@ -707,23 +707,17 @@ class FactorColumnSpec extends ColumnSpec<FactorSet>
     String nameOf(int id) => labels.getOrNull(id) ?? id.toString();
     final mode = predicate.notation.mode.named;
     ItemText placeholderOf(int id) => FactorItemsColumnSpec.placeholderText(labels, id, mode);
-    final perItemThreshold = marksShortItems;
+    final judges = judgesHeldItems;
     final own = [
       for (final factor in heldFactors(inputs.query, factorSet))
         OwnItem(
           factor.id,
           FactorItemsColumnSpec.itemText(factor, nameOf(factor.id), mode),
-          meetsQuery: !perItemThreshold || predicate.acceptsItem(factor),
+          meetsQuery: judges ? predicate.acceptsItem(factor) : null,
           strength: factor.sum(),
         ),
     ];
-    final items = missingMarkedItems(
-      own,
-      predicate.query,
-      placeholderOf,
-      inputs.order,
-      perItemThreshold: perItemThreshold,
-    );
+    final items = missingMarkedItems(own, predicate.query, placeholderOf, inputs.order);
     return ItemCellData.listing(items, hideCommon: false, csv: csv);
   }
 

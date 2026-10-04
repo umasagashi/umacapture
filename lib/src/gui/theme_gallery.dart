@@ -425,8 +425,20 @@ class _BlendSection extends StatelessWidget {
             baseLabel: 'surface',
           ),
           'Rounded background behind each skill or factor of the record table cell, in the '
-          'outline role, including a held item in a column that marks missing items. A difference column paints its '
-          'held items green instead (the item green rows below). See the item cell rows below.',
+          'outline role, including a held item a column that marks missing items does not judge on its own (a '
+          'factor under mixed or an empty query). A difference column paints its held items green instead (the item '
+          'green rows below). See the item cell rows below.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'item met',
+            overlay: s.success.withValues(alpha: itemMetAlpha),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Background of an item a column that marks missing items judges as meeting the query: a held queried skill, '
+          'or a factor that reaches the per-item threshold. One fixed strength, not shaded by stars. See the item '
+          'cell rows below.',
         ),
         _SwatchRow(
           _BlendSwatch(
@@ -664,17 +676,19 @@ class _ItemCellSection extends ConsumerWidget {
             'marking missing items',
             ItemCellData(
               items: const [
-                CellItem(ItemText.valued('Item A', ' (3)'), ItemState.normal),
+                CellItem(ItemText.valued('Item A', ' (3)'), ItemState.met),
                 CellItem(ItemText.valued('Item B', ' (1)'), ItemState.short),
+                CellItem(ItemText.valued('Item D', ' (2)'), ItemState.normal),
                 CellItem(ItemText.valued('Item C', ' (0)'), ItemState.missing),
               ],
               csv: '',
             ),
           ),
           'A queried list as a column that marks missing items shows it, in factor notation: an item the record '
-          'has (the same outline background as a filtering column), a factor below the per-item threshold (red background, normal text), and a factor the '
-          'record lacks (red background, text dimmed to disabledColor, drawn with a value of 0 so every row '
-          'lines its factors up alike). Check that the dimmed text stays legible on the red in both themes.',
+          'has and that meets the query (green background), a factor below the per-item threshold (red background, '
+          'normal text), a factor the record lacks (red background, text dimmed to disabledColor, drawn with a value '
+          'of 0 so every row lines its factors up alike), and a held factor nothing judges on its own (mixed; the '
+          'same outline background as a filtering column). Check that the dimmed text stays legible on the red in both themes.',
         ),
         _SwatchRow(
           _ItemCellSpecimen(
@@ -816,7 +830,8 @@ class _SemanticSection extends StatelessWidget {
         null,
         'Toast success, capture requirement OK, addon success, a finished tab\'s progress ring, the "safe to switch '
             'characters" arrows, every CaptureStatusTone.success line of the capture card, and the green '
-            'difference shades of the record table\'s skill and factor cells (see the item green rows above).',
+            'difference shades of the record table\'s skill and factor cells (see the item green rows above), and the '
+            'green of an item a column that marks missing items finds meeting the query (the item met row above).',
       ),
       (
         'warning',

@@ -51,6 +51,7 @@ import 'support/records.dart';
 const _normal = ItemState.normal;
 const _missing = ItemState.missing;
 const _short = ItemState.short;
+const _met = ItemState.met;
 const _common = ItemState.common;
 const _partialHeld = ItemState.partialHeld;
 const _partialMissing = ItemState.partialMissing;
@@ -332,7 +333,7 @@ void main() {
           _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing, subject: FactorSearchSubjectMode.trainee),
         ],
       );
-      expect(g.items('r', 'f'), [('F1 (2)', _normal), ('F2 (0)', _missing), ('F3 (0)', _missing)]);
+      expect(g.items('r', 'f'), [('F1 (2)', _met), ('F2 (0)', _missing), ('F3 (0)', _missing)]);
       expect(g.cell('r', 'f').value, 'F1 (2)');
       expect(g.measured('r', 'f'), (texts: 'F1 (2)|F2 (0)|F3 (0)'));
     });
@@ -344,7 +345,7 @@ void main() {
           _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 'f'), [('F1 (2)', _normal), ('F2 (3)', _normal), ('F3 (0)', _missing)]);
+      expect(g.items('r', 'f'), [('F1 (2)', _met), ('F2 (3)', _met), ('F3 (0)', _missing)]);
       expect(g.measured('r', 'f'), (texts: 'F1 (2)|F2 (3)|F3 (0)'));
     });
 
@@ -368,7 +369,7 @@ void main() {
               _factor('f', query: {1, 3}, unmetRows: UnmetRows.markMissing, subject: subject, notation: notation),
             ],
           );
-          expect(g.items('r', 'f'), [(held, _normal), (placeholder, _missing)]);
+          expect(g.items('r', 'f'), [(held, _met), (placeholder, _missing)]);
           expect(g.measured('r', 'f'), (texts: '$held|$placeholder'));
         });
       }
@@ -383,7 +384,7 @@ void main() {
           _skill('s', query: {4, 1, 2}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 's'), [('S4', _missing), ('S1', _normal), ('S2', _missing)]);
+      expect(g.items('r', 's'), [('S4', _missing), ('S1', _met), ('S2', _missing)]);
       expect(g.measured('r', 's'), (texts: 'S4|S1|S2'));
     });
 
@@ -402,7 +403,7 @@ void main() {
         ),
       ]);
       expect(g.items('one', 'f'), [('F1 (3)', _short)]);
-      expect(g.items('two', 'f'), [('F1 (2)', _normal)]);
+      expect(g.items('two', 'f'), [('F1 (2)', _met)]);
     });
 
     test('an empty query marks no factor short, whatever the lower bound', () {
@@ -417,6 +418,16 @@ void main() {
       expect(g.items('r', 'count'), [('F1 (1)', _normal), ('F2 (1)', _normal)]);
     });
 
+    test('mixed judges the query as a whole, so a held factor is neither met nor short', () {
+      final g = _build(
+        [record],
+        [
+          _factor('f', query: {1, 2, 3}, unmetRows: UnmetRows.markMissing, logic: FactorSetLogicMode.mixed, star: 9),
+        ],
+      );
+      expect(g.items('r', 'f'), [('F1 (2)', _normal), ('F2 (3)', _normal), ('F3 (0)', _missing)]);
+    });
+
     test('a column with a query selection holds every item, placeholders included', () {
       final g = _build(
         [
@@ -426,7 +437,7 @@ void main() {
           _skill('s', query: {1, 2, 3, 4}, unmetRows: UnmetRows.markMissing),
         ],
       );
-      expect(g.items('r', 's'), [('S1', _normal), ('S2', _missing), ('S3', _missing), ('S4', _missing)]);
+      expect(g.items('r', 's'), [('S1', _met), ('S2', _missing), ('S3', _missing), ('S4', _missing)]);
     });
   });
 
@@ -590,7 +601,7 @@ void main() {
         ],
         skillMaster: master,
       );
-      expect(g.items('r', 's'), [('S0', _normal), ('S3', _missing), ('S2', _normal)]);
+      expect(g.items('r', 's'), [('S0', _met), ('S3', _missing), ('S2', _met)]);
     });
 
     test('normal, empty query: master order for the items, the sort value and the CSV', () {
@@ -635,7 +646,7 @@ void main() {
       expect(g.items('r', 'normal'), [('F1 (3)', _normal), ('F2 (1)', _normal)]);
       expect(g.cell('r', 'normal').value, 'F1 (3), F2 (1)');
       expect(g.data('r', 'normal').csv, 'F1 (3),F2 (1)');
-      expect(g.items('r', 'absence'), [('F3 (0)', _missing), ('F2 (1)', _normal), ('F1 (3)', _normal)]);
+      expect(g.items('r', 'absence'), [('F3 (0)', _missing), ('F2 (1)', _met), ('F1 (3)', _met)]);
     });
 
     test('an id the master does not list sorts after every listed one, without throwing', () {

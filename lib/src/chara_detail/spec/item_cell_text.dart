@@ -13,7 +13,7 @@ import '/src/gui/theme_extensions.dart';
 const itemNormalAlpha = 0.3;
 
 /// Alpha of the red background ([ItemState.missing], [ItemState.short], [ItemState.partialMissing]).
-const itemMissingAlpha = 0.15;
+const itemMissingAlpha = 0.10;
 
 /// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the weakest strength (1).
 const itemPartialHeldAlphaMin = 0.1125;
@@ -21,6 +21,10 @@ const itemPartialHeldAlphaMin = 0.1125;
 /// Alpha of the green background ([ItemState.common], [ItemState.partialHeld]) at the strongest strength
 /// (== strengthMax, the strongest holding of the item among the compared rows).
 const itemPartialHeldAlphaMax = 0.375;
+
+/// Alpha of the green background of [ItemState.met], the same for every item that passes: the middle of the
+/// difference column's green range ([itemPartialHeldAlphaMin] to [itemPartialHeldAlphaMax]).
+const itemMetAlpha = (itemPartialHeldAlphaMin + itemPartialHeldAlphaMax) / 2;
 
 /// Alpha of the green background for [strength] out of [strengthMax], linear between the two ends.
 /// A scale of a single step (strengthMax <= 1, e.g. every compared row holds the item at the same strength 1)
@@ -37,6 +41,7 @@ double itemPartialHeldAlpha(int strength, int strengthMax) {
 Color itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item) {
   return switch (item.state) {
     ItemState.normal => scheme.outline.withValues(alpha: itemNormalAlpha),
+    ItemState.met => colors.success.withValues(alpha: itemMetAlpha),
     ItemState.missing ||
     ItemState.short ||
     ItemState.partialMissing => colors.danger.withValues(alpha: itemMissingAlpha),
@@ -50,7 +55,7 @@ Color itemBackground(ColorScheme scheme, AppSemanticColors colors, CellItem item
 Color? itemForeground(ThemeData theme, CellItem item) {
   return switch (item.state) {
     ItemState.missing || ItemState.partialMissing => theme.disabledColor,
-    ItemState.normal || ItemState.short || ItemState.common || ItemState.partialHeld => null,
+    ItemState.normal || ItemState.met || ItemState.short || ItemState.common || ItemState.partialHeld => null,
   };
 }
 

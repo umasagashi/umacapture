@@ -8,9 +8,13 @@ import '/src/chara_detail/spec/base.dart';
 
 /// How one item of a skill or factor cell is painted.
 enum ItemState {
-  /// The record has the item (outline background). Every item of a query column, missing-marked or not, that
-  /// the record holds and that meets the query.
+  /// The record has the item (outline background), and nothing judges it on its own: every held item of a column
+  /// that does not mark missing items, and a held item a marking column has no per-item judgement for.
   normal,
+
+  /// The record has a queried item that passes the per-item judgement (green). A column that marks missing items:
+  /// a held skill, or a factor that reaches the per-item threshold.
+  met,
 
   /// The record lacks a queried item (red placeholder). A column that marks missing items.
   missing,
@@ -100,13 +104,13 @@ class OwnItem {
   /// The text drawn, notation included.
   final ItemText text;
 
-  /// Whether the item passes the per-item threshold of the query (always true where there is none).
-  final bool meetsQuery;
+  /// Whether the item passes the per-item judgement of the query, or null where nothing judges it on its own.
+  final bool? meetsQuery;
 
   /// Strength within the comparison scope (the star sum for a factor).
   final int strength;
 
-  const OwnItem(this.id, this.text, {this.meetsQuery = true, this.strength = 0});
+  const OwnItem(this.id, this.text, {this.meetsQuery, this.strength = 0});
 }
 
 /// How many of the compared rows hold each item of one column, the strongest holding of each, and which items
@@ -402,18 +406,25 @@ class ItemOrder {
 /// Items of a cell that marks missing items: the record's own items and a [ItemState.missing] placeholder for each
 /// queried item it lacks, together in [order]. [placeholderOf] gives a placeholder's text.
 ///
-/// With [perItemThreshold], an own item that fails its threshold is [ItemState.short].
+/// An own item is [ItemState.met] or [ItemState.short] by its [OwnItem.meetsQuery], and [ItemState.normal] where
+/// nothing judges it.
 List<CellItem> missingMarkedItems(
   List<OwnItem> own,
   Iterable<int> query,
   ItemText Function(int) placeholderOf,
-  ItemOrder order, {
-  required bool perItemThreshold,
-}) {
+  ItemOrder order,
+) {
   final ownIds = {for (final item in own) item.id};
   final items = [
     for (final item in own)
-      (item.id, CellItem(item.text, perItemThreshold && !item.meetsQuery ? ItemState.short : ItemState.normal)),
+      (
+        item.id,
+        CellItem(item.text, switch (item.meetsQuery) {
+          null => ItemState.normal,
+          true => ItemState.met,
+          false => ItemState.short,
+        }),
+      ),
     for (final id in query)
       if (!ownIds.contains(id)) (id, CellItem(placeholderOf(id), ItemState.missing)),
   ];
