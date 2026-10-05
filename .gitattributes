@@ -44,6 +44,11 @@ docs/wasm-toolchain/*.sh                       eol=lf
 # drift and overwrite this tracked file. Pin to LF so the checkout matches upstream.
 web/coi-serviceworker.js                       eol=lf
 
+# Files served verbatim from data.umacapture.com (server/wrangler.data.jsonc). Their bytes are
+# what the released app downloads, so neither checkout nor commit may convert line endings:
+# -text keeps the committed blob and the working copy byte-identical to what is served.
+server/data-site/**                            -text
+
 # The native CLI's `build` subcommand regenerates these scene definitions (io_util::write in
 # native/src/util/misc.h, which opens the stream in binary mode so the CRT cannot inject CR).
 # Pin to LF so regeneration matches the committed blob on every platform.

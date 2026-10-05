@@ -1,0 +1,17 @@
+# Served by Workers Static Assets on data.umacapture.com. Values reproduce what the R2 custom domain served.
+/umacapture/*
+  Access-Control-Allow-Origin: *
+/umacapture/version_info.json
+  Cache-Control: no-cache
+/umacapture/modules.zip
+  Cache-Control: no-cache
+/umacapture/modules/*
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Disposition: attachment; filename="modules.zip"
+/umacapture/news.md
+  Cache-Control: public, max-age=14400, must-revalidate
+  Content-Type: text/markdown; charset=utf-8
+/umacapture/sentry_rate_limit.json
+  Cache-Control: public, max-age=14400, must-revalidate
+/umacapture/sentry_sample.json
+  Cache-Control: public, max-age=14400, must-revalidate
