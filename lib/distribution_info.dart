@@ -539,12 +539,12 @@ class DistributionInfoBuilder implements Builder {
   /// artifact is never written from a tree that would publish something undisclosed.
   ///
   /// Those checks run over whatever is on disk, always. Only the emitted `status` depends on
-  /// the gitignored `provisioned_root`: a checkout that never provisioned it is an ordinary
+  /// the gitignored `provisioned_roots`: a checkout that never provisioned them is an ordinary
   /// Windows-only checkout rather than an error, and says `not_provisioned` -- but it still
   /// ships the committed part of `web/`, so skipping verification there would let exactly
   /// the files a fresh clone carries drift unnoticed.
   ///
-  /// `verified` therefore requires *every* `provisioned_root` entry, not any of them: a run of
+  /// `verified` therefore requires *every* `provisioned_roots` entry, not any of them: a run of
   /// `uv run tool/fetch_web_deps.py` alone leaves `wasm/ort/*` present and the `origin: in-tree`
   /// recognition core absent, and calling that tree verified is what would let
   /// `tool/build_web.sh --require-verified` ship a web bundle that cannot start. That partial

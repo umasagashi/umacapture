@@ -149,6 +149,7 @@ Python through `uv`, never bare `python`):
 uv run tool/fetch_web_deps.py                     # everything missing or drifted
 uv run tool/fetch_web_deps.py --only onnxruntime-web   # a single package
 uv run tool/fetch_web_deps.py --only mediabunny   # a single package
+uv run tool/fetch_web_deps.py --only noto-cjk     # the OGP image fonts
 uv run tool/fetch_web_deps.py --force             # re-download even if present and valid
 ```
 
@@ -156,8 +157,10 @@ The fetcher restores the `origin: upstream` entries (onnxruntime-web 1.27.0 —
 only the three files the `ort.wasm.bundle.min.mjs` distribution actually
 references for the CPU-wasm SIMD-threaded execution provider, not the full
 multi-backend tree — plus the Mediabunny 1.52.3 bundle, its shipped `LICENSE`
-file so the MPL-2.0 notice travels with the code it covers, and the
-`coi-serviceworker` shim). The `origin: in-tree` entries cannot be downloaded:
+file so the MPL-2.0 notice travels with the code it covers, the Noto Sans JP
+Regular and Bold fonts under `web/og/fonts/` that the OGP image function in
+`og/` fetches at runtime, and the `coi-serviceworker` shim). The
+`origin: in-tree` entries cannot be downloaded:
 `umacapture_core.js` / `umacapture_core.wasm` come from `build.sh` (copy them
 into `web/wasm/` after building). Those are verified when present and reported
 when missing.
@@ -172,11 +175,18 @@ build, and the artifact is deleted rather than written. That is what makes the
 "unmodified upstream" claim mechanical: it cannot be produced from a tree whose
 bytes contradict it.
 
-A checkout that never provisioned `web/wasm/` is not an error — the artifact
-then says `not_provisioned`, so Windows-only development and CI keep working.
-That only changes the *status*: the pins and the closed-world scan still run
-over whatever is on disk, so the committed part of `web/`
-(`coi-serviceworker.js`, the first-party files) is verified in every checkout.
+The gitignored parts of `web/` are the manifest's `provisioned_roots`, one
+prefix per `.gitignore` line: `wasm/` and `og/fonts/`. The artifact says
+`verified` only when every pinned file under them is present, so a missing font
+stops `tool/build_web.sh` just as a missing recognition core does. A checkout
+that provisioned none of them is not an error — the artifact then says
+`not_provisioned`, so Windows-only development and CI keep working. That only
+changes the *status*: the pins and the closed-world scan still run over
+whatever is on disk, so the committed part of `web/` (`coi-serviceworker.js`,
+the first-party files) is verified in every checkout. A pinned file outside
+every root has to be tracked by git, or the check fails: placing a new
+gitignored file under `web/` therefore means adding its directory to
+`provisioned_roots`.
 
 Two cheaper checks back the codegen gate up, both running the same verification
 code (`lib/web_deps_verify.dart`):

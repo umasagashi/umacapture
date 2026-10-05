@@ -103,11 +103,11 @@ Map<String, dynamic> parseWebDepsManifest(String contents) => jsonDecode(content
 Map<String, dynamic> loadWebDepsManifest() => parseWebDepsManifest(File(webDepsManifest).readAsStringSync());
 
 /// `status` of [webLicenseArtifact] when every file under the manifest's
-/// `provisioned_root` is present, so the disclosure covers the whole shipped tree.
+/// `provisioned_roots` is present, so the disclosure covers the whole shipped tree.
 const String webStatusVerified = "verified";
 
 /// `status` of [webLicenseArtifact] when none of them is, i.e. an ordinary
-/// Windows-only checkout that never provisioned `web/wasm/`.
+/// Windows-only checkout that never provisioned the gitignored part of `web/`.
 const String webStatusNotProvisioned = "not_provisioned";
 
 /// `status` of [webLicenseArtifact] when only *some* of them are.
@@ -119,16 +119,24 @@ const String webStatusNotProvisioned = "not_provisioned";
 /// recognition core in it.
 const String webStatusPartiallyProvisioned = "partially_provisioned";
 
+/// Returns the manifest's `provisioned_roots`: the gitignored prefixes under `web/` a checkout
+/// has to provision, one per `.gitignore` line that excludes part of `web/`.
+List<String> webProvisionedRoots(Map<String, dynamic> manifest) =>
+    (manifest["provisioned_roots"] as List).cast<String>();
+
+/// Returns `true` when the manifest key [key] lies under one of [roots].
+bool isProvisionedKey(Iterable<String> roots, String key) => roots.any(key.startsWith);
+
 /// Returns the `status` [webLicenseArtifact] must report for a tree missing [absent].
 ///
-/// The manifest's `provisioned_root` is the gitignored prefix a checkout has to provision.
-/// [absent] is the manifest-relative key list of everything not on disk -- as produced by
-/// [partitionWebFiles], or as *predicted* for a given provisioning run, which is how
-/// `tool/check_web_pins.dart` derives the shape CI must produce.
+/// Only the entries under `provisioned_roots` decide it; every other pinned file is committed,
+/// which [untrackedCommittedPins] holds to git. [absent] is the manifest-relative key list of
+/// everything not on disk -- as produced by [partitionWebFiles], or as *predicted* for a given
+/// provisioning run, which is how `tool/check_web_pins.dart` derives the shape CI must produce.
 String webProvisioningStatus(Map<String, dynamic> manifest, Iterable<String> absent) {
-  final root = manifest["provisioned_root"] as String;
-  final total = (manifest["files"] as Map).keys.where((key) => (key as String).startsWith(root)).length;
-  final missing = absent.where((key) => key.startsWith(root)).length;
+  final roots = webProvisionedRoots(manifest);
+  final total = (manifest["files"] as Map).keys.where((key) => isProvisionedKey(roots, key as String)).length;
+  final missing = absent.where((key) => isProvisionedKey(roots, key)).length;
   if (missing == 0) {
     return webStatusVerified;
   }
@@ -378,6 +386,35 @@ List<String> untrackedFirstPartyFiles(Map<String, dynamic> allowlist) {
   ]..sort();
 }
 
+/// Returns one problem line per pinned file outside every `provisioned_roots` prefix that git does
+/// not track under `web/`.
+///
+/// [webProvisioningStatus] counts a missing file only under `provisioned_roots`; outside them a
+/// pinned file is taken to be committed, so a checkout always carries it. That holds only while
+/// git really tracks it. A gitignored file pinned outside the roots would be absent from a fresh
+/// clone, and codegen would still report `verified` without it, so `tool/build_web.sh
+/// --require-verified` would ship a bundle missing it. Holding the classification to git is what
+/// makes the roots a fact rather than a promise. Fails closed when git cannot answer, like
+/// [untrackedFirstPartyFiles].
+List<String> untrackedCommittedPins(Map<String, dynamic> manifest) {
+  final roots = webProvisionedRoots(manifest);
+  final tracked = gitTrackedWebFiles();
+  if (tracked == null) {
+    return [
+      "the provisioned_roots in $webDepsManifest are verified against 'git ls-files $webDirectory', "
+          "which could not be run here; refusing to trust which pinned files are committed",
+    ];
+  }
+  return [
+    for (final key in (manifest["files"] as Map).keys.cast<String>())
+      if (!isProvisionedKey(roots, key) && !tracked.contains(key))
+        "web/$key is pinned in $webDepsManifest outside every provisioned_roots prefix "
+            "(${roots.join(", ")}) but git does not track it; a fresh checkout would not have it and "
+            "nothing would count it as missing. Commit it, or add its gitignored directory to "
+            "provisioned_roots",
+  ]..sort();
+}
+
 /// Flattens the present manifest entries into one claim per (component, shipped file).
 ///
 /// A top-level entry contributes the file itself; `umacapture_core.wasm` additionally
@@ -480,7 +517,7 @@ List<String> verifyWebLicenses(Map<String, dynamic> manifest) {
   //
   // Reads `files` rather than the present ones on purpose: this is a property of the manifest,
   // not of the disk, so it has to hold in CI and in a Windows-only checkout, where nothing
-  // under `provisioned_root` exists at all and the claim loop below sees none of these entries.
+  // under `provisioned_roots` exists at all and the claim loop below sees none of these entries.
   // `origin: in-tree` is out of scope here -- those artifacts are this repository's own build
   // and their third-party content is the build's inputs, which `build.sources` already pins.
   for (final entry in files.entries) {
@@ -552,7 +589,8 @@ List<String> verifyWebLicenses(Map<String, dynamic> manifest) {
 /// Runs the closed-world check over `web/` and returns every problem found.
 ///
 /// An empty list means every pinned file that exists hashes to its pin, nothing else sits in
-/// the tree, the first-party allowlist only names committed files, and every locally built
+/// the tree, the first-party allowlist only names committed files, every pinned file outside
+/// `provisioned_roots` is committed (so a missing one is counted wherever it lives), and every locally built
 /// artifact is pinned against the sources this tree currently holds. Pass [licenses] to add
 /// [verifyWebLicenses] on top, which is what `DistributionInfoBuilder` does before it writes
 /// the disclosure.
@@ -579,6 +617,7 @@ Future<List<String>> verifyWebTree(
   final problems = await verifyWebPins(present);
   problems.addAll(unlistedWebFiles(files.keys.toSet(), allowlist));
   problems.addAll(untrackedFirstPartyFiles(allowlist));
+  problems.addAll(untrackedCommittedPins(manifest));
   if (sourceDigests) {
     problems.addAll(verifyInTreeSourceDigests(manifest));
   }

@@ -17,3 +17,10 @@
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   X-Content-Type-Options: nosniff
+
+# The OGP function on Vercel fetches these fonts at run time (og/src/handler.mjs). They change
+# only when their pin in tool/web_deps.json changes, and the function keeps a font that still
+# parses, so a day of staleness after a pin change is harmless. A day and not `immutable`: the
+# names carry no content hash.
+/og/fonts/*
+  Cache-Control: public, max-age=86400

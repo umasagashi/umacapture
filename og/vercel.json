@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "git": { "deploymentEnabled": false },
+  "rewrites": [{ "source": "/r/(.*)", "destination": "/api/og" }],
+  "functions": {
+    "api/og.mjs": { "maxDuration": 30 }
+  }
+}

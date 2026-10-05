@@ -127,6 +127,16 @@
             "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nnlohmann/json 3.12.0 -- statically linked into web/wasm/umacapture_core.wasm (recorded from the build inputs, not derived from the binary)\n\nLicense: MIT"
         },
         {
+            "package": "noto_sans_jp",
+            "asset": "assets/license/noto_sans_jp.txt",
+            "license_id": "OFL-1.1",
+            "sub_notice_of": null,
+            "components": [
+                "noto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf, web/og/fonts/NotoSansJP-Bold.otf (bytes hash-pinned in tool/web_deps.json)"
+            ],
+            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nnoto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf, web/og/fonts/NotoSansJP-Bold.otf (bytes hash-pinned in tool/web_deps.json)\n\nLicense: OFL-1.1"
+        },
+        {
             "package": "onnxruntime",
             "asset": "assets/license/onnxruntime.txt",
             "license_id": "MIT",

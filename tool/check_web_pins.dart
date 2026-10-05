@@ -102,7 +102,7 @@ Map<String, dynamic>? readArtifact() {
 /// gitignored. Its `status` records whatever tree the last codegen ran in, so a clone that
 /// provisioned only the upstream pins -- or nothing at all -- still reads `verified` off disk:
 ///
-/// * `status` must be [webStatusVerified], which now means *every* `provisioned_root` entry was
+/// * `status` must be [webStatusVerified], which now means *every* `provisioned_roots` entry was
 ///   present when it was generated ([webProvisioningStatus]). That catches a tree whose
 ///   disclosure was honestly regenerated from a partial provisioning run.
 /// * its `absent` list must match what is actually missing right now. That catches the other

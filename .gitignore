@@ -71,6 +71,12 @@ lib/*.g.dart
 # its name tables, which are generated at deploy time from the module set and carry game text.
 /server/node_modules/
 /server/src/tables.generated.json
+# The OGP image function's npm dependencies (pinned by og/package-lock.json, which is tracked) and
+# the Vercel CLI's local project state.
+/og/node_modules/
+/og/.vercel/
+# The Vercel token the OGP image function is deployed with (same convention as tool/cloudflare/.env).
+/tool/vercel/.env
 
 # FVM
 .fvm/
@@ -99,3 +105,8 @@ coverage/
 # locally, they are never committed. The coi-serviceworker shim in web/ is a
 # tracked third-party vendored file and is intentionally NOT ignored here.
 /web/wasm/
+
+# Noto Sans JP for the OGP image function (about 9 MB), served from web/ like the wasm runtime.
+# Pinned in tool/web_deps.json (provisioned_roots) and placed by tool/fetch_web_deps.py, so the
+# web build stops when they are missing instead of shipping without them.
+/web/og/fonts/

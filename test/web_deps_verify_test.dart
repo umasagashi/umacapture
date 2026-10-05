@@ -11,7 +11,7 @@ const String pinnedSha256 = "d21d7ea3ee1a2b0d1b09b0e2b1cae1cc4a5a3c3ad3a9f8f2b48
 Map<String, dynamic> manifestOf({required Map<String, dynamic> files, List<String> firstParty = const []}) {
   return {
     "manifest_version": 1,
-    "provisioned_root": "wasm/",
+    "provisioned_roots": ["wasm/"],
     "first_party": {"files": firstParty},
     "files": files,
   };
@@ -327,7 +327,7 @@ void main() {
   });
 
   group("webProvisioningStatus", () {
-    // Mirrors the real manifest: an unprovisioned file outside provisioned_root, three
+    // Mirrors the real manifest: an unprovisioned file outside provisioned_roots, three
     // upstream files inside it, and the in-tree recognition core that only a local build
     // (or a release machine) can produce.
     final manifest = manifestOf(
@@ -340,9 +340,9 @@ void main() {
       },
     );
 
-    test("is verified only when every provisioned_root entry is present", () {
+    test("is verified only when every provisioned_roots entry is present", () {
       expect(webProvisioningStatus(manifest, const []), webStatusVerified);
-      // A file outside provisioned_root has no say in the status.
+      // A file outside provisioned_roots has no say in the status.
       expect(webProvisioningStatus(manifest, const ["coi-serviceworker.js"]), webStatusVerified);
     });
 
@@ -358,6 +358,46 @@ void main() {
       const absent = ["wasm/core.js", "wasm/core.wasm"];
       expect(webProvisioningStatus(manifest, absent), webStatusPartiallyProvisioned);
       expect(webProvisioningStatus(manifest, const ["wasm/core.wasm"]), webStatusPartiallyProvisioned);
+    });
+
+    // The roots are a list because wasm/ is not the only gitignored place: the OGP fonts are
+    // provisioned under og/fonts/. Counting wasm/ alone would let a tree missing a font read
+    // 'verified', and tool/build_web.sh --require-verified would ship it without the font.
+    test("counts a missing file under every provisioned root, not only wasm/", () {
+      final manifest = {
+        ...manifestOf(
+          files: {
+            "coi-serviceworker.js": pinnedEntry(pinnedSha256),
+            "wasm/ort/ort.wasm": pinnedEntry(pinnedSha256),
+            "og/fonts/font.otf": pinnedEntry(pinnedSha256),
+          },
+        ),
+        "provisioned_roots": ["wasm/", "og/fonts/"],
+      };
+      expect(webProvisioningStatus(manifest, const ["og/fonts/font.otf"]), webStatusPartiallyProvisioned);
+      expect(
+        webProvisioningStatus(manifest, const ["wasm/ort/ort.wasm", "og/fonts/font.otf"]),
+        webStatusNotProvisioned,
+      );
+    });
+  });
+
+  // webProvisioningStatus ignores a missing file outside the roots because such a file is
+  // committed. This holds that premise to git, so a gitignored file pinned outside every root
+  // cannot go missing uncounted.
+  group("untrackedCommittedPins", () {
+    test("reports a pinned file outside every root that git does not track", () {
+      writeWebFile("coi-serviceworker.js");
+      writeWebFile("og/fonts/font.otf");
+      expect(Process.runSync("git", ["init", "-q"]).exitCode, 0);
+      expect(Process.runSync("git", ["add", "web/coi-serviceworker.js"]).exitCode, 0);
+      final files = {"coi-serviceworker.js": pinnedEntry(pinnedSha256), "og/fonts/font.otf": pinnedEntry(pinnedSha256)};
+      expect(untrackedCommittedPins(manifestOf(files: files)), [contains("web/og/fonts/font.otf")]);
+      final declared = {
+        ...manifestOf(files: files),
+        "provisioned_roots": ["wasm/", "og/fonts/"],
+      };
+      expect(untrackedCommittedPins(declared), isEmpty);
     });
   });
 }

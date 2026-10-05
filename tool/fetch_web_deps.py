@@ -4,10 +4,14 @@
 # ///
 """Provision the third-party JavaScript/Wasm assets the Flutter web bundle ships.
 
-``web/wasm/`` is gitignored and was historically populated by hand: the
-onnxruntime-web runtime and the locally built recognition core. This script
-restores the fetchable part of that tree from pinned upstream artifacts,
-verifying every byte against ``tool/web_deps.json``.
+The gitignored parts of ``web/`` -- the manifest's ``provisioned_roots``:
+``web/wasm/`` (the onnxruntime-web runtime, the Mediabunny bundle and the
+locally built recognition core) and ``web/og/fonts/`` (the Noto Sans JP files
+the OGP image function fetches) -- are not in a checkout. This script restores
+the fetchable part of them from pinned upstream artifacts, verifying every byte
+against ``tool/web_deps.json``. A file it places that is missing later is
+counted by ``tool/check_web_pins.dart`` wherever it lives, so a web build stops
+on it instead of shipping without it.
 
 It is the web-side counterpart of ``tool/fetch_deps.py``, and deliberately a
 *separate* script: ``fetch_deps.py``'s CLI is pinned by CI
@@ -19,8 +23,8 @@ Unlike ``fetch_deps.py``, the pins do not live in constants here -- they live in
 disclosure. This file only knows how to *act* on that manifest:
 
 * ``origin: upstream`` entries are downloaded (an npm tarball is fetched once and
-  every member it supplies is extracted from it), hash-verified, and written into
-  ``web/``. The archive itself is verified against ``source_form.sha256`` before a
+  every member it supplies is extracted from it; an entry without ``member`` is
+  the file itself), hash-verified, and written into ``web/``. The archive itself is verified against ``source_form.sha256`` before a
   single byte is unpacked, exactly like ``fetch_deps.py`` does for its zips.
 * ``origin: in-tree`` entries cannot be downloaded (the recognition core is built
   by ``native/wasm/build.sh``). They are verified when present and reported when
@@ -189,7 +193,7 @@ def is_first_party(relative: str, allowlist: dict) -> bool:
 def unlisted_files(listed: set[str], allowlist: dict) -> list[str]:
     """Return paths anywhere under ``web/`` that are neither pinned nor first-party.
 
-    Scoping this to ``web/wasm/`` would miss the more dangerous case: a stray
+    Scoping this to the provisioned roots would miss the more dangerous case: a stray
     third-party file dropped at the root of ``web/`` is copied into ``build/web/``
     and published just the same.
 
