@@ -99,14 +99,35 @@ In a desktop Chromium-based browser and in Firefox, and in Android Chrome for vi
 4. Capture (screen share) and video import both work.
 5. The dashboard's "このサイトについて" card links to `/notice/`.
 
+## The pinned wrangler
+
+wrangler is pinned to one exact version in `server/package.json`, with `server/package-lock.json`
+fixing everything it pulls in. `deploy_web.sh` runs `npm ci` in `server/` and calls
+`server/node_modules/.bin/wrangler`; a wrangler installed globally or on `PATH` is never used.
+Run wrangler by hand the same way:
+
+```bash
+(cd server && npm ci --no-audit --no-fund)
+export WRANGLER_SEND_METRICS=false
+server/node_modules/.bin/wrangler --version
+```
+
+Usage metrics are off twice over: every wrangler config sets `"send_metrics": false`, and
+`WRANGLER_SEND_METRICS=false` (which `deploy_web.sh` exports) overrides the config key and the
+consent stored in wrangler's user config. With `WRANGLER_LOG=debug` wrangler prints
+`Metrics dispatcher: Dispatching disabled` for each event it would have sent.
+
+To move to a newer wrangler, change the version in `server/package.json`, run `npm install` in
+`server/`, and commit both files; re-check the `compatibility_date` comments in the configs, which
+name the newest date the pinned version accepts.
+
 ## Local check without Cloudflare
 
 `wrangler dev` serves the same config from the local machine, applying `_headers`,
-`.assetsignore` and the 404 handling the way the platform does. Nothing is uploaded; set
-`WRANGLER_SEND_METRICS=false` so wrangler sends no usage metrics either.
+`.assetsignore` and the 404 handling the way the platform does. Nothing is uploaded.
 
 ```bash
-WRANGLER_SEND_METRICS=false wrangler dev -c server/wrangler.assets-only.jsonc --port 8787
+WRANGLER_SEND_METRICS=false server/node_modules/.bin/wrangler dev -c server/wrangler.assets-only.jsonc --port 8787
 curl -sI http://localhost:8787/
 ```
 
@@ -117,5 +138,5 @@ not show that Cloudflare's edge applies them, which only the post-deployment che
 
 | Goal | How |
 |---|---|
-| Return to the previous version | `wrangler rollback -c server/wrangler.assets-only.jsonc` |
+| Return to the previous version | `server/node_modules/.bin/wrangler rollback -c server/wrangler.assets-only.jsonc` |
 | Take the site off the domain | Remove the `umacapture.com` custom domain in the dashboard |
