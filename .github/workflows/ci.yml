@@ -216,7 +216,8 @@ jobs:
           if-no-files-found: warn
 
   # The required check "Flutter unit/widget tests". It runs no work of its own: it only decides
-  # whether the jobs it depends on -- the browser suites and the sharing Worker's suite included --
+  # whether the jobs it depends on -- the browser suites, the sharing Worker's suite and the OGP image
+  # function's suite included --
   # all succeeded. The
   # browser job is gated here rather than as a required context of its own, so the gate is
   # reviewed with the workflow and a skipped browser job fails it instead of passing. `if: always()` is what makes it a gate.
@@ -227,7 +228,7 @@ jobs:
   # no project code, and it is the runner that picks such a job up soonest.
   flutter-tests:
     name: Flutter unit/widget tests
-    needs: [flutter-test-shards, flutter-static, flutter-web, browser-tests, server-tests]
+    needs: [flutter-test-shards, flutter-static, flutter-web, browser-tests, server-tests, og-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -675,6 +676,32 @@ jobs:
 
       # Exactly the versions in server/package-lock.json. --no-audit: no audit request is sent to
       # the registry.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+  # The OGP image function (og/, deployed to Vercel): its suite drives the handler with real requests
+  # against a local upstream and renders real PNGs (through sharp, which @vercel/og installs as an
+  # optional dependency), so it needs neither Flutter nor the wasm build. Gated by the aggregate "Flutter unit/widget tests" like server-tests.
+  og-tests:
+    name: OGP image function tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: og
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Exactly the versions in og/package-lock.json. --no-audit: no audit request is sent to the
+      # registry.
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 

@@ -14,7 +14,7 @@ Deployment runs from the one PC that can build the wasm recognition core (CI can
 | Files | `build/web/`, built in the same run by `tool/build_web.sh` from a clean `HEAD` |
 | Excluded files | `web/.assetsignore` (copied into `build/web/`): `*.map` (uploaded to Sentry, not public) and `.last_build_id` |
 | Response headers | `web/_headers` (copied into `build/web/`): `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `X-Content-Type-Options: nosniff` on every file |
-| Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`. Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
+| Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`, except `/og/fonts/*` (one day, see the Vercel section). Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
 | CanvasKit | Served from the bundle's own `canvaskit/`. `tool/build_web.sh` always passes `--no-web-resources-cdn`, so nothing is loaded from `www.gstatic.com` |
 | Fonts | Still fetched at runtime from `fonts.gstatic.com` (not bundled) |
 | Unknown paths | Static 404 (`not_found_handling: "none"`). The app uses hash routing and needs no server-side path but `/` |
@@ -172,6 +172,42 @@ not show that Cloudflare's edge applies them, which only the post-deployment che
   publishes while reads and withdrawals go on. To take the Worker off staging entirely, delete the
   `umacapture-web-staging` Worker (and the staging database if no longer needed) in the dashboard;
   this has to happen before the Worker ships to production, because the two share quotas.
+
+## OGP image function (Vercel)
+
+The record cards' OGP images are drawn by the function in `og/`, deployed to the Vercel project
+`umacapture-og` by `tool/vercel/deploy_og.sh`. The function fetches its fonts at run time from
+`/og/fonts/*` on the web app's origin (`PUBLIC_ORIGIN`), so a font change is deployed with
+`deploy_web.sh`, not with this script. `web/_headers` gives those fonts
+`Cache-Control: public, max-age=86400`: a day, not `immutable`, because the file names carry no
+content hash.
+
+```bash
+bash tool/vercel/deploy_og.sh --target production --dry-run   # checks and tests; no upload
+bash tool/vercel/deploy_og.sh --target production             # the same, then asks 'yes' and deploys
+```
+
+`--target` defaults to `preview`. The script stops on a dirty tree, runs `npm ci` and `npm test`
+in `og/`, uploads with the CLI pinned in `og/package-lock.json` (never a `vercel` on `PATH`),
+refuses a deployment that landed on another target than the one asked for, and checks through
+the deployment URL that an absent id and a query string both answer 404 from the function.
+
+- **The first deployment is production.** Vercel makes a project's first deployment a production
+  one whatever was asked for, and the pinned CLI removes `--target preview` before it calls the
+  API. The project has no deployment yet, so its first one is the production deployment. Until a
+  production deployment exists, the script refuses a preview before creating anything, also
+  under `--dry-run`.
+- **Credentials.** `VERCEL_TOKEN` in `tool/vercel/.env` (gitignored); the CLI reads it from the
+  environment. `vercel login` is not used: it signs in the whole machine, not this repository.
+- **Project link.** `og/.vercel/project.json` (gitignored) names the project and is made once by
+  hand. The script never runs `vercel link`: it creates `.vercel/`, can add to `.gitignore`, and
+  offers to connect the repository's Git remote, which it does without asking under `--yes`.
+- **No Git connection.** Deployments come only from the script, so that what is uploaded is a
+  clean, tested `HEAD`. `og/vercel.json` also sets `git.deploymentEnabled: false`.
+- **Deployment protection bypass.** Deployments behind Vercel Authentication are checked with
+  `VERCEL_AUTOMATION_BYPASS_SECRET` from `tool/vercel/.env`, sent only as the
+  `x-vercel-protection-bypass` header of the script's own checks. It never goes into a URL, a page
+  or an `og:image`.
 
 ## Rolling back and switching off
 

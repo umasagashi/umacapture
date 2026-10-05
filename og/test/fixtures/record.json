@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "id": "0123456789",
+  "url": "https://umacapture.example/r/0123456789",
+  "published_on": "2026-10-05",
+  "region": "ja",
+  "recognizer_version": "2026-09-01",
+  "tables_version": "2026-10-01T00:00:00Z",
+  "record_type": "standard",
+  "trainee": {
+    "card": { "gid": 100101, "name": "[Test Card] Sample Runner" },
+    "character": { "gid": 1001, "name": "Sample Runner" },
+    "rank": { "name": "UA" }
+  },
+  "evaluation": 12345,
+  "status": { "speed": 1200, "stamina": 800, "power": 1000, "guts": 400, "intelligence": 900 },
+  "aptitudes": {
+    "ground": { "turf": { "name": "A", "value": 6 }, "dirt": { "name": "G", "value": 0 } },
+    "distance": {
+      "short": { "name": "F", "value": 1 },
+      "mile": { "name": "B", "value": 5 },
+      "middle": { "name": "A", "value": 6 },
+      "long": { "name": "A", "value": 6 }
+    },
+    "style": {
+      "lead_pace": { "name": "G", "value": 0 },
+      "with_pace": { "name": "A", "value": 6 },
+      "off_pace": { "name": "B", "value": 5 },
+      "late_charge": { "name": "C", "value": 4 }
+    }
+  },
+  "strategy": { "name": "Pace" },
+  "skills": [{ "gid": 200011, "name": "Sample Skill", "level": 3 }, { "gid": 200012, "name": "Another Skill" }],
+  "factors": {
+    "self": [{ "gid": 1, "name": "Speed", "star": 3 }, { "gid": 2, "name": "Turf", "star": 1 }],
+    "parent1": [],
+    "parent2": []
+  },
+  "support_cards": [],
+  "family": {
+    "parent1": {
+      "self": { "card": { "name": "a" }, "character": { "name": "a" } },
+      "parent1": { "card": { "name": "b" }, "character": { "name": "b" } },
+      "parent2": { "card": { "name": "c" }, "character": { "name": "c" } },
+      "rental": false
+    },
+    "parent2": {
+      "self": { "card": { "name": "d" }, "character": { "name": "d" } },
+      "parent1": { "card": { "name": "e" }, "character": { "name": "e" } },
+      "parent2": { "card": { "name": "f" }, "character": { "name": "f" } },
+      "rental": true
+    }
+  },
+  "relation_bonus": null,
+  "fans": 250000,
+  "scenario": { "name": "Sample Scenario" },
+  "trained_on": "2026-09-30",
+  "races": [
+    {
+      "title": { "name": "Sample Cup" },
+      "turn": { "name": "Junior" },
+      "place": { "name": "Tokyo" },
+      "ground": { "name": "turf" },
+      "distance": 1600,
+      "variation": { "name": "left" },
+      "weather": { "name": "sunny" },
+      "strategy": { "name": "Pace" },
+      "position": { "name": "1" }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "umacapture-og",
+  "private": true,
+  "type": "module",
+  "description": "The OGP image function served from og.umacapture.com (Vercel): draws /r/<id>.png from public JSON v1.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "render:default": "node scripts/render_default.mjs"
+  },
+  "dependencies": {
+    "@vercel/og": "1.0.1"
+  },
+  "devDependencies": {
+    "vercel": "62.2.0"
+  }
+}

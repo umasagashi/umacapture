@@ -46,8 +46,8 @@
     "                  immutable source archive, and 'git_url' points at the upstream tag or",
     "                  commit. No self-hosted mirror is kept.",
     "",
-    "Everything under web/wasm/ is gitignored and provisioned locally; web/coi-serviceworker.js",
-    "is committed. Both are listed here, so the manifest also doubles as the answer to 'what",
+    "Everything under web/wasm/ and web/og/fonts/ is gitignored and provisioned locally;",
+    "web/coi-serviceworker.js is committed. Both kinds are listed here, so the manifest also doubles as the answer to 'what",
     "exactly does this repo place under web/, and under which license'. It does NOT cover the",
     "rest of build/web/: Flutter emits flutter.js, flutter_bootstrap.js, main.dart.js and the",
     "CanvasKit / Skwasm payload at build time, and those carry the Flutter SDK's own licensing.",
@@ -80,15 +80,18 @@
     "pin left behind is therefore allowed and expected; the rebuild+repin above is what clears",
     "the CI failure before the branch can merge.",
     "",
-    "'provisioned_root' is the gitignored prefix (see .gitignore) that has to be provisioned",
-    "before a web build. When nothing under it exists, the tree is simply un-provisioned --",
-    "an ordinary Windows-only checkout -- and DistributionInfoBuilder emits",
-    "assets/web_license_info.json with status 'not_provisioned' instead of failing. That only",
-    "changes the status: the pins and the closed-world scan still run over whatever IS on disk,",
-    "so the committed half of web/ (coi-serviceworker.js) is verified in every checkout."
+    "'provisioned_roots' lists the gitignored prefixes (one per .gitignore line under web/) that",
+    "have to be provisioned before a web build. Status 'verified' needs every pinned file under",
+    "them present. When none of them exists, the tree is simply un-provisioned -- an ordinary",
+    "Windows-only checkout -- and DistributionInfoBuilder emits assets/web_license_info.json with",
+    "status 'not_provisioned' instead of failing. That only changes the status: the pins and the",
+    "closed-world scan still run over whatever IS on disk, so the committed half of web/",
+    "(coi-serviceworker.js) is verified in every checkout. A pinned file outside every root must",
+    "be tracked by git, otherwise the check fails: an untracked one would be missing from a fresh",
+    "clone with nothing counting it as missing. So a new gitignored location is a new root here."
   ],
   "manifest_version": 1,
-  "provisioned_root": "wasm/",
+  "provisioned_roots": ["wasm/", "og/fonts/"],
   "first_party": {
     "_comment": [
       "This repo's own hand-written files under web/ -- everything 'git ls-files web/' reports",
@@ -115,10 +118,51 @@
       "splash/splash.js",
       "splash/style.css",
       "_headers",
-      ".assetsignore"
+      ".assetsignore",
+      "og/default.png"
     ]
   },
   "files": {
+    "og/fonts/NotoSansJP-Regular.otf": {
+      "sha256": "dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073",
+      "bytes": 4533028,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf",
+        "package": "noto-cjk",
+        "version": "Sans2.004"
+      },
+      "license": {
+        "id": "OFL-1.1",
+        "asset": "assets/license/noto_sans_jp.txt"
+      },
+      "linked_note": "Nothing to link: this is a font file, not code. It is the full-glyph Japanese subset OTF of Noto Sans CJK, and its name table credits Adobe as the designer under the OFL; no other font or program is embedded.",
+      "source_form": {
+        "form": "git",
+        "git_url": "https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans",
+        "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. Read at runtime by the OGP image function in og/, which fetches it from this origin instead of bundling it."
+      }
+    },
+    "og/fonts/NotoSansJP-Bold.otf": {
+      "sha256": "1b0edfb500b73a4fa8a4fcaae1bbbd403994e08e73e3e0da37e70d3853f42c5f",
+      "bytes": 4656448,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/SubsetOTF/JP/NotoSansJP-Bold.otf",
+        "package": "noto-cjk",
+        "version": "Sans2.004"
+      },
+      "license": {
+        "id": "OFL-1.1",
+        "asset": "assets/license/noto_sans_jp.txt"
+      },
+      "linked_note": "Nothing to link: this is a font file, not code. It is the full-glyph Japanese subset OTF of Noto Sans CJK, and its name table credits Adobe as the designer under the OFL; no other font or program is embedded.",
+      "source_form": {
+        "form": "git",
+        "git_url": "https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans",
+        "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. Read at runtime by the OGP image function in og/, which fetches it from this origin instead of bundling it."
+      }
+    },
     "coi-serviceworker.js": {
       "sha256": "d12bd536e27e39a773d7dc7adb1a1167d24002293e97ac81c995fb00cf8d4d5a",
       "bytes": 4678,

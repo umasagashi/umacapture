@@ -2,8 +2,9 @@
 # Build the Flutter web bundle, but only from a web/ tree that still matches its pins.
 #
 # WHY THIS EXISTS
-#   `flutter build web` copies web/ verbatim into build/web/. Everything under web/wasm/ is
-#   gitignored, so tampering with a byte there is invisible to git, needs no commit, and does
+#   `flutter build web` copies web/ verbatim into build/web/. Everything under web/wasm/ and
+#   web/og/fonts/ (the manifest's provisioned_roots) is gitignored, so tampering with a byte
+#   there -- or losing a file -- is invisible to git, needs no commit, and does
 #   not re-run codegen: the tampered bytes would ship next to a committed
 #   assets/web_license_info.json still asserting they are unmodified upstream. Codegen and the
 #   pre-commit hook both close the door on the *commit* path; this closes it on the build path.

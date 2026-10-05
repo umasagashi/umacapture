@@ -152,6 +152,7 @@ void main() {
     Map<String, dynamic> staleManifest() => {
       "files": {"wasm/core.wasm": inTreeEntry(sourcesBlock(digest: "recorded-before-the-change"))},
       "first_party": {"files": <String>[]},
+      "provisioned_roots": ["wasm/"],
     };
 
     test("reports a stale in-tree pin by default", () async {

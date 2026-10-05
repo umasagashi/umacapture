@@ -20,7 +20,9 @@ runs:
       id: cache
       uses: actions/cache@v4
       with:
-        path: web/wasm
+        path: |
+          web/wasm
+          web/og/fonts
         key: web-deps-${{ hashFiles('tool/web_deps.json') }}
 
     # uv's own cache is off for the reason given in provision-opencv/action.yml.
