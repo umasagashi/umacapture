@@ -1,0 +1,30 @@
+{
+  "version": "2026-01-01T00:00:00Z",
+  "names": {
+    "aptitude.name": ["G", "F", "E", "D", "C", "B", "A", "S"],
+    "character.character": ["chara 0", "chara 1", "chara 2", "chara 3"],
+    "character.card": ["card 0", "card 1", "card 2", "card <b>&\"'"],
+    "character_rank.name": ["rank 0", "rank 1", "rank 2"],
+    "factor.name": ["factor 0", "factor 1", "factor 2", "factor 3"],
+    "factor_rank.name": ["star 1", "star 2", "star 3"],
+    "race_place.place": ["place 0", "place 1"],
+    "race_place.ground": ["turf", "dirt"],
+    "race_place.distance": ["1200", "2400"],
+    "race_place.variation": ["variation 0", "variation 1"],
+    "race_position.name": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"],
+    "race_strategy.name": ["strategy 0", "strategy 1", "strategy 2", "strategy 3"],
+    "race_title.name": ["race 0", "race 1", "race 2"],
+    "race_turn.name": ["turn 0", "turn 1", "turn 2"],
+    "race_weather.name": ["weather 0", "weather 1"],
+    "scenario.name": ["scenario 0\nsubtitle 0", "scenario 1\nsubtitle 1"],
+    "skill.name": ["skill 0", "skill 1", "skill 2"],
+    "support_card.name": ["support 0", "support 1"],
+    "record_type.name": ["standard", "inheritance only"]
+  },
+  "gids": {
+    "character.card": [1001, 1002, 1003, 1004],
+    "skill.name": [2001, 2002, 2003],
+    "factor.name": [3001, 3002, 3003, 3004],
+    "race_title.name": [4001, 4002, 4003]
+  }
+}

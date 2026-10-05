@@ -1,0 +1,78 @@
+// The web app (build/web/ on Workers Static Assets) together with the record-sharing Worker.
+//
+// The top level is production, and production carries no Worker until the sharing feature ships:
+// it is the same static-assets-only deployment as wrangler.assets-only.jsonc, so a `wrangler deploy`
+// that forgets `--env staging` uploads nothing but the assets already live. `main`, the D1 binding
+// and the vars exist under env.staging only; the release adds them to the top level.
+//
+// Deploy through tool/cloudflare/deploy_web.sh, never with a bare `wrangler deploy`: the script is
+// what guarantees build/web/ was built from this commit in the same run. Use the wrangler pinned in
+// server/package.json (server/node_modules/.bin/wrangler).
+{
+  "name": "umacapture-web",
+  // No later than the newest date the pinned wrangler's local runtime accepts (4.113.0 accepts up
+  // to 2026-07-28), so `wrangler dev` and the tests can run this config.
+  "compatibility_date": "2026-07-28",
+  // Usage metrics off for every command that reads this file. WRANGLER_SEND_METRICS, which
+  // deploy_web.sh sets, takes precedence over this key.
+  "send_metrics": false,
+  "assets": {
+    "directory": "../build/web",
+    // Unknown paths answer 404. The app uses hash routing and serves nothing but "/", so a SPA
+    // fallback would only turn every mistyped URL into a 73 MiB app download.
+    "not_found_handling": "none"
+  },
+  // The custom domain is the only entrance: the zone's WAF applies to it and to nothing else.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "umacapture.com", "custom_domain": true }],
+
+  "env": {
+    // Served at umacapture-web-staging.<account subdomain>.workers.dev, with its own D1. It shares
+    // the account's daily Worker and D1 quotas with production.
+    "staging": {
+      "main": "src/index.mjs",
+      // routes, workers_dev and assets are inherited from the top level unless set here; staging
+      // must never claim the production domain.
+      "routes": [],
+      "workers_dev": true,
+      "preview_urls": false,
+      "assets": {
+        "directory": "../build/web",
+        "not_found_handling": "none",
+        // The Worker runs first for these so a static file can never shadow an endpoint. Every
+        // other path that matches no file still reaches the Worker, which answers it 404.
+        "run_worker_first": ["/r/*", "/api/*"]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "umacapture-share-staging",
+          // Created once with `wrangler d1 create umacapture-share-staging`.
+          "database_id": "b79b37f9-1beb-49ed-a144-1e1084d84146",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        // PLACEHOLDER: `.invalid` until the account's workers.dev subdomain is known.
+        "PUBLIC_ORIGIN": "https://umacapture-web-staging.invalid",
+        // "static" until the OGP image service exists; then "vercel".
+        "OG_IMAGE_MODE": "static",
+        // PLACEHOLDER: `.invalid` until the OGP image preview deployment exists.
+        "OG_IMAGE_ORIGIN": "https://og-staging.invalid",
+        // "false" stops new tickets and publishes (503 publishing_paused); reads and withdrawals go on.
+        "PUBLISH_ENABLED": "true",
+        // Turnstile's always-passing test sitekey: staging's publish endpoint has no abuse protection.
+        // The matching secret, TURNSTILE_SECRET, is not set here.
+        "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
+        // "true" accepts siteverify's answers for the testing secret, which carry no hostname or
+        // action of this environment. "false" refuses them; production must say "false".
+        "TURNSTILE_TESTING_KEY": "true",
+        // siteverify must report this hostname and action, or the ticket is refused.
+        // PLACEHOLDER: `.invalid` until the account's workers.dev subdomain is known.
+        "TURNSTILE_HOSTNAME": "umacapture-web-staging.invalid",
+        "TURNSTILE_ACTION": "publish"
+      }
+    }
+  }
+}

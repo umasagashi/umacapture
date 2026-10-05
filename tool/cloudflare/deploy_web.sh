@@ -9,7 +9,9 @@
 # of every byte served.
 #
 # Stages:
-#   0 preflight (tools, clean tree, credentials for Cloudflare and Sentry)
+#   0 preflight (tools, clean tree, credentials for Cloudflare and Sentry),
+#     then `npm ci` in server/ so the wrangler run below is the one pinned in
+#     server/package-lock.json, never whatever wrangler is on PATH
 #   1 build: tool/build_web.sh --source-maps (refuses to build unless web/
 #     matches tool/web_deps.json, including the wasm source digest)
 #   2 source maps: tool/upload_web_sourcemaps.sh. This SENDS the maps to Sentry
@@ -38,6 +40,11 @@
 # ============================================================================
 set -euo pipefail
 
+# wrangler reports usage metrics to Cloudflare unless told not to. This
+# variable takes precedence over the `send_metrics` key and over the consent
+# stored in wrangler's user config, for every wrangler run below.
+export WRANGLER_SEND_METRICS=false
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -45,6 +52,8 @@ PUBLIC_ROOT="https://umacapture.com"
 WRANGLER_CONFIG="server/wrangler.assets-only.jsonc"
 WEB_DIR="build/web"
 ENV_FILE="$SCRIPT_DIR/.env"
+SERVER_DIR="server"
+WRANGLER="$REPO_ROOT/$SERVER_DIR/node_modules/.bin/wrangler"
 # The edge may take a moment to switch versions; retry a mismatching
 # deploy.json for this long before failing.
 VERIFY_WAIT_SECONDS=120
@@ -68,7 +77,7 @@ cd "$REPO_ROOT"
 
 # ---- 0 preflight -------------------------------------------------------------
 step "0 preflight"
-for tool in git curl sha256sum wrangler; do
+for tool in git curl sha256sum npm; do
   command -v "$tool" >/dev/null || fail "$tool not found on PATH"
 done
 [[ -z "$(git status --porcelain)" ]] || fail "working tree is not clean; commit or remove changes first"
@@ -81,7 +90,9 @@ set +a
 [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || fail "CLOUDFLARE_ACCOUNT_ID is empty in $ENV_FILE"
 [[ -n "${SENTRY_AUTH_TOKEN:-}" ]] || fail "SENTRY_AUTH_TOKEN is not set (stage 2 uploads source maps)"
 GIT_SHA="$(git rev-parse HEAD)"
-echo "    HEAD $GIT_SHA, wrangler $(wrangler --version 2>/dev/null | tail -1)"
+(cd "$SERVER_DIR" && npm ci --no-audit --no-fund)
+[[ -x "$WRANGLER" ]] || fail "$WRANGLER missing after npm ci"
+echo "    HEAD $GIT_SHA, wrangler $("$WRANGLER" --version 2>/dev/null | tail -1)"
 
 # ---- 1 build -----------------------------------------------------------------
 step "1 build"
@@ -103,7 +114,7 @@ cat "$WEB_DIR/deploy.json"
 
 # ---- 4 dry run ---------------------------------------------------------------
 step "4 wrangler deploy --dry-run"
-wrangler deploy -c "$WRANGLER_CONFIG" --dry-run
+"$WRANGLER" deploy -c "$WRANGLER_CONFIG" --dry-run
 
 # ---- 5 confirmation gate -----------------------------------------------------
 step "5 confirm"
@@ -118,7 +129,7 @@ fi
 
 # ---- 6 deploy ----------------------------------------------------------------
 step "6 wrangler deploy"
-wrangler deploy -c "$WRANGLER_CONFIG"
+"$WRANGLER" deploy -c "$WRANGLER_CONFIG"
 
 # ---- 7 verify ----------------------------------------------------------------
 step "7 verify via $PUBLIC_ROOT"

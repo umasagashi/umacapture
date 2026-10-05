@@ -65,6 +65,12 @@ lib/*.g.dart
 .wrangler/
 # Pointer/alias backups written by tool/cloudflare/publish_modules.sh.
 /tool/cloudflare/.publish-backup/
+# The share tables last deployed: the append-only baseline of tool/cloudflare/build_share_tables.py.
+/tool/cloudflare/.deploy-backup/
+# The sharing Worker's npm dependencies (pinned by server/package-lock.json, which is tracked) and
+# its name tables, which are generated at deploy time from the module set and carry game text.
+/server/node_modules/
+/server/src/tables.generated.json
 
 # FVM
 .fvm/

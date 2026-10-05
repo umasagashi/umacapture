@@ -17,6 +17,9 @@
   // No later than the newest date wrangler's local runtime accepts, so `wrangler dev` can serve
   // this config for a local check (wrangler 4.113.0 accepts up to 2026-07-28).
   "compatibility_date": "2026-07-28",
+  // Usage metrics off for every command that reads this file. WRANGLER_SEND_METRICS, which
+  // deploy_web.sh sets, takes precedence over this key.
+  "send_metrics": false,
   "assets": {
     "directory": "../build/web",
     // Unknown paths answer 404. The app uses hash routing and serves nothing but "/", so a SPA
