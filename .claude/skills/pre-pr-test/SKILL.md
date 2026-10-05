@@ -138,7 +138,7 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | 2.3b | `SKIP_SOURCE_CHECK=1 bash native/wasm/build.sh` (Git Bash) | exit 0 | 115 s |
 | 2.3c | `sha256sum` of `umacapture_core.js` and `umacapture_core.wasm` in the directory `build.sh` names on its `Done. Artifacts in <dir>:` line (`$BUILD_DIR` in the script, whose default lies outside the repository), against `grep -A1 '^    "wasm/umacapture_core' tool/web_deps.json`. That line is near the end, not the last: an `ls -la` of the two artifacts follows it | both hashes equal their pin | — |
 | 2.4 | `.fvm/flutter_sdk/bin/dart run tool/check_web_pins.dart --licenses --require-verified` | exit 0, `N pinned file(s) verified, 0 not provisioned` | 2 s |
-| 2.5 | `bash tool/cloudflare/test/publish_modules_test.sh` | exit 0, 0 failed | 40 s |
+| 2.5 | `bash tool/cloudflare/test/publish_modules_test.sh` | exit 0, 0 failed | 160 s |
 
 Measured as stage 1 (§2), in the same run; 2.1 was measured on 2026-09-27 at `0aa3813e` after the
 deletion below.

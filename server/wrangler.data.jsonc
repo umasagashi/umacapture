@@ -1,0 +1,28 @@
+// Static-assets-only deployment of data.umacapture.com: build/data-site/ served by Workers Static
+// Assets, with no Worker script at all. It hosts what the app downloads -- the recognizer module
+// pointer and archives, the news, and the Sentry configuration.
+//
+// It deliberately has no `main`, so every request is a static-asset request: free, unmetered, and
+// answered with the static 404 when no file matches.
+//
+// build/data-site/ is assembled on every run by tool/cloudflare/publish_modules.sh; deploy with
+// that script, never with a bare `wrangler deploy`.
+{
+  "name": "umacapture-data",
+  // No later than the newest date wrangler's local runtime accepts, so `wrangler dev` can serve
+  // this config for a local check (wrangler 4.113.0 accepts up to 2026-07-28).
+  "compatibility_date": "2026-07-28",
+  "assets": {
+    "directory": "../build/data-site",
+    // Unknown paths answer 404, as the R2 custom domain did.
+    "not_found_handling": "none"
+  },
+  // The custom domain is the only entrance: the zone's WAF applies to it and to nothing else.
+  "workers_dev": false,
+  "preview_urls": false,
+  // data.umacapture.com is a custom domain of this Worker and nothing else routes here: no zone
+  // route, no R2 custom domain, no other host name. Deploy only from a terminal: a wrangler whose
+  // stdout is not a TTY overrides an existing DNS record or another Worker's claim on this host
+  // without asking.
+  "routes": [{ "pattern": "data.umacapture.com", "custom_domain": true }]
+}

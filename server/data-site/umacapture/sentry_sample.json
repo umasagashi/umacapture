@@ -1,0 +1,3026 @@
+{
+    "event_id": "cdfb32f4b4924850b181224c0f0731da",
+    "project": 6668087,
+    "release": "0.0.0-alpha.3-debug",
+    "dist": null,
+    "platform": "other",
+    "message": "",
+    "datetime": "2022-08-25T16:38:17.372000Z",
+    "tags": [
+        [
+            "environment",
+            "debug"
+        ],
+        [
+            "handled",
+            "yes"
+        ],
+        [
+            "level",
+            "fatal"
+        ],
+        [
+            "mechanism",
+            "FlutterError"
+        ],
+        [
+            "os",
+            "windows \"Windows 10 Pro\" 10.0 (Build 19044)"
+        ],
+        [
+            "os.name",
+            "windows"
+        ],
+        [
+            "release",
+            "0.0.0-alpha.3-debug"
+        ],
+        [
+            "sentry_dart_runtime.name",
+            "Dart"
+        ],
+        [
+            "sentry_flutter_runtime.name",
+            "Flutter"
+        ]
+    ],
+    "_meta": {
+        "exception": {
+            "values": {
+                "0": {
+                    "stacktrace": {
+                        "frames": {
+                            "": {
+                                "len": 299
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "_metrics": {
+        "bytes.ingested.event": 75090,
+        "bytes.stored.event": 139963
+    },
+    "breadcrumbs": {
+        "values": [
+            {
+                "timestamp": 1661444673.17,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Start\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.19,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Init state\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.191,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Build\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.192,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Init Localization Delegate\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.192,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Init provider\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.4,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Load Localization Delegate\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.402,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u001b[90m[\ud83c\udf0e Easy Localization] [DEBUG] Load asset from assets/translations\u001b[0m"
+            },
+            {
+                "timestamp": 1661444673.646,
+                "type": "navigation",
+                "category": "device.screen",
+                "level": "info",
+                "message": "Screen size changed",
+                "data": {
+                    "new_height": 712.0,
+                    "new_pixel_ratio": 1.0,
+                    "new_width": 1264.0
+                }
+            },
+            {
+                "timestamp": 1661444673.728,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "The locale ja_JP is not supported, falling back to english translations"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #0   _checkLatestAppVersion (package:umacapture/src/core/version_check.dart:174:10)"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #1   appVersionCheckLoader.<anonymous closure> (package:umacapture/src/core/version_check.dart:204:24)"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 01:24:34.047 (+0:00:00.926240)"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.047,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 last=21:52:33.123349, latest=0.0.0-alpha.3"
+            },
+            {
+                "timestamp": 1661444674.048,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444674.128,
+                "type": "navigation",
+                "category": "device.screen",
+                "level": "info",
+                "message": "Screen size changed",
+                "data": {
+                    "new_height": 1090.0,
+                    "new_pixel_ratio": 1.0,
+                    "new_width": 1155.0
+                }
+            },
+            {
+                "timestamp": 1661444674.503,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444674.503,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #0   moduleVersionLoader.<anonymous closure> (package:umacapture/src/core/version_check.dart:96:10)"
+            },
+            {
+                "timestamp": 1661444674.503,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #1   <asynchronous suspension>"
+            },
+            {
+                "timestamp": 1661444674.503,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.504,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 01:24:34.503 (+0:00:01.381973)"
+            },
+            {
+                "timestamp": 1661444674.504,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.504,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 Module version: local=2022-08-24T12:00:00+0900, latest=2022-08-24T12:00:00+0900"
+            },
+            {
+                "timestamp": 1661444674.504,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #0   trainerIdProvider.<anonymous closure> (package:umacapture/src/core/platform_controller.dart:150:12)"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #1   Provider.create (package:riverpod/src/provider/base.dart:269:50)"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 01:24:34.523 (+0:00:01.402001)"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 Trainer ID loaded: c81899af-e156-4f4e-840b-900d3c01f08b"
+            },
+            {
+                "timestamp": 1661444674.523,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444675.444,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661444675.444,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #0   appVersionCheckLoader.<anonymous closure> (package:umacapture/src/core/version_check.dart:205:10)"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #1   <asynchronous suspension>"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 01:24:35.444 (+0:00:02.323579)"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 App version: local=0.0.0-alpha.3, latest=0.0.0-alpha.3"
+            },
+            {
+                "timestamp": 1661444675.445,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661445497.358,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            },
+            {
+                "timestamp": 1661445497.358,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #0   specCloneProvider.<anonymous closure> (package:umacapture/src/gui/chara_detail/column_spec_dialog.dart:17:10)"
+            },
+            {
+                "timestamp": 1661445497.358,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 #1   AutoDisposeStateProviderFamily.create.<anonymous closure> (package:riverpod/src/state_provider/auto_dispose.dart:160:23)"
+            },
+            {
+                "timestamp": 1661445497.359,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661445497.359,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 01:38:17.358 (+0:13:44.237374)"
+            },
+            {
+                "timestamp": 1661445497.359,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u251c\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504\u2504"
+            },
+            {
+                "timestamp": 1661445497.359,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2502 specCloneProvider: DateTimeColumnSpec, \u80b2\u6210\u65e5 -> DateTimeColumnSpec, \u80b2\u6210\u65e5"
+            },
+            {
+                "timestamp": 1661445497.359,
+                "type": "debug",
+                "category": "console",
+                "level": "debug",
+                "message": "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+            }
+        ]
+    },
+    "contexts": {
+        "accessibility": {
+            "accessible_navigation": false,
+            "bold_text": false,
+            "disable_animations": false,
+            "high_contrast": false,
+            "invert_colors": false,
+            "reduce_motion": false,
+            "type": "accessibility"
+        },
+        "culture": {
+            "is_24_hour_format": true,
+            "locale": "ja-JP",
+            "timezone": "\u6771\u4eac (\u6a19\u6e96\u6642)",
+            "type": "culture"
+        },
+        "dart_context": {
+            "compile_mode": "debug",
+            "isolate": "main",
+            "type": "dart_context"
+        },
+        "device": {
+            "name": "DESKTOP-QN94DSE",
+            "orientation": "landscape",
+            "screen_density": 1.0,
+            "timezone": "\u6771\u4eac (\u6a19\u6e96\u6642)",
+            "language": "ja_JP",
+            "processor_count": 24,
+            "screen_height_pixels": 1090,
+            "screen_width_pixels": 1155,
+            "theme": "dark",
+            "type": "device"
+        },
+        "flutter_context": {
+            "default_route_name": "/",
+            "has_render_view": "true",
+            "type": "flutter_context"
+        },
+        "flutter_error_details": {
+            "context": "thrown building RawGestureDetector-[LabeledGlobalKey<RawGestureDetectorState>#b0e0e](state: RawGestureDetectorState#be9e3(gestures: <none>, behavior: opaque))",
+            "information": "debugCreator: RawGestureDetector-[LabeledGlobalKey<RawGestureDetectorState>#b0e0e] \u2190 Listener \u2190 _ScrollableScope \u2190 _ScrollSemantics-[GlobalKey#0189b] \u2190 NotificationListener<ScrollMetricsNotification> \u2190 RepaintBoundary \u2190 CustomPaint-[GlobalKey#8e130] \u2190 MouseRegion \u2190 Listener \u2190 _GestureSemantics \u2190 RawGestureDetector \u2190 RepaintBoundary \u2190 \u22ef",
+            "library": "widgets library",
+            "type": "flutter_error_details"
+        },
+        "os": {
+            "name": "windows",
+            "version": "\"Windows 10 Pro\" 10.0 (Build 19044)",
+            "theme": "dark",
+            "type": "os"
+        },
+        "sentry_dart_runtime": {
+            "name": "Dart",
+            "raw_description": "2.17.6 (stable) (Tue Jul 12 12:54:37 2022 +0200) on \"windows_x64\"",
+            "type": "runtime"
+        },
+        "sentry_flutter_runtime": {
+            "name": "Flutter",
+            "compiler": "Dart VM",
+            "type": "runtime"
+        }
+    },
+    "culprit": "framework.dart in StatefulElement.dependOnInheritedElement.<fn>",
+    "environment": "debug",
+    "exception": {
+        "values": [
+            {
+                "type": "FlutterError",
+                "value": "dependOnInheritedWidgetOfExactType<UncontrolledProviderScope>() or dependOnInheritedElement() was called before _DateTimeSelectorState.initState() completed.\nWhen an inherited widget changes, for example if the value of Theme.of() changes, its dependent widgets are rebuilt. If the dependent widget's reference to the inherited widget is in a constructor or an initState() method, then the rebuilt dependent widget will not reflect the changes in the inherited widget.\nTypically references to inherited widgets should occur in widget build() methods. Alternatively, initialization based on inherited widgets can be placed in the didChangeDependencies method, which is called after initState and whenever the dependencies change thereafter.",
+                "stacktrace": {
+                    "frames": [
+                        {
+                            "function": "_drawFrame",
+                            "filename": "hooks.dart",
+                            "abs_path": "dart:ui/hooks.dart",
+                            "lineno": 115,
+                            "colno": 31,
+                            "in_app": false
+                        },
+                        {
+                            "function": "PlatformDispatcher._drawFrame",
+                            "filename": "platform_dispatcher.dart",
+                            "abs_path": "dart:ui/platform_dispatcher.dart",
+                            "lineno": 308,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "_invoke",
+                            "filename": "hooks.dart",
+                            "abs_path": "dart:ui/hooks.dart",
+                            "lineno": 151,
+                            "colno": 10,
+                            "in_app": false
+                        },
+                        {
+                            "function": "_CustomZone.runGuarded",
+                            "filename": "zone.dart",
+                            "abs_path": "dart:async/zone.dart",
+                            "lineno": 1236,
+                            "colno": 7,
+                            "in_app": false
+                        },
+                        {
+                            "function": "_CustomZone.run",
+                            "filename": "zone.dart",
+                            "abs_path": "dart:async/zone.dart",
+                            "lineno": 1328,
+                            "colno": 19,
+                            "in_app": false
+                        },
+                        {
+                            "function": "_rootRun",
+                            "filename": "zone.dart",
+                            "abs_path": "dart:async/zone.dart",
+                            "lineno": 1426,
+                            "colno": 13,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SchedulerBinding._handleDrawFrame",
+                            "package": "flutter",
+                            "filename": "binding.dart",
+                            "abs_path": "package:flutter/src/scheduler/binding.dart",
+                            "lineno": 997,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SchedulerBinding.handleDrawFrame",
+                            "package": "flutter",
+                            "filename": "binding.dart",
+                            "abs_path": "package:flutter/src/scheduler/binding.dart",
+                            "lineno": 1083,
+                            "colno": 9,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SchedulerBinding._invokeFrameCallback",
+                            "package": "flutter",
+                            "filename": "binding.dart",
+                            "abs_path": "package:flutter/src/scheduler/binding.dart",
+                            "lineno": 1146,
+                            "colno": 15,
+                            "in_app": false
+                        },
+                        {
+                            "function": "RendererBinding._handlePersistentFrameCallback",
+                            "package": "flutter",
+                            "filename": "binding.dart",
+                            "abs_path": "package:flutter/src/rendering/binding.dart",
+                            "lineno": 370,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "WidgetsBinding.drawFrame",
+                            "package": "flutter",
+                            "filename": "binding.dart",
+                            "abs_path": "package:flutter/src/widgets/binding.dart",
+                            "lineno": 891,
+                            "colno": 21,
+                            "in_app": false
+                        },
+                        {
+                            "function": "BuildOwner.buildScope",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 2659,
+                            "colno": 19,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3530,
+                            "colno": 15,
+                            "in_app": false
+                        },
+                        {
+                            "function": "MultiChildRenderObjectElement.update",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6375,
+                            "colno": 17,
+                            "in_app": false
+                        },
+                        {
+                            "function": "RenderObjectElement.updateChildren",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 5883,
+                            "colno": 32,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "MultiChildRenderObjectElement.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6350,
+                            "colno": 36,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "MultiChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6362,
+                            "colno": 32,
+                            "in_app": false
+                        },
+                        {
+                            "function": "MultiChildRenderObjectElement.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6350,
+                            "colno": 36,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4968,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4977,
+                            "colno": 11,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4781,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement._firstBuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4787,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.rebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4529,
+                            "colno": 5,
+                            "in_app": false
+                        },
+                        {
+                            "function": "ComponentElement.performRebuild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 4832,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.updateChild",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3551,
+                            "colno": 18,
+                            "in_app": false
+                        },
+                        {
+                            "function": "Element.inflateWidget",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 3817,
+                            "colno": 16,
+                            "in_app": false
+                        },
+                        {
+                            "function": "SingleChildRenderObjectElement.mount",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 6215,
+                            "colno": 14,
+                            "in_app": false
+                        },
+                        {
+                            "function": "StatefulElement.dependOnInheritedElement.<fn>",
+                            "package": "flutter",
+                            "filename": "framework.dart",
+                            "abs_path": "package:flutter/src/widgets/framework.dart",
+                            "lineno": 5056,
+                            "colno": 9,
+                            "in_app": false
+                        }
+                    ]
+                },
+                "mechanism": {
+                    "type": "FlutterError",
+                    "handled": true,
+                    "data": {
+                        "hint": "See \"flutter_error_details\" down below for more information"
+                    }
+                }
+            }
+        ]
+    },
+    "fingerprint": [
+        "{{ default }}"
+    ],
+    "grouping_config": {
+        "enhancements": "eJybzDRxY3J-bm5-npWRgaGlroGxrpHxBABcYgcZ",
+        "id": "newstyle:2019-10-29"
+    },
+    "hashes": [
+        "de063602b3142d64892130f15b6baad5"
+    ],
+    "ingest_path": [
+        {
+            "version": "22.8.0",
+            "public_key": "XE7QiyuNlja9PZ7I9qJlwQotzecWrUIN91BAO7Q5R38"
+        }
+    ],
+    "key_id": "2484034",
+    "level": "fatal",
+    "location": "framework.dart",
+    "logger": "",
+    "metadata": {
+        "display_title_with_tree_label": false,
+        "filename": "framework.dart",
+        "function": "StatefulElement.dependOnInheritedElement.<fn>",
+        "type": "FlutterError",
+        "value": "dependOnInheritedWidgetOfExactType<UncontrolledProviderScope>() or dependOnInheritedElement() was called before _DateTimeSelectorState.initState() completed.\nWhen an inherited widget changes, for example if the value of Theme.of() changes, its dependent widgets are rebuilt. If the dependent widget's reference to the inherited widget is in a constructor or an initState() method, then the rebuilt dependent widget will not reflect the changes in the inherited widget.\nTypically references to inherited widgets should occur in widget build() methods. Alternatively, initialization based on inherited widgets can be placed in the didChangeDependencies method, which is called after initState and whenever the dependencies change thereafter."
+    },
+    "modules": {
+        "StackWalker": "unknown",
+        "_fe_analyzer_shared": "unknown",
+        "abseil-cpp": "unknown",
+        "accessibility": "unknown",
+        "analyzer": "unknown",
+        "angle": "unknown",
+        "another_xlider": "unknown",
+        "archive": "unknown",
+        "args": "unknown",
+        "async": "unknown",
+        "audioplayers": "unknown",
+        "audioplayers_android": "unknown",
+        "audioplayers_darwin": "unknown",
+        "audioplayers_linux": "unknown",
+        "audioplayers_platform_interface": "unknown",
+        "audioplayers_web": "unknown",
+        "audioplayers_windows": "unknown",
+        "auto_route": "unknown",
+        "auto_route_generator": "unknown",
+        "badges": "unknown",
+        "base": "unknown",
+        "boringssl": "unknown",
+        "build": "unknown",
+        "build_config": "unknown",
+        "build_daemon": "unknown",
+        "build_resolvers": "unknown",
+        "build_runner": "unknown",
+        "build_runner_core": "unknown",
+        "built_collection": "unknown",
+        "built_value": "unknown",
+        "characters": "unknown",
+        "charcode": "unknown",
+        "charset": "unknown",
+        "checked_yaml": "unknown",
+        "cli_dialog": "unknown",
+        "cli_util": "unknown",
+        "clock": "unknown",
+        "code_builder": "unknown",
+        "collection": "unknown",
+        "colorama": "unknown",
+        "convert": "unknown",
+        "crypto": "unknown",
+        "csslib": "unknown",
+        "csv": "unknown",
+        "dart": "unknown",
+        "dart_console": "unknown",
+        "dart_json_mapper": "unknown",
+        "dart_pubspec_licenses": "unknown",
+        "dart_style": "unknown",
+        "dio": "unknown",
+        "double-conversion": "unknown",
+        "easy_localization": "unknown",
+        "easy_logger": "unknown",
+        "engine": "unknown",
+        "equatable": "unknown",
+        "etc1": "unknown",
+        "expat": "unknown",
+        "extended_image": "unknown",
+        "extended_image_library": "unknown",
+        "feedback": "unknown",
+        "feedback_sentry": "unknown",
+        "ffi": "unknown",
+        "ffx_spd": "unknown",
+        "file": "unknown",
+        "file_picker": "unknown",
+        "fixnum": "unknown",
+        "flex_color_scheme": "unknown",
+        "flutter": "unknown",
+        "flutter_lints": "unknown",
+        "flutter_native_splash": "unknown",
+        "flutter_oss_licenses": "unknown",
+        "flutter_plugin_android_lifecycle": "unknown",
+        "flutter_rating_bar": "unknown",
+        "flutter_riverpod": "unknown",
+        "freetype2": "unknown",
+        "frontend_server_client": "unknown",
+        "fuchsia-vulkan": "unknown",
+        "fuchsia_sdk": "unknown",
+        "get_it": "unknown",
+        "glfw": "unknown",
+        "glob": "unknown",
+        "google_fonts": "unknown",
+        "gpu": "unknown",
+        "graphs": "unknown",
+        "harfbuzz": "unknown",
+        "hive": "unknown",
+        "hive_flutter": "unknown",
+        "hive_generator": "unknown",
+        "html": "unknown",
+        "http": "unknown",
+        "http_client_helper": "unknown",
+        "http_multi_server": "unknown",
+        "http_parser": "unknown",
+        "icu": "unknown",
+        "image": "unknown",
+        "intl": "unknown",
+        "io": "unknown",
+        "js": "unknown",
+        "json_annotation": "unknown",
+        "khronos": "unknown",
+        "libcxx": "unknown",
+        "libcxxabi": "unknown",
+        "libjpeg-turbo": "unknown",
+        "libjxl": "unknown",
+        "libtess2": "unknown",
+        "libwebp": "unknown",
+        "lint": "unknown",
+        "lints": "unknown",
+        "logger": "unknown",
+        "logging": "unknown",
+        "matcher": "unknown",
+        "material_color_utilities": "unknown",
+        "meta": "unknown",
+        "mime": "unknown",
+        "msix": "unknown",
+        "onnxruntime": "unknown",
+        "opencv": "unknown",
+        "package_config": "unknown",
+        "package_info_plus": "unknown",
+        "package_info_plus_linux": "unknown",
+        "package_info_plus_macos": "unknown",
+        "package_info_plus_platform_interface": "unknown",
+        "package_info_plus_web": "unknown",
+        "package_info_plus_windows": "unknown",
+        "pasteboard": "unknown",
+        "path": "unknown",
+        "path_provider": "unknown",
+        "path_provider_android": "unknown",
+        "path_provider_ios": "unknown",
+        "path_provider_linux": "unknown",
+        "path_provider_macos": "unknown",
+        "path_provider_platform_interface": "unknown",
+        "path_provider_windows": "unknown",
+        "percent_indicator": "unknown",
+        "petitparser": "unknown",
+        "pkg": "unknown",
+        "platform": "unknown",
+        "platform_detect": "unknown",
+        "plugin_platform_interface": "unknown",
+        "pluto_grid": "unknown",
+        "pool": "unknown",
+        "process": "unknown",
+        "pub_semver": "unknown",
+        "pubspec_parse": "unknown",
+        "quiver": "unknown",
+        "rapidjson": "unknown",
+        "recase": "unknown",
+        "reflectable": "unknown",
+        "riverpod": "unknown",
+        "root_certificates": "unknown",
+        "rxdart": "unknown",
+        "screen_retriever": "unknown",
+        "sentry": "unknown",
+        "sentry_flutter": "unknown",
+        "shared_preferences": "unknown",
+        "shared_preferences_android": "unknown",
+        "shared_preferences_ios": "unknown",
+        "shared_preferences_linux": "unknown",
+        "shared_preferences_macos": "unknown",
+        "shared_preferences_platform_interface": "unknown",
+        "shared_preferences_web": "unknown",
+        "shared_preferences_windows": "unknown",
+        "shelf": "unknown",
+        "shelf_web_socket": "unknown",
+        "simple_gesture_detector": "unknown",
+        "skcms": "unknown",
+        "skia": "unknown",
+        "smhasher": "unknown",
+        "source_gen": "unknown",
+        "source_helper": "unknown",
+        "source_span": "unknown",
+        "sqlite": "unknown",
+        "stack_trace": "unknown",
+        "state_notifier": "unknown",
+        "stream_channel": "unknown",
+        "stream_transform": "unknown",
+        "string_scanner": "unknown",
+        "table_calendar": "unknown",
+        "tcmalloc": "unknown",
+        "term_glyph": "unknown",
+        "timing": "unknown",
+        "tonic": "unknown",
+        "tuple": "unknown",
+        "txt": "unknown",
+        "typed_data": "unknown",
+        "umacapture": "unknown",
+        "universal_html": "unknown",
+        "universal_io": "unknown",
+        "url_launcher": "unknown",
+        "url_launcher_android": "unknown",
+        "url_launcher_ios": "unknown",
+        "url_launcher_linux": "unknown",
+        "url_launcher_macos": "unknown",
+        "url_launcher_platform_interface": "unknown",
+        "url_launcher_web": "unknown",
+        "url_launcher_windows": "unknown",
+        "uuid": "unknown",
+        "vector_math": "unknown",
+        "version": "unknown",
+        "vulkan": "unknown",
+        "vulkan-deps": "unknown",
+        "vulkan-headers": "unknown",
+        "vulkanmemoryallocator": "unknown",
+        "watcher": "unknown",
+        "web_socket_channel": "unknown",
+        "win32": "unknown",
+        "window_manager": "unknown",
+        "wuffs": "unknown",
+        "xdg_directories": "unknown",
+        "xml": "unknown",
+        "xxhash": "unknown",
+        "yaml": "unknown",
+        "zlib": "unknown"
+    },
+    "nodestore_insert": 1661445502.782975,
+    "received": 1661445499.879622,
+    "sdk": {
+        "name": "sentry.dart.flutter",
+        "version": "6.9.1",
+        "integrations": [
+            "isolateErrorIntegration",
+            "runZonedGuardedIntegration",
+            "widgetsFlutterBindingIntegration",
+            "flutterErrorIntegration",
+            "widgetsBindingIntegration",
+            "loadReleaseIntegration"
+        ],
+        "packages": [
+            {
+                "name": "pub:sentry",
+                "version": "6.9.1"
+            },
+            {
+                "name": "pub:sentry_flutter",
+                "version": "6.9.1"
+            }
+        ]
+    },
+    "timestamp": 1661445497.372,
+    "title": "FlutterError: dependOnInheritedWidgetOfExactType<UncontrolledProviderScope>() or dependOnInheritedElement() was...",
+    "type": "error",
+    "version": "7"
+}
