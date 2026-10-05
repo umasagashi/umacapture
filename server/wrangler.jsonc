@@ -54,8 +54,9 @@
         }
       ],
       "vars": {
-        // PLACEHOLDER: `.invalid` until the account's workers.dev subdomain is known.
-        "PUBLIC_ORIGIN": "https://umacapture-web-staging.invalid",
+        // <worker name>-<env>.<account workers.dev subdomain>.workers.dev; tool/cloudflare/deploy_web.sh
+        // verifies the staging deployment on the same origin.
+        "PUBLIC_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
         // "static" until the OGP image service exists; then "vercel".
         "OG_IMAGE_MODE": "static",
         // PLACEHOLDER: `.invalid` until the OGP image preview deployment exists.
@@ -63,14 +64,13 @@
         // "false" stops new tickets and publishes (503 publishing_paused); reads and withdrawals go on.
         "PUBLISH_ENABLED": "true",
         // Turnstile's always-passing test sitekey: staging's publish endpoint has no abuse protection.
-        // The matching secret, TURNSTILE_SECRET, is not set here.
+        // The matching test secret, TURNSTILE_SECRET, is a Worker secret (`wrangler secret put`), never a var.
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
         // "true" accepts siteverify's answers for the testing secret, which carry no hostname or
         // action of this environment. "false" refuses them; production must say "false".
         "TURNSTILE_TESTING_KEY": "true",
         // siteverify must report this hostname and action, or the ticket is refused.
-        // PLACEHOLDER: `.invalid` until the account's workers.dev subdomain is known.
-        "TURNSTILE_HOSTNAME": "umacapture-web-staging.invalid",
+        "TURNSTILE_HOSTNAME": "umacapture-web-staging.umasagashi.workers.dev",
         "TURNSTILE_ACTION": "publish"
       }
     }

@@ -112,9 +112,12 @@ export WRANGLER_SEND_METRICS=false
 server/node_modules/.bin/wrangler --version
 ```
 
-Usage metrics are off twice over: every wrangler config sets `"send_metrics": false`, and
-`WRANGLER_SEND_METRICS=false` (which `deploy_web.sh` exports) overrides the config key and the
-consent stored in wrangler's user config. With `WRANGLER_LOG=debug` wrangler prints
+For the web app, usage metrics are off twice over: `server/wrangler.assets-only.jsonc` and
+`server/wrangler.jsonc` set `"send_metrics": false`, and `WRANGLER_SEND_METRICS=false` (which
+`deploy_web.sh` exports) overrides the config key and the consent stored in wrangler's user config.
+The data host's `server/wrangler.data.jsonc` and `tool/cloudflare/publish_modules.sh` set neither
+yet, so a wrangler run against that config sends metrics unless `WRANGLER_SEND_METRICS=false` is
+exported by hand. With `WRANGLER_LOG=debug` wrangler prints
 `Metrics dispatcher: Dispatching disabled` for each event it would have sent.
 
 To move to a newer wrangler, change the version in `server/package.json`, run `npm install` in
@@ -134,9 +137,46 @@ curl -sI http://localhost:8787/
 The custom-domain route is ignored locally. This shows the headers the config produces; it does
 not show that Cloudflare's edge applies them, which only the post-deployment checks above do.
 
+## Staging
+
+`bash tool/cloudflare/deploy_web.sh --target staging [--dry-run] [--yes]` deploys the same
+`build/web/` together with the record-sharing Worker (`server/src/`) to
+`https://umacapture-web-staging.umasagashi.workers.dev`, from `env.staging` in
+`server/wrangler.jsonc`. The invariants are the production ones: a clean tree, a fresh build from
+`HEAD` in the same run, and a `deploy.json` verified through the public URL.
+
+- **Credentials.** The API token also needs Account › D1 › Edit (`tool/cloudflare/.env.example`).
+  The staging database (`umacapture-share-staging`) is created once by hand, its id written into
+  `env.staging.d1_databases`, and the migrations applied with
+  `wrangler d1 migrations apply umacapture-share-staging --env staging --remote -c server/wrangler.jsonc`.
+  The Turnstile secret is a Worker secret, set once with
+  `wrangler secret put TURNSTILE_SECRET --env staging -c server/wrangler.jsonc`; staging uses
+  Turnstile's always-passing test keys, so its publish endpoint has no abuse protection.
+- **workers.dev.** Staging has no custom domain. Its `workers.dev` URL bypasses the zone WAF and
+  anyone who has it can open it; nothing links to it. It shares the account's daily Worker and D1
+  quotas with production.
+- **No Sentry.** A staging run uploads no source maps and needs no `SENTRY_AUTH_TOKEN`; the maps
+  are still excluded from the deployment by `.assetsignore`.
+- **Name tables.** The run builds `server/src/tables.generated.json` with
+  `tool/cloudflare/build_share_tables.py` from the module archive the live pointer on
+  `data.umacapture.com` names, and records that archive's sha256 in `deploy.json` as
+  `tables_module_sha256`. The tables must only grow at the end: they are checked against the
+  baseline `tool/cloudflare/.deploy-backup/tables.json` (gitignored; it holds game text), and the
+  run stops before deploying if they are not append-only. Only after the deployment has been
+  verified does the run copy the deployed tables to the baseline, so a run that stopped earlier
+  leaves the baseline as it was. After publishing a new module set with `publish_modules.sh`, run
+  the staging deployment again so the Worker resolves the new names.
+- **Local web builds.** A web app served locally (`serve_web_build.py`) cannot call the staging
+  API: the API is same-origin only. Test sharing from the web app on the staging host.
+- **Stopping staging.** `vars.PUBLISH_ENABLED: "false"` and a redeploy stop new tickets and
+  publishes while reads and withdrawals go on. To take the Worker off staging entirely, delete the
+  `umacapture-web-staging` Worker (and the staging database if no longer needed) in the dashboard;
+  this has to happen before the Worker ships to production, because the two share quotas.
+
 ## Rolling back and switching off
 
 | Goal | How |
 |---|---|
 | Return to the previous version | `server/node_modules/.bin/wrangler rollback -c server/wrangler.assets-only.jsonc` |
+| Return staging to its previous version | `server/node_modules/.bin/wrangler rollback -c server/wrangler.jsonc --env staging` |
 | Take the site off the domain | Remove the `umacapture.com` custom domain in the dashboard |

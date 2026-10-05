@@ -21,6 +21,9 @@ only reads the baseline; promoting the output to the baseline is the deploy's jo
 have actually been deployed.
 
 --archive <zip> builds from a local archive instead of the live one (no network, no sha256 check).
+
+--source-out <file> also writes the sha256 of the archive the tables were read from, as one line of
+64 hex digits, for the deploy to record. It is written only when the tables are.
 """
 
 from __future__ import annotations
@@ -128,10 +131,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--archive", type=Path, help="build from this local module archive instead of the live one")
     parser.add_argument("--previous", type=Path, default=DEFAULT_PREVIOUS, help="tables last deployed (baseline)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--source-out", type=Path, help="write the sha256 of the source archive here")
     args = parser.parse_args(argv)
     try:
         if args.archive:
             archive_bytes, source = args.archive.read_bytes(), str(args.archive)
+            sha = hashlib.sha256(archive_bytes).hexdigest()
         else:
             archive_bytes, sha = fetch_live_archive()
             source = f"modules/{sha}.zip"
@@ -148,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     body = json.dumps(tables, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(body)
+    if args.source_out:
+        args.source_out.write_text(f"{sha}\n", encoding="ascii", newline="\n")
     name_count = sum(len(v) for v in tables["names"].values())
     gid_count = sum(len(v) for v in tables["gids"].values())
     print(
