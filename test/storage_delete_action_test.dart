@@ -678,7 +678,7 @@ void main() {
       // that happened not to equal the expected one would still pass that check.
       expect(
         toasts.single.description,
-        isNot(_sentence('pages.storage.delete.completed', {'count': '8'})),
+        isNot(_sentence('pages.storage.delete.completed', {'count': '${StorageBoxKey.values.length}'})),
         reason: 'a delete that removed nothing was announced as one that removed everything',
       );
       // A failed delete owes the list of what stayed as well as the sentence.
@@ -693,7 +693,7 @@ void main() {
       expect(
         toasts.single.description,
         _sentence('pages.storage.delete.partial', {
-          'total': '8',
+          'total': '${StorageBoxKey.values.length}',
           'deleted': '5',
           'cause': appSentenceAt('pages.storage.delete.cause_in_use'),
         }),
@@ -708,7 +708,10 @@ void main() {
       final toasts = await announce(container);
 
       expect(toasts.single.type, ToastType.success);
-      expect(toasts.single.description, _sentence('pages.storage.delete.completed', {'count': '8'}));
+      expect(
+        toasts.single.description,
+        _sentence('pages.storage.delete.completed', {'count': '${StorageBoxKey.values.length}'}),
+      );
       // Opened on success too, which no other group does: the forced restart is
       // owed whether or not the stores went, because the boxes are unregistered
       // before the removal is attempted and the session cannot read settings again

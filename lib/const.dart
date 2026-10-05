@@ -67,6 +67,14 @@ class Const {
 
   static String get xUrl => "https://x.com/umasagashi";
 
+  /// The origin of the record-sharing server: its API under `/api/`, and the published pages under `/r/`.
+  ///
+  /// Web and Windows read the same value. A staging build replaces it with
+  /// `--dart-define=UMACAPTURE_SHARING_ORIGIN=<origin>`; the staging web app is served from that same
+  /// origin, which the API requires because `/api/*` answers no CORS.
+  static String get sharingOrigin =>
+      const String.fromEnvironment("UMACAPTURE_SHARING_ORIGIN", defaultValue: "https://umacapture.com");
+
   static RegExp get uninstallerPattern => RegExp(r"unins[0-9]+\.exe");
 
   static Uri get sentrySampleUrl => Uri.parse("$moduleUrlRoot/sentry_sample.json");

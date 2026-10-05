@@ -354,6 +354,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a plain tap on the confirm deletes nothing; only the long press does', (tester) async {
+    final container = await _pumpUnconfirmed(tester);
+    final storage = container.read(charaDetailRecordStorageLoaderProvider.notifier) as _FakeRecordStorage;
+    final confirm = find.widgetWithIcon(FilledButton, Symbols.delete_rounded);
+
+    await tester.tap(confirm);
+    await tester.pump();
+    expect(storage.deleteAllCalls, isEmpty);
+    expect(find.byType(BulkDeleteRecordDialog), findsOneWidget);
+
+    // The same finder confirms when held, so the tap above did reach the button.
+    await tester.longPress(confirm);
+    await tester.pump();
+    expect(storage.deleteAllCalls, [
+      {'a', 'b'},
+    ]);
+    await _expectHeldDeleteFinished(tester, storage, find.byType(BulkDeleteRecordDialog));
+  });
+
   testWidgets('survives the dialog being closed while the delete runs', (tester) async {
     final h = await _pump(tester);
 

@@ -41,7 +41,12 @@ class ModuleVersion {
   final DateTime recognizerVersion;
   final DateTime minimumVersion;
 
-  ModuleVersion({required this.recognizerVersion, required this.minimumVersion});
+  /// [recognizerVersion] as the module states it (`2026-09-30T11:00:00+0900`). A published record
+  /// carries this text, and the sharing server compares it with its own tables' version; a
+  /// [DateTime] cannot give the module's own offset back.
+  final String recognizerVersionText;
+
+  ModuleVersion({required this.recognizerVersion, required this.minimumVersion, required this.recognizerVersionText});
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase)
@@ -93,7 +98,11 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
     if (recognizer == null || minimum == null) {
       return null;
     }
-    return ModuleVersion(recognizerVersion: recognizer, minimumVersion: minimum);
+    return ModuleVersion(
+      recognizerVersion: recognizer,
+      minimumVersion: minimum,
+      recognizerVersionText: recognizerVersion,
+    );
   }
 
   static Future<ModuleVersionRawData?> load(FilePath file) async {

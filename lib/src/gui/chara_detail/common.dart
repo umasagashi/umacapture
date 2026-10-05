@@ -342,9 +342,11 @@ Widget dismissForMissingRecord(RefBase ref) {
 
 /// The cancel/confirm button row shared by the record confirmation dialogs.
 ///
-/// [destructive] dialogs (delete, archive) use the error palette and gate the
-/// action behind a long-press; non-destructive ones (export) confirm on a plain
-/// tap. Cancel always dismisses the dialog.
+/// [destructive] dialogs (delete, archive) use the error palette. Whether the
+/// action is gated behind a long-press is [requireLongPress], which follows
+/// [destructive] unless given: an action that cannot be taken back but is not a
+/// deletion (publishing) asks for the long-press without the error palette.
+/// Cancel always dismisses the dialog.
 class ConfirmActionRow extends StatelessWidget {
   final RefBase dismissRef;
   final String cancelLabel;
@@ -354,6 +356,10 @@ class ConfirmActionRow extends StatelessWidget {
   final IconData confirmIcon;
   final bool destructive;
   final VoidCallback onConfirm;
+
+  /// Whether a plain press is a no-op and only a long-press confirms. Null means
+  /// "same as [destructive]".
+  final bool? requireLongPress;
 
   /// Whether the confirm button accepts input. When false the button is greyed
   /// and both tap and long-press are no-ops, e.g. until a required choice (an
@@ -382,6 +388,7 @@ class ConfirmActionRow extends StatelessWidget {
     required this.confirmIcon,
     required this.destructive,
     required this.onConfirm,
+    this.requireLongPress,
     this.enabled = true,
     this.cancelEnabled = true,
   });
@@ -389,6 +396,7 @@ class ConfirmActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final longPress = requireLongPress ?? destructive;
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -412,15 +420,15 @@ class ConfirmActionRow extends StatelessWidget {
                 : null,
             icon: Icon(confirmIcon),
             label: Text(confirmLabel),
-            // Destructive actions require a deliberate long-press; a plain press
-            // is a no-op so an accidental tap cannot delete/archive. When
+            // A long-press action needs a deliberate hold; a plain press is a
+            // no-op so an accidental tap cannot delete, archive or publish. When
             // disabled, both are null so the button greys out entirely.
             onPressed: !enabled
                 ? null
-                : destructive
+                : longPress
                 ? () {}
                 : onConfirm,
-            onLongPress: enabled && destructive ? onConfirm : null,
+            onLongPress: enabled && longPress ? onConfirm : null,
           ),
         ),
       ],

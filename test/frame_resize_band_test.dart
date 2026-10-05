@@ -138,7 +138,11 @@ void main() {
       final container = ProviderContainer.test(
         overrides: [
           moduleVersionLoader.overrideWith(
-            (ref) async => ModuleVersion(recognizerVersion: DateTime(2024), minimumVersion: DateTime(2021)),
+            (ref) async => ModuleVersion(
+              recognizerVersion: DateTime(2024),
+              minimumVersion: DateTime(2021),
+              recognizerVersionText: "2024-01-01T00:00:00+0900",
+            ),
           ),
           platformConfigLoader.overrideWith((ref) async => <String, dynamic>{}),
         ],

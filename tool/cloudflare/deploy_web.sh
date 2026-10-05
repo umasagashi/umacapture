@@ -93,6 +93,7 @@ done
 # Everything that differs between the targets is set here and nowhere else.
 #   SENTRY_MAPS    upload source maps to Sentry (stage 2)
 #   SHARE_TABLES   build the name tables the Worker bundles (stages 3 and 9)
+#   BUILD_ARGS     extra arguments for the web build (stage 1)
 #   WRANGLER_ARGS  config (and environment) handed to every wrangler deploy
 case "$TARGET" in
   production)
@@ -100,6 +101,8 @@ case "$TARGET" in
     WRANGLER_ARGS=(-c server/wrangler.assets-only.jsonc)
     SENTRY_MAPS=1
     SHARE_TABLES=0
+    # The app's built-in sharing origin is production's.
+    BUILD_ARGS=()
     ;;
   staging)
     # <worker name>-<env>.<account workers.dev subdomain>.workers.dev
@@ -108,6 +111,8 @@ case "$TARGET" in
     # Staging deployments send nothing to Sentry.
     SENTRY_MAPS=0
     SHARE_TABLES=1
+    # Point the app's record sharing at this deployment's own Worker, not production.
+    BUILD_ARGS=("--dart-define=UMACAPTURE_SHARING_ORIGIN=$PUBLIC_ROOT")
     ;;
   *) fail "$usage" ;;
 esac
@@ -140,7 +145,7 @@ echo "    HEAD $GIT_SHA, wrangler $("$WRANGLER" --version 2>/dev/null | tail -1)
 # ---- 1 build -----------------------------------------------------------------
 step "1 build"
 rm -rf "$WEB_DIR"
-bash tool/build_web.sh --source-maps
+bash tool/build_web.sh --source-maps ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
 
 # ---- 2 source maps -----------------------------------------------------------
 if [[ "$SENTRY_MAPS" == 1 ]]; then
