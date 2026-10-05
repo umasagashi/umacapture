@@ -1365,7 +1365,12 @@
                 "delete_record": "データを削除",
                 "report_record": "誤認識を報告",
                 "archive_record": "データをアーカイブ",
-                "group_file": "ファイル"
+                "group_file": "ファイル",
+                "group_publish": "公開",
+                "publish_record": "公開する…",
+                "open_published": "公開ページを開く",
+                "copy_published_url": "URL をコピー",
+                "withdraw_record": "公開を取り消す…"
             },
             "column_context_menu": {
                 "reset_width": "列幅を自動調整に戻す",
@@ -1505,6 +1510,63 @@
                         "no_frame": "送信する場面の画像がないため、送信できません。"
                     },
                     "unsupported": "この環境では取り込みエラー報告を利用できません。"
+                }
+            },
+            "publication": {
+                "open_published": "公開ページを開く",
+                "copy_url": "URL をコピー",
+                "url_copied": "URL をコピーしました。",
+                "close": "閉じる",
+                "retry": "もう一度",
+                "open_verification": "確認ページを開く",
+                "report_record": "誤認識を報告"
+            },
+            "publish_record": {
+                "dialog": {
+                    "title": "このレコードを公開",
+                    "description": "公開すると、URL を知っている人は誰でもこのレコードを見られます。\nメモ・評価・撮影日時・画像は公開されません。\n公開はこの端末からいつでも取り消せますが、共有先に残った表示や、他の人が保存したものは消せません。\n試験公開中のため、公開したレコードは予告なく消えることがあります。\n詳しくは{link}をご覧ください。",
+                    "cancel_button": {
+                        "label": "キャンセル",
+                        "tooltip": "公開せずに閉じる"
+                    },
+                    "ok_button": {
+                        "label": "長押しで公開",
+                        "tooltip": "このレコードを公開します"
+                    },
+                    "published": "公開しました。"
+                },
+                "failure": {
+                    "not_publishable": "自分で育成したレコードだけ公開できます。",
+                    "module_unavailable": "認識モジュールが読み込まれていないため、公開できません。アプリを再起動してから、もう一度お試しください。",
+                    "already_published": "このレコードはすでに公開しています。",
+                    "ticket_required": "公開の前に、ブラウザで bot でないことの確認を済ませてください。確認が終わったら、ここに戻って公開してください。",
+                    "daily_limit": "今日の公開の上限に達しました。日本時間 9:00 以降にお試しください。",
+                    "storage_full": "公開できる件数の上限に達しているため、いまは公開できません。",
+                    "server_tables_older": "サーバー側の更新が済んでいないため、公開できません。時間をおいてお試しください。",
+                    "rejected": "このレコードは公開できませんでした。認識結果に誤りがある可能性があります。",
+                    "publishing_paused": "現在、公開はサーバー側で一時的に停止されています。",
+                    "busy": "混み合っています。時間をおいて、もう一度お試しください。",
+                    "unreachable": "サーバーに接続できませんでした。もう一度お試しください。"
+                }
+            },
+            "withdraw_record": {
+                "dialog": {
+                    "title": "公開の取り消し",
+                    "description": "公開ページと JSON を削除します。\nX や Discord などに残った表示や、他の人が保存したものは消せません。共有カードの画像は、取り消した後もしばらく表示されることがあります。",
+                    "cancel_button": {
+                        "label": "キャンセル",
+                        "tooltip": "取り消さずに閉じる"
+                    },
+                    "ok_button": {
+                        "label": "長押しで取り消す",
+                        "tooltip": "このレコードの公開を取り消します"
+                    }
+                },
+                "success": "公開を取り消しました。",
+                "failure": {
+                    "unreachable": "サーバーに接続できませんでした。もう一度お試しください。",
+                    "forbidden": "この端末に残っている鍵では取り消せませんでした。",
+                    "failed": "取り消せませんでした。時間をおいて、もう一度お試しください。"
                 }
             },
             "delete_record": {
@@ -1786,7 +1848,7 @@
                 "settings": {
                     "label": "設定",
                     "description": "アプリのすべての設定",
-                    "delete_warning": "この操作は取り消せません。\n\nこのファイルの削除は推奨されません。"
+                    "delete_warning": "この操作は取り消せません。\n\nこのファイルの削除は推奨されません。「公開したレコード」の鍵も消え、この端末から公開を取り消せなくなります。"
                 },
                 "temp": {
                     "label": "一時ファイル",
@@ -1917,7 +1979,8 @@
                     "version_check": "更新の確認の記録",
                     "addon": "アドオンの設定と実行の履歴",
                     "data_migration": "データ整理の実施記録",
-                    "telemetry_id": "不具合報告に使う匿名の ID"
+                    "telemetry_id": "不具合報告に使う匿名の ID",
+                    "published_records": "公開したレコード"
                 }
             },
             "status": {
@@ -2058,6 +2121,23 @@
                     "title": "利用環境情報の送信許可",
                     "description": "エラーログやフィードバックなど、お使いの環境情報を送信する機能を有効にします。これをオフにしてもバージョンチェックなどの受信機能はオフになりません。変更は次回アプリ起動時から反映されます。",
                     "sample_link": "サンプルデータ"
+                },
+                "published_records": {
+                    "title": "公開したレコード",
+                    "description": "この端末から公開したレコードの確認と、公開の取り消しができます。",
+                    "dialog": {
+                        "title": "公開したレコード",
+                        "description": "この端末から公開したレコードです。端末のレコードを削除しても、公開は残ります。",
+                        "deleted_record": "端末から削除したレコード",
+                        "published_on": "公開日 {date}",
+                        "checking": "公開できたか確かめています…",
+                        "not_on_server": "公開されていません。",
+                        "unreachable": "公開できたか確かめられませんでした。",
+                        "withdraw": "取り消す…",
+                        "forget": "控えを消す",
+                        "check_again": "もう一度確かめる",
+                        "empty": "公開したレコードはありません。"
+                    }
                 }
             },
             "raw_frame_probe": {

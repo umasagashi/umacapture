@@ -16,11 +16,12 @@
 # Asserts:
 #   (1) production: source maps go to Sentry, the assets-only config is
 #       deployed to umacapture.com, no tables are built, and deploy.json has
-#       no tables entry
+#       no tables entry, and the build keeps the app's sharing origin
 #   (2) staging: nothing goes to Sentry (and no Sentry token is needed), the
 #       tables are built, server/wrangler.jsonc is deployed with --env staging,
 #       verification reads the staging host, deploy.json names the module
-#       archive, and the deployed tables become the baseline
+#       archive, the deployed tables become the baseline, and the build
+#       points the app's sharing origin at the staging host
 #   (3) staging --dry-run: no deploy without --dry-run, and the baseline is
 #       left alone
 #   (4) production --dry-run: no deploy without --dry-run (stage 2 still runs)
@@ -161,6 +162,7 @@ check "assets-only config deployed" called "wrangler deploy -c server/wrangler.a
 check "no tables built" not called_like "^uv "
 check "verified on umacapture.com" called "curl GET https://umacapture.com/deploy.json"
 check "deploy.json has no tables entry" not grep -q tables_module_sha256 "$STUB_WEB/umacapture.com/deploy.json"
+check "build keeps the app's sharing origin" called "build_web --source-maps"
 
 echo "(2) staging"
 (unset SENTRY_AUTH_TOKEN; run_world staging --target staging --yes; echo "$STATUS" > "$ROOT/staging.status")
@@ -177,6 +179,8 @@ check "deploy.json names the module archive" \
   grep -q "\"tables_module_sha256\": \"$MODULE_SHA\"" "$STUB_WEB/$STAGING_HOST/deploy.json"
 check "deployed tables became the baseline" \
   cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.json"
+check "build shares through the staging host" \
+  called "build_web --source-maps --dart-define=UMACAPTURE_SHARING_ORIGIN=https://$STAGING_HOST"
 
 echo "(3) staging --dry-run"
 run_world staging_dry --target staging --dry-run

@@ -167,7 +167,9 @@ not show that Cloudflare's edge applies them, which only the post-deployment che
   leaves the baseline as it was. After publishing a new module set with `publish_modules.sh`, run
   the staging deployment again so the Worker resolves the new names.
 - **Local web builds.** A web app served locally (`serve_web_build.py`) cannot call the staging
-  API: the API is same-origin only. Test sharing from the web app on the staging host.
+  API: the API is same-origin only. Test sharing from the web app on the staging host; a staging
+  run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging URL, so it
+  shares through the staging Worker rather than `umacapture.com`.
 - **Stopping staging.** `vars.PUBLISH_ENABLED: "false"` and a redeploy stop new tickets and
   publishes while reads and withdrawals go on. To take the Worker off staging entirely, delete the
   `umacapture-web-staging` Worker (and the staging database if no longer needed) in the dashboard;
@@ -197,6 +199,19 @@ the deployment URL that an absent id and a query string both answer 404 from the
   API. The project has no deployment yet, so its first one is the production deployment. Until a
   production deployment exists, the script refuses a preview before creating anything, also
   under `--dry-run`.
+- **`PUBLIC_ORIGIN` per environment.** The function requires it and fails while loading when it
+  is unset (`og/api/og.mjs` throws `PUBLIC_ORIGIN is not set`), so every request to that
+  deployment fails. Set it in the project before the first deployment to each environment:
+  `https://umacapture.com` for **Production**, and the staging origin
+  `https://umacapture-web-staging.umasagashi.workers.dev` for **Preview**. With the pinned CLI,
+  from `og/` and with `VERCEL_TOKEN` exported from `tool/vercel/.env`:
+
+  ```bash
+  node_modules/.bin/vercel env add PUBLIC_ORIGIN production --value https://umacapture.com --yes
+  node_modules/.bin/vercel env add PUBLIC_ORIGIN preview --value https://umacapture-web-staging.umasagashi.workers.dev --yes
+  ```
+
+  `deploy_og.sh` neither sets nor checks this variable.
 - **Credentials.** `VERCEL_TOKEN` in `tool/vercel/.env` (gitignored); the CLI reads it from the
   environment. `vercel login` is not used: it signs in the whole machine, not this repository.
 - **Project link.** `og/.vercel/project.json` (gitignored) names the project and is made once by

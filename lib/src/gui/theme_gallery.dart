@@ -958,7 +958,8 @@ const Map<String, String> _roleUsages = {
   'primary':
       'Brand accent: add-column button, drag/slot accents, data-table accents, progress, feedback drawer, '
       'storage-group folder icons, the hold-to-confirm button\'s fill, the enhancement merge dialog\'s '
-      'selected-card border, and the single-tab-instance waiting screen\'s icon.',
+      'selected-card border, the single-tab-instance waiting screen\'s icon, and the publish dialog\'s '
+      'notice link and its long-press publish button (held to confirm, but not destructive).',
   'onPrimary':
       'Text and icons on primary fills (add-column button, data-table accents, feedback drawer, hold-to-confirm '
       'button label, gauge and keyboard-focus ring).',
@@ -977,7 +978,8 @@ const Map<String, String> _roleUsages = {
       'Never painted under this name: the role consolidation in app_widget.dart remaps it onto onTertiary, '
       'so this is the source of the card/dialog header band\'s text color.',
   'error':
-      'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, task failures, and the '
+      'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs and the withdraw-publication '
+      'confirm, task failures, and the '
       'import-report dialog\'s failure card. In the storage view it moved off the row: the delete button became '
       'the one destructive entry of the row menu, which resolves this role itself, and only while that entry is '
       'live -- a withheld one takes disabledColor instead.',

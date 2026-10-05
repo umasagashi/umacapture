@@ -73,6 +73,7 @@ String storageBoxLabelKey(StorageBoxKey key) => switch (key) {
   StorageBoxKey.addon => _boxLabelKey('addon'),
   StorageBoxKey.dataMigration => _boxLabelKey('data_migration'),
   StorageBoxKey.telemetryId => _boxLabelKey('telemetry_id'),
+  StorageBoxKey.publishedRecords => _boxLabelKey('published_records'),
 };
 
 String _boxLabelKey(String name) => 'pages.storage.store.name.$name';

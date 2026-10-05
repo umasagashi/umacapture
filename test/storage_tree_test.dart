@@ -877,12 +877,12 @@ void main() {
     for (final name in storageBoxNames) {
       expect(find.byKey(storageBoxRowKey(name)), findsOneWidget, reason: name);
     }
-    // And there are eight of them, which is the number of settings stores the
+    // And there are nine of them, which is the number of settings stores the
     // synthetic node was specified to list and the
     // count stage 4e's value-rendering rules were derived against. A ninth is not
     // a failure of this screen, but it is a fact that has to be looked at rather
     // than absorbed silently.
-    expect(storageBoxNames.length, 8);
+    expect(storageBoxNames.length, 9);
 
     // Stage 4e: the row opens the store. Asserted as the row's own callback and
     // not by driving a tap, because what the dialog then shows is not this

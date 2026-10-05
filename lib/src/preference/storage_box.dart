@@ -6,7 +6,17 @@ import 'package:recase/recase.dart';
 import '/const.dart';
 import '/src/preference/hive_adapter.dart';
 
-enum StorageBoxKey { settings, windowState, trainerId, columnSpec, versionCheck, addon, dataMigration, telemetryId }
+enum StorageBoxKey {
+  settings,
+  windowState,
+  trainerId,
+  columnSpec,
+  versionCheck,
+  addon,
+  dataMigration,
+  telemetryId,
+  publishedRecords,
+}
 
 /// The name each box is opened and stored under, derived from [StorageBoxKey].
 ///

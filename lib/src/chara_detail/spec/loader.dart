@@ -172,6 +172,12 @@ final charaCardInfoProvider = Provider<List<CharaCardInfo>>((ref) {
   return ref.watch(_charaCardInfoLoader).value!;
 });
 
+/// The name of character card [card], or null while the module files are not loaded or the card is
+/// unknown to them. For a screen that can open before the modules have been read.
+final charaCardNameProvider = Provider.family<String?, int>((ref, card) {
+  return ref.watch(_charaCardInfoLoader).value?.getOrNull(card)?.names.first;
+});
+
 final raceTitleInfoLoader = FutureProvider<List<RaceTitleInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
