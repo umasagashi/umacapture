@@ -3,10 +3,10 @@
 # Remove the interim data.umasagashi.com custom domain from the R2 bucket.
 #
 # During an earlier plan the bucket was going to be fronted by
-# data.umasagashi.com. The chosen public custom domain is now
-# data.umacapture.com (see r2_stage1_setup.sh). If data.umasagashi.com was ever
-# connected to the bucket, run this ONCE, AFTER data.umacapture.com is connected
-# and verified, to detach the stale domain.
+# data.umasagashi.com. The public host is data.umacapture.com, and it is served
+# by the Worker umacapture-data (Workers Static Assets), not by the bucket; the
+# bucket has no custom domain of its own. If data.umasagashi.com was ever
+# connected to the bucket, run this ONCE to detach the stale domain.
 #
 # This only detaches a custom domain from the R2 bucket; it does not delete the
 # bucket, its objects, or the umacapture.com domain. Safe to no-op if the domain

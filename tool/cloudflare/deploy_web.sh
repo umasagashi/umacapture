@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Deploy the Flutter web app to one of two targets:
+# Deploy the Flutter web app. Two independent choices pick what is deployed:
 #
-#   production (default)  https://umacapture.com, as a static-assets-only
-#                         Worker (server/wrangler.assets-only.jsonc). No Worker
-#                         script is uploaded.
-#   staging               https://umacapture-web-staging.umasagashi.workers.dev,
-#                         the same assets together with the record-sharing
-#                         Worker and its staging D1 (server/wrangler.jsonc,
-#                         env.staging).
+#   --target   where it goes
+#     production (default)  https://umacapture.com (the top level of the config)
+#     staging               https://umacapture-web-staging.umasagashi.workers.dev
+#                           (env.staging of the config)
+#   --sharing  whether the record-sharing Worker comes with the assets
+#     on (default)  server/wrangler.jsonc: the Worker answers /r/* and /api/*
+#                   and every path that matches no file, with its D1
+#     off           server/wrangler.assets-only.jsonc: no Worker script at all,
+#                   so those paths get the static 404. This is how sharing is
+#                   switched off with the assets of the current HEAD.
 #
-# Invariant, for both targets: what is uploaded is build/web/ as built from the
-# committed HEAD in THIS run. A previous build/web/ is never reused, and a
-# dirty working tree stops the script before it builds, so deploy.json's
+# Invariant, for every combination: what is uploaded is build/web/ as built
+# from the committed HEAD in THIS run. A previous build/web/ is never reused,
+# and a dirty working tree stops the script before it builds, so deploy.json's
 # git_sha names the source of every byte served.
 #
-# Stages (a stage marked with a target runs for that target only):
+# Stages (a stage marked with a choice runs for that choice only):
 #   0 preflight (tools, clean tree, credentials), then `npm ci` in server/ so
 #     the wrangler run below is the one pinned in server/package-lock.json,
 #     never whatever wrangler is on PATH
@@ -26,27 +29,37 @@
 #     before the tree is fingerprinted and uploaded. Staging sends nothing to
 #     Sentry. Either way the maps are excluded from the deployment by
 #     web/.assetsignore.
-#   3 [staging] name tables: tool/cloudflare/build_share_tables.py writes
+#   3 [sharing on] name tables: tool/cloudflare/build_share_tables.py writes
 #     server/src/tables.generated.json from the module archive the live
-#     pointer names, checked append-only against the baseline
-#     tool/cloudflare/.deploy-backup/tables.json; the Worker bundles it
-#   4 write build/web/deploy.json (git_sha, build time, wasm sha256, and for
-#     staging the sha256 of the module archive the tables were built from)
+#     pointer names, checked append-only against the target's own baseline
+#     tool/cloudflare/.deploy-backup/tables.<target>.json; the Worker bundles
+#     it. Each target has its own D1 and so its own baseline.
+#   4 write build/web/deploy.json (git_sha, build time, wasm sha256, and with
+#     sharing on the sha256 of the module archive the tables were built from)
 #   5 wrangler deploy --dry-run (config and asset collection, no upload)
 #   6 confirmation gate ('yes')          <- --dry-run stops here;
 #                                           --yes answers it without a prompt
 #   7 wrangler deploy
 #   8 verify through the public URL: deploy.json matches, "/" carries
-#     COOP/COEP, a source map and an unknown path both answer 404
-#   9 [staging] promote the deployed tables to the baseline
+#     COOP/COEP, a source map answers 404, and /r/0000000000 answers 404 from
+#     the side the --sharing choice expects: the Worker's 404 carries
+#     X-Robots-Tag: noindex, the static 404 carries no X-Robots-Tag
+#   9 [sharing on] promote the deployed tables to the target's baseline
 #
 # --dry-run still runs stages 1 to 3, because stage 5 needs a real tree; for
-# production stage 2 therefore still uploads source maps to Sentry. Rolling
-# back is `wrangler rollback` with the target's config (see docs/web-deploy.md).
+# production stage 2 therefore still uploads source maps to Sentry.
+#
+# Rolling back does not go through this script: `wrangler rollback <version-id>
+# --name <worker>` with the id of the version to return to, never without one
+# (see docs/web-deploy.md). It needs no build, no Sentry and no clean tree. A
+# rollback from one sharing-on version to another is safe only when both
+# deploy.json files name the same tables_module_sha256: records published
+# under longer tables cannot be read with shorter ones, and D1 is not rolled
+# back.
 #
 # Run from Git Bash at the repository root:
 #   export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"   # production only
-#   bash tool/cloudflare/deploy_web.sh [--target production|staging] [--dry-run] [--yes]
+#   bash tool/cloudflare/deploy_web.sh [--target production|staging] [--sharing on|off] [--dry-run] [--yes]
 # Cloudflare credentials come from tool/cloudflare/.env (see .env.example).
 #
 # NOTE: `set -x` is deliberately never enabled, so no token is ever printed.
@@ -66,7 +79,6 @@ ENV_FILE="$SCRIPT_DIR/.env"
 SERVER_DIR="server"
 WRANGLER="$REPO_ROOT/$SERVER_DIR/node_modules/.bin/wrangler"
 TABLES_OUT="server/src/tables.generated.json"
-TABLES_BASELINE="tool/cloudflare/.deploy-backup/tables.json"
 # The edge may take a moment to switch versions; retry a mismatching
 # deploy.json for this long before failing.
 VERIFY_WAIT_SECONDS=120
@@ -76,13 +88,15 @@ step() { echo; echo "==> $*"; }
 fail() { echo "error: $*" >&2; exit 1; }
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 
-usage="usage: $0 [--target production|staging] [--dry-run] [--yes]"
+usage="usage: $0 [--target production|staging] [--sharing on|off] [--dry-run] [--yes]"
 TARGET=production
+SHARING=on
 DRY_RUN=0
 ASSUME_YES=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target) [[ $# -ge 2 ]] || fail "$usage"; TARGET="$2"; shift ;;
+    --sharing) [[ $# -ge 2 ]] || fail "$usage"; SHARING="$2"; shift ;;
     --dry-run) DRY_RUN=1 ;;
     --yes) ASSUME_YES=1 ;;
     *) fail "$usage" ;;
@@ -90,37 +104,61 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Everything that differs between the targets is set here and nowhere else.
-#   SENTRY_MAPS    upload source maps to Sentry (stage 2)
-#   SHARE_TABLES   build the name tables the Worker bundles (stages 3 and 9)
-#   BUILD_ARGS     extra arguments for the web build (stage 1)
-#   WRANGLER_ARGS  config (and environment) handed to every wrangler deploy
+# Everything that differs between the choices is set here and nowhere else. The target and the
+# sharing choice are independent: each sets its own variables, and only the two lines after them
+# (WRANGLER_ARGS, TABLES_BASELINE) combine the two.
+#   PUBLIC_ROOT      where stage 8 verifies
+#   SENTRY_MAPS      upload source maps to Sentry (stage 2)
+#   BUILD_ARGS       extra arguments for the web build (stage 1)
+#   ENV_ARGS         the config environment the target lives in
+#   CONFIG           the wrangler config of the sharing choice
+#   SHARE_TABLES     build the name tables the Worker bundles (stages 3 and 9)
+#   NOT_FOUND_FROM   what stage 8 expects to answer /r/0000000000 with a 404, and
+#   NOT_FOUND_ROBOTS the X-Robots-Tag that tells it apart: the Worker's own 404 says noindex
+#                    (server/src/worker.mjs), the static 404 says nothing
 case "$TARGET" in
   production)
     PUBLIC_ROOT="https://umacapture.com"
-    WRANGLER_ARGS=(-c server/wrangler.assets-only.jsonc)
     SENTRY_MAPS=1
-    SHARE_TABLES=0
     # The app's built-in sharing origin is production's.
     BUILD_ARGS=()
+    ENV_ARGS=()
     ;;
   staging)
     # <worker name>-<env>.<account workers.dev subdomain>.workers.dev
     PUBLIC_ROOT="https://umacapture-web-staging.umasagashi.workers.dev"
-    WRANGLER_ARGS=(-c server/wrangler.jsonc --env staging)
     # Staging deployments send nothing to Sentry.
     SENTRY_MAPS=0
-    SHARE_TABLES=1
-    # Point the app's record sharing at this deployment's own Worker, not production.
+    # Point the app's record sharing at this deployment's own origin, not production.
     BUILD_ARGS=("--dart-define=UMACAPTURE_SHARING_ORIGIN=$PUBLIC_ROOT")
+    ENV_ARGS=(--env staging)
     ;;
   *) fail "$usage" ;;
 esac
+case "$SHARING" in
+  on)
+    CONFIG=server/wrangler.jsonc
+    SHARE_TABLES=1
+    NOT_FOUND_FROM="the record-sharing Worker"
+    NOT_FOUND_ROBOTS=noindex
+    ;;
+  off)
+    CONFIG=server/wrangler.assets-only.jsonc
+    SHARE_TABLES=0
+    NOT_FOUND_FROM="the static assets"
+    NOT_FOUND_ROBOTS=""
+    ;;
+  *) fail "$usage" ;;
+esac
+WRANGLER_ARGS=(-c "$CONFIG" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"})
+# The tables last deployed to this target. Each target has its own D1, holding records published
+# under its own tables, so one target's tables say nothing about what the other may drop.
+TABLES_BASELINE="tool/cloudflare/.deploy-backup/tables.$TARGET.json"
 
 cd "$REPO_ROOT"
 
 # ---- 0 preflight -------------------------------------------------------------
-step "0 preflight ($TARGET)"
+step "0 preflight ($TARGET, sharing $SHARING)"
 tools=(git curl sha256sum npm)
 [[ "$SHARE_TABLES" == 1 ]] && tools+=(uv)
 for tool in "${tools[@]}"; do
@@ -218,15 +256,26 @@ while :; do
 done
 echo "    deploy.json matches"
 
+# header <file> <lowercase name>: the value of that header in a curl -D dump.
+header() { tr -d '\r' < "$1" | awk -F': ' -v h="$2" 'tolower($1)==h{print $2}'; }
+
 curl -sS -D "$work/root.headers" -o /dev/null "$PUBLIC_ROOT/"
-header() { tr -d '\r' < "$work/root.headers" | awk -F': ' -v h="$1" 'tolower($1)==h{print $2}'; }
-[[ "$(header cross-origin-opener-policy)" == "same-origin" ]] || fail "/ lacks COOP: same-origin"
-[[ "$(header cross-origin-embedder-policy)" == "require-corp" ]] || fail "/ lacks COEP: require-corp"
+[[ "$(header "$work/root.headers" cross-origin-opener-policy)" == "same-origin" ]] || fail "/ lacks COOP: same-origin"
+[[ "$(header "$work/root.headers" cross-origin-embedder-policy)" == "require-corp" ]] || fail "/ lacks COEP: require-corp"
 echo "    / carries COOP/COEP"
 
 [[ "$(status_of /main.dart.js.map)" == "404" ]] || fail "/main.dart.js.map is served (web/.assetsignore not applied)"
-[[ "$(status_of /r/0000000000)" == "404" ]] || fail "/r/0000000000 is not a 404"
-echo "    source map and unknown path answer 404"
+echo "    source map answers 404"
+
+# A 404 alone cannot tell the Worker from the static assets: both answer an unknown /r/ id with 404.
+# The X-Robots-Tag tells them apart, so a deploy whose Worker did not come up (or did not go away)
+# stops here, before stage 9 promotes its tables.
+code="$(curl -sS -D "$work/record.headers" -o /dev/null -w '%{http_code}' "$PUBLIC_ROOT/r/0000000000" || echo "000")"
+[[ "$code" == "404" ]] || fail "/r/0000000000: HTTP $code, not a 404"
+robots="$(header "$work/record.headers" x-robots-tag)"
+[[ "$robots" == "$NOT_FOUND_ROBOTS" ]] \
+  || fail "/r/0000000000 is not answered by $NOT_FOUND_FROM (X-Robots-Tag '$robots', expected '$NOT_FOUND_ROBOTS')"
+echo "    /r/0000000000 is the 404 of $NOT_FOUND_FROM"
 
 # ---- 9 baseline --------------------------------------------------------------
 # Only tables that are now live become the baseline: a run that stopped earlier

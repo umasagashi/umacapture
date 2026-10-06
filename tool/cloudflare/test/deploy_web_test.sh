@@ -9,24 +9,36 @@
 #
 # Hosts are directories under $STUB_WEB/<host>/. The fake `wrangler deploy`
 # copies build/web/ to umacapture.com, or to the staging workers.dev host when
-# given `--env staging`; `--dry-run` copies nothing. The fake `curl` answers a
-# GET from the host directory (200 with the file, 404 without it) and sends
-# COOP/COEP with every 200.
+# given `--env staging`; `--dry-run` copies nothing. A deploy of
+# server/wrangler.jsonc also brings up the record-sharing Worker on that host
+# (marked by $STUB_WEB/<host>.worker), unless STUB_NO_WORKER is set; a deploy
+# of server/wrangler.assets-only.jsonc never does. The fake `curl` answers a
+# GET from the host directory (200 with the file, 404 without it), sends
+# COOP/COEP with every 200, and, while the host's Worker is up, sends the
+# Worker's X-Robots-Tag: noindex with every 404.
 #
 # Asserts:
-#   (1) production: source maps go to Sentry, the assets-only config is
-#       deployed to umacapture.com, no tables are built, and deploy.json has
-#       no tables entry, and the build keeps the app's sharing origin
+#   (1) production: source maps go to Sentry, server/wrangler.jsonc is
+#       deployed to umacapture.com, the tables are built against production's
+#       own baseline, deploy.json names the module archive, the deployed tables
+#       become production's baseline, and the build keeps the app's sharing
+#       origin
 #   (2) staging: nothing goes to Sentry (and no Sentry token is needed), the
-#       tables are built, server/wrangler.jsonc is deployed with --env staging,
-#       verification reads the staging host, deploy.json names the module
-#       archive, the deployed tables become the baseline, and the build
-#       points the app's sharing origin at the staging host
+#       tables are built against staging's own baseline, server/wrangler.jsonc
+#       is deployed with --env staging, verification reads the staging host,
+#       deploy.json names the module archive, the deployed tables become
+#       staging's baseline, and the build points the app's sharing origin at
+#       the staging host
 #   (3) staging --dry-run: no deploy without --dry-run, and the baseline is
 #       left alone
 #   (4) production --dry-run: no deploy without --dry-run (stage 2 still runs)
 #   (5) staging where the table builder records no source sha256: the run
 #       stops before anything is deployed
+#   (6) staging --sharing off: the assets-only config is deployed with
+#       --env staging, no tables are built and no baseline is written,
+#       deploy.json has no tables entry, and stage 8 accepts the static 404
+#   (7) production where the deploy brings up no Worker: stage 8 fails on the
+#       static 404, and the tables do not become the baseline
 #
 # Run from Git Bash:  bash tool/cloudflare/test/deploy_web_test.sh
 # Needs git and sha256sum.
@@ -78,15 +90,19 @@ echo "wrangler $*" >> "$STUB_LOG"
 [[ "$1" == --version ]] && { echo "4.113.0"; exit 0; }
 [[ "$1" == deploy ]] || exit 2
 host=umacapture.com
+config=""
 prev=""
 for a in "$@"; do
   [[ "$a" == --dry-run ]] && exit 0
   [[ "$prev" == --env && "$a" == staging ]] && host="umacapture-web-staging.umasagashi.workers.dev"
+  [[ "$prev" == -c ]] && config="$a"
   prev="$a"
 done
-rm -rf "$STUB_WEB/$host"
+rm -rf "$STUB_WEB/$host" "$STUB_WEB/$host.worker"
 mkdir -p "$STUB_WEB/$host"
 cp -R build/web/. "$STUB_WEB/$host/"
+[[ "$config" == server/wrangler.jsonc && -z "${STUB_NO_WORKER:-}" ]] && : > "$STUB_WEB/$host.worker"
+exit 0
 SH
 cat > "$BIN/npm" <<SH
 #!/usr/bin/env bash
@@ -129,6 +145,7 @@ if [[ -f "$src" ]]; then code=200; cp "$src" "$body"; else code=404; : > "$body"
 if [[ -n "$headers" ]]; then
   { printf 'HTTP/1.1 %s\r\n' "$code"
     [[ "$code" == 200 ]] && printf 'cross-origin-opener-policy: same-origin\r\ncross-origin-embedder-policy: require-corp\r\n'
+    [[ "$code" == 404 && -e "$STUB_WEB/$host.worker" ]] && printf 'x-robots-tag: noindex\r\n'
     printf '\r\n'; } > "$headers"
 fi
 [[ -n "$fmt" ]] && printf '%s' "$code"
@@ -158,10 +175,14 @@ echo "(1) production"
 SENTRY_AUTH_TOKEN=stub-sentry run_world prod --yes
 check "exit 0" test "$STATUS" -eq 0
 check "source maps sent to Sentry" called "sentry upload"
-check "assets-only config deployed" called "wrangler deploy -c server/wrangler.assets-only.jsonc"
-check "no tables built" not called_like "^uv "
+check "Worker config deployed" called "wrangler deploy -c server/wrangler.jsonc"
+check "tables built against production's baseline" \
+  called_like "^uv run tool/cloudflare/build_share_tables.py --previous tool/cloudflare/.deploy-backup/tables.production.json --out server/src/tables.generated.json --source-out "
 check "verified on umacapture.com" called "curl GET https://umacapture.com/deploy.json"
-check "deploy.json has no tables entry" not grep -q tables_module_sha256 "$STUB_WEB/umacapture.com/deploy.json"
+check "deploy.json names the module archive" \
+  grep -q "\"tables_module_sha256\": \"$MODULE_SHA\"" "$STUB_WEB/umacapture.com/deploy.json"
+check "deployed tables became production's baseline" \
+  cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.production.json"
 check "build keeps the app's sharing origin" called "build_web --source-maps"
 
 echo "(2) staging"
@@ -170,15 +191,15 @@ STATUS="$(cat "$ROOT/staging.status")"
 REPO="$ROOT/staging/repo"; STUB_LOG="$ROOT/staging/calls.log"; STUB_WEB="$ROOT/staging/web"
 check "exit 0 without a Sentry token" test "$STATUS" -eq 0
 check "nothing sent to Sentry" not called "sentry upload"
-check "tables built against the baseline" \
-  called_like "^uv run tool/cloudflare/build_share_tables.py --previous tool/cloudflare/.deploy-backup/tables.json --out server/src/tables.generated.json --source-out "
+check "tables built against staging's baseline" \
+  called_like "^uv run tool/cloudflare/build_share_tables.py --previous tool/cloudflare/.deploy-backup/tables.staging.json --out server/src/tables.generated.json --source-out "
 check "staging env deployed" called "wrangler deploy -c server/wrangler.jsonc --env staging"
 check "nothing deployed to production" not test -e "$STUB_WEB/umacapture.com"
 check "verified on the staging host" called "curl GET https://$STAGING_HOST/deploy.json"
 check "deploy.json names the module archive" \
   grep -q "\"tables_module_sha256\": \"$MODULE_SHA\"" "$STUB_WEB/$STAGING_HOST/deploy.json"
-check "deployed tables became the baseline" \
-  cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.json"
+check "deployed tables became staging's baseline" \
+  cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.staging.json"
 check "build shares through the staging host" \
   called "build_web --source-maps --dart-define=UMACAPTURE_SHARING_ORIGIN=https://$STAGING_HOST"
 
@@ -187,18 +208,35 @@ run_world staging_dry --target staging --dry-run
 check "exit 0" test "$STATUS" -eq 0
 check "dry run only" called "wrangler deploy -c server/wrangler.jsonc --env staging --dry-run"
 check "no real deploy" not called "wrangler deploy -c server/wrangler.jsonc --env staging"
-check "baseline untouched" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.json"
+check "baseline untouched" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.staging.json"
 
 echo "(4) production --dry-run"
 SENTRY_AUTH_TOKEN=stub-sentry run_world prod_dry --dry-run
 check "exit 0" test "$STATUS" -eq 0
 check "source maps still sent" called "sentry upload"
-check "no real deploy" not called "wrangler deploy -c server/wrangler.assets-only.jsonc"
+check "no real deploy" not called "wrangler deploy -c server/wrangler.jsonc"
 
 echo "(5) staging, the source archive's sha256 not recorded"
 STUB_NO_SOURCE=1 run_world staging_no_source --target staging --yes
 check "stops" test "$STATUS" -ne 0
 check "nothing deployed" not called_like "^wrangler deploy"
+
+echo "(6) staging --sharing off"
+run_world staging_off --target staging --sharing off --yes
+check "exit 0" test "$STATUS" -eq 0
+check "assets-only config deployed to the staging env" \
+  called "wrangler deploy -c server/wrangler.assets-only.jsonc --env staging"
+check "nothing deployed to production" not test -e "$STUB_WEB/umacapture.com"
+check "no tables built" not called_like "^uv "
+check "no baseline written" not test -e "$REPO/tool/cloudflare/.deploy-backup"
+check "deploy.json has no tables entry" not grep -q tables_module_sha256 "$STUB_WEB/$STAGING_HOST/deploy.json"
+check "verified on the staging host" called "curl GET https://$STAGING_HOST/r/0000000000"
+
+echo "(7) production, the deploy brings up no Worker"
+SENTRY_AUTH_TOKEN=stub-sentry STUB_NO_WORKER=1 run_world prod_no_worker --yes
+check "stops" test "$STATUS" -ne 0
+check "stops at the Worker check" grep -q "is not answered by the record-sharing Worker" "$ROOT/prod_no_worker/out.log"
+check "tables not promoted" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.production.json"
 
 echo
 echo "passed $PASSED, failed $FAILED"

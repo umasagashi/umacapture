@@ -144,6 +144,7 @@ body { font-family: sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 
 th { text-align: left; padding-right: 1rem; font-weight: normal; }
 footer { margin-top: 3rem; font-size: 0.9em; }
 </style>
+<link rel="icon" type="image/png" href="/favicon.png">
 </head>
 <body>
 ${body(record)}

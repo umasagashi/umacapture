@@ -34,7 +34,9 @@
 #
 # Stages:
 #   0 preflight (tools, the deployed paths committed and clean, _headers CORS
-#     rule, credentials, archive layout and entry names, pointer JSON)
+#     rule, credentials, archive layout and entry names, pointer JSON), then
+#     `npm ci` in server/ so the wrangler run below is the one pinned in
+#     server/package-lock.json, never whatever wrangler is on PATH
 #   1 live state: pointer and deploy.json, the inherited archives, the backup
 #   2 assemble the phase 1 and phase 2 trees
 #   3 wrangler deploy --dry-run, confirmation gate ('yes')
@@ -51,9 +53,13 @@
 # host the deploy lands on (both default to https://data.umacapture.com), so a
 # parallel host can be filled from the one still in service.
 #
-# Rolling back is publishing an older modules.zip with this same script; the
-# faster `wrangler rollback -c server/wrangler.data.jsonc` has to go back two
-# versions, since one publish deploys twice.
+# Rolling back is publishing an older modules.zip with this same script, or the
+# faster `server/node_modules/.bin/wrangler rollback <version-id> -c
+# server/wrangler.data.jsonc` to the version just before that publish began,
+# picked from `wrangler deployments list -c server/wrangler.data.jsonc`. A new
+# zip deploys twice, the same zip or none once; without a version-id wrangler
+# returns to the immediately preceding version, which after a two-deploy
+# publish is its own phase 1.
 #
 # Run from Git Bash:  bash tool/cloudflare/publish_modules.sh [<modules.zip>] [--dry-run] [--yes]
 # Without a zip, the archive the live pointer names is fetched from
@@ -64,7 +70,9 @@
 # publish (umasagashi-trainer's deploy); every other check is unchanged. With
 # --dry-run as well, --dry-run wins: stage 3 still stops before any deploy.
 # Run it from a terminal: a wrangler whose stdout is not a TTY overwrites an
-# existing DNS record for a custom domain without asking.
+# existing DNS record for a custom domain without asking, and one whose stdin is
+# not a TTY, or that detects a CI environment, answers its own confirmation
+# with yes.
 # Credentials come from tool/cloudflare/.env (copy .env.example first).
 # Do not run two instances at once; there is no lock.
 #
@@ -73,16 +81,25 @@
 # ============================================================================
 set -euo pipefail
 
+# wrangler reports usage metrics to Cloudflare unless told not to. This
+# variable takes precedence over the `send_metrics` key and over the consent
+# stored in wrangler's user config, for every wrangler run below.
+export WRANGLER_SEND_METRICS=false
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ---- Fixed configuration ---------------------------------------------------
 WRANGLER_CONFIG="server/wrangler.data.jsonc"
+SERVER_DIR="server"
+WRANGLER="$REPO_ROOT/$SERVER_DIR/node_modules/.bin/wrangler"
 SITE_SOURCE="server/data-site"
 TREE="build/data-site"
-# The paths whose committed bytes are deployed; any change or untracked file
-# under them stops the run, so deploy.json's git_sha names what is served.
-DEPLOYED_PATHS=("$SITE_SOURCE" "$WRANGLER_CONFIG" "tool/cloudflare")
+# The paths whose committed bytes are deployed, plus the npm ci inputs that pick
+# the wrangler doing the deploy; any change or untracked file under them stops
+# the run, so deploy.json's git_sha names what is served and what served it.
+DEPLOYED_PATHS=("$SITE_SOURCE" "$WRANGLER_CONFIG" "tool/cloudflare"
+  "$SERVER_DIR/package.json" "$SERVER_DIR/package-lock.json")
 KEY_PREFIX="umacapture"
 POINTER_KEY="$KEY_PREFIX/version_info.json"
 ALIAS_KEY="$KEY_PREFIX/modules.zip"
@@ -185,7 +202,7 @@ wait_for_deploy_json() {
 
 # ---- 0. Preflight ----------------------------------------------------------
 step "0. Preflight"
-for tool in wrangler jq unzip sha256sum curl git; do
+for tool in npm jq unzip sha256sum curl git; do
   command -v "$tool" >/dev/null || fail "'$tool' not found on PATH."
 done
 cd "$REPO_ROOT"
@@ -289,6 +306,9 @@ echo "    archive: $ZIP ($SIZE bytes, sha256 $SHA)"
 echo "    recognizer_version: $RECOGNIZER_VERSION"
 echo "    pointer JSON:"
 sed 's/^/      /' "$POINTER"
+(cd "$SERVER_DIR" && npm ci --no-audit --no-fund)
+[[ -x "$WRANGLER" ]] || fail "$WRANGLER missing after npm ci"
+echo "    wrangler $("$WRANGLER" --version 2>/dev/null | tail -1)"
 
 # ---- 1. Live state -----------------------------------------------------------
 step "1. Live state on $DATA_READ_ROOT"
@@ -417,7 +437,7 @@ cat "$WORK/phase2/deploy.json"
 
 # ---- 3. Plan / confirmation gate ---------------------------------------------
 step "3. Plan"
-wrangler deploy -c "$WRANGLER_CONFIG" --dry-run
+"$WRANGLER" deploy -c "$WRANGLER_CONFIG" --dry-run
 if [[ "$SKIP_PHASE1" == 1 ]]; then
   echo "    one deploy: the live pointer already names this archive"
 else
@@ -440,7 +460,7 @@ fi
 if [[ "$SKIP_PHASE1" == 0 ]]; then
   step "4. Phase 1: the new archive beside the current pointer"
   stage_phase 1
-  wrangler deploy -c "$WRANGLER_CONFIG" \
+  "$WRANGLER" deploy -c "$WRANGLER_CONFIG" \
     || fail "phase 1 deploy failed. The pointer was not changed."
   wait_for_deploy_json "$WORK/phase1/deploy.json" \
     || fail "phase 1 is not served: $VERIFY_ERROR. The pointer was not changed."
@@ -469,19 +489,19 @@ verify_phase1() {
 }
 stage_phase 2
 PHASE2_ERROR=""
-if ! wrangler deploy -c "$WRANGLER_CONFIG"; then
+if ! "$WRANGLER" deploy -c "$WRANGLER_CONFIG"; then
   PHASE2_ERROR="the deploy failed, so the host may or may not serve phase 2"
 elif ! verify_phase2; then
   PHASE2_ERROR="$VERIFY_ERROR"
 fi
 if [[ -n "$PHASE2_ERROR" ]]; then
   echo "    phase 2 failed verification: $PHASE2_ERROR" >&2
-  ROLLBACK_HINT="NEEDS MANUAL RECOVERY: run \`wrangler rollback -c $WRANGLER_CONFIG\` to the version before this publish (one publish deploys twice) and check $DATA_VERIFY_ROOT/deploy.json."
+  ROLLBACK_HINT="NEEDS MANUAL RECOVERY: pick the version just before this publish began from \`$SERVER_DIR/node_modules/.bin/wrangler deployments list -c $WRANGLER_CONFIG\`, run \`$SERVER_DIR/node_modules/.bin/wrangler rollback <version-id> -c $WRANGLER_CONFIG\` (without a version-id it returns only to this publish's phase 1) and check $DATA_VERIFY_ROOT/deploy.json."
   [[ "$SKIP_PHASE1" == 0 ]] \
     || fail "phase 2 failed ($PHASE2_ERROR); there is no phase 1 to return to. $ROLLBACK_HINT"
   echo "    deploying phase 1 again" >&2
   stage_phase 1
-  wrangler deploy -c "$WRANGLER_CONFIG" && verify_phase1 \
+  "$WRANGLER" deploy -c "$WRANGLER_CONFIG" && verify_phase1 \
     || fail "phase 2 failed ($PHASE2_ERROR), and returning to phase 1 ALSO failed verification ($VERIFY_ERROR). $ROLLBACK_HINT"
   fail "phase 2 failed ($PHASE2_ERROR); phase 1 was deployed again and verified, so the previous pointer and alias are served."
 fi
@@ -496,5 +516,8 @@ echo "    git_sha $GIT_SHA"
 echo "    backup: $BACKUP"
 echo "    to roll back, publish the previous archive with this script:"
 echo "      bash tool/cloudflare/publish_modules.sh $BACKUP/modules.zip"
-echo "    or, faster, \`wrangler rollback -c $WRANGLER_CONFIG\` -- one publish advances"
-echo "    the Worker by two versions, so go back to the one before this publish's phase 1."
+echo "    or, faster, \`$SERVER_DIR/node_modules/.bin/wrangler rollback <version-id> -c $WRANGLER_CONFIG\`,"
+echo "    picking the version just before this publish began from"
+echo "    \`$SERVER_DIR/node_modules/.bin/wrangler deployments list -c $WRANGLER_CONFIG\`. This publish deployed"
+echo "    $([[ "$SKIP_PHASE1" == 0 ]] && echo twice || echo once); without a version-id wrangler returns to the immediately preceding version,"
+echo "    which after a two-deploy publish is its own phase 1."
