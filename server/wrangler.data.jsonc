@@ -12,6 +12,9 @@
   // No later than the newest date wrangler's local runtime accepts, so `wrangler dev` can serve
   // this config for a local check (wrangler 4.113.0 accepts up to 2026-07-28).
   "compatibility_date": "2026-07-28",
+  // Usage metrics off for every command that reads this file. WRANGLER_SEND_METRICS, which
+  // publish_modules.sh sets, takes precedence over this key.
+  "send_metrics": false,
   "assets": {
     "directory": "../build/data-site",
     // Unknown paths answer 404, as the R2 custom domain did.
@@ -23,6 +26,7 @@
   // data.umacapture.com is a custom domain of this Worker and nothing else routes here: no zone
   // route, no R2 custom domain, no other host name. Deploy only from a terminal: a wrangler whose
   // stdout is not a TTY overrides an existing DNS record or another Worker's claim on this host
-  // without asking.
+  // without asking, and one whose stdin is not a TTY, or that detects a CI environment, answers
+  // its own confirmation with yes.
   "routes": [{ "pattern": "data.umacapture.com", "custom_domain": true }]
 }

@@ -4,7 +4,7 @@
 # ///
 """Build the name tables the share Worker resolves sids through (server/src/tables.generated.json).
 
-    uv run tool/cloudflare/build_share_tables.py
+    uv run tool/cloudflare/build_share_tables.py --previous <baseline>
 
 The tables come from the module set served to users, not from a local one: the live pointer
 (https://data.umacapture.com/umacapture/version_info.json) names an archive by sha256 and size, the
@@ -14,9 +14,11 @@ server/src/tables.mjs: {version, names, gids}.
 
 A published record stores sids, and its names are looked up in whichever tables are deployed when
 it is read, so the tables may only ever grow at the end. The tables last deployed are kept as the
-baseline (--previous, default tool/cloudflare/.deploy-backup/tables.json); every list of the
-baseline has to be a prefix of the same list in the new tables, or the script stops with exit 1 and
-writes nothing. Without a baseline file the check is skipped, and the script says so. This script
+baseline, given with --previous. It is required and has no default, because each deploy target has
+its own D1 and so its own baseline (tool/cloudflare/deploy_web.sh passes
+tool/cloudflare/.deploy-backup/tables.<target>.json). Every list of the baseline has to be a prefix
+of the same list in the new tables, or the script stops with exit 1 and writes nothing. When the
+baseline file does not exist the check is skipped, and the script says so. This script
 only reads the baseline; promoting the output to the baseline is the deploy's job, once the tables
 have actually been deployed.
 
@@ -42,7 +44,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DATA_ROOT = "https://data.umacapture.com/umacapture"
 DEFAULT_OUT = REPO / "server" / "src" / "tables.generated.json"
-DEFAULT_PREVIOUS = REPO / "tool" / "cloudflare" / ".deploy-backup" / "tables.json"
 
 # labels.json keys the public form never names (campaign_field.name: no record field reads it).
 EXCLUDED_KEYS = frozenset({"campaign_field.name"})
@@ -129,7 +130,7 @@ def append_only_violations(previous: dict, current: dict) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--archive", type=Path, help="build from this local module archive instead of the live one")
-    parser.add_argument("--previous", type=Path, default=DEFAULT_PREVIOUS, help="tables last deployed (baseline)")
+    parser.add_argument("--previous", type=Path, required=True, help="tables last deployed to the target (baseline)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--source-out", type=Path, help="write the sha256 of the source archive here")
     args = parser.parse_args(argv)

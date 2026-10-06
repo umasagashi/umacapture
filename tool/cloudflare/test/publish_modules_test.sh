@@ -3,8 +3,11 @@
 # Stub test for tool/cloudflare/publish_modules.sh. Touches nothing outside a
 # temporary directory: each scenario runs a copy of the script inside a
 # throwaway git repository that holds the deployed paths (server/data-site/,
-# server/wrangler.data.jsonc, tool/cloudflare/), with fake `wrangler` and
-# `curl` first on PATH. Both record every call.
+# server/wrangler.data.jsonc, tool/cloudflare/), with fake `npm` and `curl`
+# first on PATH. The fake `npm ci` installs the fake `wrangler` as
+# server/node_modules/.bin/wrangler, the pinned one the script runs; the
+# `wrangler` on PATH only logs "PATH wrangler" and fails. Every fake records
+# every call.
 #
 # Hosts are directories under $STUB_WEB/<host>/. The fake `wrangler deploy`
 # replaces the deploy host's directory (STUB_DEPLOY_HOST, default
@@ -43,7 +46,8 @@
 #       not taken for a first publish
 #  (15) reading and verifying on different hosts: the live state is read from
 #       DATA_READ_ROOT and the deploy verified on DATA_VERIFY_ROOT
-#  (16) a change or untracked file under the deployed paths stops the run
+#  (16) a change or untracked file under the deployed paths, or a change to
+#       the npm ci inputs (server/package-lock.json), stops the run
 #       before any request; one elsewhere does not
 #  (17) deploy.json records git_sha, pointer_sha256 and the zips; the backup
 #       holds the live pointer, the archive it names and the new pointer
@@ -107,8 +111,9 @@ TEMPLATE="$ROOT/template"
 mkdir -p "$TEMPLATE/tool/cloudflare" "$TEMPLATE/server"
 cp "$SRC_ROOT/$SCRIPT_REL" "$TEMPLATE/$SCRIPT_REL"
 cp -R "$SRC_ROOT/server/data-site" "$TEMPLATE/server/"
-cp "$SRC_ROOT/server/wrangler.data.jsonc" "$TEMPLATE/server/"
-printf '/build/\n/tool/cloudflare/.publish-backup/\n' > "$TEMPLATE/.gitignore"
+cp "$SRC_ROOT/server/wrangler.data.jsonc" "$SRC_ROOT/server/package.json" "$SRC_ROOT/server/package-lock.json" \
+  "$TEMPLATE/server/"
+printf '/build/\n/server/node_modules/\n/tool/cloudflare/.publish-backup/\n' > "$TEMPLATE/.gitignore"
 git -C "$TEMPLATE" init -q
 git -C "$TEMPLATE" config core.autocrlf false
 git -C "$TEMPLATE" add -A
@@ -116,10 +121,12 @@ git -C "$TEMPLATE" -c user.name=stub -c user.email=stub@example.com commit -q -m
 
 # ---- Stubs ------------------------------------------------------------------
 BIN="$ROOT/bin"
-mkdir -p "$BIN"
-cat > "$BIN/wrangler" <<'SH'
+FAKE_WRANGLER="$ROOT/fake/wrangler"
+mkdir -p "$BIN" "$ROOT/fake"
+cat > "$FAKE_WRANGLER" <<'SH'
 #!/usr/bin/env bash
 echo "wrangler $*" >> "$STUB_LOG"
+[[ "$1" == --version ]] && { echo "4.113.0"; exit 0; }
 [[ "$1" == deploy ]] || exit 2
 for a in "$@"; do [[ "$a" == --dry-run ]] && exit 0; done
 n=$(( $(cat "$STUB_LOG.deploys" 2>/dev/null || echo 0) + 1 ))
@@ -181,7 +188,18 @@ fi
 [[ -n "$fmt" ]] && printf '%s' "$code"
 exit 0
 SH
-chmod +x "$BIN/wrangler" "$BIN/curl"
+cat > "$BIN/npm" <<SH
+#!/usr/bin/env bash
+echo "npm \$*" >> "\$STUB_LOG"
+mkdir -p node_modules/.bin
+cp "$FAKE_WRANGLER" node_modules/.bin/wrangler
+SH
+cat > "$BIN/wrangler" <<'SH'
+#!/usr/bin/env bash
+echo "PATH wrangler $*" >> "$STUB_LOG"
+exit 1
+SH
+chmod +x "$FAKE_WRANGLER" "$BIN/npm" "$BIN/wrangler" "$BIN/curl"
 
 # ---- Scenario runner --------------------------------------------------------
 LIVE="https://data.umacapture.com"
@@ -237,7 +255,7 @@ line_of() { grep -n -m1 -F -- "$1" "$LOG" | cut -d: -f1; }
 tree_digest() { (cd "$1" && find . -type f | sort | xargs sha256sum) | sha256sum | cut -d' ' -f1; }
 listed_zips() { jq -r '[.zips[].sha256] | sort | join(" ")' "$1" | tr -d '\r'; }
 sorted() { tr ' ' '\n' <<<"$*" | sort | tr '\n' ' ' | sed 's/ $//'; }
-no_requests() { never "curl " && never "wrangler"; }
+no_requests() { never "curl " && never "wrangler deploy"; }
 dump_on_failure() { [[ "$FAILED" == "$1" ]] || { echo "  --- output ---"; cat "$OUT"; echo "  --- calls ---"; cat "$LOG"; }; }
 
 OLD_POINTER_SHA="$(sha "$FIX/old_pointer.json")"
@@ -328,7 +346,7 @@ new_world phase2_unrecoverable; f0=$FAILED; STUB_DEPLOY_CORRUPT="2 3" run_scenar
 check "exits non-zero" [ "$RC" != 0 ]
 check "the failed return is named" grep -q "returning to phase 1 ALSO failed" "$OUT"
 check "manual recovery by wrangler rollback is demanded" \
-  grep -q "NEEDS MANUAL RECOVERY: run \`wrangler rollback -c server/wrangler.data.jsonc\`" "$OUT"
+  grep -q "NEEDS MANUAL RECOVERY: pick the version just before this publish began from \`server/node_modules/.bin/wrangler deployments list -c server/wrangler.data.jsonc\`, run \`server/node_modules/.bin/wrangler rollback <version-id> -c server/wrangler.data.jsonc\`" "$OUT"
 dump_on_failure "$f0"
 
 echo "(6) CORS"
@@ -429,7 +447,7 @@ for fault in missing corrupt unlisted; do
   ZIP_UNDER_TEST="$FIX/newer.zip" run_scenario --yes
   unset STUB_CORRUPT_URL
   check "$fault: exits non-zero" [ "$RC" != 0 ]
-  check "$fault: nothing deployed, not even a dry run" never "wrangler"
+  check "$fault: nothing deployed, not even a dry run" never "wrangler deploy"
   check "$fault: the host is unchanged" [ "$(tree_digest "$EDGE")" = "$before" ]
   dump_on_failure "$f0"
 done
@@ -443,7 +461,7 @@ for code in 503 000; do
   STUB_FAIL_URL="$LIVE/deploy.json" STUB_FAIL_CODE="$code" run_scenario --yes
   check "HTTP $code: exits non-zero" [ "$RC" != 0 ]
   check "HTTP $code: refused as not a 404" grep -q "HTTP $code. Only a 404 means a first publish" "$OUT"
-  check "HTTP $code: nothing deployed" never "wrangler"
+  check "HTTP $code: nothing deployed" never "wrangler deploy"
   check "HTTP $code: the host is unchanged" [ "$(tree_digest "$EDGE")" = "$before" ]
   dump_on_failure "$f0"
 done
@@ -465,10 +483,11 @@ check "the new archive is verified on the verify host" \
 dump_on_failure "$f0"
 
 echo "(16) the deployed paths must be committed"
-for dirt in modified untracked_site untracked_tool; do
+for dirt in modified untracked_site untracked_tool lockfile; do
   new_world "dirty_$dirt"; f0=$FAILED
   case "$dirt" in
     modified) printf 'edited\n' >> "$REPO/server/data-site/umacapture/news.md" ;;
+    lockfile) printf '\n' >> "$REPO/server/package-lock.json" ;;
     untracked_site) printf 'x\n' > "$REPO/server/data-site/umacapture/extra.txt" ;;
     untracked_tool) printf 'x\n' > "$REPO/tool/cloudflare/notes.txt" ;;
   esac
@@ -489,7 +508,7 @@ new_world dry; f0=$FAILED; before="$(tree_digest "$EDGE")"; run_scenario --dry-r
 check "exits 0" [ "$RC" = 0 ]
 check "no deploy" [ "$(deploys)" = 0 ]
 check "only a wrangler dry run" \
-  [ "$(grep '^wrangler ' "$LOG" | tr '\n' ' ')" = "wrangler deploy -c server/wrangler.data.jsonc --dry-run " ]
+  [ "$(grep '^wrangler deploy ' "$LOG" | tr '\n' ' ')" = "wrangler deploy -c server/wrangler.data.jsonc --dry-run " ]
 check "the host is unchanged" [ "$(tree_digest "$EDGE")" = "$before" ]
 check "prints the versioned key" grep -qF "$(vkey "$NEW_SHA")" "$OUT"
 dump_on_failure "$f0"
@@ -533,7 +552,7 @@ STUB_CORRUPT_URL="$LIVE/$(vkey "$NEW_SHA")" ZIP_UNDER_TEST=none run_scenario --y
 check "live archive not matching the pointer: exits non-zero" [ "$RC" != 0 ]
 check "live archive not matching the pointer: refused for it" \
   grep -q "the archive the live pointer names does not match it.*sha256" "$OUT"
-check "live archive not matching the pointer: nothing deployed, not even a dry run" never "wrangler"
+check "live archive not matching the pointer: nothing deployed, not even a dry run" never "wrangler deploy"
 check "live archive not matching the pointer: the host is unchanged" [ "$(tree_digest "$EDGE")" = "$before" ]
 dump_on_failure "$f0"
 new_world empty_arg; f0=$FAILED; ZIP_UNDER_TEST=empty run_scenario --yes

@@ -11,9 +11,11 @@
 # The rule is installed on the umasagashi.com zone (where the legacy URLs live);
 # only the redirect TARGET points at the new umacapture.com custom domain.
 #
-# EVERY already-released desktop build hardcodes the legacy URL and will start
-# following this redirect immediately. Only run this AFTER r2_stage1_setup.sh has
-# succeeded and all 5 files verify at data.umacapture.com.
+# The desktop builds up to v0.2.x hardcode the legacy URL and will start
+# following this redirect immediately; v0.3.0 reads data.umacapture.com directly. Only run this while all 5 files verify at
+# data.umacapture.com. That host is served by the Worker umacapture-data
+# (Workers Static Assets), not by the R2 bucket, so the redirected apps fetch
+# from the Worker; it serves the same /umacapture/* paths the target names.
 #
 # Default status code is 302 (not cached by clients) for the initial rollout.
 # Once stable, re-run with --promote-301 to switch to a cacheable 301.

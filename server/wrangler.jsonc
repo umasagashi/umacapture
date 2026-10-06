@@ -1,15 +1,15 @@
 // The web app (build/web/ on Workers Static Assets) together with the record-sharing Worker.
 //
-// The top level is production, and production carries no Worker until the sharing feature ships:
-// it is the same static-assets-only deployment as wrangler.assets-only.jsonc, so a `wrangler deploy`
-// that forgets `--env staging` uploads nothing but the assets already live. `main`, the D1 binding
-// and the vars exist under env.staging only; the release adds them to the top level.
+// The top level is production: the assets at umacapture.com with the Worker in front of /r/* and
+// /api/*, its own D1 and its own Turnstile widget. env.staging is the same Worker on workers.dev
+// with its own D1. wrangler.assets-only.jsonc deploys either one without the Worker.
 //
 // Deploy through tool/cloudflare/deploy_web.sh, never with a bare `wrangler deploy`: the script is
 // what guarantees build/web/ was built from this commit in the same run. Use the wrangler pinned in
 // server/package.json (server/node_modules/.bin/wrangler).
 {
   "name": "umacapture-web",
+  "main": "src/index.mjs",
   // No later than the newest date the pinned wrangler's local runtime accepts (4.113.0 accepts up
   // to 2026-07-28), so `wrangler dev` and the tests can run this config.
   "compatibility_date": "2026-07-28",
@@ -20,12 +20,42 @@
     "directory": "../build/web",
     // Unknown paths answer 404. The app uses hash routing and serves nothing but "/", so a SPA
     // fallback would only turn every mistyped URL into a 73 MiB app download.
-    "not_found_handling": "none"
+    "not_found_handling": "none",
+    // The Worker runs first for these so a static file can never shadow an endpoint. Every other
+    // path that matches no file still reaches the Worker, which answers it 404.
+    "run_worker_first": ["/r/*", "/api/*"]
   },
+  // Workers Logs off. env.staging inherits this.
+  "observability": { "enabled": false },
   // The custom domain is the only entrance: the zone's WAF applies to it and to nothing else.
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "umacapture.com", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "umacapture-share",
+      // Created once with `wrangler d1 create umacapture-share`.
+      "database_id": "4e8ae460-31b2-4a75-b340-c554e67e892a",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://umacapture.com",
+    // "static" gives every card /og/default.png; "vercel" points og:image at OG_IMAGE_ORIGIN.
+    "OG_IMAGE_MODE": "vercel",
+    "OG_IMAGE_ORIGIN": "https://og.umacapture.com",
+    // "false" stops new tickets and publishes (503 publishing_paused); reads and withdrawals go on.
+    "PUBLISH_ENABLED": "true",
+    // The Managed widget for umacapture.com. Its secret, TURNSTILE_SECRET, is a Worker secret
+    // (`wrangler secret put`), never a var.
+    "TURNSTILE_SITEKEY": "0x4AAAAAAFPDypoYl2jLeU4y",
+    // "false" refuses siteverify's answers for Turnstile's testing secrets.
+    "TURNSTILE_TESTING_KEY": "false",
+    // siteverify must report this hostname and action, or the ticket is refused.
+    "TURNSTILE_HOSTNAME": "umacapture.com",
+    "TURNSTILE_ACTION": "publish"
+  },
 
   "env": {
     // Served at umacapture-web-staging.<account subdomain>.workers.dev, with its own D1. It shares
@@ -57,9 +87,9 @@
         // <worker name>-<env>.<account workers.dev subdomain>.workers.dev; tool/cloudflare/deploy_web.sh
         // verifies the staging deployment on the same origin.
         "PUBLIC_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
-        // "static" until the OGP image service exists; then "vercel".
+        // Staging has no OGP image deployment of its own; its origin is decided if staging gets
+        // its Worker back.
         "OG_IMAGE_MODE": "static",
-        // PLACEHOLDER: `.invalid` until the OGP image preview deployment exists.
         "OG_IMAGE_ORIGIN": "https://og-staging.invalid",
         // "false" stops new tickets and publishes (503 publishing_paused); reads and withdrawals go on.
         "PUBLISH_ENABLED": "true",

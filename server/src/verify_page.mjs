@@ -27,6 +27,7 @@ export function verifyPageResponse(hash, env) {
 <style>
 body { font-family: sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
 </style>
+<link rel="icon" type="image/png" href="/favicon.png">
 </head>
 <body>
 <h1>公開の確認</h1>
@@ -65,6 +66,7 @@ window.onTurnstile = async (token) => {
         `script-src 'nonce-${n}' ${TURNSTILE_ORIGIN}`,
         `frame-src ${TURNSTILE_ORIGIN}`,
         "connect-src 'self'",
+        "img-src 'self'",
         "style-src 'unsafe-inline'",
       ].join("; "),
       "Cache-Control": "no-store",
