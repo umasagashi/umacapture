@@ -2,11 +2,14 @@
 // outside CI. The fixed seeds in test/sync_model_test.dart are the CI share; this is where large
 // seed ranges run.
 //
-//   dart run tool/sync_model_random.dart [--from N] [--count N] [--rules designed|retirementShortcuts|lineage]
-//       [--mutation <name>] [--lineage-mutation <name>] [--readings <name>,...] [--without <accepted>,...]
-//       [--generator default|deep|untracked|deep-untracked] [--devices A,B,...] [--stop-at-first] [--show N]
-//   dart run tool/sync_model_random.dart --detect-all [--rules designed|lineage] [--from N] [--count N]
-//       [--generator ...] [--devices A,B,...] [--only <part of a control's name>]
+//   dart run tool/sync_model_random.dart [--from N] [--count N] [--rules designed|retirementShortcuts|lineage|oplog]
+//       [--mutation <name>] [--lineage-mutation <name>] [--oplog-mutation <name>] [--readings <name>,...]
+//       [--without <accepted>,...] [--judge-readings <name>,...]
+//       [--generator default|deep|untracked|deep-untracked] [--no-faults] [--devices A,B,...] [--no-bystander]
+//       [--stop-at-first] [--show N]
+//   dart run tool/sync_model_random.dart --detect-all [--rules designed|lineage|oplog] [--from N] [--count N]
+//       [--generator ...] [--no-faults] [--devices A,B,...] [--no-bystander] [--judge-readings <name>,...]
+//       [--only <part of a control's name>]
 //
 // The first form prints one summary line (sequences, passed, failed, time), then groups the
 // failures by what their shrunk sequence still reports and prints up to --show of the shortest per
@@ -15,13 +18,19 @@
 // two first heads of records merged without a lineage (`untrackedHeadForks`).
 // --generator deep draws longer sequences that keep both devices merging the same records (see
 // `deepGenerator`); untracked and deep-untracked add the removals that leave no lineage (lineage
-// rules only). The default is the generator the CI share uses.
+// rules only). The default is the generator the CI share uses. --no-faults draws no full storage,
+// limited day's rows or reads, cut push or round that ends while it receives: the sequences a seed
+// gave before those were drawn.
+// Under the operation-log rules a log that never syncs and only takes zips in stands beside the devices
+// (`oplogBystander`), unless --no-bystander or --devices names it: the devices do what they did
+// without it.
 // --readings picks the model's alternative readings where the lineage rules are silent (see
 // `LineageReadings`).
 // --detect-all runs every positive control of the rule set (each mutation, the rules with
 // retirement shortcuts, the judge without each accepted outcome) until the first sequence it fails
 // on while the unbroken rules pass, and prints how many sequences that took and the shrunk sequence;
-// it exits 1 when a control is never caught.
+// it exits 1 when a control is never caught. --judge-readings applies to the controls and the
+// unbroken rules alike.
 
 import 'dart:io';
 
@@ -29,6 +38,8 @@ import '../test/support/sync_model/judge.dart';
 import '../test/support/sync_model/lineage_mutations.dart';
 import '../test/support/sync_model/lineage_world.dart';
 import '../test/support/sync_model/mutations.dart';
+import '../test/support/sync_model/oplog_mutations.dart';
+import '../test/support/sync_model/oplog_world.dart';
 import '../test/support/sync_model/random_check.dart';
 import '../test/support/sync_model/types.dart';
 
@@ -51,18 +62,28 @@ void main(List<String> args) {
   final mutation = mutationName == null ? null : Mutation.values.byName(mutationName);
   final lineageName = opt('lineage-mutation');
   final lineageMutation = lineageName == null ? null : LineageMutation.values.byName(lineageName);
+  final oplogName = opt('oplog-mutation');
+  final oplogMutation = oplogName == null ? null : OplogMutation.values.byName(oplogName);
+  final judgeReadings = _judgeReadings(_names(opt('judge-readings')));
   final readings = LineageReadings.parse((opt('readings') ?? '').split(',').where((s) => s.isNotEmpty));
   final without = (opt('without') ?? '').split(',').where((s) => s.isNotEmpty).map(Accepted.values.byName);
-  final accepted = (rules == Rules.lineage ? acceptedUnderLineage : acceptedUnderDesigned).toSet()..removeAll(without);
+  final accepted = switch (rules) {
+    Rules.lineage => acceptedUnderLineage,
+    Rules.oplog => acceptedUnderOplog,
+    _ => acceptedUnderDesigned,
+  }.toSet()..removeAll(without);
   final config = ModelConfig(
     rules: rules,
     mutation: mutation,
     lineageMutation: lineageMutation,
+    oplogMutation: oplogMutation,
     readings: readings,
     accepted: accepted,
+    judgeReadings: judgeReadings,
     devices: _devices(opt('devices')),
+    bystander: _bystander(args, rules, _devices(opt('devices'))),
   );
-  final gen = _generator(opt('generator'));
+  final gen = _generator(opt('generator')).copyWith(faults: !args.contains('--no-faults'));
 
   final watch = Stopwatch()..start();
   final findings = check(config, from: from, count: count, stopAtFirst: args.contains('--stop-at-first'), gen: gen);
@@ -87,7 +108,8 @@ void main(List<String> args) {
 
   stdout.writeln(
     'rules=${rules.name} generator=${opt('generator') ?? 'default'} mutation=${mutation?.name ?? '-'} '
-    'lineage-mutation=${lineageMutation?.name ?? '-'} readings=${readings.toString().isEmpty ? '-' : readings} '
+    'lineage-mutation=${lineageMutation?.name ?? '-'} oplog-mutation=${oplogMutation?.name ?? '-'} '
+    'judge-readings=${opt('judge-readings') ?? '-'} readings=${readings.toString().isEmpty ? '-' : readings} '
     'without=${without.map((e) => e.name).join(',')} '
     'seeds=$from..${from + ran - 1} sequences=$ran passed=${ran - findings.length} failed=${findings.length} '
     '${rules == Rules.lineage ? 'candidateOnly=$candidateOnly untrackedHeadForks=$untrackedHeadForks ' : ''}'
@@ -110,10 +132,22 @@ void main(List<String> args) {
 void _detectAll(List<String> args, String? Function(String) opt, Rules rules) {
   final from = int.parse(opt('from') ?? '1');
   final limit = int.parse(opt('count') ?? '2000');
-  final lineage = rules == Rules.lineage;
-  final gen = _generator(opt('generator') ?? (lineage ? 'deep-untracked' : null));
-  final baseline = ModelConfig(rules: lineage ? Rules.lineage : Rules.designed, devices: _devices(opt('devices')));
-  final controls = lineage ? lineagePositiveControls : positiveControls;
+  final own = rules == Rules.lineage || rules == Rules.oplog;
+  final gen = _generator(
+    opt('generator') ?? (own ? 'deep-untracked' : null),
+  ).copyWith(faults: !args.contains('--no-faults'));
+  final judgeReadings = _judgeReadings(_names(opt('judge-readings')));
+  final baseline = ModelConfig(
+    rules: own ? rules : Rules.designed,
+    devices: _devices(opt('devices')),
+    judgeReadings: judgeReadings,
+    bystander: _bystander(args, rules, _devices(opt('devices'))),
+  );
+  final controls = switch (rules) {
+    Rules.lineage => lineagePositiveControls,
+    Rules.oplog => oplogPositiveControls,
+    _ => positiveControls,
+  };
   var missed = 0;
   final only = opt('only');
   for (final MapEntry(key: name, value: control) in controls.entries) {
@@ -122,8 +156,11 @@ void _detectAll(List<String> args, String? Function(String) opt, Rules rules) {
       rules: control.rules,
       mutation: control.mutation,
       lineageMutation: control.lineageMutation,
+      oplogMutation: control.oplogMutation,
       accepted: control.accepted,
       devices: baseline.devices,
+      judgeReadings: judgeReadings,
+      bystander: baseline.bystander,
     );
     final watch = Stopwatch()..start();
     final d = detect(config, baseline, from: from, limit: limit, gen: gen);
@@ -142,7 +179,42 @@ void _detectAll(List<String> args, String? Function(String) opt, Rules rules) {
   exitCode = missed == 0 ? 0 : 1;
 }
 
+Iterable<String> _names(String? list) => (list ?? '').split(',').where((s) => s.isNotEmpty);
+
+JudgeReadings _judgeReadings(Iterable<String> names) {
+  const known = {
+    'copyDiscardsOnlyItself',
+    'pushAnswerIsReceipt',
+    'sameRetakeIsOneChoice',
+    'sameMergeNeedsSameState',
+    'copyHereDiscardsOnlyItself',
+    'importWithoutImagesIsACopy',
+    'overwriteDiscards',
+    'zipOperationsAreTheExporters',
+    'zipChoicesArriveWithTheirOperations',
+    'choicesFollowVersions',
+  };
+  final unknown = names.toSet().difference(known);
+  if (unknown.isNotEmpty) throw ArgumentError('unknown judge readings $unknown');
+  return JudgeReadings(
+    copyDiscardsOnlyItself: names.contains('copyDiscardsOnlyItself'),
+    pushAnswerIsReceipt: names.contains('pushAnswerIsReceipt'),
+    sameRetakeIsOneChoice: names.contains('sameRetakeIsOneChoice'),
+    sameMergeNeedsSameState: names.contains('sameMergeNeedsSameState'),
+    copyHereDiscardsOnlyItself: names.contains('copyHereDiscardsOnlyItself'),
+    importWithoutImagesIsACopy: names.contains('importWithoutImagesIsACopy'),
+    overwriteDiscards: names.contains('overwriteDiscards'),
+    zipOperationsAreTheExporters: names.contains('zipOperationsAreTheExporters'),
+    zipChoicesArriveWithTheirOperations: names.contains('zipChoicesArriveWithTheirOperations'),
+    choicesFollowVersions: names.contains('choicesFollowVersions'),
+  );
+}
+
 List<String> _devices(String? names) => names == null ? const ['A', 'B'] : names.split(',');
+
+/// The log that never syncs, under the operation-log rules.
+String? _bystander(List<String> args, Rules rules, List<String> devices) =>
+    rules != Rules.oplog || args.contains('--no-bystander') || devices.contains(oplogBystander) ? null : oplogBystander;
 
 GeneratorConfig _generator(String? name) => switch (name) {
   null || 'default' => const GeneratorConfig(),

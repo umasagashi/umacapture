@@ -696,24 +696,28 @@ final lineageSeeds = <LineageSeed>[
   ], takes: 'T11'),
   LineageSeed(
     'N4f a record split off without the image is a copy too: discarding the original takes the image with it',
-    [
-      const SetImageForm('A', 'none'),
-      const Capture('A', 'R1', 1),
-      const Capture('A', 'R3', 3),
-      const Capture('A', 'R4', 4),
-      const Capture('A', 'R5', 5),
-      const Capture('A', 'R8', 8),
-      const SyncRound('A'),
-      const SyncRound('B'),
-      const Merge('B', 'R3', 'R8', contentFrom: 'R3'),
-      const Merge('A', 'R3', 'R5', contentFrom: 'R3'),
-      const SyncRound('A'),
-      const SyncRound('B'),
-      const Merge('B', 'R4', 'R3~B1', contentFrom: 'R3~B1'),
-      const Merge('B', 'R3', 'R1', contentFrom: 'R1'),
-    ],
+    n4f('R3~B1'),
     takes: 'fork',
   ),
+];
+
+/// The operations of N4f. [fork] is the id of the record B's merge of R3 and R8 is split off as once
+/// A's merge of R3 arrived, which each rule set names its own way.
+List<Op> n4f(String fork) => [
+  const SetImageForm('A', 'none'),
+  const Capture('A', 'R1', 1),
+  const Capture('A', 'R3', 3),
+  const Capture('A', 'R4', 4),
+  const Capture('A', 'R5', 5),
+  const Capture('A', 'R8', 8),
+  const SyncRound('A'),
+  const SyncRound('B'),
+  const Merge('B', 'R3', 'R8', contentFrom: 'R3'),
+  const Merge('A', 'R3', 'R5', contentFrom: 'R3'),
+  const SyncRound('A'),
+  const SyncRound('B'),
+  Merge('B', 'R4', fork, contentFrom: fork),
+  const Merge('B', 'R3', 'R1', contentFrom: 'R1'),
 ];
 
 /// Mutations no named sequence catches, with why the judge cannot see the difference.
