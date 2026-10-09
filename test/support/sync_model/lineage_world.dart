@@ -59,9 +59,15 @@ class LineageWorld extends SyncWorld {
   @override
   bool syncEnabled(String device) => devices[device]!.syncEnabled;
 
+  /// One memo per record, with no send limit, and no ratings, titles, dismissed pairs or inheritance
+  /// links.
   @override
   bool supports(Op op) => switch (op) {
     Merge(:final untracked) => untracked != Untracked.storageScreen,
+    EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
+    EditRating() || Title() || Dismiss() || Link() => false,
+    DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
+    SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
     _ => true,
   };
 
@@ -90,6 +96,9 @@ class LineageWorld extends SyncWorld {
       case EditMemo(:final id, :final value):
         tick();
         d.editMemo(id, value);
+      case EditRating() || Title() || Dismiss() || Link() || DeleteAccount() || Elapse() || OldApp() || Upgrade():
+      case SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume():
+        throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):
         zips[slot] = d.exportZip(id);
       case ImportZip(:final slot):
@@ -137,13 +146,18 @@ class LineageWorld extends SyncWorld {
                 hasSnapshot: d.seen.containsKey(r.id),
               ),
           },
-          memos: {for (final MapEntry(key: id, value: m) in d.memos.entries) id: ObservedMemo(m.value, m.time)},
+          annotations: {
+            for (final MapEntry(key: id, value: m) in d.memos.entries)
+              (column: memoColumn, id: id): ObservedValue(m.value, m.time),
+          },
           downloadImages: d.downloadImages,
         ),
     };
     return Observation(
       rows: rows,
-      serverMemos: {for (final MapEntry(key: id, value: a) in server.annotations.entries) id: a.value},
+      serverAnnotations: {
+        for (final MapEntry(key: id, value: a) in server.annotations.entries) (column: memoColumn, id: id): a.value,
+      },
       imageForm: server.imageForm,
       devices: devs,
       fingerprint: _fingerprint(),

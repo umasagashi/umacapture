@@ -36,6 +36,17 @@ abstract class SyncWorld {
   /// Whether this rule set has a path for [op] at all (an untracked removal, say).
   bool supports(Op op);
 
+  /// Whether [device] holds nothing and has written nothing, so it may start on an app from before
+  /// the operation log ([OldApp]).
+  bool startsFresh(String device) => false;
+
+  /// Whether [device] runs an app from before the operation log (until its [Upgrade]).
+  bool runsOldApp(String device) => false;
+
+  /// Field [field] (`parent1`, `parent2`, `bonus`) of record [id]'s inheritance link as [device]
+  /// shows it; null for rules that do not link records.
+  String? linkOf(String device, String id, String field) => null;
+
   /// Applies [op] to the stores, with no checking.
   void execute(Op op);
 
@@ -107,9 +118,15 @@ class World extends SyncWorld {
   bool syncEnabled(String device) => devices[device]!.syncEnabled;
 
   /// These rules have no untracked removal: every delete and merge goes through the record store.
+  /// They carry one memo per record, with no send limit, and no ratings, titles, dismissed pairs or
+  /// inheritance links.
   @override
   bool supports(Op op) => switch (op) {
     Merge(:final untracked) || Delete(:final untracked) => untracked == Untracked.none,
+    EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
+    EditRating() || Title() || Dismiss() || Link() => false,
+    DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
+    SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
     _ => true,
   };
 
@@ -117,6 +134,17 @@ class World extends SyncWorld {
   void execute(Op op) {
     final d = devices[op.device]!;
     switch (op) {
+      case DeleteAccount() ||
+          Elapse() ||
+          OldApp() ||
+          Upgrade() ||
+          SetStorageFull() ||
+          SetDailyRows() ||
+          SetDailyReads() ||
+          PushCut() ||
+          ReceiveCut() ||
+          Resume():
+        throw UnsupportedError('these rules have no path for $op');
       case Capture(:final id, :final captured, :final withImages):
         d.capture(id, captured, withImages: withImages);
       case Merge(:final a, :final b, :final contentFrom):
@@ -128,6 +156,8 @@ class World extends SyncWorld {
       case EditMemo(:final id, :final value):
         tick();
         d.editMemo(id, value);
+      case EditRating() || Title() || Dismiss() || Link():
+        throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):
         zips[slot] = d.exportZip(id);
       case ImportZip(:final slot):
@@ -175,13 +205,18 @@ class World extends SyncWorld {
                 hasSnapshot: d.snapshots.containsKey(r.id),
               ),
           },
-          memos: {for (final MapEntry(key: id, value: m) in d.memos.entries) id: ObservedMemo(m.value, m.time)},
+          annotations: {
+            for (final MapEntry(key: id, value: m) in d.memos.entries)
+              (column: memoColumn, id: id): ObservedValue(m.value, m.time),
+          },
           downloadImages: d.downloadImages,
         ),
     };
     return Observation(
       rows: rows,
-      serverMemos: {for (final MapEntry(key: id, value: a) in server.annotations.entries) id: a.value},
+      serverAnnotations: {
+        for (final MapEntry(key: id, value: a) in server.annotations.entries) (column: memoColumn, id: id): a.value,
+      },
       imageForm: server.imageForm,
       devices: devs,
       fingerprint: _fingerprint(),

@@ -21,6 +21,9 @@ enum Rules {
   /// The lineage rules (`lineage_core.dart`), run by `LineageWorld` instead of `World`; the rest of
   /// this file and `core.dart` never see this value.
   lineage,
+
+  /// The operation-log rules (`oplog_core.dart`), run by `OplogWorld`; likewise unseen here.
+  oplog,
 }
 
 enum RowState { active, archived, deleted }
