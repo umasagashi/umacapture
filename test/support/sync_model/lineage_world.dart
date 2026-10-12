@@ -64,8 +64,9 @@ class LineageWorld extends SyncWorld {
   @override
   bool supports(Op op) => switch (op) {
     Merge(:final untracked) => untracked != Untracked.storageScreen,
+    Capture(:final beforeTheUpgrade) || ExportZip(:final beforeTheUpgrade) => !beforeTheUpgrade,
     EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
-    EditRating() || Title() || Dismiss() || Link() => false,
+    EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
     _ => true,
@@ -96,7 +97,8 @@ class LineageWorld extends SyncWorld {
       case EditMemo(:final id, :final value):
         tick();
         d.editMemo(id, value);
-      case EditRating() || Title() || Dismiss() || Link() || DeleteAccount() || Elapse() || OldApp() || Upgrade():
+      case EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link():
+      case DeleteAccount() || Elapse() || OldApp() || Upgrade():
       case SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume():
         throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):

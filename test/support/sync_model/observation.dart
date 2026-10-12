@@ -15,9 +15,18 @@ class ObservedRecord {
     this.links = const {},
     this.recognition,
     this.holdsBody = true,
+    this.state,
+    this.body,
+    this.captured,
+    this.absorbed = const {},
+    this.binding,
   });
 
   final String id;
+
+  /// When the record was captured, as the device shows it: the date of the capture a record made by
+  /// merges kept. Null under rules whose worlds do not tell it.
+  final int? captured;
 
   /// Whether the device holds the recognised content the record shows. Rules that keep it inside the
   /// record always do.
@@ -45,6 +54,44 @@ class ObservedRecord {
 
   /// The R# of the body the record shows, under rules whose devices show one per source; else null.
   final int? recognition;
+
+  /// The ids of the records merged into this one, as the device keeps them, under rules whose
+  /// dismissed pairs follow a merge by them; else empty.
+  final Set<String> absorbed;
+
+  /// What the record is made of, as the device keeps it, under rules that tell two records of one id
+  /// apart by that and by nothing of how each came to be: two records with the same [state] are, to
+  /// those rules, the same record. Opaque: compared, never computed. Null under other rules.
+  final String? state;
+
+  /// The recognised content the record shows, by the name the server keeps it under
+  /// ([Observation.serverBodies]); null under rules that keep it inside the record.
+  final String? body;
+
+  /// Which capture's images the recognised content the record shows was read from, as the record carries
+  /// it with that content, under rules that bind the two; null under other rules, and where the record
+  /// carries none — one from before the upgrade, until the device works it out from its directory.
+  final String? binding;
+}
+
+/// Why a device holds no base for a record — the list it last agreed with the server on has none —
+/// under rules whose devices keep such a list.
+enum Unbased {
+  /// It has never agreed with a server on a list: its first sync is still to come.
+  firstSync,
+
+  /// Its base was of an account since deleted and made again.
+  accountRemade,
+
+  /// It lost its base (the sync state file).
+  stateLost,
+
+  /// It holds a whole base, which lists no record of that id.
+  notInBase,
+
+  /// It sent a list and lost the answer, and cannot tell whether the server took it: of the record of
+  /// that id, or of a value of it, its base holds nothing agreed.
+  answerLost,
 }
 
 /// One annotation cell: the value of [Cell.column] on record [Cell.id].
@@ -68,7 +115,21 @@ class ObservedDevice {
     this.held = false,
     this.roomRefusals = 0,
     this.confirmedBodies = const {},
+    this.baseGap,
+    this.imagesKept = const {},
+    this.heldByLongMemos = 0,
   });
+
+  /// How many memos over the send limit held the device's last round back, under rules that hold a
+  /// round back for them; 0 where it ran.
+  final int heldByLongMemos;
+
+  /// The images the device holds of no record it lists: those of the records a round that did not end
+  /// took off its list, kept until a round ends, under rules whose devices keep them so. By source.
+  final Set<String> imagesKept;
+
+  /// Why the device holds no whole base, or null when it holds one (and under rules without one).
+  final Unbased? baseGap;
 
   /// The records the device lists.
   final Map<String, ObservedRecord> records;
@@ -89,7 +150,8 @@ class ObservedDevice {
   final Map<Column, ObservedValue> titles;
 
   /// Pair ([Dismiss.pair]) → `dismissed`, or null when offered again, for every pair of records the
-  /// device lists that was ever dismissed.
+  /// device lists that was ever dismissed. Under rules that keep the pairs as a set: every pair the
+  /// device holds dismissed, also one that names a record it does not list, each as made at 0.
   final Map<String, ObservedValue> dismissed;
 
   /// The device shows that a full storage holds part of what it has to send back.
@@ -138,7 +200,12 @@ class ObservedRow {
     required this.imageSet,
     this.links = const {},
     this.body,
+    this.state,
+    this.absorbed = const {},
   });
+
+  /// As [ObservedRecord.absorbed], of a live row.
+  final Set<String> absorbed;
 
   /// The recognised content a live row shows, by the name the server keeps it under
   /// ([Observation.serverBodies]); null for a removed row, and under rules that keep it inside the row.
@@ -156,6 +223,9 @@ class ObservedRow {
 
   /// The source of the image body the server holds for this row, or null.
   final String? imageSet;
+
+  /// As [ObservedRecord.state], of a live row.
+  final String? state;
 }
 
 class Observation {
@@ -170,6 +240,7 @@ class Observation {
     this.serverImages = const {},
     this.serverBodies = const {},
     this.serverOperations = 0,
+    this.serverGeneration,
   });
 
   /// The recognised contents the server holds apart from its rows, by name, whether or not a live row
@@ -178,6 +249,9 @@ class Observation {
 
   /// How many operations the server stores, under rules whose server stores operations.
   final int serverOperations;
+
+  /// How many times the server swapped its list in, under rules whose server swaps a list.
+  final int? serverGeneration;
 
   final Map<String, ObservedRow> rows;
 

@@ -24,6 +24,10 @@ enum Rules {
 
   /// The operation-log rules (`oplog_core.dart`), run by `OplogWorld`; likewise unseen here.
   oplog,
+
+  /// The rules of file sync with merging on the device (`file_core.dart`), run by `FileWorld`;
+  /// likewise unseen here.
+  file,
 }
 
 enum RowState { active, archived, deleted }
