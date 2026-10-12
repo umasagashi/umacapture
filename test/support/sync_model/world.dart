@@ -25,6 +25,9 @@ abstract class SyncWorld {
 
   int tick() => ++_clock;
 
+  /// The world's clock, read without moving it.
+  int get now => _clock;
+
   Iterable<String> get deviceNames;
 
   /// The ids [device] lists, sorted.
@@ -36,6 +39,13 @@ abstract class SyncWorld {
   /// Whether this rule set has a path for [op] at all (an untracked removal, say).
   bool supports(Op op);
 
+  /// Whether the app of these rules offers an archived record for a merge as it offers an active one.
+  bool get mergesArchived => false;
+
+  /// Whether a re-recognition of these rules writes at a module of any R#, older ones included, as one at a
+  /// newer one; else only a newer one writes, and the generator draws only newer ones.
+  bool get rerecognizesAtAnyModule => false;
+
   /// Whether [device] holds nothing and has written nothing, so it may start on an app from before
   /// the operation log ([OldApp]).
   bool startsFresh(String device) => false;
@@ -46,6 +56,10 @@ abstract class SyncWorld {
   /// Field [field] (`parent1`, `parent2`, `bonus`) of record [id]'s inheritance link as [device]
   /// shows it; null for rules that do not link records.
   String? linkOf(String device, String id, String field) => null;
+
+  /// Whether the resolver of these rules derives a parent from what the record shows ([Capture.parents]), so
+  /// that a [Link] is its hand on a slot and names no parent it reads.
+  bool get derivesParents => false;
 
   /// Applies [op] to the stores, with no checking.
   void execute(Op op);
@@ -123,8 +137,9 @@ class World extends SyncWorld {
   @override
   bool supports(Op op) => switch (op) {
     Merge(:final untracked) || Delete(:final untracked) => untracked == Untracked.none,
+    Capture(:final beforeTheUpgrade) || ExportZip(:final beforeTheUpgrade) => !beforeTheUpgrade,
     EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
-    EditRating() || Title() || Dismiss() || Link() => false,
+    EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
     _ => true,
@@ -156,7 +171,7 @@ class World extends SyncWorld {
       case EditMemo(:final id, :final value):
         tick();
         d.editMemo(id, value);
-      case EditRating() || Title() || Dismiss() || Link():
+      case EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link():
         throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):
         zips[slot] = d.exportZip(id);

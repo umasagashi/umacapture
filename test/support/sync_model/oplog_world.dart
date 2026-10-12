@@ -1817,7 +1817,12 @@ class OplogWorld extends SyncWorld {
   bool syncEnabled(String device) => _holder(device).syncEnabled;
 
   @override
-  bool supports(Op op) => true;
+  bool supports(Op op) =>
+      op is! DeleteDismissalFile &&
+      op is! DeleteColumnStore &&
+      !(op is EditMemo && op.fromBeforeTheLimit) &&
+      !(op is Capture && op.beforeTheUpgrade) &&
+      !(op is ExportZip && op.beforeTheUpgrade);
 
   @override
   bool startsFresh(String device) {
@@ -1885,6 +1890,8 @@ class OplogWorld extends SyncWorld {
         d.title(column.key, name);
       case Dismiss(:final a, :final b, :final dismissed):
         d.dismiss(a, b, dismissed: dismissed);
+      case DeleteDismissalFile() || DeleteColumnStore():
+        throw UnsupportedError('these rules have no path for $op');
       case Link(:final id, :final slot, :final parent, :final bonus):
         d.link(id, slot, parent, bonus);
       case ExportZip(:final id, :final slot):

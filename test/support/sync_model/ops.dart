@@ -9,12 +9,32 @@ sealed class Op {
 
 /// A capture of a new record whose content and images come from its own capture.
 final class Capture extends Op {
-  const Capture(super.device, this.id, this.captured, {this.withImages = true});
+  const Capture(
+    super.device,
+    this.id,
+    this.captured, {
+    this.withImages = true,
+    this.beforeTheUpgrade = false,
+    this.parents = const {},
+  });
   final String id;
   final int captured;
   final bool withImages;
+
+  /// A record the app captured before it bound what a record shows to its images: under the rules of file
+  /// sync, a record that carries no binding until the device works it out from its directory. No other
+  /// rule set has such a record.
+  final bool beforeTheUpgrade;
+
+  /// What the captured screens show of the inheritance: slot (1, 2) → the capture of the parent that slot
+  /// names, none where the slot names no parent. A fact of the capture, and so of every content read from
+  /// its images, from which a resolver derives a record's parents ([Link]). Only the rules of file sync
+  /// read it; the others take the parent a [Link] names.
+  final Map<int, String> parents;
   @override
-  String toString() => '$device: capture $id@$captured${withImages ? '' : ' (no images)'}';
+  String toString() =>
+      '$device: capture $id@$captured${withImages ? '' : ' (no images)'}${beforeTheUpgrade ? ' (before the upgrade)' : ''}'
+      '${parents.isEmpty ? '' : ' (parents ${[for (final e in parents.entries) '${e.key}=${e.value}'].join(',')})'}';
 }
 
 /// How a removal reached a record without leaving the trace the lineage rules read. The judge reads
@@ -56,11 +76,14 @@ String _untrackedPrefix(Untracked u) => u == Untracked.none ? '' : '${u.name} ';
 
 /// [option] is `none` or `resized_jpeg`.
 final class Archive extends Op {
-  const Archive(super.device, this.id, this.option);
+  const Archive(super.device, this.id, this.option, {this.untracked = Untracked.none});
   final String id;
   final String option;
+
+  /// [Untracked.none] or [Untracked.legacyApp]; the storage screen does not archive.
+  final Untracked untracked;
   @override
-  String toString() => '$device: archive $id ($option)';
+  String toString() => '$device: ${_untrackedPrefix(untracked)}archive $id ($option)';
 }
 
 /// What an annotation column holds: a rating (a number) or a memo (text).
@@ -90,14 +113,21 @@ sealed class EditAnnotation extends Op {
 }
 
 final class EditMemo extends EditAnnotation {
-  const EditMemo(String device, String id, this.value, {Column column = memoColumn}) : super(device, id, column);
+  const EditMemo(String device, String id, this.value, {Column column = memoColumn, this.fromBeforeTheLimit = false})
+    : super(device, id, column);
   @override
   final String? value;
+
+  /// Not an edit a user makes: the memo the cell held before the app limited what a user types, which
+  /// carries no edit time. Under the rules of file sync, the only way a memo over [memoSendLimit] is
+  /// in a cell.
+  final bool fromBeforeTheLimit;
   @override
   String toString() {
     final v = value;
     final shown = overMemoLimit(v) ? '${v!.substring(0, 12)}…(${v.runes.length} chars)' : v;
-    return '$device: memo $id${column == memoColumn ? '' : ' [${column.key}]'} = $shown';
+    return '$device: ${fromBeforeTheLimit ? 'memo from before the limit' : 'memo'} $id'
+        '${column == memoColumn ? '' : ' [${column.key}]'} = $shown';
   }
 }
 
@@ -120,7 +150,17 @@ final class Title extends Op {
   String toString() => '$device: title ${column.key} = $name';
 }
 
+/// The storage screen deletes the store of [column]: its title and every value the device holds of it.
+final class DeleteColumnStore extends Op {
+  const DeleteColumnStore(super.device, this.column);
+  final Column column;
+  @override
+  String toString() => '$device: delete column store ${column.key}';
+}
+
 /// A pair of records offered as a merge candidate, dismissed, or offered again ([dismissed] false).
+/// The rules of file sync, as the app of today, offer no pair again by itself: there the pairs
+/// dismissed are offered again all at once ([DeleteDismissalFile]).
 final class Dismiss extends Op {
   const Dismiss(super.device, this.a, this.b, {required this.dismissed});
   final String a;
@@ -133,9 +173,18 @@ final class Dismiss extends Op {
   String toString() => '$device: ${dismissed ? 'dismiss' : 'undismiss'} $a+$b';
 }
 
+/// The storage screen's delete of the file [device] keeps its dismissed pairs in: every pair is
+/// offered again there.
+final class DeleteDismissalFile extends Op {
+  const DeleteDismissalFile(super.device);
+  @override
+  String toString() => '$device: delete dismissal file';
+}
+
 /// The inheritance resolver links record [id]'s parent slot [slot] (1 or 2) to record [parent] and
 /// writes the relation bonus it computed ([bonus]). The resolver fills only a slot the device shows
-/// empty.
+/// empty. Under the rules of file sync the resolver derives the parent itself, from what the record shows
+/// ([Capture.parents]), and [parent] is not read ([SyncWorld.derivesParents]).
 final class Link extends Op {
   const Link(super.device, this.id, this.slot, this.parent, this.bonus);
   final String id;
@@ -148,18 +197,26 @@ final class Link extends Op {
 
 /// Export [id] to a zip kept under [slot].
 final class ExportZip extends Op {
-  const ExportZip(super.device, this.id, this.slot);
+  const ExportZip(super.device, this.id, this.slot, {this.beforeTheUpgrade = false});
   final String id;
   final String slot;
+
+  /// A zip the app made before it bound what a record shows to its images ([Capture.beforeTheUpgrade]):
+  /// under the rules of file sync, one that carries no binding. No other rule set has such a zip.
+  final bool beforeTheUpgrade;
   @override
-  String toString() => '$device: export $id -> $slot';
+  String toString() => '$device: export $id -> $slot${beforeTheUpgrade ? ' (before the upgrade)' : ''}';
 }
 
 final class ImportZip extends Op {
-  const ImportZip(super.device, this.slot);
+  const ImportZip(super.device, this.slot, {this.beforeTheUpgrade = false});
   final String slot;
+
+  /// Taken in by the app from before the upgrade: what it leaves is a value from before the upgrade, as a
+  /// [Capture.beforeTheUpgrade] is.
+  final bool beforeTheUpgrade;
   @override
-  String toString() => '$device: import $slot';
+  String toString() => '$device: import $slot${beforeTheUpgrade ? ' (before the upgrade)' : ''}';
 }
 
 final class Rerecognize extends Op {

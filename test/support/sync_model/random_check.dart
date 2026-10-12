@@ -17,6 +17,8 @@
 
 import 'dart:math';
 
+import 'file_mutations.dart';
+import 'file_world.dart';
 import 'judge.dart';
 import 'lineage_mutations.dart';
 import 'lineage_world.dart';
@@ -94,18 +96,22 @@ const Map<OpKind, int> deepWeights = {
 };
 
 /// The operations drawn on their own stream: ratings, memos in a second memo column, memos over the
-/// send limit, column titles, dismissed pairs and inheritance links. None of them changes which
+/// send limit, column titles, a column's store deleted, dismissed pairs (and the file they are kept in
+/// deleted) and inheritance links. None of them changes which
 /// records a device lists, their versions, their state or the zips, which is all the main draw reads,
 /// so drawing them between its operations from another random stream leaves the main draw of a seed
-/// as it was before they existed — and a rule set with no path for them (the rules in `core.dart` and
-/// the lineage rules) draws exactly the sequences it drew before.
-enum AnnotationOpKind { rating, secondMemo, longMemo, title, dismiss, link }
+/// as it was before they existed. Each world draws from the kinds its rules have a path for and only
+/// those ([AnnotationGenerator]), so a kind one rule set alone takes leaves every other rule set's
+/// sequences as they were — and a rule set with no path for any (the rules in `core.dart` and the
+/// lineage rules) draws exactly the sequences it drew before.
+enum AnnotationOpKind { rating, secondMemo, longMemo, title, deleteColumnStore, dismiss, link }
 
 const Map<AnnotationOpKind, int> defaultAnnotationWeights = {
   AnnotationOpKind.rating: 3,
   AnnotationOpKind.secondMemo: 2,
   AnnotationOpKind.longMemo: 1,
   AnnotationOpKind.title: 2,
+  AnnotationOpKind.deleteColumnStore: 1,
   AnnotationOpKind.dismiss: 2,
   AnnotationOpKind.link: 3,
 };
@@ -132,11 +138,15 @@ class GeneratorConfig {
     this.accountDeletionWeight = 1,
     this.elapseWeight = 24,
     this.oldDataEvery = 3,
+    this.oldMemoEvery = 20,
+    this.oldRecordEvery = 4,
+    this.oldOtherContentEvery = 2,
     this.faultEvery = 10,
     this.bystander,
     this.bystanderEvery = 6,
     this.receiveCutEvery = 12,
     this.readLimitEvery = 24,
+    this.mergesArchived = false,
   });
 
   final List<String> devices;
@@ -171,6 +181,19 @@ class GeneratorConfig {
   /// (0: none).
   final int oldDataEvery;
 
+  /// One sequence in [oldMemoEvery] starts with a device holding a record whose memo is one from before
+  /// the limit, over it ([OldMemoGenerator]; 0: none).
+  final int oldMemoEvery;
+
+  /// One sequence in [oldRecordEvery] starts with records captured before the upgrade, which carry no
+  /// binding of what they show to their images ([OldRecordGenerator]; 0: none).
+  final int oldRecordEvery;
+
+  /// Of the sequences that start with a record from before the upgrade on two devices, one in
+  /// [oldOtherContentEvery] goes on with the app before putting a zip of another capture's content over it
+  /// on one of them ([OldOtherContentGenerator]; 0: none).
+  final int oldOtherContentEvery;
+
   /// After each operation of the main draw, the fault stream draws one with chance 1 / [faultEvery]
   /// (0: none).
   final int faultEvery;
@@ -187,6 +210,11 @@ class GeneratorConfig {
   /// After each operation of the main draw, the chance 1 / [readLimitEvery] that the day's reads are
   /// limited, or the limit is lifted (0: never).
   final int readLimitEvery;
+
+  /// The main draw merges archived records too — with an active one, or two of them — where the app
+  /// of the rules offers them ([SyncWorld.mergesArchived]); else only active ones. A switch of its
+  /// own: with it a seed draws other sequences than without.
+  final bool mergesArchived;
 
   /// This configuration with [devices] and, when [faults] is false, no fault, no round cut while it
   /// receives and no limit on the day's reads drawn: the sequences as they were drawn before those
@@ -208,7 +236,11 @@ class GeneratorConfig {
     accountDeletionWeight: accountDeletionWeight,
     elapseWeight: elapseWeight,
     oldDataEvery: oldDataEvery,
+    oldMemoEvery: oldMemoEvery,
+    oldRecordEvery: oldRecordEvery,
+    oldOtherContentEvery: oldOtherContentEvery,
     faultEvery: faults ? faultEvery : 0,
+    mergesArchived: mergesArchived,
   );
 }
 
@@ -222,6 +254,15 @@ const deepGenerator = GeneratorConfig(
   maxLength: 60,
   weights: deepWeights,
   startForms: [ImageForm.png, ImageForm.jpeg, ImageForm.none],
+);
+
+/// The default generator, and the deep one, merging archived records too ([GeneratorConfig.mergesArchived]).
+const archivedMergeGenerator = GeneratorConfig(mergesArchived: true);
+const deepArchivedMergeGenerator = GeneratorConfig(
+  maxLength: 60,
+  weights: deepWeights,
+  startForms: [ImageForm.png, ImageForm.jpeg, ImageForm.none],
+  mergesArchived: true,
 );
 
 /// The weights of [untrackedGenerator]: the defaults, plus the removals an app without lineages or
@@ -248,17 +289,18 @@ bool applicable(SyncWorld w, Op op) {
   if (!w.deviceNames.contains(op.device) || !w.supports(op)) return false;
   bool has(String id) => w.recordIds(op.device).contains(id);
   bool active(String id) => has(id) && w.isActive(op.device, id);
+  bool merges(String id) => w.mergesArchived ? has(id) : active(id);
   if (w.runsOldApp(op.device) && !_oldAppDoes(op)) return false;
   return switch (op) {
     Capture(:final id) => !w.deviceNames.any((x) => w.recordIds(x).contains(id)),
     Merge(:final a, :final b, :final contentFrom) =>
-      a != b && active(a) && active(b) && (contentFrom == a || contentFrom == b),
+      a != b && merges(a) && merges(b) && (contentFrom == a || contentFrom == b),
     Delete(:final id) => has(id),
     Archive(:final id) => active(id),
     EditAnnotation(:final id) => has(id),
     Dismiss(:final a, :final b) => a != b && has(a) && has(b),
     Link(:final id, :final slot, :final parent) =>
-      id != parent && has(id) && has(parent) && w.linkOf(op.device, id, 'parent$slot') == null,
+      (w.derivesParents || (id != parent && has(parent))) && has(id) && w.linkOf(op.device, id, 'parent$slot') == null,
     ExportZip(:final id) => has(id),
     ImportZip(:final slot) => w.zips.containsKey(slot),
     Rerecognize(:final id) => has(id),
@@ -322,9 +364,10 @@ class OpGenerator {
         _captures++;
         return Capture(device, 'R$_captures', _captures, withImages: random.nextInt(8) != 0);
       case OpKind.merge:
-        if (activeIds.length < 2) return null;
-        final a = _pick(activeIds);
-        final b = _pick(activeIds.where((x) => x != a).toList());
+        final offered = config.mergesArchived && w.mergesArchived ? ids : activeIds;
+        if (offered.length < 2) return null;
+        final a = _pick(offered);
+        final b = _pick(offered.where((x) => x != a).toList());
         return Merge(device, a, b, contentFrom: random.nextBool() ? a : b);
       case OpKind.delete:
         return ids.isEmpty ? null : Delete(device, _pick(ids));
@@ -343,7 +386,11 @@ class OpGenerator {
       case OpKind.rerecognize:
         if (ids.isEmpty) return null;
         final id = _pick(ids);
-        return Rerecognize(device, id, w.versionOf(device, id) + 1 + random.nextInt(2));
+        // Where the rules write at an older module too, half the draws are of a module no newer than the
+        // record's, from the first up to its own; else, and the other half, one or two past it.
+        final shown = w.versionOf(device, id);
+        final older = w.rerecognizesAtAnyModule && random.nextBool();
+        return Rerecognize(device, id, older ? 1 + random.nextInt(shown) : shown + 1 + random.nextInt(2));
       case OpKind.setImageForm:
         return SetImageForm(device, _pick(const [ImageForm.png, ImageForm.jpeg, ImageForm.none]));
       case OpKind.syncRound:
@@ -377,10 +424,12 @@ class OpGenerator {
   };
 }
 
-/// Draws the operations of the annotation stream ([AnnotationOpKind]).
+/// Draws the operations of the annotation stream ([AnnotationOpKind]) from a bag of the kinds [w]'s rules
+/// have a path for: a kind they refuse takes no place in it, so it moves no other kind's draw.
 class AnnotationGenerator {
-  AnnotationGenerator(this.random, this.config) {
+  AnnotationGenerator(this.random, this.config, SyncWorld w) {
     for (final MapEntry(key: k, value: v) in config.annotationWeights.entries) {
+      if (!_offered(k, config.devices.first, w)) continue;
       for (var i = 0; i < v; i++) {
         _bag.add(k);
       }
@@ -394,6 +443,25 @@ class AnnotationGenerator {
 
   T _pick<T>(List<T> xs) => xs[random.nextInt(xs.length)];
 
+  /// Whether [w]'s rules take some operation of [kind] as [_build] makes them, asked of [w] itself.
+  static bool _offered(AnnotationOpKind kind, String device, SyncWorld w) {
+    const memo = 'note';
+    final long = 'long'.padRight(memoSendLimit + 1, '.');
+    final ops = switch (kind) {
+      AnnotationOpKind.rating => [for (final c in annotationColumns.sublist(2)) EditRating(device, '', c, 0)],
+      AnnotationOpKind.secondMemo => [EditMemo(device, '', memo, column: annotationColumns[1])],
+      AnnotationOpKind.longMemo => [for (final c in annotationColumns.take(2)) EditMemo(device, '', long, column: c)],
+      AnnotationOpKind.title => [for (final c in annotationColumns) Title(device, c, 'name')],
+      AnnotationOpKind.deleteColumnStore => [for (final c in annotationColumns) DeleteColumnStore(device, c)],
+      AnnotationOpKind.dismiss => [
+        for (final dismissed in [true, false]) Dismiss(device, '', '', dismissed: dismissed),
+        DeleteDismissalFile(device),
+      ],
+      AnnotationOpKind.link => [Link(device, '', 1, '', 0)],
+    };
+    return ops.any(w.supports);
+  }
+
   /// After an operation of the main draw: an annotation operation valid in [w], or null.
   Op? after(SyncWorld w) {
     if (_bag.isEmpty || random.nextInt(config.annotationEvery) != 0) return null;
@@ -403,7 +471,7 @@ class AnnotationGenerator {
 
   Op? _build(AnnotationOpKind kind, String device, SyncWorld w) {
     final ids = w.recordIds(device);
-    if (ids.isEmpty && kind != AnnotationOpKind.title) return null;
+    if (ids.isEmpty && kind != AnnotationOpKind.title && kind != AnnotationOpKind.deleteColumnStore) return null;
     switch (kind) {
       case AnnotationOpKind.rating:
         final rating = random.nextInt(7);
@@ -416,15 +484,20 @@ class AnnotationGenerator {
           column: annotationColumns[1],
         );
       case AnnotationOpKind.longMemo:
-        // One character over the send limit, and unique like every memo drawn.
+        // One character over the send limit, and unique like every memo drawn. Rules under which a user
+        // types no memo that long (file sync, S-03) refuse it; there [OldMemoGenerator] puts one in.
         final text = 'long${++_n}'.padRight(memoSendLimit + 1, '.');
         return EditMemo(device, _pick(ids), text, column: annotationColumns[random.nextInt(2)]);
       case AnnotationOpKind.title:
         return Title(device, _pick(annotationColumns), random.nextInt(4) == 0 ? null : 'name${++_n}');
+      case AnnotationOpKind.deleteColumnStore:
+        return DeleteColumnStore(device, _pick(annotationColumns));
       case AnnotationOpKind.dismiss:
         if (ids.length < 2) return null;
         final a = _pick(ids);
-        return Dismiss(device, a, _pick(ids.where((x) => x != a).toList()), dismissed: random.nextInt(4) != 0);
+        final op = Dismiss(device, a, _pick(ids.where((x) => x != a).toList()), dismissed: random.nextInt(4) != 0);
+        // Rules that offer no pair again by itself delete the file the pairs are kept in instead.
+        return w.supports(op) ? op : DeleteDismissalFile(device);
       case AnnotationOpKind.link:
         if (ids.length < 2) return null;
         final id = _pick(ids);
@@ -516,6 +589,139 @@ class LifecycleGenerator {
         ? DeleteAccount(device)
         : Elapse(device, _pick(const [1, 2, 4, 8]));
     return applicable(w, op) ? op : null;
+  }
+}
+
+/// Draws what a sequence starts with where the rules keep a memo from before the limit
+/// ([EditMemo.fromBeforeTheLimit]): a device's record, captured before the upgrade, whose memo is over the
+/// limit. A user types no memo that long, so this is the one way the generator puts one in a cell. None of
+/// it is drawn under rules that do not keep such a memo, so those rules draw what they drew before.
+class OldMemoGenerator {
+  OldMemoGenerator(this.random, this.config);
+
+  final Random random;
+  final GeneratorConfig config;
+
+  /// The id of the record; no other draw names a record so.
+  static const id = 'M1';
+
+  Iterable<Op> start(SyncWorld w) sync* {
+    if (config.oldMemoEvery == 0 || random.nextInt(config.oldMemoEvery) != 0) return;
+    final device = config.devices[random.nextInt(config.devices.length)];
+    final column = annotationColumns[random.nextInt(2)];
+    final memo = EditMemo(device, id, 'old'.padRight(memoSendLimit + 1, '.'), column: column, fromBeforeTheLimit: true);
+    if (!w.supports(memo)) return;
+    yield Capture(device, id, 0, withImages: random.nextInt(6) != 0, beforeTheUpgrade: true);
+    yield memo;
+  }
+}
+
+/// Draws what a sequence starts with where the rules bind what a record shows to its images
+/// ([Capture.beforeTheUpgrade]): records each device captured before the upgrade, which carry no binding
+/// — some with their images, some without. None of it is drawn under rules that have no such record, so
+/// those rules draw what they drew before.
+class OldRecordGenerator {
+  OldRecordGenerator(this.random, this.config);
+
+  final Random random;
+  final GeneratorConfig config;
+  int _old = 0;
+
+  /// The prefix of the slots of the zips the app before made; no other draw names a slot so.
+  static const slotPrefix = 'p';
+
+  /// The prefix of the ids of the records; no other draw names a record so.
+  static const idPrefix = 'P';
+
+  Iterable<Op> start(SyncWorld w) sync* {
+    if (config.oldRecordEvery == 0 || random.nextInt(config.oldRecordEvery) != 0) return;
+    if (!w.supports(Capture(config.devices.first, '${idPrefix}0', 0, beforeTheUpgrade: true))) return;
+    final made = <(String, String)>[];
+    for (final device in config.devices) {
+      for (var i = random.nextInt(3); i > 0; i--) {
+        final id = '$idPrefix${++_old}';
+        made.add((device, id));
+        yield Capture(device, id, 0, withImages: random.nextInt(4) != 0, beforeTheUpgrade: true);
+      }
+    }
+    // A copy of some of them on another device, made by the app before with its zips, before the upgrade:
+    // the same record there, carrying no binding and no time either. Taking such a zip in after the upgrade
+    // is the main draw's, as any other zip.
+    for (final (device, id) in made) {
+      if (random.nextBool()) continue;
+      final slot = '$slotPrefix$id';
+      yield ExportZip(device, id, slot, beforeTheUpgrade: true);
+      for (final other in config.devices.where((x) => x != device)) {
+        yield ImportZip(other, slot, beforeTheUpgrade: true);
+      }
+    }
+  }
+}
+
+/// Draws, after [OldRecordGenerator]'s start, how a record from before the upgrade comes to show one capture
+/// while its directory holds the images of another (v6 §4): the app before puts a zip of another capture's
+/// content, holding no images, over the record on a device that holds it with its images — that app
+/// compares nothing and leaves the directory as it is ([FDevice.importZip]).
+///
+/// The zip is made on the other device that holds the record: it captures another, merges it into the
+/// record keeping the content of the capture, and zips the record. A zip of the app before holds the
+/// images its record's directory holds, so the capture is either one taken without its images, or one
+/// with them, and then the device zips the record twice — with the images, and after archiving it without
+/// them — deletes it and takes the first zip in again: it holds the content with its own capture's images,
+/// the other device the content with another capture's. Every operation is the app before's: its merge,
+/// archive and delete carry [Untracked.legacyApp], its zips [ImportZip.beforeTheUpgrade].
+///
+/// Its own random stream, drawn after the rest of the start: under rules that have no merge of the app
+/// before or no record from before the upgrade, and in a sequence with no such record on two devices,
+/// nothing is drawn, and the sequence is the one drawn before this stream existed.
+class OldOtherContentGenerator {
+  OldOtherContentGenerator(this.random, this.config);
+
+  final Random random;
+  final GeneratorConfig config;
+
+  /// The prefix of the ids of the captures merged in and of the slots of the zips; no other draw names a
+  /// record or a slot so.
+  static const idPrefix = 'Q';
+  static const slotPrefix = 'q';
+
+  T _pick<T>(List<T> xs) => xs[random.nextInt(xs.length)];
+
+  Iterable<Op> start(SyncWorld w) sync* {
+    final devices = config.devices;
+    if (config.oldOtherContentEvery == 0) return;
+    if (!w.supports(Merge(devices.first, '', '', contentFrom: '', untracked: Untracked.legacyApp)) ||
+        !w.supports(Archive(devices.first, '', ArchiveOption.none, untracked: Untracked.legacyApp)) ||
+        !w.supports(Capture(devices.first, '${idPrefix}0', 0, beforeTheUpgrade: true))) {
+      return;
+    }
+    final shown = w.observe().devices;
+    final pairs = [
+      for (final maker in devices)
+        for (final id in w.recordIds(maker))
+          if (id.startsWith(OldRecordGenerator.idPrefix))
+            for (final taker in devices)
+              if (taker != maker && shown[taker]?.records[id]?.imageSet != null) (maker, taker, id),
+    ];
+    if (pairs.isEmpty || random.nextInt(config.oldOtherContentEvery) != 0) return;
+    final (maker, taker, id) = _pick(pairs);
+    final capture = '$idPrefix${id.substring(OldRecordGenerator.idPrefix.length)}';
+    final slot = '$slotPrefix$id';
+    final withImages = random.nextBool();
+    yield Capture(maker, capture, 0, withImages: withImages, beforeTheUpgrade: true);
+    // The record captured first is the older: it keeps its id.
+    yield Merge(maker, id, capture, contentFrom: capture, untracked: Untracked.legacyApp);
+    if (!withImages) {
+      yield ExportZip(maker, id, slot, beforeTheUpgrade: true);
+      yield ImportZip(taker, slot, beforeTheUpgrade: true);
+      return;
+    }
+    yield ExportZip(maker, id, '${slot}a', beforeTheUpgrade: true);
+    yield Archive(maker, id, ArchiveOption.none, untracked: Untracked.legacyApp);
+    yield ExportZip(maker, id, slot, beforeTheUpgrade: true);
+    yield Delete(maker, id, untracked: Untracked.legacyApp);
+    yield ImportZip(maker, '${slot}a', beforeTheUpgrade: true);
+    yield ImportZip(taker, slot, beforeTheUpgrade: true);
   }
 }
 
@@ -623,6 +829,43 @@ class ReadLimitGenerator {
   }
 }
 
+/// Draws what each capture shows of the inheritance ([Capture.parents]), from a stream of its own, so the
+/// operations every stream draws are the ones they drew without it. A capture names, in each slot, one of
+/// the captures drawn before it, and none one time in four or where there is none to name; the two slots
+/// name two captures. A capture drawn again under its name shows what it showed.
+class InheritanceGenerator {
+  InheritanceGenerator(this.random);
+
+  final Random random;
+  final List<String> _order = [];
+  final Map<String, Map<int, String>> _of = {};
+
+  /// [op], a capture with what it shows of the inheritance; any other operation as it is.
+  Op of(Op op) {
+    if (op is! Capture) return op;
+    final parents = _of[op.id] ??= _draw(op.id);
+    return Capture(
+      op.device,
+      op.id,
+      op.captured,
+      withImages: op.withImages,
+      beforeTheUpgrade: op.beforeTheUpgrade,
+      parents: parents,
+    );
+  }
+
+  Map<int, String> _draw(String capture) {
+    final earlier = [..._order];
+    _order.add(capture);
+    final parents = <int, String>{};
+    for (final slot in [1, 2]) {
+      final pool = earlier.where((c) => !parents.containsValue(c)).toList();
+      if (pool.isNotEmpty && random.nextInt(4) != 0) parents[slot] = pool[random.nextInt(pool.length)];
+    }
+    return parents;
+  }
+}
+
 /// Everything a configuration of the model needs besides the operations.
 class ModelConfig {
   const ModelConfig({
@@ -630,6 +873,7 @@ class ModelConfig {
     this.mutation,
     this.lineageMutation,
     this.oplogMutation,
+    this.fileMutation,
     this.readings = LineageReadings.literal,
     this.accepted,
     this.judgeReadings = const JudgeReadings(),
@@ -650,12 +894,16 @@ class ModelConfig {
 
   /// Read by the operation-log rules only.
   final OplogMutation? oplogMutation;
+
+  /// Read by the rules of file sync only.
+  final FileMutation? fileMutation;
   final LineageReadings readings;
   final Set<Accepted>? accepted;
   final JudgeReadings judgeReadings;
   final List<String> devices;
 
-  /// Under the operation-log rules: a log beside [devices] that never syncs and only takes zips in.
+  /// Under the operation-log rules and the rules of file sync: a log, or a device, beside [devices]
+  /// that never syncs and only takes zips in.
   final String? bystander;
 
   SyncWorld newWorld() => switch (rules) {
@@ -674,6 +922,13 @@ class ModelConfig {
         judgeReadings: judgeReadings,
         bystanders: [?bystander],
       ),
+    ),
+    Rules.file => FileWorld(
+      devices,
+      mutation: fileMutation,
+      accepted: accepted,
+      judgeReadings: judgeReadings,
+      bystanders: [?bystander],
     ),
     _ => World(rules, devices, mutation: mutation, accepted: accepted, judgeReadings: judgeReadings),
   };
@@ -799,70 +1054,64 @@ const _receiveCutStream = 0x61e7;
 /// Seeds the stream of the limits on the day's reads apart from the other six.
 const _readLimitStream = 0x4d93;
 
+/// Seeds the stream of the memos from before the limit apart from the other seven.
+const _oldMemoStream = 0x1b6f;
+
+/// Seeds the stream of the records from before the upgrade apart from the other eight.
+const _oldRecordStream = 0x6a2d;
+
+/// Seeds the stream of the zips of another capture's content the app before took in apart from the other nine.
+const _oldOtherContentStream = 0x3e85;
+
+/// Seeds the stream of what each capture shows of the inheritance apart from the other ten.
+const _inheritanceStream = 0x5c3b;
+
 /// The sequence seed [seed] generates: drawn step by step against a world under [config], the main
 /// draw and the other streams each from a random stream of its own of the seed.
 List<Op> generate(int seed, ModelConfig config, {GeneratorConfig gen = const GeneratorConfig()}) {
   final random = Random(seed);
   final drawn = gen.copyWith(devices: config.devices, bystander: config.bystander);
+  final w = config.newWorld();
   final g = OpGenerator(random, drawn);
-  final annotations = AnnotationGenerator(Random(seed ^ _annotationStream), drawn);
+  final annotations = AnnotationGenerator(Random(seed ^ _annotationStream), drawn, w);
   final lifecycle = LifecycleGenerator(Random(seed ^ _lifecycleStream), drawn);
   final faults = FaultGenerator(Random(seed ^ _faultStream), drawn);
   final bystander = BystanderGenerator(Random(seed ^ _bystanderStream), drawn);
   final cuts = ReceiveCutGenerator(Random(seed ^ _receiveCutStream), drawn);
   final readLimits = ReadLimitGenerator(Random(seed ^ _readLimitStream), drawn);
+  final oldMemos = OldMemoGenerator(Random(seed ^ _oldMemoStream), drawn);
+  final oldRecords = OldRecordGenerator(Random(seed ^ _oldRecordStream), drawn);
+  final oldOtherContents = OldOtherContentGenerator(Random(seed ^ _oldOtherContentStream), drawn);
+  final inheritance = InheritanceGenerator(Random(seed ^ _inheritanceStream));
   final length = gen.minLength + random.nextInt(gen.maxLength - gen.minLength + 1);
-  final w = config.newWorld();
   final ops = <Op>[];
+  void take(Op drawnOp) {
+    final op = inheritance.of(drawnOp);
+    w.apply(op);
+    ops.add(op);
+  }
+
   final start = gen.startForms.length == 1 ? gen.startForms.single : g._pick(gen.startForms);
   try {
-    if (start != w.observe().imageForm) {
-      final op = SetImageForm(config.devices.first, start);
-      w.apply(op);
-      ops.add(op);
-    }
+    if (start != w.observe().imageForm) take(SetImageForm(config.devices.first, start));
     // The main draw's length counts neither what the lifecycle stream starts the sequence with nor
     // the choice of `png`: under every rule set a seed draws the operations it would draw for an
     // account made in that form.
     final first = start == ImageForm.png ? 0 : 1;
-    for (final op in lifecycle.start(w)) {
-      if (!applicable(w, op)) continue;
-      w.apply(op);
-      ops.add(op);
+    // Each stream's start draws against the world the operations before it made.
+    for (final drawStart in [lifecycle.start, oldMemos.start, oldRecords.start, oldOtherContents.start]) {
+      for (final op in drawStart(w)) {
+        if (applicable(w, op)) take(op);
+      }
     }
     for (var i = first; i < length; i++) {
-      final op = g.next(w);
-      w.apply(op);
-      ops.add(op);
-      final a = annotations.after(w);
-      if (a != null) {
-        w.apply(a);
-        ops.add(a);
-      }
-      final l = lifecycle.after(w);
-      if (l != null) {
-        w.apply(l);
-        ops.add(l);
-      }
-      final f = faults.after(w);
-      if (f != null) {
-        w.apply(f);
-        ops.add(f);
-      }
-      for (final b in bystander.after(w)) {
-        w.apply(b);
-        ops.add(b);
-      }
-      final c = cuts.after(w);
-      if (c != null) {
-        w.apply(c);
-        ops.add(c);
-      }
-      final r = readLimits.after(w);
-      if (r != null) {
-        w.apply(r);
-        ops.add(r);
-      }
+      take(g.next(w));
+      if (annotations.after(w) case final a?) take(a);
+      if (lifecycle.after(w) case final l?) take(l);
+      if (faults.after(w) case final f?) take(f);
+      bystander.after(w).forEach(take);
+      if (cuts.after(w) case final c?) take(c);
+      if (readLimits.after(w) case final r?) take(r);
     }
   } on Object {
     // The replay reports the crash with its sequence; the prefix up to it is what reproduces it.
@@ -957,6 +1206,22 @@ final Map<String, ModelConfig> oplogPositiveControls = {
   for (final m in OplogMutation.values) 'oplog mutation ${m.name}': ModelConfig(rules: Rules.oplog, oplogMutation: m),
   for (final a in acceptedUnderOplog)
     'oplog judge without ${a.name}': ModelConfig(rules: Rules.oplog, accepted: acceptedUnderOplog.toSet()..remove(a)),
+};
+
+/// The device the large random runs of the rules of file sync put beside the two that sync.
+const fileBystander = 'C';
+
+/// The positive controls of the rules of file sync: each mutation, and the judge without each of
+/// their accepted outcomes, under the readings these rules are run with ([fileReadings]).
+final Map<String, ModelConfig> filePositiveControls = {
+  for (final m in FileMutation.values)
+    'file mutation ${m.name}': ModelConfig(rules: Rules.file, fileMutation: m, judgeReadings: fileReadings),
+  for (final a in acceptedUnderFile)
+    'file judge without ${a.name}': ModelConfig(
+      rules: Rules.file,
+      accepted: acceptedUnderFile.toSet()..remove(a),
+      judgeReadings: fileReadings,
+    ),
 };
 
 /// Runs seeds from [from] until the first sequence that separates [mutant] from [baseline], or
