@@ -15,7 +15,7 @@ enum StorageBoxKey {
   addon,
   dataMigration,
   telemetryId,
-  publishedRecords,
+  recordShares,
 }
 
 /// The name each box is opened and stored under, derived from [StorageBoxKey].

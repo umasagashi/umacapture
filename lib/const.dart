@@ -67,7 +67,7 @@ class Const {
 
   static String get xUrl => "https://x.com/umasagashi";
 
-  /// The origin of the record-sharing server: its API under `/api/`, and the published pages under `/r/`.
+  /// The origin of the record-sharing server: its API under `/api/`, and the shared pages under `/r/`.
   ///
   /// Web and Windows read the same value. A staging build replaces it with
   /// `--dart-define=UMACAPTURE_SHARING_ORIGIN=<origin>`; the staging web app is served from that same
