@@ -10,7 +10,7 @@ const ID = "[0-9a-hjkmnp-tv-z]{10}";
 const ACCOUNT_ID = "[0-9a-hjkmnp-tv-z]{16}";
 
 // [method, name, pattern]. HEAD is accepted wherever GET is.
-const ROUTES = [
+export const ROUTES = [
   ["GET", "recordJson", new RegExp(`^/r/(${ID})\\.json$`)],
   ["GET", "recordPage", new RegExp(`^/r/(${ID})$`)],
   ["GET", "listJson", new RegExp(`^/u/(${ACCOUNT_ID})\\.json$`)],
@@ -27,6 +27,20 @@ const ROUTES = [
   ["GET", "loginCallback", /^\/api\/auth\/callback\/([a-z]+)$/],
   ["POST", "loginClaim", /^\/api\/auth\/claim$/],
   ["POST", "logout", /^\/api\/auth\/logout$/],
+  // File sync: every endpoint lives under /api/sync/, so the zone's WAF can tell them apart by prefix.
+  // The id is an object name, the SHA-256 of its bytes.
+  ["GET", "syncGeneration", /^\/api\/sync\/generation$/],
+  ["GET", "syncGetSettings", /^\/api\/sync\/settings$/],
+  ["PUT", "syncPutSettings", /^\/api\/sync\/settings$/],
+  ["POST", "syncPutBodies", /^\/api\/sync\/bodies$/],
+  ["POST", "syncGetBodies", /^\/api\/sync\/bodies\/get$/],
+  ["POST", "syncHeld", /^\/api\/sync\/held$/],
+  ["PUT", "syncPutImage", /^\/api\/sync\/images\/([0-9a-f]{64})$/],
+  ["GET", "syncGetImage", /^\/api\/sync\/images\/([0-9a-f]{64})$/],
+  ["POST", "syncPutPart", /^\/api\/sync\/parts$/],
+  ["GET", "syncGetPart", /^\/api\/sync\/parts\/([0-9a-f]{64})$/],
+  ["POST", "syncReplaceRoot", /^\/api\/sync\/root$/],
+  ["GET", "syncGetRoot", /^\/api\/sync\/roots\/([0-9a-f]{64})$/],
 ];
 
 /** `{name, id}` for a recognised route (`id` only on routes that carry one), or null. */

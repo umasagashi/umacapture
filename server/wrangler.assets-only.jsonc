@@ -19,6 +19,9 @@
   // Usage metrics off for every command that reads this file. WRANGLER_SEND_METRICS, which
   // deploy_web.sh sets, takes precedence over this key.
   "send_metrics": false,
+  // No script, so no hourly run. The empty list removes the crons a deploy of wrangler.jsonc set: an
+  // absent key would leave them firing at a Worker with no scheduled handler. env.staging inherits it.
+  "triggers": { "crons": [] },
   "assets": {
     "directory": "../build/web",
     // Unknown paths answer 404. The app uses hash routing and serves nothing but "/", so a SPA

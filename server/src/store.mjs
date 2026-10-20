@@ -474,14 +474,15 @@ export async function beginAccountDeletion(db, accountId, tokenHash, now, expire
  * Removes up to `limit` records of account `accountId` (one batch), giving their charge back to the
  * totals and their places back to the account's cap. Allowed only to a deletion-only session
  * `tokenHash` of the account, while the account is being deleted: the opposite of an unshare's
- * condition, which the mark of the deletion makes fail. Throws Unavailable.
+ * condition, which the mark of the deletion makes fail. Returns the records it removed. Throws
+ * Unavailable.
  */
 export async function deleteShareChunk(db, accountId, tokenHash, limit) {
   const allowed = `EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?3 AND account_id = ?1 AND scope = 'delete')
     AND EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL)`;
   // The same rows in every statement: the batch is one transaction and the order is total.
   const chunk = "SELECT id FROM records WHERE owner_id = ?1 ORDER BY id LIMIT ?2";
-  await query(() =>
+  const results = await query(() =>
     db.batch([
       db
         .prepare(
@@ -499,6 +500,7 @@ export async function deleteShareChunk(db, accountId, tokenHash, limit) {
       db.prepare(`DELETE FROM records WHERE id IN (${chunk}) AND ${allowed}`).bind(accountId, limit, tokenHash),
     ]),
   );
+  return results[2].meta.changes;
 }
 
 /** How many records account `accountId` still shares. Throws Unavailable. */
