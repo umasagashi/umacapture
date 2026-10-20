@@ -170,6 +170,6 @@ export function buildFallbackCard() {
       fontFamily: "Noto Sans JP",
     },
     text({ fontSize: 96, fontWeight: 700 }, "umacapture"),
-    text({ marginTop: 16, padding: "8px 28px", borderRadius: 10, background: PANEL, fontSize: 40, color: ACCENT }, "公開レコード"),
+    text({ marginTop: 16, padding: "8px 28px", borderRadius: 10, background: PANEL, fontSize: 40, color: ACCENT }, "共有レコード"),
   );
 }

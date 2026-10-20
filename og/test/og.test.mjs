@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { after, before, beforeEach, describe, test } from "node:test";
 
+import { buildFallbackCard } from "../src/card.mjs";
 import { CACHE_NONE, CACHE_NOT_FOUND, CACHE_SUCCESS, FALLBACK_PATH, FONT_FILES, createHandler } from "../src/handler.mjs";
 
 const realFetch = globalThis.fetch;
@@ -142,4 +143,16 @@ test("the fonts and the fallback image the function fetches are shipped under we
   assert.ok(manifest.first_party.files.includes(fallback), `${fallback} is not listed as first-party`);
   const png = await readFile(new URL(`../../web/${fallback}`, import.meta.url));
   assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [1200, 630]);
+});
+
+test("the fallback card names what it stands for as 共有レコード", () => {
+  const strings = [];
+  const walk = (node) => {
+    if (typeof node === "string") strings.push(node);
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node?.props) walk(node.props.children);
+  };
+  walk(buildFallbackCard());
+  assert.ok(strings.includes("共有レコード"), JSON.stringify(strings));
+  assert.equal(strings.includes("公開レコード"), false);
 });

@@ -16,15 +16,15 @@ function testingKeyDeclared(env) {
 }
 
 /**
- * Whether `token` passed Turnstile on this environment's hostname with this environment's action.
- * A network failure, a non-JSON answer or any mismatch is a refusal.
+ * Whether `token` passed Turnstile on this environment's hostname with `action`, the action of the
+ * page that issued it. A network failure, a non-JSON answer or any mismatch is a refusal.
  *
  * siteverify marks an answer issued for a testing secret with `metadata.result_with_testing_key`.
  * Such an answer names no hostname or action of this environment (it reports "example.com" and no
  * action), so an environment that declares the testing key accepts it on `success` alone, and every
  * other environment refuses it.
  */
-export async function verifyTurnstile(token, env) {
+export async function verifyTurnstile(token, env, action) {
   const testingKey = testingKeyDeclared(env);
   let outcome;
   try {
@@ -39,5 +39,5 @@ export async function verifyTurnstile(token, env) {
   }
   if (outcome === null || outcome.success !== true) return false;
   if (outcome.metadata?.result_with_testing_key === true) return testingKey;
-  return outcome.hostname === env.TURNSTILE_HOSTNAME && outcome.action === env.TURNSTILE_ACTION;
+  return outcome.hostname === env.TURNSTILE_HOSTNAME && outcome.action === action;
 }

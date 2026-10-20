@@ -2,7 +2,7 @@
   "name": "umacapture-share-server",
   "private": true,
   "type": "module",
-  "description": "The record-sharing Worker served under umacapture.com/r/* and /api/*.",
+  "description": "The record-sharing Worker served under umacapture.com/r/*, /u/* and /api/*.",
   "engines": {
     "node": ">=22"
   },
