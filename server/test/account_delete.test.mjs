@@ -1,10 +1,15 @@
 // Deleting an account (DELETE /api/me), driven over HTTP against a real (local) D1 with sessions
 // claimed through the login: the calls that remove the account's shares a chunk at a time, the
-// refusals while it is being deleted, and the logins that meet a deletion.
+// refusals while it is being deleted, and the logins that meet a deletion. An account that synced
+// has its sync rows removed within the day's limit and every version under its B2 prefix, read
+// through the in-memory bucket.
 
 import { after, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
+import { ROUTES } from "../src/routes.mjs";
+import { named, STATEMENT } from "../src/sync_refs.mjs";
+import { answer as answerWithHeaders, bodyOf, idIn, newImage, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
 import { CookieJar, GOOGLE, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
 
 /** Status and parsed body of one response (null for a body that is not JSON). */
@@ -15,6 +20,9 @@ async function answer(resPromise) {
   return { status: res.status, body, text };
 }
 
+/** A hide's (c), recording its markers, by its name: cutting D1 off there leaves a marker no row names. */
+const HIDE_RECORD = named(STATEMENT.HIDE_RECORD);
+
 const TRAINER = "0f8fad5b-d9cb-469f-a165-70867728950e";
 
 describe("account deletion", () => {
@@ -24,10 +32,11 @@ describe("account deletion", () => {
   beforeEach(async () => {
     const db = worker.db;
     await db.batch([
-      ...["records", "account_trainers", "sessions", "identities", "logins", "accounts", "daily"].map((table) =>
-        db.prepare(`DELETE FROM ${table}`),
+      ...["records", "account_trainers", "sessions", "identities", "logins", "sync_objects", "sync_accounts", "sync_daily", "accounts", "daily"].map(
+        (table) => db.prepare(`DELETE FROM ${table}`),
       ),
       db.prepare("UPDATE totals SET bytes = 0, count = 0"),
+      db.prepare("UPDATE sync_totals SET stored_bytes = 0, hidden_bytes = '{}'"),
     ]);
   });
 
@@ -89,7 +98,7 @@ describe("account deletion", () => {
 
     const first = await deleteMe(token);
     assert.equal(first.status, 200, first.text);
-    assert.deepEqual(first.body, { remaining: { shares: 1 } });
+    assert.deepEqual(first.body, { remaining: { sync_rows: 0, sync_versions: 0, shares: 1 } });
     assert.equal(await rowsOf("records", "owner_id", owner), 1);
     assert.equal(await rowsOf("sessions", "account_id", owner), 1, "only the deleting session is left");
     assert.equal((await getMe(other)).status, 401);
@@ -248,5 +257,261 @@ describe("account deletion", () => {
     assert.equal((await deleteMe(token)).status, 200);
     assert.equal((await worker.logout(token)).status, 204);
     assert.equal((await deleteMe(token)).status, 401);
+  });
+
+  /** Calls DELETE /api/me with `token` until it answers other than 200, at most `calls` times; the answers. */
+  async function deleteUntilDone(token, calls) {
+    const answers = [];
+    for (let i = 0; i < calls; i++) {
+      const res = await deleteMe(token);
+      answers.push(res);
+      if (res.status !== 200) break;
+    }
+    return answers;
+  }
+
+  /** The sync rows of account `id`: its sync_objects rows and its sync_accounts row. */
+  const syncRowsOf = async (id) => (await rowsOf("sync_objects", "account_id", id)) + (await rowsOf("sync_accounts", "account_id", id));
+
+  /** A signed-in account syncing PNGs: `{token, id, client, prefix}`. */
+  async function syncing(sub) {
+    const token = await worker.signIn(sub);
+    const id = await worker.accountOf(token);
+    const client = syncClient(worker, token);
+    assert.equal((await client.setImageForm("png")).status, 200);
+    return { token, id, client, prefix: `a/${id}/` };
+  }
+
+  /** Inserts `n` stored, referenced sync_objects rows of account `id` straight into D1. */
+  async function insertSyncRows(id, n) {
+    const rows = Array.from({ length: n }, (_, i) => ({ name: String(i).padStart(64, "0") }));
+    await worker.db
+      .prepare(
+        `INSERT INTO sync_objects (account_id, name, kind, size, stored_at, ref_count)
+         SELECT ?1, json_extract(value, '$.name'), 'body', 10, 1, 1 FROM json_each(?2)`,
+      )
+      .bind(id, JSON.stringify(rows))
+      .run();
+  }
+
+  /** The UTC day of the Worker's clock. */
+  const today = async () => Math.floor((await worker.now()) / 86_400);
+
+  /** Sets today's sync rows so that the deletions' share leaves `left` rows. */
+  async function leaveDeleteRows(left) {
+    await worker.db
+      .prepare(
+        `INSERT INTO sync_daily (day, rows_written, delete_rows) VALUES (?1, ?2, ?2)
+         ON CONFLICT (day) DO UPDATE SET rows_written = ?2, delete_rows = ?2`,
+      )
+      .bind(await today(), limits.SYNC_DAILY_DELETE_ROWS - left)
+      .run();
+  }
+
+  /** The list row of record `id` with body `body` (`{name, body}`) and the image binding in it. */
+  const rowOf = (id, body) => ({
+    id,
+    body: { name: body.name, written_at: 1 },
+    archive: { state: "normal", written_at: 1 },
+    image: JSON.parse(body.body).metadata.binding,
+    ratings: {},
+  });
+
+  /** The records of writes under the prefix of account `id` that no row accounts for yet (sync_writes). */
+  const writesOf = (id) => rowsOf("sync_writes", "account_id", id);
+
+  /** Moves the Worker's clock on until what a write a request left records is taken, and runs the hourly run. */
+  async function takeWrites() {
+    await worker.advanceClock(limits.SYNC_ABANDONED_AFTER + 2 * limits.RESTORE_MARGIN_SECONDS);
+    assert.equal(await worker.scheduled(), "ok");
+  }
+
+  test("a put that passed its session check before the deletion began and reaches B2 after it answered 204 leaves nothing once the hourly run took its write", async () => {
+    const a = await syncing("sync-put-after-delete");
+    const body = bodyOf({});
+    const key = `${a.prefix}${body.name}`;
+    const store = worker.b2.hold("PUT", key);
+    const put = a.client.putBodies([body]);
+    await store.entered;
+    const answers = await deleteUntilDone(a.token, 5);
+    assert.equal(answers.at(-1).status, 204, answers.map((r) => r.text).join("\n"));
+    store.release();
+    assert.equal((await put).status, 503, "its row cannot reference the deleted account");
+    assert.deepEqual(worker.b2.keys(a.prefix), [key], "stored under the prefix of a deleted account");
+    assert.equal(await writesOf(a.id), 1);
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.keys(a.prefix), []);
+    assert.equal(await writesOf(a.id), 0);
+  });
+
+  test("a hide by the hourly run that adds its marker after the deletion listed the prefix for the last time, cut off before it gave the marker back, leaves nothing once a later run took its write", async () => {
+    const a = await syncing("sync-hide-after-delete");
+    const body = bodyOf({});
+    assert.equal((await a.client.putBodies([body])).status, 200);
+    const key = `${a.prefix}${body.name}`;
+    await worker.advanceClock(limits.SYNC_ABANDONED_AFTER);
+    // The run reads the body as a hide to do and stops at adding its marker; the deletion removes the
+    // row and every version, and answers 204, before the marker lands. The run finds no row to record
+    // the marker on and would give it back; it is cut off right there.
+    const hide = worker.b2.hold("DELETE_OBJECTS", key);
+    const run = worker.scheduled();
+    await hide.entered;
+    const answers = await deleteUntilDone(a.token, 5);
+    assert.equal(answers.at(-1).status, 204, answers.map((r) => r.text).join("\n"));
+    await worker.cutD1After(HIDE_RECORD);
+    hide.release();
+    assert.notEqual(await run, "ok");
+    await worker.restoreD1();
+    assert.deepEqual(worker.b2.keys(a.prefix), [key], "a marker under the prefix of a deleted account");
+    assert.deepEqual(worker.b2.versions(key), ["m"]);
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.keys(a.prefix), []);
+    assert.equal(await writesOf(a.id), 0);
+  });
+
+  test("a hide by the hourly run that adds its marker after the deletion listed the prefix for the last time, and that B2 fails to give back, leaves nothing once a later run took its write", async () => {
+    const a = await syncing("sync-hide-after-delete-failed");
+    const body = bodyOf({});
+    assert.equal((await a.client.putBodies([body])).status, 200);
+    const key = `${a.prefix}${body.name}`;
+    await worker.advanceClock(limits.SYNC_ABANDONED_AFTER);
+    // The run stops at adding its marker while the deletion answers 204; it then finds no row to record
+    // the marker on, and B2 fails the DeleteObjects that would give it back. The run itself finishes.
+    const hide = worker.b2.hold("DELETE_OBJECTS", key);
+    const run = worker.scheduled();
+    await hide.entered;
+    const answers = await deleteUntilDone(a.token, 5);
+    assert.equal(answers.at(-1).status, 204, answers.map((r) => r.text).join("\n"));
+    const giveBack = worker.b2.hold("DELETE_OBJECTS", key);
+    hide.release();
+    await giveBack.entered;
+    worker.b2.failTarget(key);
+    giveBack.release();
+    assert.equal(await run, "ok");
+    assert.deepEqual(worker.b2.versions(key), ["m"], "a marker under the prefix of a deleted account");
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.keys(a.prefix), []);
+    assert.equal(await writesOf(a.id), 0);
+  });
+
+  test("removes everything an account synced, every version and marker under its B2 prefix and every sync row, while D1 enforces references", async () => {
+    assert.deepEqual((await worker.db.prepare("PRAGMA foreign_keys").all()).results, [{ foreign_keys: 1 }]);
+    const a = await syncing("sync-deleted");
+    const b = await syncing("sync-kept");
+    const [skill, factor, later] = [newImage(), newImage(), newImage()];
+    const first = bodyOf({ skill_png: skill.name, skill_jpeg: null, factor_png: factor.name });
+    const second = bodyOf({ skill_png: later.name, skill_jpeg: null, factor_png: newImage().name });
+    assert.equal((await a.client.putBodies([first, second])).status, 200);
+    for (const image of [skill, factor, later]) assert.equal((await a.client.putImage(image.name, image.bytes)).status, 200);
+    // The current root and its part, which reference the second body (one of whose images was never
+    // put); the first root, replaced, and what only it referenced, hidden.
+    const record = idIn(0);
+    const p1 = recordPart(0, [rowOf(record, first)]);
+    const p2 = recordPart(0, [rowOf(record, second)]);
+    for (const p of [p1, p2]) assert.equal((await a.client.putPart(p)).status, 200);
+    assert.equal((await a.client.replace(0, root({ 0: p1.name }))).status, 200);
+    assert.equal((await a.client.replace(1, root({ 0: p2.name }))).status, 200);
+    // Put and never referenced, so hidden by the account's next write once old enough, that hide cut
+    // off after B2 added its marker and before D1 recorded it; and put and never referenced, shown.
+    assert.equal((await a.client.putBodies([bodyOf({})])).status, 200);
+    await worker.advanceClock(limits.SYNC_ABANDONED_AFTER);
+    await worker.cutD1At(HIDE_RECORD);
+    assert.equal((await a.client.putBodies([bodyOf({})])).status, 200);
+    await worker.restoreD1();
+    assert.equal((await b.client.putBodies([bodyOf({})])).status, 200);
+    const kept = worker.b2.keys(b.prefix);
+    assert.ok(worker.b2.keys(a.prefix).some((key) => worker.b2.versions(key).includes("m")), "something is hidden");
+    assert.ok((await syncRowsOf(a.id)) > 0);
+
+    // Two versions to a page, so the versions take more than one call.
+    worker.b2.pageSize = 2;
+    try {
+      const answers = await deleteUntilDone(a.token, 20);
+      assert.deepEqual(
+        answers.map((res) => res.status),
+        [...Array(answers.length - 1).fill(200), 204],
+        answers.map((res) => res.text).join("\n"),
+      );
+      assert.ok(answers.length > 2, "the versions took more than one call");
+    } finally {
+      worker.b2.pageSize = 1000;
+    }
+    assert.deepEqual(worker.b2.keys(a.prefix), []);
+    assert.equal(await syncRowsOf(a.id), 0);
+    assert.equal(await rowsOf("accounts", "id", a.id), 0);
+    assert.deepEqual(worker.b2.keys(b.prefix), kept);
+    const totals = await worker.db.prepare("SELECT stored_bytes FROM sync_totals").first();
+    const bAccount = await worker.db.prepare("SELECT stored_bytes FROM sync_accounts WHERE account_id = ?").bind(b.id).first();
+    assert.equal(totals.stored_bytes, bAccount.stored_bytes);
+  });
+
+  test("removes sync rows only within the deletions' half of the day's sync rows, refuses with sync_paused_today when that has no room, and goes on the next day", async () => {
+    const a = await syncing("sync-paused");
+    await insertSyncRows(a.id, 10);
+    // Room for four rows at what each costs, and then for less than one.
+    await leaveDeleteRows(4 * 3 + 2);
+    const some = await deleteMe(a.token);
+    assert.equal(some.status, 200, some.text);
+    assert.deepEqual(some.body, { remaining: { sync_rows: 7, sync_versions: 0, shares: 0 } });
+
+    const paused = await answerWithHeaders(worker.fetch("/api/me", { method: "DELETE", headers: { Authorization: `Bearer ${a.token}` } }));
+    assert.equal(paused.status, 429, paused.text);
+    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 7, sync_versions: 0, shares: 0 } });
+    assert.ok(Number(paused.headers.get("retry-after")) > 0);
+    assert.equal(await syncRowsOf(a.id), 7);
+    const day = await worker.db.prepare("SELECT rows_written, delete_rows FROM sync_daily WHERE day = ?").bind(await today()).first();
+    assert.deepEqual(day, { rows_written: limits.SYNC_DAILY_DELETE_ROWS - 2, delete_rows: limits.SYNC_DAILY_DELETE_ROWS - 2 });
+
+    await worker.advanceClock(86_400);
+    const done = await deleteMe(a.token);
+    assert.equal(done.status, 204, done.text);
+    assert.equal(await syncRowsOf(a.id), 0);
+    assert.equal(await rowsOf("accounts", "id", a.id), 0);
+  });
+
+  test("counts what removing sync rows reads in the day's sync rows read, and refuses with sync_paused_today once those leave less than a call reads", async () => {
+    const a = await syncing("sync-read-paused");
+    await insertSyncRows(a.id, 10);
+    const readOn = async () =>
+      (await worker.db.prepare("SELECT rows_read FROM sync_daily WHERE day = ?").bind(await today()).first()).rows_read;
+    // The first call begins and removes every row; what it read is counted. Leave the rows written
+    // alone and the rows read one short of what a call may read.
+    await worker.db
+      .prepare("INSERT INTO sync_daily (day, rows_read) VALUES (?1, ?2) ON CONFLICT (day) DO UPDATE SET rows_read = ?2")
+      .bind(await today(), limits.SYNC_DAILY_READ_ROWS - limits.ACCOUNT_DELETE_SYNC_READ_ROWS + 1)
+      .run();
+    const before = await readOn();
+    const paused = await answerWithHeaders(worker.fetch("/api/me", { method: "DELETE", headers: { Authorization: `Bearer ${a.token}` } }));
+    assert.equal(paused.status, 429, paused.text);
+    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 11, sync_versions: 0, shares: 0 } });
+    assert.ok((await readOn()) > before, "what the call read is counted");
+    assert.equal(await syncRowsOf(a.id), 11);
+
+    await worker.advanceClock(86_400);
+    const done = await deleteMe(a.token);
+    assert.equal(done.status, 204, done.text);
+    assert.ok((await readOn()) > 0, "the next day counts its reads too");
+    assert.equal(await syncRowsOf(a.id), 0);
+  });
+
+  test("refuses every sync endpoint of an account being deleted with 409 account_deleting, the deletion-only session included", async () => {
+    const a = await syncing("sync-refused");
+    await insertSyncRows(a.id, 1);
+    await leaveDeleteRows(0);
+    assert.equal((await deleteMe(a.token)).status, 429);
+
+    const sync = ROUTES.filter(([, , pattern]) => pattern.source.startsWith("^\\/api\\/sync\\/"));
+    assert.ok(sync.length > 0);
+    for (const [method, name, pattern] of sync) {
+      const path = pattern.source.slice(1, -1).replaceAll("\\/", "/").replace("([0-9a-f]{64})", "0".repeat(64));
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${a.token}` };
+      const res = await answer(worker.fetch(path, { method, headers, body: method === "GET" ? undefined : "{}" }));
+      assert.equal(res.status, 409, `${name}: ${res.text}`);
+      assert.equal(res.body.error, "account_deleting", name);
+    }
+    assert.equal(await syncRowsOf(a.id), 2);
   });
 });

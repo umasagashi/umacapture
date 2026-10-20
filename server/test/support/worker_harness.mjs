@@ -1,7 +1,7 @@
 // Runs the real Worker entry (src/index.mjs) in workerd through Miniflare, with an in-memory D1
 // that carries every file of migrations/ applied in name order, and the synthetic tables in place
 // of the generated ones. The Worker's outbound fetches (Turnstile's siteverify, Google's token
-// endpoint) are answered here and never leave the process.
+// endpoint, the B2 bucket) are answered here and never leave the process.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { Miniflare, Response as MfResponse } from "miniflare";
+import * as limits from "../../src/limits.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SRC = join(ROOT, "src");
@@ -35,6 +36,260 @@ export const GOOGLE = Object.freeze({
 /** The Worker's identity HMAC key in tests: a fixed 32 bytes as hex, never a real key. */
 export const IDENTITY_HMAC_KEY = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
+/** The B2 bucket in tests: a host no real request could reach, and fixed key values, never a real key. */
+export const B2 = Object.freeze({
+  ENDPOINT: "s3.b2.test",
+  REGION: "test-region-1",
+  BUCKET: "sync-test",
+  KEY_ID: "test-key-id",
+  APPLICATION_KEY: "test-application-key",
+});
+
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const xml = (body, status = 200) => new MfResponse(body, { status, headers: { "Content-Type": "application/xml" } });
+const xmlText = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const unXml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/**
+ * An in-memory, versioned B2 bucket answering the S3 calls the Worker makes, with B2's own behaviour
+ * as measured on the real service and nothing more. A PUT whose x-amz-content-sha256 is not the
+ * SHA-256 of the bytes is refused 403 and stores nothing; UNSIGNED-PAYLOAD is accepted unchecked.
+ * Conditional writes (If-None-Match, If-Match) are 501. A DELETE naming no version adds a delete
+ * marker whatever the latest version is; one naming a version removes it for good. DeleteObjects
+ * takes at most 1,000 objects and marks names that do not exist too. GET is 404 when the latest
+ * version is a marker. The signature itself is not verified, only that the request carries one.
+ * `requests` records every call as `{method, key, query}`.
+ *
+ * `hold` stops one operation on one key before it takes effect, so a test can order B2's side of
+ * two requests apart from their D1 side (whose batches the batch gate orders). `fail` makes B2 fail
+ * one DeleteObjects, and `failTarget` one target of one.
+ *
+ * The bucket's lifecycle rule (`daysFromHidingToDeleting`) runs only when a test runs it, in its two
+ * steps apart: `pickExpired` picks every version hidden that many days on the Worker's clock (`now`,
+ * seconds), and `deleteExpired` deletes the picked versions for good, including any shown again since
+ * it picked them. Real B2 is not known to delete in that order; it is the worst order there is.
+ */
+export class FakeB2 {
+  /** key → versions, oldest first: `{versionId, marker, bytes, at}`, `at` the Worker's clock when added. */
+  objects = new Map();
+  requests = [];
+  /**
+   * Versions a ListObjectVersions page holds at most. S3 lists up to 1,000 and may list fewer, so a
+   * test can make pages shorter to put their ends where it needs them.
+   */
+  pageSize = 1000;
+  #next = 0;
+  #holds = [];
+  #fails = [];
+  #failsOne = [];
+  /** `{key, versionId}` the lifecycle picked and has not deleted yet. */
+  #picked = [];
+
+  constructor(now = () => Math.floor(Date.now() / 1000)) {
+    this.now = now;
+  }
+
+  /**
+   * Holds the next `op` on `key` until `release()`: "PUT", "HIDE" (a DELETE naming no version),
+   * "DELETE_VERSION", or "DELETE_OBJECTS" (any DeleteObjects one of whose targets is `key`).
+   * `entered` resolves when the request arrives and waits.
+   */
+  hold(op, key) {
+    let release;
+    let entered;
+    const gate = new Promise((resolve) => (release = resolve));
+    const arrived = new Promise((resolve) => (entered = resolve));
+    this.#holds.push({ op, key, gate, entered });
+    return { entered: arrived, release };
+  }
+
+  /** Answers the next DeleteObjects one of whose targets is `key` 500, as B2 failing does, before it takes effect. */
+  fail(key) {
+    this.#fails.push(key);
+  }
+
+  /** Reports the next DeleteObjects target naming `key` as an error, as B2 may for one object of many, and leaves it. */
+  failTarget(key) {
+    this.#failsOne.push(key);
+  }
+
+  async #wait(op, keys) {
+    const at = this.#holds.findIndex((h) => h.op === op && keys.includes(h.key));
+    if (at === -1) return;
+    const [h] = this.#holds.splice(at, 1);
+    h.entered();
+    await h.gate;
+  }
+
+  /** The versions of `key`, oldest first, as `"v"` (an object) or `"m"` (a delete marker). */
+  versions(key) {
+    return (this.objects.get(key) ?? []).map((v) => (v.marker ? "m" : "v"));
+  }
+
+  #add(key, version) {
+    const versionId = `v${++this.#next}`;
+    if (!this.objects.has(key)) this.objects.set(key, []);
+    this.objects.get(key).push({ versionId, ...version, at: this.now() });
+    return versionId;
+  }
+
+  /**
+   * The lifecycle's first step: picks every object version hidden (by the marker or the version added
+   * next above it) at least `days` days ago on the Worker's clock. Returns the keys it picked, sorted.
+   */
+  pickExpired(days = limits.B2_DAYS_FROM_HIDING_TO_DELETING) {
+    const by = this.now() - days * 86_400;
+    const keys = new Set();
+    for (const [key, versions] of this.objects) {
+      versions.forEach((v, i) => {
+        if (v.marker || i === versions.length - 1 || versions[i + 1].at > by) return;
+        if (this.#picked.some((p) => p.key === key && p.versionId === v.versionId)) return;
+        this.#picked.push({ key, versionId: v.versionId });
+        keys.add(key);
+      });
+    }
+    return [...keys].sort();
+  }
+
+  /** The lifecycle's second step: deletes every version `pickExpired` picked, whatever it is now. Returns how many it deleted. */
+  deleteExpired() {
+    const picked = this.#picked.splice(0);
+    let deleted = 0;
+    for (const { key, versionId } of picked) {
+      if ((this.objects.get(key) ?? []).some((v) => v.versionId === versionId)) deleted++;
+      this.#deleteVersion(key, versionId);
+    }
+    return deleted;
+  }
+
+  #latest(key) {
+    const versions = this.objects.get(key);
+    return versions === undefined || versions.length === 0 ? null : versions.at(-1);
+  }
+
+  #deleteVersion(key, versionId) {
+    const versions = this.objects.get(key) ?? [];
+    const at = versions.findIndex((v) => v.versionId === versionId);
+    if (at !== -1) versions.splice(at, 1);
+    if (versions.length === 0) this.objects.delete(key);
+  }
+
+  /** The bytes of `key`'s latest version, or null when it has none or the latest is a marker. */
+  visible(key) {
+    const latest = this.#latest(key);
+    return latest === null || latest.marker ? null : latest.bytes;
+  }
+
+  /** Every key holding any version or marker under `prefix`. */
+  keys(prefix = "") {
+    return [...this.objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+  }
+
+  /** How many recorded requests had `method` (and `key`, when given). */
+  count(method, key) {
+    return this.requests.filter((r) => r.method === method && (key === undefined || r.key === key)).length;
+  }
+
+  async handle(request) {
+    const url = new URL(request.url);
+    const prefix = `/${B2.BUCKET}`;
+    if (!url.pathname.startsWith(prefix)) return xml("<Error><Code>NoSuchBucket</Code></Error>", 404);
+    const key = decodeURIComponent(url.pathname.slice(prefix.length + 1));
+    const query = Object.fromEntries(url.searchParams);
+    const method = request.method;
+    this.requests.push({ method, key, query });
+    const claimed = request.headers.get("x-amz-content-sha256");
+    if (!request.headers.get("authorization")?.startsWith("AWS4-HMAC-SHA256 ") || claimed === null || !request.headers.get("x-amz-date")) {
+      return xml("<Error><Code>AccessDenied</Code></Error>", 403);
+    }
+    if (request.headers.has("if-none-match") || request.headers.has("if-match")) {
+      return xml("<Error><Code>NotImplemented</Code></Error>", 501);
+    }
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (claimed !== "UNSIGNED-PAYLOAD" && claimed !== sha256(bytes)) {
+      return xml("<Error><Code>AccessDenied</Code><Message>Signature validation failed</Message></Error>", 403);
+    }
+    if (method === "PUT" && key !== "") {
+      await this.#wait("PUT", [key]);
+      const versionId = this.#add(key, { marker: false, bytes });
+      return new MfResponse("", { headers: { "x-amz-version-id": versionId } });
+    }
+    if ((method === "GET" || method === "HEAD") && key !== "") {
+      const visible = this.visible(key);
+      if (visible === null) return xml("<Error><Code>NoSuchKey</Code></Error>", 404);
+      return new MfResponse(method === "HEAD" ? null : visible, { headers: { "Content-Length": String(visible.length) } });
+    }
+    if (method === "DELETE" && key !== "") {
+      await this.#wait(query.versionId === undefined ? "HIDE" : "DELETE_VERSION", [key]);
+      if (query.versionId !== undefined) {
+        this.#deleteVersion(key, query.versionId);
+        return new MfResponse(null, { status: 204, headers: { "x-amz-version-id": query.versionId } });
+      }
+      const versionId = this.#add(key, { marker: true, bytes: null });
+      return new MfResponse(null, { status: 204, headers: { "x-amz-version-id": versionId, "x-amz-delete-marker": "true" } });
+    }
+    if (method === "POST" && key === "" && "delete" in query) {
+      const targets = [...new TextDecoder().decode(bytes).matchAll(/<Object>([\s\S]*?)<\/Object>/g)].map(([, o]) => ({
+        key: unXml(/<Key>([\s\S]*?)<\/Key>/.exec(o)[1]),
+        versionId: /<VersionId>([\s\S]*?)<\/VersionId>/.exec(o)?.[1],
+      }));
+      if (targets.length > 1000) return xml("<Error><Code>InvalidRequest</Code></Error>", 400);
+      const quiet = /<Quiet>true<\/Quiet>/.test(new TextDecoder().decode(bytes));
+      await this.#wait("DELETE_OBJECTS", targets.map((t) => t.key));
+      const failing = this.#fails.findIndex((key) => targets.some((t) => t.key === key));
+      if (failing !== -1) {
+        this.#fails.splice(failing, 1);
+        return xml("<Error><Code>InternalError</Code></Error>", 500);
+      }
+      // Without Quiet, each target is reported as S3 documents it: a version named, or the marker
+      // added over a name. That B2 reports the marker's version id this way is an assumption. A target
+      // reported as an error is reported with or without Quiet.
+      const errors = [];
+      const deleted = targets.map((t) => {
+        const one = this.#failsOne.indexOf(t.key);
+        if (one !== -1) {
+          this.#failsOne.splice(one, 1);
+          errors.push(`<Error><Key>${xmlText(t.key)}</Key><Code>InternalError</Code></Error>`);
+          return "";
+        }
+        if (t.versionId !== undefined) {
+          this.#deleteVersion(t.key, t.versionId);
+          return `<Deleted><Key>${xmlText(t.key)}</Key><VersionId>${t.versionId}</VersionId></Deleted>`;
+        }
+        const versionId = this.#add(t.key, { marker: true, bytes: null });
+        return `<Deleted><Key>${xmlText(t.key)}</Key><DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>${versionId}</DeleteMarkerVersionId></Deleted>`;
+      });
+      return xml(`<DeleteResult>${quiet ? "" : deleted.join("")}${errors.join("")}</DeleteResult>`);
+    }
+    if (method === "GET" && key === "" && "versions" in query) {
+      // In key order, as S3 lists; a page begins after key-marker (after its version
+      // version-id-marker, when given) and ends at pageSize versions.
+      const all = this.keys(query.prefix ?? "").flatMap((k) => {
+        const versions = this.objects.get(k);
+        return versions.map((v, i) => ({ key: k, versionId: v.versionId, marker: v.marker, latest: i === versions.length - 1, at: v.at }));
+      });
+      const after = query["key-marker"];
+      const start =
+        after === undefined
+          ? 0
+          : query["version-id-marker"] === undefined
+            ? all.findIndex((e) => e.key > after)
+            : all.findIndex((e) => e.key === after && e.versionId === query["version-id-marker"]) + 1;
+      const page = start === -1 ? [] : all.slice(start, start + this.pageSize);
+      const truncated = start !== -1 && start + this.pageSize < all.length;
+      const last = page.at(-1);
+      const entries = page.map((e) => {
+        const tag = e.marker ? "DeleteMarker" : "Version";
+        const modified = new Date(e.at * 1000).toISOString();
+        return `<${tag}><Key>${xmlText(e.key)}</Key><VersionId>${e.versionId}</VersionId><IsLatest>${e.latest}</IsLatest><LastModified>${modified}</LastModified></${tag}>`;
+      });
+      const next = truncated ? `<NextKeyMarker>${xmlText(last.key)}</NextKeyMarker><NextVersionIdMarker>${last.versionId}</NextVersionIdMarker>` : "";
+      return xml(`<ListVersionsResult><IsTruncated>${truncated}</IsTruncated>${next}${entries.join("")}</ListVersionsResult>`);
+    }
+    return xml("<Error><Code>InvalidRequest</Code></Error>", 400);
+  }
+}
+
 /** What `identities.subject_hmac` holds for subject `sub` of `provider` under IDENTITY_HMAC_KEY. */
 export const subjectHmac = (sub, provider = "google") =>
   createHmac("sha256", Buffer.from(IDENTITY_HMAC_KEY, "hex")).update(`${provider}\u0000${sub}`, "utf8").digest();
@@ -53,6 +308,22 @@ export const subjectHmac = (sub, provider = "google") =>
 //
 // The clock: the Worker reads time from the real clock plus an offset. `POST /__test/clock?advance=<s>`
 // moves it forward by s seconds; `GET` returns `{now}`, the Worker's current time in seconds.
+//
+// A cut-off request: `POST /__test/d1-fault` with `{match}` makes the next D1 statement whose SQL
+// contains `match` fail when it runs, as a request stopped at that point (past its CPU limit, or
+// disconnected) leaves D1: what it committed before stays, nothing after runs. With `cut`, every
+// statement and batch after it fails too, until a POST with `{match: null}`, so a request whose
+// failure has a way back (a rolled-back batch) cannot take it: `cut: "before"` fails the matching
+// statement, `cut: "after"` runs it and fails once it has committed. `GET` returns the match not
+// reached yet, or null. A statement found inside a batch acts the same way: the batch fails, or
+// commits and then the request is cut off. Statements a caller names (a leading \`/* name */\`, see
+// \`named\` in sync_refs.mjs) are found by that name, whatever their SQL says otherwise.
+//
+// The database's size: \`POST /__test/d1-size\` with \`{add}\` makes every statement and batch the Worker
+// runs from then on report \`add\` bytes more in \`meta.size_after\` than the in-memory D1 holds, as a
+// database that much fuller would; \`{add: 0}\` ends it.
+//
+// The scheduled handler gets the same D1, so the daily run can be ordered against requests too.
 const TEST_ENTRY = `
 import tables from "./tables.generated.json";
 import { newPublicId } from "./secrets.mjs";
@@ -63,8 +334,56 @@ const now = () => Date.now() + offsetMs;
 const worker = createWorker(tables, { newId: () => forcedIds.shift() ?? newPublicId(), now });
 let armed = null;
 let last = { expected: 0, arrived: 0 };
+let fault = null;
+let cut = false;
+let sizeAdded = 0;
+function sized(result) {
+  if (typeof result?.meta?.size_after === "number") result.meta.size_after += sizeAdded;
+  return result;
+}
+function resized(statement) {
+  return {
+    bind: (...args) => resized(statement.bind(...args)),
+    all: async (...args) => sized(await statement.all(...args)),
+    run: async (...args) => sized(await statement.run(...args)),
+    first: (...args) => statement.first(...args),
+    raw: (...args) => statement.raw(...args),
+    real: statement,
+  };
+}
+function failing(sql) {
+  const fail = () => Promise.reject(new Error("D1 fault injected at " + sql));
+  const statement = { bind: () => statement, all: fail, run: fail, first: fail, raw: fail, fault: "fail" };
+  return statement;
+}
+function committedThenCut(real) {
+  const wrap = (statement) => {
+    const run = (op) => async (...args) => {
+      await statement[op](...args);
+      cut = true;
+      throw new Error("D1 fault injected: the request was cut off after a statement committed");
+    };
+    return { bind: (...args) => wrap(statement.bind(...args)), all: run("all"), run: run("run"), first: run("first"), raw: run("raw"), fault: "after", real: statement };
+  };
+  return wrap(real);
+}
+function gated(db) {
+  const prepare = (sql) => {
+    if (cut) return failing(sql);
+    if (fault !== null && sql.includes(fault.match)) {
+      const mode = fault.cut;
+      fault = null;
+      if (mode === "after") return committedThenCut(db.prepare(sql));
+      cut = mode === "before";
+      return failing(sql);
+    }
+    return sizeAdded === 0 ? db.prepare(sql) : resized(db.prepare(sql));
+  };
+  return { prepare, batch: gatedBatch(db), exec: (sql) => db.exec(sql) };
+}
 function gatedBatch(db) {
   return async (statements) => {
+    if (cut) throw new Error("D1 fault injected: the request was cut off");
     const gate = armed;
     if (gate !== null) {
       gate.arrived++;
@@ -74,7 +393,13 @@ function gatedBatch(db) {
         await new Promise((resolve) => setTimeout(resolve, 2));
       }
     }
-    return db.batch(statements);
+    if (statements.some((s) => s.fault === "fail")) throw new Error("D1 fault injected in a batch");
+    const results = await db.batch(statements.map((s) => s.real ?? s));
+    if (statements.some((s) => s.fault === "after")) {
+      cut = true;
+      throw new Error("D1 fault injected: the request was cut off after a batch committed");
+    }
+    return results.map(sized);
   };
 }
 export default {
@@ -101,9 +426,23 @@ export default {
       }
       return Response.json({ now: Math.floor(now() / 1000) });
     }
-    const db = env.DB;
-    const gated = { prepare: (sql) => db.prepare(sql), batch: gatedBatch(db), exec: (sql) => db.exec(sql) };
-    return worker.fetch(request, { ...env, DB: gated }, ctx);
+    if (url.pathname === "/__test/d1-fault") {
+      if (request.method === "POST") {
+        const { match, cut: mode = false } = await request.json();
+        fault = match === null ? null : { match, cut: mode };
+        if (match === null) cut = false;
+        return new Response(null, { status: 204 });
+      }
+      return Response.json(fault?.match ?? null);
+    }
+    if (url.pathname === "/__test/d1-size" && request.method === "POST") {
+      sizeAdded = (await request.json()).add;
+      return new Response(null, { status: 204 });
+    }
+    return worker.fetch(request, { ...env, DB: gated(env.DB) }, ctx);
+  },
+  async scheduled(controller, env, ctx) {
+    return worker.scheduled(controller, { ...env, DB: gated(env.DB) }, ctx);
   },
 };
 `;
@@ -128,23 +467,31 @@ function modules(testEntry) {
 
 /**
  * The statements of every migration, files in name order (the order wrangler applies them in).
- * Each file is cut at every ";" after dropping "--" comments, so a migration must not hold either
- * inside a string literal, nor a trigger body; 0002_accounts.sql states the same constraint. Lines
- * end at LF or CRLF alike, so a checkout that writes CRLF yields the same statements.
+ * Each file is cut at every ";" after dropping "--" comments, except that a CREATE TRIGGER runs on
+ * to the ";" after its END, so a migration must not hold either inside a string literal;
+ * 0002_accounts.sql states the same constraint. Lines end at LF or CRLF alike, so a checkout that
+ * writes CRLF yields the same statements.
  */
 export function migrationStatements(dir = join(ROOT, "migrations")) {
   return readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort()
-    .flatMap((f) =>
-      readFileSync(join(dir, f), "utf8")
+    .flatMap((f) => {
+      const pieces = readFileSync(join(dir, f), "utf8")
         .split(/\r?\n/)
         .map((line) => line.replace(/--.*$/, ""))
         .join("\n")
-        .split(";")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
+        .split(";");
+      const statements = [];
+      let open = null;
+      for (const piece of pieces) {
+        open = open === null ? piece : `${open};${piece}`;
+        if (/^\s*CREATE\s+TRIGGER\b/i.test(open) && !/\bEND\s*$/i.test(open)) continue;
+        statements.push(open.trim());
+        open = null;
+      }
+      return statements.filter(Boolean);
+    });
 }
 
 /**
@@ -226,13 +573,17 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
   // unknown code is refused as Google refuses one); `calls` records each request to the token
   // endpoint with its form body, redirect_uri included.
   const google = { codes: new Map(), calls: [] };
-  // The Worker's clock offset (testEntry), so an ID token is fresh on the Worker's clock.
+  // The Worker's clock offset (testEntry), so an ID token is fresh on the Worker's clock, and the
+  // bucket's lifecycle counts days on it.
   let clockOffset = 0;
+  const b2 = new FakeB2(() => Math.floor((Date.now() + clockOffset * 1000) / 1000));
   const mf = new Miniflare({
     modules: modules(testEntry),
     modulesRoot: SRC,
     compatibilityDate: "2026-07-28",
     d1Databases: { DB: "share-test" },
+    // Lets a test run the scheduled handler: GET /cdn-cgi/handler/scheduled.
+    unsafeTriggerHandlers: true,
     bindings: {
       PUBLIC_ORIGIN: ORIGIN,
       OG_IMAGE_MODE: ogImageMode,
@@ -247,12 +598,19 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
       GOOGLE_CLIENT_SECRET: GOOGLE.CLIENT_SECRET,
       AUTH_REDIRECT_ORIGIN: GOOGLE.REDIRECT_ORIGIN,
       IDENTITY_HMAC_KEY: IDENTITY_HMAC_KEY,
+      SYNC_ENABLED: "true",
+      B2_ENDPOINT: B2.ENDPOINT,
+      B2_REGION: B2.REGION,
+      B2_BUCKET: B2.BUCKET,
+      B2_KEY_ID: B2.KEY_ID,
+      B2_APPLICATION_KEY: B2.APPLICATION_KEY,
       ...vars,
     },
-    // Every outbound fetch lands here. siteverify and Google's token endpoint are expected; anything
-    // else is a 599 the Worker would see as a failure.
+    // Every outbound fetch lands here. siteverify, Google's token endpoint and the B2 bucket are
+    // expected; anything else is a 599 the Worker would see as a failure.
     outboundService: async (request) => {
       const url = request.url;
+      if (new URL(url).host === B2.ENDPOINT) return b2.handle(request);
       const form = new URLSearchParams(await request.text());
       if (url === GOOGLE.TOKEN_URL) {
         google.calls.push({ url, form });
@@ -283,6 +641,8 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     siteverify,
     /** Google's token endpoint: the nonce its next ID token carries, and the requests it received. */
     google,
+    /** The B2 bucket the Worker stores synced objects in (a FakeB2). */
+    b2,
 
     /**
      * POST /api/auth/begin as the start page's form sends it: from PUBLIC_ORIGIN, urlencoded, with
@@ -393,6 +753,44 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     /** The forced public ids not drawn yet. */
     async forcedPublicIdsLeft() {
       return (await fetch("/__test/public-ids")).json();
+    },
+    /**
+     * Makes the next D1 statement whose SQL contains `match` fail (needs `testEntry: true`): the
+     * request running it stops there, with what it committed before.
+     */
+    async failD1At(match) {
+      (await fetch("/__test/d1-fault", { method: "POST", body: JSON.stringify({ match }) })).body?.cancel();
+    },
+    /**
+     * Cuts the next request that runs a D1 statement whose SQL contains `match` off there: that
+     * statement and every D1 statement and batch after it fail, until `restoreD1()`.
+     */
+    async cutD1At(match) {
+      (await fetch("/__test/d1-fault", { method: "POST", body: JSON.stringify({ match, cut: "before" }) })).body?.cancel();
+    },
+    /** As `cutD1At`, but the matching statement runs and commits first. */
+    async cutD1After(match) {
+      (await fetch("/__test/d1-fault", { method: "POST", body: JSON.stringify({ match, cut: "after" }) })).body?.cancel();
+    },
+    /** Ends what `cutD1At` or `cutD1After` started: D1 answers again. */
+    async restoreD1() {
+      (await fetch("/__test/d1-fault", { method: "POST", body: JSON.stringify({ match: null }) })).body?.cancel();
+    },
+    /**
+     * Makes the database report `bytes` more than it holds to every statement the Worker runs from now
+     * on (needs `testEntry: true`); 0 ends it.
+     */
+    async addToDatabaseSize(bytes) {
+      (await fetch("/__test/d1-size", { method: "POST", body: JSON.stringify({ add: bytes }) })).body?.cancel();
+    },
+    /** The fault `failD1At` armed and no statement reached yet, or null. */
+    async d1FaultLeft() {
+      return (await fetch("/__test/d1-fault")).json();
+    },
+    /** Runs the scheduled handler once, as its cron trigger does; its outcome, "ok" when it finished. */
+    async scheduled() {
+      const res = await fetch("/cdn-cgi/handler/scheduled?format=json");
+      return (await res.json()).outcome;
     },
     /** `{expected, arrived}` of the last armed gate. */
     async gate() {

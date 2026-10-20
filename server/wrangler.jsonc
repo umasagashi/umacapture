@@ -27,6 +27,12 @@
   },
   // Workers Logs off. env.staging inherits this.
   "observability": { "enabled": false },
+  // The hourly run (src/scheduled.mjs), at half past every hour UTC: off the hour, and its 00:30 run
+  // the first after sync's daily limits (limits.mjs, counted per UTC day) reset at 00:00 UTC. One
+  // run hides at most 1,000 names (SYNC_LEFTOVER_HIDES), so hourly keeps what a cut-off request
+  // leaves within hours of its hide.
+  // env.staging sets its own, at a quarter to every hour, so the two never run at the same minute.
+  "triggers": { "crons": ["30 * * * *"] },
   // The custom domain is the only entrance: the zone's WAF applies to it and to nothing else.
   "workers_dev": false,
   "preview_urls": false,
@@ -64,7 +70,14 @@
     "GOOGLE_CLIENT_ID": "",
     // The origin of the login callback, ${AUTH_REDIRECT_ORIGIN}/api/auth/callback/<provider>, as
     // registered with the provider. The authorisation request and the token exchange both build it.
-    "AUTH_REDIRECT_ORIGIN": "https://umacapture.com"
+    "AUTH_REDIRECT_ORIGIN": "https://umacapture.com",
+    // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.
+    "SYNC_ENABLED": "true",
+    // The B2 bucket synced objects are stored in. Its key, B2_KEY_ID and B2_APPLICATION_KEY, is a
+    // pair of Worker secrets (`wrangler secret put`), never vars.
+    "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
+    "B2_REGION": "us-west-004",
+    "B2_BUCKET": "umacapture-sync"
   },
 
   "env": {
@@ -77,6 +90,7 @@
       "routes": [],
       "workers_dev": true,
       "preview_urls": false,
+      "triggers": { "crons": ["45 * * * *"] },
       "assets": {
         "directory": "../build/web",
         "not_found_handling": "none",
@@ -115,7 +129,13 @@
         // Staging's own value: the top level's vars are not inherited once env.staging sets "vars".
         "GOOGLE_CLIENT_ID": "",
         // Staging's own origin, so staging's logins come back to staging, where their rows are.
-        "AUTH_REDIRECT_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev"
+        "AUTH_REDIRECT_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
+        // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.
+        "SYNC_ENABLED": "true",
+        // Staging's own bucket, with its own key in the secrets B2_KEY_ID and B2_APPLICATION_KEY.
+        "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
+        "B2_REGION": "us-west-004",
+        "B2_BUCKET": "umacapture-sync-staging"
       }
     }
   }
