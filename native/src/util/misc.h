@@ -133,8 +133,8 @@ inline void writeAndSync(const std::filesystem::path &path, const std::string &t
 // MoveFileExW with MOVEFILE_REPLACE_EXISTING; the staging file sits in the same directory, so the move is a
 // rename on one volume and never a copy. On failure the staging file is removed and `path` is left as it was.
 //
-// For record.json, which the app moves to quarantine when it cannot decode it, so a write torn by a crash would
-// take a listed record off the list. The wasm build writes into MEMFS, where nothing outlives the page and the
+// For recognized.json, the recognizer's result the app composes into record.json, so a write torn by a crash
+// never reaches the app as a result. The wasm build writes into MEMFS, where nothing outlives the page and the
 // web app makes the result durable itself (it publishes the record directory it reads back); the staging and
 // the rename hold there too, and only the sync is skipped (see writeAndSync).
 inline void replace(const std::filesystem::path &path, const std::string &text) {

@@ -28,15 +28,45 @@ class RatingDataMapper extends ClassMapperBase<RatingData> {
     'data',
     _$data,
   );
+  static Map<String, int> _$writtenAt(RatingData v) => v.writtenAt;
+  static const Field<RatingData, Map<String, int>> _f$writtenAt = Field(
+    'writtenAt',
+    _$writtenAt,
+    opt: true,
+  );
+  static int? _$titleWrittenAt(RatingData v) => v.titleWrittenAt;
+  static const Field<RatingData, int> _f$titleWrittenAt = Field(
+    'titleWrittenAt',
+    _$titleWrittenAt,
+    opt: true,
+  );
+  static bool _$titleCleared(RatingData v) => v.titleCleared;
+  static const Field<RatingData, bool> _f$titleCleared = Field(
+    'titleCleared',
+    _$titleCleared,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<RatingData> fields = const {
     #title: _f$title,
     #data: _f$data,
+    #writtenAt: _f$writtenAt,
+    #titleWrittenAt: _f$titleWrittenAt,
+    #titleCleared: _f$titleCleared,
   };
+  @override
+  final bool ignoreNull = true;
 
   static RatingData _instantiate(DecodingData data) {
-    return RatingData(title: data.dec(_f$title), data: data.dec(_f$data));
+    return RatingData(
+      title: data.dec(_f$title),
+      data: data.dec(_f$data),
+      writtenAt: data.dec(_f$writtenAt),
+      titleWrittenAt: data.dec(_f$titleWrittenAt),
+      titleCleared: data.dec(_f$titleCleared),
+    );
   }
 
   @override
@@ -86,15 +116,45 @@ class MemoDataMapper extends ClassMapperBase<MemoData> {
     'data',
     _$data,
   );
+  static Map<String, int> _$writtenAt(MemoData v) => v.writtenAt;
+  static const Field<MemoData, Map<String, int>> _f$writtenAt = Field(
+    'writtenAt',
+    _$writtenAt,
+    opt: true,
+  );
+  static int? _$titleWrittenAt(MemoData v) => v.titleWrittenAt;
+  static const Field<MemoData, int> _f$titleWrittenAt = Field(
+    'titleWrittenAt',
+    _$titleWrittenAt,
+    opt: true,
+  );
+  static bool _$titleCleared(MemoData v) => v.titleCleared;
+  static const Field<MemoData, bool> _f$titleCleared = Field(
+    'titleCleared',
+    _$titleCleared,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<MemoData> fields = const {
     #title: _f$title,
     #data: _f$data,
+    #writtenAt: _f$writtenAt,
+    #titleWrittenAt: _f$titleWrittenAt,
+    #titleCleared: _f$titleCleared,
   };
+  @override
+  final bool ignoreNull = true;
 
   static MemoData _instantiate(DecodingData data) {
-    return MemoData(title: data.dec(_f$title), data: data.dec(_f$data));
+    return MemoData(
+      title: data.dec(_f$title),
+      data: data.dec(_f$data),
+      writtenAt: data.dec(_f$writtenAt),
+      titleWrittenAt: data.dec(_f$titleWrittenAt),
+      titleCleared: data.dec(_f$titleCleared),
+    );
   }
 
   @override

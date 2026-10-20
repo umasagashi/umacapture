@@ -1103,6 +1103,7 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
       RecordIdMapper.ensureInitialized();
       RecordStageMapper.ensureInitialized();
       RecordTypeMapper.ensureInitialized();
+      RecordBindingMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -1158,6 +1159,17 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
     _$recordType,
     key: r'record_type',
   );
+  static RecordBinding? _$binding(Metadata v) => v.binding;
+  static const Field<Metadata, RecordBinding> _f$binding = Field(
+    'binding',
+    _$binding,
+  );
+  static int? _$bodyWrittenAt(Metadata v) => v.bodyWrittenAt;
+  static const Field<Metadata, int> _f$bodyWrittenAt = Field(
+    'bodyWrittenAt',
+    _$bodyWrittenAt,
+    key: r'body_written_at',
+  );
 
   @override
   final MappableFields<Metadata> fields = const {
@@ -1171,6 +1183,8 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
     #strategy: _f$strategy,
     #relationBonus: _f$relationBonus,
     #recordType: _f$recordType,
+    #binding: _f$binding,
+    #bodyWrittenAt: _f$bodyWrittenAt,
   };
   @override
   final bool ignoreNull = true;
@@ -1187,6 +1201,8 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
       data.dec(_f$strategy),
       data.dec(_f$relationBonus),
       data.dec(_f$recordType),
+      data.dec(_f$binding),
+      data.dec(_f$bodyWrittenAt),
     );
   }
 
@@ -1212,6 +1228,112 @@ mixin MetadataMappable {
   Map<String, dynamic> toMap() {
     return MetadataMapper.ensureInitialized().encodeMap<Metadata>(
       this as Metadata,
+    );
+  }
+}
+
+class RecordBindingMapper extends ClassMapperBase<RecordBinding> {
+  RecordBindingMapper._();
+
+  static RecordBindingMapper? _instance;
+  static RecordBindingMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = RecordBindingMapper._());
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'RecordBinding';
+
+  static String? _$skillPng(RecordBinding v) => v.skillPng;
+  static const Field<RecordBinding, String> _f$skillPng = Field(
+    'skillPng',
+    _$skillPng,
+    key: r'skill_png',
+    opt: true,
+  );
+  static String? _$skillJpeg(RecordBinding v) => v.skillJpeg;
+  static const Field<RecordBinding, String> _f$skillJpeg = Field(
+    'skillJpeg',
+    _$skillJpeg,
+    key: r'skill_jpeg',
+    opt: true,
+  );
+  static String? _$factorPng(RecordBinding v) => v.factorPng;
+  static const Field<RecordBinding, String> _f$factorPng = Field(
+    'factorPng',
+    _$factorPng,
+    key: r'factor_png',
+    opt: true,
+  );
+  static String? _$factorJpeg(RecordBinding v) => v.factorJpeg;
+  static const Field<RecordBinding, String> _f$factorJpeg = Field(
+    'factorJpeg',
+    _$factorJpeg,
+    key: r'factor_jpeg',
+    opt: true,
+  );
+  static String? _$campaignPng(RecordBinding v) => v.campaignPng;
+  static const Field<RecordBinding, String> _f$campaignPng = Field(
+    'campaignPng',
+    _$campaignPng,
+    key: r'campaign_png',
+    opt: true,
+  );
+  static String? _$campaignJpeg(RecordBinding v) => v.campaignJpeg;
+  static const Field<RecordBinding, String> _f$campaignJpeg = Field(
+    'campaignJpeg',
+    _$campaignJpeg,
+    key: r'campaign_jpeg',
+    opt: true,
+  );
+
+  @override
+  final MappableFields<RecordBinding> fields = const {
+    #skillPng: _f$skillPng,
+    #skillJpeg: _f$skillJpeg,
+    #factorPng: _f$factorPng,
+    #factorJpeg: _f$factorJpeg,
+    #campaignPng: _f$campaignPng,
+    #campaignJpeg: _f$campaignJpeg,
+  };
+  @override
+  final bool ignoreNull = true;
+
+  static RecordBinding _instantiate(DecodingData data) {
+    return RecordBinding(
+      skillPng: data.dec(_f$skillPng),
+      skillJpeg: data.dec(_f$skillJpeg),
+      factorPng: data.dec(_f$factorPng),
+      factorJpeg: data.dec(_f$factorJpeg),
+      campaignPng: data.dec(_f$campaignPng),
+      campaignJpeg: data.dec(_f$campaignJpeg),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static RecordBinding fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<RecordBinding>(map);
+  }
+
+  static RecordBinding fromJson(String json) {
+    return ensureInitialized().decodeJson<RecordBinding>(json);
+  }
+}
+
+mixin RecordBindingMappable {
+  String toJson() {
+    return RecordBindingMapper.ensureInitialized().encodeJson<RecordBinding>(
+      this as RecordBinding,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return RecordBindingMapper.ensureInitialized().encodeMap<RecordBinding>(
+      this as RecordBinding,
     );
   }
 }

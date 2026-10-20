@@ -1,4 +1,5 @@
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_quarantine_ledger.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/fs/record_id_safety.dart';
 import '/src/core/fs/record_mutation_lock.dart';
@@ -160,6 +161,8 @@ Future<RecordScanResult> _loadRecordsUnderDeclared(
     recordDirectories = await gate.runForRoot(
       storageDir,
       (_) async {
+        // Before the listing, so a record put back from the quarantine shelf is listed by this scan.
+        await releaseRepairedQuarantinesUnlocked(directory);
         final listed = await (snapshotDirectories ?? _snapshotRecordDirectories)(directory);
         return _quarantineUnusableNames(listed, unavailable);
         // The scan reads the store and removes nothing from the journals, so a

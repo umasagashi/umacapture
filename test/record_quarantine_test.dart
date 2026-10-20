@@ -3,12 +3,18 @@
 // and json survive for later inspection or recovery.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_quarantine_test.dart
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_quarantine_ledger.dart';
+import 'package:umacapture/src/core/fs/record_loader.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
+
+import 'support/long_read_declarations.dart';
+import 'support/records.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -86,5 +92,49 @@ void main() {
     expect(destination!.name, 'id-004_1');
     expect(Directory('${tempRoot.path}/quarantine/id-004_1').existsSync(), isTrue);
     expect(Directory(dir.path).existsSync(), isFalse);
+  });
+  group('C3: a quarantined record is kept by id across a restart, and comes back once it reads again', () {
+    late DirectoryPath active;
+    late DirectoryPath shelf;
+
+    setUp(() {
+      active = DirectoryPath('${tempRoot.path}/storage/chara_detail/active');
+      shelf = DirectoryPath('${tempRoot.path}/storage/chara_detail/quarantine');
+    });
+
+    Future<List<String>> scanIds() async {
+      final scan = await loadRecordsUnder(active, declaration: undeclaredInTest);
+      return [
+        for (final result in scan.results)
+          if (result case RecordLoaded(:final record)) record.id,
+      ];
+    }
+
+    String body(String id) => jsonEncode(makeRecord(id: id, card: 1).toMap());
+
+    test('quarantined by a scan, noted, still noted after a restart, put back by the scan after the repair', () async {
+      for (final id in ['broken', 'fine']) {
+        File('${(active / id).path}/record.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(id == 'broken' ? '{' : body(id));
+      }
+
+      expect(await scanIds(), ['fine']);
+      final noted = (await readQuarantineLedger(shelf)).kept;
+      expect(
+        [for (final record in noted) (record.id, record.store, record.directory.name)],
+        [('broken', 'active', 'broken')],
+      );
+
+      // A restart: nothing of the session survives but the files, and the shelf is read from them alone.
+      expect([for (final record in (await readQuarantineLedger(shelf)).kept) record.id], ['broken']);
+      expect(await scanIds(), ['fine'], reason: 'a record still unreadable stays on the shelf');
+      expect([for (final record in (await readQuarantineLedger(shelf)).kept) record.id], ['broken']);
+
+      File('${(shelf / 'broken').path}/record.json').writeAsStringSync(body('broken'));
+      expect((await scanIds())..sort(), ['broken', 'fine']);
+      expect((await readQuarantineLedger(shelf)).kept, isEmpty);
+      expect(File('${(active / 'broken').path}/$quarantineOriginName').existsSync(), isFalse);
+    });
   });
 }

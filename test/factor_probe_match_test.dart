@@ -42,6 +42,8 @@ CharaDetailRecord makeRecord({required List<Factor> self}) {
     0,
     null,
     RecordType.standard,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

@@ -343,7 +343,7 @@ private:
 // The count is a property of a RECOGNITION RUN and differs on no platform, unlike the front-end capabilities
 // .claude/rules/platform-parity.md puts on the other side of the line (preview needs a display surface; the CLI
 // has none). Left to the front ends, it would be rebuilt three times over -- Dart counting
-// CharaDetailRecordCapturedEvent, the web worker counting its MEMFS harvest, the CLI counting record.json files
+// CharaDetailRecordCapturedEvent, the web worker counting its MEMFS harvest, the CLI counting recognized.json files
 // -- and three reconstructions of one fact is what .claude/rules/design-priorities.md calls a gap. The SENTENCE
 // shown about the count still belongs to the front end; the count does not.
 //

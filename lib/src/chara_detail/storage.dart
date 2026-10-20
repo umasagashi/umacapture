@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/const.dart';
 import '/src/chara_detail/archive_executor.dart' as archive_executor;
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/factor_enhancement.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
@@ -361,6 +362,20 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   /// and applied once when it finishes ([_finish]); an announcement that arrives
   /// outside a batch applies it at once, since no batch end will come for it.
   Future<void> updated(String id, {required RecordWriteEffects effects}) async {
+    // On desktop the recognizer leaves its result in the record's directory, and it reaches the record
+    // only when this composes it into `record.json`. On web the result is in the worker's MEMFS, never in
+    // the record's OPFS directory, so it is composed where the worker's files are published instead.
+    if (!kIsWeb) {
+      try {
+        await ref.read(charaDetailRecordStorageLoaderProvider.notifier).composeRegenerated(id);
+      } catch (e, s) {
+        logger.e("Failed to compose the regenerated record $id.", e, s);
+        if (ref.mounted) {
+          fail(id);
+        }
+        return;
+      }
+    }
     PathInfo? pathInfo;
     try {
       final info = await ref.read(pathInfoLoader.future);
@@ -408,8 +423,9 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   ///
   /// A failure is not announced as a write: no reload runs and no [RecordWriteEffects]
   /// is applied. Native can fail after it has already rewritten some of the record's
-  /// files (`record.json` is written last), and what the app shows of those files
-  /// stays as it was until they are next read.
+  /// files (its result is written last), and what the app shows of those files
+  /// stays as it was until they are next read. [updated] reports here too when the
+  /// result could not be composed into `record.json`.
   void fail(String id) {
     logger.w("Regeneration failed for record $id.");
     _count(id, failed: true);
@@ -923,19 +939,22 @@ abstract interface class CharaDetailRecordMutator {
   Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects});
 }
 
-/// Hands [effects] what a finished delete in the store rooted at [store] erased, and returns [result].
+/// Hands [effects] what a finished delete in the store rooted at [store] erased, removes what the erased records
+/// carried outside their directories ([forgetDeletedRecords]), and returns [result].
 ///
 /// The scope is the directories of [RecordDeleteResult.succeeded] only: a failed id's directory can
 /// still be on disk with the pictures it had, so dropping its cached reads would throw away pixels
-/// that are still correct.
-RecordDeleteResult _declareDeleted(
+/// that are still correct, and the record it still is keeps its ratings, memos and dismissals.
+Future<RecordDeleteResult> _declareDeleted(
   RecordDeleteResult result, {
+  required RefBase ref,
   required PathInfo info,
   required DirectoryPath store,
   required RecordWriteEffects effects,
-}) {
+}) async {
   effects.images.apply(RecordImageScope(info: info, changed: [for (final id in result.succeeded) (store / id).path]));
   effects.totals.apply(TotalsScope.recordRoot(info));
+  await forgetDeletedRecords(ref, info, result.succeeded);
   return result;
 }
 
@@ -1007,6 +1026,12 @@ const _stableRecordSetMaxAttempts = 8;
 /// different reason (see `storage_action_blocker.dart`).
 const _importMergeDeclaration = LongReadDeclaration.none(
   reason: 'one record read plus the inheritance merge its plan names; shorter than a claim is worth',
+);
+
+/// What composing one re-recognized record announces: nothing, because the
+/// regeneration batch it belongs to holds its claim over the record directories.
+const _regenerationComposeDeclaration = LongReadDeclaration.none(
+  reason: "one recognized.json composed into one record.json, inside the regeneration batch's own claim",
 );
 
 /// What a record delete's acquisition announces: nothing, because the delete
@@ -1612,6 +1637,83 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     };
   }
 
+  /// Re-derives the links and the relation bonus that the records [ids] reach, once a zip import
+  /// has written them and both stores have been re-listed.
+  ///
+  /// The relation bonus is a value only this device holds, derived from the lineage it has stored,
+  /// so a zip does not carry it and the import keeps the device's value or leaves none. What the
+  /// import changes is the input of that derivation, as a capture does; so each imported record
+  /// goes through the capture's resolver entry ([InheritanceResolver.resolveForNewRecord]) against
+  /// every other stored record, under the capture's lock discipline: [_runForStableRecordSet] over
+  /// the ids the resolution writes, with the declaration an arrival carries. Its records that link
+  /// to it — children and grandchildren — are recomputed by the same pass.
+  ///
+  /// An id neither store holds (refused, quarantined, or written over by something since) is
+  /// skipped.
+  Future<void> resolveImportedInheritance(Iterable<String> ids) async {
+    for (final id in ids) {
+      if (_storedRecord(id) == null) continue;
+      await _runForStableRecordSet<void>(
+        recoveryGate: recordRecoveryGate,
+        storageRoot: rootDirectory.parent.parent,
+        initialIds: _arrivalMutationIds(id),
+        currentIds: () => _arrivalMutationIds(id),
+        declaration: _importMergeDeclaration,
+        action: () async {
+          final record = _storedRecord(id);
+          if (record == null) return;
+          final resolution = _resolveArrival(record);
+          if (resolution.changed.isEmpty) {
+            _surfaceInheritance(resolution);
+            return;
+          }
+          final archiveRecords =
+              ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+          final archiveIds = {for (final e in archiveRecords) e.id};
+          final archiveStore = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
+          final archiveUpdates = <CharaDetailRecord>[];
+          final activeUpdates = <CharaDetailRecord>[];
+          for (final updated in resolution.changed) {
+            (archiveIds.contains(updated.id) ? archiveUpdates : activeUpdates).add(updated);
+          }
+          for (final updated in activeUpdates) {
+            await _persistAsync(updated);
+          }
+          await archiveStore._applyInheritanceUpdatesAsyncUnlocked(archiveUpdates);
+
+          archiveStore._swapInMemory(archiveUpdates);
+          for (final updated in activeUpdates) {
+            replaceBy(updated, id: updated.id);
+          }
+          forceRebuild();
+          _surfaceInheritance(resolution);
+        },
+      );
+    }
+  }
+
+  CharaDetailRecord? _storedRecord(String id) => existingRecords().firstWhereOrNull((e) => e.id == id);
+
+  /// The capture's resolver entry for a record that is already stored: the record is weighed against
+  /// every *other* stored record, as [InheritanceResolver.resolveForNewRecord] requires.
+  InheritanceResolution _resolveArrival(CharaDetailRecord record) => InheritanceResolver.resolveForNewRecord(
+    record,
+    [
+      for (final e in existingRecords())
+        if (e.id != record.id) e,
+    ],
+    g1RaceSids: _g1RaceSids(),
+    classifier: _factorClassifier(),
+  );
+
+  /// [_additionMutationIds]' counterpart for [resolveImportedInheritance]: the imported record and
+  /// every record its resolution rewrites, in either store.
+  Set<String> _arrivalMutationIds(String id) {
+    final record = _storedRecord(id);
+    if (record == null) return {id};
+    return {id, for (final updated in _resolveArrival(record).changed) updated.id};
+  }
+
   /// Executes a resolved web import while [_additionMutationIds]' locks are held.
   /// Do not call a public archive mutation from here: it would try to acquire a
   /// nested lock for records already held by this scope.
@@ -1923,6 +2025,15 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// replaces that record's files in place (see [duplicateCharaIdIn]), so the pictures cached by its
   /// paths are as stale as the storage view's totals.
   void addFromFile(String id, {bool notifyDuplicate = true, required RecordWriteEffects effects}) {
+    // The recognizer's result becomes this record's `record.json` here, before it is read. A result that
+    // cannot be composed stays in place with the id unacknowledged, so the next build's scan composes it;
+    // read as it stands, it would be a record without its `record.json`, and quarantined.
+    try {
+      CharaDetailRecord.composeRecognizedSyncUnlocked(rootDirectory / id);
+    } catch (error, stackTrace) {
+      logger.e("Failed to compose the captured record $id; it is left for the next scan.", error, stackTrace);
+      return;
+    }
     final result = CharaDetailRecord.load(rootDirectory / id);
     switch (result) {
       case RecordLoaded(:final record):
@@ -2031,6 +2142,18 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
   }
 
+  /// Composes the result a desktop re-recognition of [id] left in its directory into its `record.json`
+  /// ([CharaDetailRecord.composeRecognizedSyncUnlocked]), under the record's lock.
+  ///
+  /// The lock is what excludes a delete, an archive move or a merge rewriting the same `record.json`.
+  /// Throws when the result could not be composed; the stored record is then as it was.
+  Future<void> composeRegenerated(String id) => recordRecoveryGate.runForRecord(
+    rootDirectory.parent.parent,
+    id,
+    () async => CharaDetailRecord.composeRecognizedSyncUnlocked(rootDirectory / id),
+    declaration: _regenerationComposeDeclaration,
+  );
+
   Future<void> reload(String id) async {
     // The conditionally selected loader keeps the native isolate and web async
     // implementations below this storage boundary. Both preserve the same
@@ -2069,7 +2192,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
           () => deleteAllUnlocked({id}),
           declaration: _declaredByTheDeleteClaim,
         );
-        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+        return _declareDeleted(result, ref: ref.base, info: _pathInfo, store: rootDirectory, effects: effects);
       },
     );
   }
@@ -2108,6 +2231,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
         );
         return _declareDeleted(
           _reportDeleted(succeeded: succeeded, failed: failed),
+          ref: ref.base,
           info: _pathInfo,
           store: rootDirectory,
           effects: effects,
@@ -2548,7 +2672,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
           () => deleteAllUnlocked({id}),
           declaration: _declaredByTheDeleteClaim,
         );
-        return _declareDeleted(result, info: _pathInfo, store: rootDirectory, effects: effects);
+        return _declareDeleted(result, ref: ref.base, info: _pathInfo, store: rootDirectory, effects: effects);
       },
     );
   }
@@ -2576,6 +2700,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
         );
         return _declareDeleted(
           _reportDeleted(succeeded: succeeded, failed: failed),
+          ref: ref.base,
           info: _pathInfo,
           store: rootDirectory,
           effects: effects,
@@ -3227,5 +3352,7 @@ final charaDetailQuarantineCountProvider = FutureProvider<int>((ref) async {
   if (!await dir.exists()) {
     return 0;
   }
-  return dir.list(recursive: false, followLinks: false).length;
+  // Directories only: each is one thing set aside. The shelf's own list of the ids the user deleted is a file beside
+  // them (`quarantineUserDeletedName`), and holds nothing that is on the shelf.
+  return dir.list(recursive: false, followLinks: false).where((entry) => entry is DirectoryPath).length;
 });

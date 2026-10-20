@@ -28,7 +28,9 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_channel.dart';
@@ -90,11 +92,14 @@ void main() {
   /// sounds only for the attempt on screen, so the duplicate cases announce it first, as the core does.
   String started(String id) => jsonEncode({'type': 'onCharaDetailStarted', 'record_id': id});
 
-  /// Boots the real store and the real controller over a temp store holding one record (card 1).
-  Future<({ProviderContainer container, PlatformController controller, DirectoryPath activeDir})> boot() async {
+  /// Boots the real store and the real controller over a temp store holding [stored] (one record of card 1 by
+  /// default).
+  Future<({ProviderContainer container, PlatformController controller, DirectoryPath activeDir})> boot({
+    CharaDetailRecord? stored,
+  }) async {
     final root = DirectoryPath(tempRoot.path);
     final activeDir = pathInfoFor(root).charaDetailActiveDir;
-    writeRecord(activeDir, makeRecord(id: 'stored', card: 1));
+    writeRecord(activeDir, stored ?? makeRecord(id: 'stored', card: 1));
 
     final container = ProviderContainer(
       overrides: [
@@ -186,6 +191,103 @@ void main() {
     });
 
     expect(order, ['first-message-returned', 'duplicate-cue', 'second-message-dispatched']);
+  });
+
+  /// Places the recognizer's result for a capture where the recognizer leaves it, in the directory named by its id,
+  /// and returns the id. The bytes are a real result: `umacapture_cli video` over a golden clip.
+  String placeRecognized(DirectoryPath activeDir) {
+    final bytes = File('test/fixtures/recognized.json').readAsBytesSync();
+    final id = CharaDetailRecord.fromRecordJson(utf8.decode(bytes)).id;
+    File((activeDir / id).filePath(CharaDetailRecord.recognizedJsonName).path)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(bytes);
+    return id;
+  }
+
+  test("a capture's recognized.json becomes its record.json inside the same merge", () async {
+    final env = await boot();
+    final id = placeRecognized(env.activeDir);
+    final directory = env.activeDir / id;
+    final recognized = CharaDetailRecord.fromRecordJson(File('test/fixtures/recognized.json').readAsStringSync());
+    final clock = valueWriteClock;
+    addTearDown(() => valueWriteClock = clock);
+    valueWriteClock = () => 1767225600000;
+
+    final seen = await atNextEventLoopTask(
+      () => env.controller.handleNativeMessage(finished(id)),
+      () => (
+        merged: env.container.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id) != null,
+        recognizedLeft: File(directory.filePath('recognized.json').path).existsSync(),
+        stagingLeft: File(directory.filePath('record.json.part').path).existsSync(),
+        outstanding: capturedRecordRetention.pending,
+      ),
+    );
+
+    expect(seen.merged, isTrue, reason: 'the composition must not push the merge past the next native message');
+    expect(seen.outstanding, isEmpty);
+    expect(seen.recognizedLeft, isFalse, reason: 'a composed result is removed once record.json holds it');
+    expect(seen.stagingLeft, isFalse, reason: 'record.json is put in place by the one replacement');
+    final stored = CharaDetailRecord.fromRecordJson(File(directory.filePath('record.json').path).readAsStringSync());
+    expect(stored.id, id);
+    expect(recognizedContentKey(stored), recognizedContentKey(recognized));
+    expect(stored.metadata.binding, isNull, reason: 'a capture reads no image, so it writes no binding');
+    expect(stored.metadata.bodyWrittenAt, 1767225600000, reason: 'the body is written with its time, in one write');
+  });
+
+  test('a capture that places parents moves the time of no body, and writes its own with its body', () async {
+    final clock = valueWriteClock;
+    addTearDown(() => valueWriteClock = clock);
+    valueWriteClock = () => 1767225600000;
+    final storedChild = CharaDetailRecordMapper.fromMap(
+      makeRecord(id: 'child-stored', card: 20, parent1Card: 10, parent1: const [Factor(1, 1)]).toMap()
+        ..update('metadata', (m) => <String, dynamic>{...(m as Map), 'body_written_at': 1700000000000}),
+    );
+    final env = await boot(stored: storedChild);
+    final parent = makeRecord(id: 'parent', card: 10, self: const [Factor(1, 1)]);
+    final newChild = makeRecord(id: 'child-new', card: 30, parent2Card: 10, parent2: const [Factor(1, 1)]);
+    CharaDetailRecord read(String id) =>
+        CharaDetailRecord.fromRecordJson(File((env.activeDir / id).filePath('record.json').path).readAsStringSync());
+
+    for (final arrival in [parent, newChild]) {
+      File((env.activeDir / arrival.id).filePath(CharaDetailRecord.recognizedJsonName).path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(arrival.toRecordJsonBytes());
+      await atNextEventLoopTask(() => env.controller.handleNativeMessage(finished(arrival.id)), () {});
+    }
+
+    final child = read('child-stored');
+    expect(child.metadata.recordId.parent1, 'parent', reason: 'the capture of its parent placed the link');
+    expect(child.metadata.bodyWrittenAt, 1700000000000);
+    expect(recognizedContentKey(child), recognizedContentKey(storedChild));
+    final placed = read('child-new');
+    expect(placed.metadata.recordId.parent2, 'parent', reason: 'the capture placed its own parent');
+    expect(placed.metadata.bodyWrittenAt, 1767225600000);
+    expect(recognizedContentKey(placed), recognizedContentKey(newChild));
+  });
+
+  test("a capture whose record.json cannot be written keeps its recognized.json and stays retained", () async {
+    final env = await boot();
+    final id = placeRecognized(env.activeDir);
+    final directory = env.activeDir / id;
+    // The replacement stages its bytes in record.json.part; a directory standing there refuses the write.
+    Directory(directory.filePath(CharaDetailRecord.recordJsonReplacementName).path).createSync();
+
+    final seen = await atNextEventLoopTask(
+      () => env.controller.handleNativeMessage(finished(id)),
+      () => (
+        merged: env.container.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id) != null,
+        recognizedLeft: File(directory.filePath('recognized.json').path).existsSync(),
+        recordJson: File(directory.filePath('record.json').path).existsSync(),
+        directoryLeft: Directory(directory.path).existsSync(),
+        outstanding: capturedRecordRetention.pending,
+      ),
+    );
+
+    expect(seen.recognizedLeft, isTrue, reason: 'the result is removed only after record.json holds it');
+    expect(seen.recordJson, isFalse);
+    expect(seen.directoryLeft, isTrue, reason: 'a result not yet composed is not a record to quarantine');
+    expect(seen.merged, isFalse);
+    expect(seen.outstanding, [id], reason: "the next build's scan composes what this merge could not");
   });
 
   test('the announcement itself merges nothing: delivery is a microtask, and that is by design', () async {

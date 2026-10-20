@@ -33,9 +33,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
@@ -381,6 +383,70 @@ void main() {
           (onDisk: false, listed: false, imageCached: false, measuredBytes: null),
         ], reason: 'the claim ended before the store had forgotten the record');
       });
+    }
+  });
+  group('a deleted record takes what it carried outside its directory with it', () {
+    /// Seeds one rating file, one memo file and the dismissal file, each naming [gone] and `kept`.
+    void seedMetadata(String gone) {
+      for (final (dir, value) in [(_layout.charaDetailRatingDir, 4.0), (_layout.charaDetailMemoDir, 'note')]) {
+        File(dir.filePath('main.json').path)
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'title': 'main',
+              'data': {gone: value, 'kept': value},
+              'writtenAt': {gone: 100, 'kept': 100},
+            }),
+          );
+      }
+      File(_layout.charaDetailEnhancementDismissedFile.path).writeAsStringSync(
+        jsonEncode([
+          [gone, 'kept'],
+          ['kept', 'other'],
+        ]),
+      );
+    }
+
+    Map<String, dynamic> keyFile(DirectoryPath dir) =>
+        jsonDecode(File(dir.filePath('main.json').path).readAsStringSync()) as Map<String, dynamic>;
+
+    // One store: both reach this through the one function that declares a finished delete.
+    for (final source in [RecordSource.archive]) {
+      test(
+        '${source.name}: the ratings, memos and dismissed pairs of the id go, and a zip of it brings none back',
+        () async {
+          _seedRecord(source, 'x');
+          _seedRecord(RecordSource.active, 'kept');
+          seedMetadata('x');
+          final container = _container();
+          final store = await _loadedStore(container, source);
+
+          expect((await store.deleteAllAsync(['x'], effects: recordDeleteEffects(container))).succeeded, {'x'});
+
+          void expectForgotten() {
+            for (final dir in [_layout.charaDetailRatingDir, _layout.charaDetailMemoDir]) {
+              final file = keyFile(dir);
+              expect((file['data'] as Map).keys, ['kept'], reason: dir.name);
+              expect((file['writtenAt'] as Map).keys, ['kept'], reason: dir.name);
+            }
+            expect(jsonDecode(File(_layout.charaDetailEnhancementDismissedFile.path).readAsStringSync()), [
+              ['kept', 'other'],
+            ]);
+          }
+
+          expectForgotten();
+          final archive = Archive()
+            ..addFile(
+              ArchiveFile.bytes(
+                'chara_detail/active/x/record.json',
+                utf8.encode(jsonEncode(makeRecord(id: 'x', card: 1).toMap())),
+              ),
+            );
+          await RecordZipService.import(Uint8List.fromList(ZipEncoder().encode(archive)), _layout.storageDir);
+          expect(Directory((_layout.charaDetailActiveDir / 'x').path).existsSync(), isTrue);
+          expectForgotten();
+        },
+      );
     }
   });
 }

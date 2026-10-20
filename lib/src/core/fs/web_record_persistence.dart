@@ -9,29 +9,70 @@ import '/src/core/fs/web_record_write_transaction.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
+import '/src/core/wasm_worker_ops.dart';
 
 typedef RecordPersistenceFile = ({String recordId, List<String> relativeSegments, Uint8List bytes});
 
-/// Whether the named record should be published at all, asked as the
-/// publication reaches it.
+/// How one record is published: [files] written over its base, [removals] — names of files of the base — not
+/// carried, and [store] the record store it lands in. The base is the record's tree in [store], and none for a record
+/// [store] does not hold. A record another store holds is refused
+/// ([WebRecordWriteResult.blockedByOtherStore]) unless [fromOtherStore]: then its tree there is the base, and the
+/// publication takes it out of that store. [afterCommit], where given, runs on the published record directory once
+/// the publication committed, under the same acquisition.
+typedef RecordPublication = ({
+  List<RecordPersistenceFile> files,
+  Set<String> removals,
+  String store,
+  bool fromOtherStore,
+  Future<void> Function(DirectoryPath published)? afterCommit,
+});
+
+/// The publication of [files] over the record's tree in the active store, refused where another store holds it.
+RecordPublication activeOverlayPublication(List<RecordPersistenceFile> files) => (
+  files: files,
+  removals: const {},
+  store: WebRecordWriteTransaction.activeStoreName,
+  fromOtherStore: false,
+  afterCommit: null,
+);
+
+/// How the named record is to be published, or null where it is not to be published at all, asked under the record's
+/// lock as the publication reaches it, with [payload] the files the caller handed for it.
 ///
 /// [committed] holds the ids this same call has already written, in the order
 /// they committed. It is the only vantage point from which "does the store
 /// already hold an equivalent copy" can be answered about a batch: asked before
 /// the batch starts, the answer counts records that have not been written yet
 /// and might never be, and one the store then refuses has already withheld the
-/// copy that could have landed; asked afterwards, the batch is over.
+/// copy that could have landed; asked afterwards, the batch is over. Asked under
+/// the lock, the record the store holds can be read and stays as read until the
+/// publication is done.
 ///
 /// A record the answer withholds is not published and gets no entry in
 /// [WebRecordPersistenceResult.statuses]. The caller that withheld it is the one
 /// that knows why, and filing it here would put that reason under a name meant
 /// for the store's own refusals.
-typedef RecordPublicationDecision = bool Function(String recordId, Set<String> committed);
+typedef RecordPublicationPlanner =
+    Future<RecordPublication?> Function(String recordId, List<RecordPersistenceFile> payload, Set<String> committed);
 typedef RecordFileWriter = Future<void> Function(FilePath target, Uint8List bytes);
 typedef PersistentHarvestedRecordFile = ({String path, Uint8List bytes});
 typedef PlatformRecordUpdateBuilder = Future<Iterable<PersistentHarvestedRecordFile>?> Function();
 
 enum WebRecordPersistenceStatus { completed, cleanupPending, failed }
+
+/// How a re-recognition ended ([WebRecordPersistence.persistRecordUpdate]).
+enum RecordUpdateOutcome {
+  /// The record's composed files were published.
+  published,
+
+  /// The recognizer read the body the record already holds, so nothing was published. A success: the record is
+  /// what a publication would have made it.
+  unchanged,
+
+  /// Nothing was published and the record was not re-recognised: no input, no result, or a publication that did
+  /// not commit.
+  failed,
+}
 
 final class WebRecordPersistenceResult extends SetBase<String> {
   WebRecordPersistenceResult(
@@ -142,12 +183,13 @@ final class WebRecordPersistence {
   /// added a second time by whatever arrives next.
   ///
   /// Records are published in the sorted order the record locks are taken in,
-  /// under one acquisition of the whole set, and [shouldPublish] -- when one is
-  /// given -- is asked about each record as it is reached.
+  /// under one acquisition of the whole set. Without [plan] each record's files
+  /// are written over its tree in the active store; with one, [plan] is asked
+  /// about each record as it is reached and decides how it is published.
   Future<WebRecordPersistenceResult> persistFiles(
     DirectoryPath storageDir,
     List<RecordPersistenceFile> files, {
-    RecordPublicationDecision? shouldPublish,
+    RecordPublicationPlanner? plan,
   }) async {
     if (files.isEmpty) return WebRecordPersistenceResult(const {});
     final grouped = _validatedPayloads(files);
@@ -181,8 +223,11 @@ final class WebRecordPersistence {
           // every record after it -- and leave the ones before it written with
           // nothing naming them, which is the state the whole-batch validation
           // above exists to make impossible.
-          if (shouldPublish != null && !shouldPublish(recordId, UnmodifiableSetView(committed))) return;
-          final (status, failure) = await _publishRecordUnlocked(storageDir, recordId, payload);
+          final publication = plan == null
+              ? activeOverlayPublication(payload)
+              : await plan(recordId, payload, UnmodifiableSetView(committed));
+          if (publication == null) return;
+          final (status, failure) = await _publishRecordUnlocked(storageDir, recordId, publication);
           statuses[recordId] = status;
           if (failure != null) failures[recordId] = failure;
           if (WebRecordPersistenceResult.isCommitted(status)) committed.add(recordId);
@@ -233,7 +278,10 @@ final class WebRecordPersistence {
 
   /// Runs the platform regeneration read/compute/publish sequence under one
   /// record lock. The builder reads the current record and invokes the worker;
-  /// its output is then strictly parsed and transactionally overlaid.
+  /// its output is then strictly parsed, the recognizer's result composed onto
+  /// the stored `record.json` the worker hands back with it ([composeRecordFiles]),
+  /// and the composed record transactionally overlaid — or nothing published at
+  /// all when the result holds the body the record already has.
   ///
   /// **Known cost:** [build] runs *inside* the lock, and on web the record lock
   /// is nested inside a shared acquisition of the root gate, so a regeneration
@@ -253,7 +301,11 @@ final class WebRecordPersistence {
   /// bounded rather than indefinite: every acquisition carries an abort timeout
   /// (see `recordMutationLockAcquireTimeout`), so a starved reader surfaces a
   /// [RecordMutationLockBusy] instead of hanging forever.
-  Future<bool> persistRecordUpdate(DirectoryPath storageDir, String recordId, PlatformRecordUpdateBuilder build) {
+  Future<RecordUpdateOutcome> persistRecordUpdate(
+    DirectoryPath storageDir,
+    String recordId,
+    PlatformRecordUpdateBuilder build,
+  ) {
     // **The longest read in this file, and the claim for it is taken a level up.**
     // [build] runs the recognition worker inside this acquisition, bounded only by
     // the worker's 120 s timeout, and the record's directory is rewritten at the
@@ -273,11 +325,18 @@ final class WebRecordPersistence {
     );
     return _recoveryGate.runForRecord(storageDir, recordId, declaration: declaration, () async {
       final harvested = await build();
-      if (harvested == null) return false;
+      if (harvested == null) return RecordUpdateOutcome.failed;
       final harvestedList = harvested.toList(growable: false);
-      if (harvestedList.isEmpty) return false;
+      if (harvestedList.isEmpty) return RecordUpdateOutcome.failed;
+      // Parsed before composing, so every path is known to name this record when the files are read as one.
+      parseHarvestedRecordFiles(harvestedList, logContext: 'record regeneration', expectedRecordId: recordId);
+      final composed = composeRecordFiles(harvestedList);
+      if (composed == null) {
+        throw const FormatException('Regenerated payload holds neither a recognized.json nor a record.json.');
+      }
+      if (composed.bodyUnchanged) return RecordUpdateOutcome.unchanged;
       final payloads = parseHarvestedRecordFiles(
-        harvestedList,
+        composed.files,
         logContext: 'record regeneration',
         expectedRecordId: recordId,
       );
@@ -286,22 +345,50 @@ final class WebRecordPersistence {
       if (payload == null) {
         throw const FormatException('Regenerated payload does not describe exactly the requested record.');
       }
-      final (status, _) = await _publishRecordUnlocked(storageDir, recordId, payload);
-      return status == WebRecordPersistenceStatus.completed || status == WebRecordPersistenceStatus.cleanupPending;
+      final (status, _) = await _publishRecordUnlocked(storageDir, recordId, activeOverlayPublication(payload));
+      return WebRecordPersistenceResult.isCommitted(status)
+          ? RecordUpdateOutcome.published
+          : RecordUpdateOutcome.failed;
     });
   }
 
-  /// Publishes one record, returning its status and — when it did not commit —
-  /// the transaction result that explains why.
+  /// Publishes one record as [publication] says, returning its status and —
+  /// when it did not commit — the transaction result that explains why.
+  ///
+  /// A record another store holds is published from that tree into
+  /// [RecordPublication.store] where [RecordPublication.fromOtherStore] says so,
+  /// which removes it from the store it was in: one record id belongs to one
+  /// store.
   Future<(WebRecordPersistenceStatus, Object?)> _publishRecordUnlocked(
     DirectoryPath storageDir,
     String recordId,
-    List<RecordPersistenceFile> files,
+    RecordPublication publication,
   ) async {
     final dataRoot = storageDir / 'chara_detail';
-    final result = await _transaction.publish(dataRoot, recordId, [
-      for (final file in files) (relativeSegments: file.relativeSegments, bytes: file.bytes),
-    ]);
+    DirectoryPath? elsewhere;
+    if (publication.fromOtherStore) {
+      for (final store in WebRecordWriteTransaction.recordStoreNames) {
+        if (store != publication.store && await (dataRoot / store / recordId).exists()) {
+          elsewhere = dataRoot / store / recordId;
+        }
+      }
+    }
+    final result = await _transaction.publish(
+      dataRoot,
+      recordId,
+      [for (final file in publication.files) (relativeSegments: file.relativeSegments, bytes: file.bytes)],
+      store: publication.store,
+      baseFrom: elsewhere,
+      removals: publication.removals,
+    );
+    if (result.isCommitted) {
+      try {
+        await publication.afterCommit?.call(dataRoot / publication.store / recordId);
+      } catch (error, stackTrace) {
+        // The record is published; what follows its publication does not decide whether it was.
+        logger.e('What follows the publication of record $recordId failed.', error, stackTrace);
+      }
+    }
     switch (result) {
       case WebRecordWriteResult.completed:
         return (WebRecordPersistenceStatus.completed, null);
@@ -352,7 +439,7 @@ Future<WebRecordPersistenceResult> persistPlatformHarvestToOpfs(
   return (persistence ?? platformWebRecordPersistence).persistFiles(storageDir, payloads);
 }
 
-Future<bool> persistPlatformRecordUpdateToOpfs(
+Future<RecordUpdateOutcome> persistPlatformRecordUpdateToOpfs(
   String recordId,
   DirectoryPath storageDir,
   PlatformRecordUpdateBuilder build, {

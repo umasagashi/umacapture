@@ -46,6 +46,7 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/core/clipboard_alt.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -57,6 +58,7 @@ import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
+import 'support/record_binding_seed.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
 import 'support/storage_row_menu.dart';
@@ -899,5 +901,64 @@ void main() {
       expect(find.text(storageActionLabel('copy_directory')), findsOneWidget);
       expect(find.text(storageActionLabel('zip_directory')), findsOneWidget);
     });
+  });
+  group('a record without a binding goes out of a folder zip with one worked out from its PNGs', () {
+    for (final (name, folderOf) in <(String, DirectoryPath Function(String id))>[
+      ('the store', (_) => _info.charaDetailActiveDir),
+      ('the record directory', (id) => _info.charaDetailActiveDir / id),
+    ]) {
+      test('zipping $name places it and carries it', () async {
+        final pngs = bindingImagePngs();
+        final dir = seedUnboundRecord(_info.charaDetailActiveDir.path, UnboundRecord.legacy, pngs);
+        final id = UnboundRecord.legacy.id;
+        final folder = folderOf(id);
+
+        final outcome = await exportDirectoryAsZip(
+          _ref(_container()),
+          folder,
+          silent: true,
+          group: storageGroupOf(StorageGroupId.activeRecords),
+        );
+
+        expect(outcome, StorageZipOutcome.written);
+        final prefix = folder.name == id ? id : '${folder.name}/$id';
+        final files = _readArchive(_at('out.zip')).files;
+        expect(bindingIn(files['$prefix/record.json'] ?? const []), expectedBinding(pngs));
+        expect(files['$prefix/skill.png'], orderedEquals(pngs['skill'] ?? const []));
+        expect(bindingIn(File('$dir/record.json').readAsBytesSync()), expectedBinding(pngs), reason: 'placed');
+      });
+    }
+  });
+  group('a record leaves a folder zip without what only this device holds, and keeps it', () {
+    for (final (name, folderOf) in <(String, DirectoryPath Function(String id))>[
+      ('the store', (_) => _info.charaDetailActiveDir),
+      ('the record directory', (id) => _info.charaDetailActiveDir / id),
+    ]) {
+      test('zipping $name packs the export table and imports', () async {
+        final dir = seedUnboundRecord(_info.charaDetailActiveDir.path, UnboundRecord.legacy, bindingImagePngs());
+        seedRecordLocalFields(dir);
+        final before = recordDirectoryNames(dir);
+        final id = UnboundRecord.legacy.id;
+        final folder = folderOf(id);
+
+        final outcome = await exportDirectoryAsZip(
+          _ref(_container()),
+          folder,
+          silent: true,
+          group: storageGroupOf(StorageGroupId.activeRecords),
+        );
+
+        expect(outcome, StorageZipOutcome.written);
+        final prefix = folder.name == id ? id : '${folder.name}/$id';
+        final bytes = File(_at('out.zip')).readAsBytesSync();
+        final files = _readArchive(_at('out.zip')).files;
+        expectRecordLeftWithoutLocalFields(zipEntryNames(bytes), prefix, (name) => files[name] ?? const []);
+        expect(recordDirectoryNames(dir), namesAfterPlacing(before), reason: 'nothing else is removed');
+        if (folder.name == id) {
+          final imported = await RecordZipService.import(bytes, DirectoryPath(_at('imported')));
+          expect(imported.recordIds, {id});
+        }
+      });
+    }
   });
 }

@@ -53,6 +53,8 @@ CharaDetailRecord makeRecord({
     0,
     relationBonus,
     recordType,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

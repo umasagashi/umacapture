@@ -149,7 +149,7 @@ def run_matrix(case: dict, matrix: str, cli: Path, data_dir: Path, assets_dir: P
     if not records:
         # An empty set is exactly the failure mode this test exists to catch (the landscape import that
         # latched no pane produced no records at all), so it is a failure, never a pass-by-vacuum.
-        return "fail", f"cli produced no record.json under {matrix}"
+        return "fail", f"cli produced no recognized.json under {matrix}"
     return "records", records
 
 

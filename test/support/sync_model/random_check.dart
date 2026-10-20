@@ -17,6 +17,8 @@
 
 import 'dart:math';
 
+import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
+
 import 'file_mutations.dart';
 import 'file_world.dart';
 import 'judge.dart';
@@ -783,7 +785,7 @@ class BystanderGenerator {
     if (ids.isEmpty) return const [];
     final beside = [
       for (final id in ids)
-        if (id.contains('~')) id,
+        if (id.contains(recordSyncSplitSeparator)) id,
     ];
     final slot = '$slotPrefix${++_slots}';
     return [ExportZip(device, _pick(beside.isEmpty ? ids : beside), slot), ImportZip(bystander, slot)];

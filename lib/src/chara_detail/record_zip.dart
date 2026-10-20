@@ -1,9 +1,16 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 
+import '/src/chara_detail/archive_executor_shared.dart';
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/enhancement_merge.dart';
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/record_body.dart';
+import '/src/chara_detail/record_export_shape.dart';
+import '/src/core/app_logger.dart';
 import '/src/core/fs/web_record_persistence.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/web_record_write_transaction.dart';
@@ -15,20 +22,10 @@ import '/src/core/storage/long_read_registry.dart';
 /// A closed set, and every member owes the user a sentence
 /// (`pages.chara_detail.import.refused.*`): a record that was in the zip and is
 /// not in the table afterwards is a record the user has to be told about, and
-/// "how many failed" is not enough — [alreadyArchived] calls for no action at
-/// all, while [notStored] is a real loss. Collapsing the two into a count would
-/// leave the common one reading as a fault.
+/// "how many failed" is not enough — [duplicateOfExisting] calls for no action
+/// at all, while [notStored] is a real loss. Collapsing the two into a count
+/// would leave the common one reading as a fault.
 enum RecordImportRefusal {
-  /// The same record id already lives under `archive/`, so publishing it into
-  /// `active/` would put one record in two stores at once
-  /// ([WebRecordWriteResult.blockedByOtherStore]).
-  ///
-  /// The expected outcome of re-importing a zip exported from the archive view:
-  /// the interchange format packs every record under `chara_detail/active/<id>/`
-  /// regardless of the store it came from. The copy the user already has is left
-  /// byte-for-byte untouched, so the correct advice is "nothing to do".
-  alreadyArchived,
-
   /// The store already holds a record with this one's contents under a different
   /// id, so writing it would put the same chara in the table twice.
   ///
@@ -117,12 +114,12 @@ class RecordZipTooLargeException extends FormatException {
 /// through the async filesystem backend, so the same code path lands records in
 /// OPFS on web and on disk on desktop.
 ///
-/// A record id already present under `active/` is overwritten (the writes
-/// replace the individual files), matching the design's "uuid collision =
-/// overwrite" rule. A record id already present under `archive/` is *refused*
-/// instead — one id belongs to one store — and comes back in
-/// [RecordImportResult.refusals] as [RecordImportRefusal.alreadyArchived] so the
-/// caller can say so rather than dropping the record without a word.
+/// Each record is made the record the zip carries ([_importPublication]): its
+/// body, the ids it absorbed and its archive state are the zip's, it lands in
+/// the store that state is held in — taken out of the other store where that
+/// one held it, as one id belongs to one store — and its images follow its body.
+/// The ratings, memos and dismissed pairs of the id are not in the record
+/// directory and are not touched.
 ///
 /// The service also builds the same layout back out ([export]), so an exported
 /// zip re-imports without loss and stays byte-compatible with the Stage-4
@@ -134,16 +131,16 @@ class RecordZipService {
   ///
   /// Reads every file in each record directory through the async filesystem
   /// backend — so the same code path reads records from OPFS on web and from
-  /// disk on desktop — and packs them under `chara_detail/active/<uuid>/<file>`,
+  /// disk on desktop — and packs them, as the export table says
+  /// (`recordFileForExport`), under `chara_detail/active/<uuid>/<file>`,
   /// where `<uuid>` is the record directory's own name. Entries are STORED
   /// (uncompressed) to match the harness exactly; the record files are already
   /// PNG/JPEG/JSON, so deflate would gain little.
   ///
   /// The `active/` segment is a fixed part of the interchange format regardless
-  /// of the source the directories came from, so a zip exported from the archive
-  /// view names the active store on re-import (mirroring [import]) — which the
-  /// write transaction then refuses while the archived copy still exists, and
-  /// [import] reports as [RecordImportRefusal.alreadyArchived].
+  /// of the source the directories came from: the store a record is in follows
+  /// from its archive state, which `archive.json` carries, and [import] places
+  /// it by that.
   ///
   /// [declaration] is required and has no default for the same reason the gate's
   /// own argument does: this method reads every file of every record it is given
@@ -170,13 +167,26 @@ class RecordZipService {
         final archive = Archive();
         for (final dir in recordDirs) {
           final recordId = dir.name;
-          // Record directories are flat (the nine per-record files, no nested
-          // directories), so every listed entry is a file; read each through the
-          // async backend and store it verbatim.
+          // The binding goes out with the record, placed first where the record
+          // carries none; the zip carries it even where `record.json` could not
+          // be rewritten.
+          final recordJson = await placeRecordBindingUnlocked(dir);
+          // Record directories are flat (the per-record files, no nested
+          // directories), so every listed entry is a file; each is packed as the
+          // export table says, and one it leaves on the device is not read.
           await for (final entry in dir.list()) {
-            final bytes = await entry.asFilePath.readAsBytes();
+            if (recordFileExportOf(entry.name) == RecordFileExport.left) continue;
+            final stored = entry.name == 'record.json' && recordJson != null
+                ? recordJson
+                : await entry.asFilePath.readAsBytes();
+            final bytes = recordFileForExport(entry.name, stored);
+            if (bytes == null) continue;
             final name = "chara_detail/active/$recordId/${entry.name}";
             archive.addFile(ArchiveFile.noCompress(name, bytes.length, bytes));
+          }
+          if (await exportedArchiveNoteOf(dir) case final note?) {
+            final name = "chara_detail/active/$recordId/$recordArchiveNoteName";
+            archive.addFile(ArchiveFile.noCompress(name, note.length, note));
           }
         }
         return ZipEncoder().encodeBytes(archive);
@@ -337,6 +347,7 @@ class RecordZipService {
     }
 
     final refusals = <String, RecordImportRefusal>{};
+    final written = <String, CharaDetailRecord>{};
     // The whole zip goes to the store as one batch -- one acquisition, every
     // record lock taken once -- and the duplicate rule is asked inside it, as
     // each record is reached. The rule asks "is an equivalent copy already in
@@ -350,23 +361,169 @@ class RecordZipService {
     final result = await store.persistFiles(
       storageDir,
       files,
-      shouldPublish: duplicateRule == null
-          ? null
-          : (recordId, committed) {
-              final record = decoded[recordId];
-              if (record == null) return true;
-              if (!duplicateRule(record, recordsOf(committed))) return true;
-              refusals[recordId] = RecordImportRefusal.duplicateOfExisting;
-              return false;
-            },
+      plan: (recordId, payload, committed) async {
+        final record = decoded[recordId];
+        if (duplicateRule != null && record != null && duplicateRule(record, recordsOf(committed))) {
+          refusals[recordId] = RecordImportRefusal.duplicateOfExisting;
+          return null;
+        }
+        final planned = await _importPublication(storageDir, recordId, payload);
+        if (planned.record case final writtenRecord?) written[recordId] = writtenRecord;
+        return planned.publication;
+      },
     );
     refusals.addAll(_refusals(result));
     return RecordImportResult(
       recordIds: result.committedIds,
       skippedEntries: skipped,
       refusals: refusals,
-      acceptedRecords: recordsOf(result.committedIds),
+      acceptedRecords: [for (final id in result.committedIds) ?(written[id] ?? decoded[id])],
     );
+  }
+
+  /// How the record [recordId], whose files the zip carries as [payload], is published over the record the device
+  /// holds of that id, and the record its `record.json` then holds (null where the zip's does not decode).
+  ///
+  /// The record is made the zip's ([R4-6]):
+  ///
+  /// * **The body** is the zip's, written at the time of this import where it is not the body the device holds, and
+  ///   left as it is, with the zip's parents placed on it, where it is ([composeBodyImport]). The binding is the
+  ///   zip's; a zip of an older build carries none, and it is then worked out from the images the zip carries, or
+  ///   known for none of them where it carries no image.
+  /// * **The absorbed ids** are the zip's `merged_ids.json`, and none where it carries none.
+  /// * **The archive state** is the one the zip's `archive.json` notes — normal where it carries none — written at
+  ///   the time of this import where the device's record is in another ([importedArchiveNote]). The record lands in
+  ///   the store of that state, and its images take the form that state holds them in.
+  /// * **The images** are the zip's where it carries any. Where it carries none, the device's stay where the body
+  ///   stays, and otherwise only those the zip's binding names ([imagesInDirectoryBoundBy]) stay; `trainee.jpg`, cut
+  ///   from the factor image, stays with it. An image's geometry (`<image>.json`) goes with the last of its forms.
+  ///
+  /// Nothing the zip carries of a time is read, nor its relation bonus, which only the device that resolved it holds.
+  /// The files the export table leaves on a device are not taken from the zip either ([recordFileExportOf]).
+  static Future<({RecordPublication publication, CharaDetailRecord? record})> _importPublication(
+    DirectoryPath storageDir,
+    String recordId,
+    List<RecordPersistenceFile> payload,
+  ) async {
+    final carried = {for (final file in payload) file.relativeSegments.join('/'): file.bytes};
+    final dataRoot = storageDir / 'chara_detail';
+    final archived = dataRoot / 'archive' / recordId;
+    final active = dataRoot / WebRecordWriteTransaction.activeStoreName / recordId;
+    final localDir = await active.exists() ? active : (await archived.exists() ? archived : null);
+    final localInArchive = localDir != null && localDir.path == archived.path;
+
+    final state = exportedArchiveState(carried[recordArchiveNoteName]);
+    final store = state == RecordArchiveState.normal ? WebRecordWriteTransaction.activeStoreName : 'archive';
+    final note = await importedArchiveNote(state, localDir: localDir, localInArchive: localInArchive);
+    final asIs = [
+      for (final MapEntry(:key, :value) in carried.entries)
+        if (recordFileExportOf(key) == RecordFileExport.asIs)
+          (recordId: recordId, relativeSegments: [key], bytes: value),
+    ];
+    Future<void> shape(DirectoryPath published) => shapeArchivedImagesUnlocked(published, state);
+    final afterCommit = state == RecordArchiveState.normal ? null : shape;
+    final noteFile = note == null
+        ? null
+        : (recordId: recordId, relativeSegments: const [recordArchiveNoteName], bytes: note);
+
+    final imported = _decodeRecordJson(carried['record.json']);
+    if (imported == null) {
+      // A body this build cannot read is no body to weigh against the device's: the files go as the zip has them,
+      // and the loader judges the record.
+      final recordJson = (recordId: recordId, relativeSegments: const ['record.json'], bytes: carried['record.json']!);
+      return (
+        publication: (
+          files: [recordJson, ...asIs, ?noteFile],
+          removals: const <String>{},
+          store: store,
+          fromOtherStore: true,
+          afterCommit: afterCommit,
+        ),
+        record: null,
+      );
+    }
+    final local = localDir == null ? null : await _readLocalRecord(localDir);
+    final carriesImages = carried.keys.any(_isImageFile);
+    final importedBinding =
+        imported.metadata.binding ?? (carriesImages ? await compute(recordBindingOf, _imageFilesOf(carried)) : null);
+    final localBinding = local == null || localDir == null
+        ? null
+        : local.metadata.binding ??
+              (recognizedContentKey(local) == recognizedContentKey(imported)
+                  ? await computeRecordBinding(localDir)
+                  : null);
+    final record = composeBodyImport(local, imported, storedBinding: localBinding, importedBinding: importedBinding);
+    final sameBody = local != null && sameRecordBody(local, localBinding, imported, importedBinding);
+
+    final removals = <String>{if (!carried.containsKey(mergedIdsFileName)) mergedIdsFileName};
+    if (localDir != null) {
+      final localImages = <String>{};
+      await for (final entry in localDir.list()) {
+        if (entry is FilePath && _isImageFile(entry.name)) localImages.add(entry.name);
+      }
+      final Set<String> kept;
+      if (carriesImages) {
+        kept = const {};
+      } else if (sameBody) {
+        kept = localImages;
+      } else {
+        final bound = await imagesInDirectoryBoundBy(importedBinding, localDir);
+        final factorKept = bound.contains('factor.png') || bound.contains('factor.jpg');
+        kept = {
+          ...bound,
+          for (final image in recordBindingImages)
+            if (bound.contains('$image.png') || bound.contains('$image.jpg')) '$image.json',
+          if (factorKept) traineeIconFileName,
+        };
+      }
+      removals.addAll(localImages.difference(kept));
+    }
+    return (
+      publication: (
+        files: [
+          (recordId: recordId, relativeSegments: const ['record.json'], bytes: record.toRecordJsonBytes()),
+          ...asIs,
+          ?noteFile,
+        ],
+        removals: removals,
+        store: store,
+        fromOtherStore: true,
+        afterCommit: afterCommit,
+      ),
+      record: record,
+    );
+  }
+
+  /// Whether [name] is one of a record's images or what goes with one: `<image>.png`, `<image>.jpg` and the image's
+  /// geometry `<image>.json` of [recordBindingImages], and `trainee.jpg`.
+  static bool _isImageFile(String name) =>
+      name == traineeIconFileName ||
+      recordBindingImages.any((image) => name == '$image.png' || name == '$image.jpg' || name == '$image.json');
+
+  static Map<String, RecordImageFiles> _imageFilesOf(Map<String, Uint8List> files) => {
+    for (final image in recordBindingImages) image: (png: files['$image.png'], jpeg: files['$image.jpg']),
+  };
+
+  static CharaDetailRecord? _decodeRecordJson(Uint8List? bytes) {
+    if (bytes == null) return null;
+    try {
+      return CharaDetailRecord.fromRecordJson(utf8.decode(bytes));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The record the device holds in [directory], or null where it holds none this build can read — which an import
+  /// then writes over as it would over no record.
+  static Future<CharaDetailRecord?> _readLocalRecord(DirectoryPath directory) async {
+    final file = directory.filePath('record.json');
+    try {
+      if (!await file.exists()) return null;
+      return CharaDetailRecord.fromRecordJson(await file.readAsString());
+    } catch (error, stackTrace) {
+      logger.w('The record.json of ${directory.name} could not be read; the import writes over it.', error, stackTrace);
+      return null;
+    }
   }
 
   /// The record [files] carries in its `record.json`, or `null` when it carries
@@ -404,8 +561,8 @@ class RecordZipService {
     }
   }
 
-  /// The non-committed half of [result], classified into the reasons the import
-  /// UI has a sentence for.
+  /// The non-committed half of [result], as the reason the import UI has a
+  /// sentence for: every record the store did not write is [RecordImportRefusal.notStored].
   ///
   /// Walks the *statuses* — the store's own record of what it was asked to write
   /// — rather than the failure map, so a record that neither committed nor
@@ -414,10 +571,7 @@ class RecordZipService {
   static Map<String, RecordImportRefusal> _refusals(WebRecordPersistenceResult result) {
     return {
       for (final id in result.statuses.keys)
-        if (!result.committed(id))
-          id: result.failures[id] == WebRecordWriteResult.blockedByOtherStore
-              ? RecordImportRefusal.alreadyArchived
-              : RecordImportRefusal.notStored,
+        if (!result.committed(id)) id: RecordImportRefusal.notStored,
     };
   }
 

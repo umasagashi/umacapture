@@ -81,13 +81,38 @@ bool saveRating(
 }) {
   final controller = ref.read(charaDetailRecordRatingProvider(storageKey).notifier);
   return commitStorageChange(() {
-    if (notify) {
-      controller.updateRating(recordId, rating);
-    } else {
-      controller.updateWithoutNotify(recordId, rating);
+    final changed = notify
+        ? controller.updateRating(recordId, rating)
+        : controller.updateWithoutNotify(recordId, rating);
+    if (changed) {
+      controller.save();
     }
-    controller.save();
   });
+}
+
+/// The ids of every listed record, active and archived, or null where a set of them cannot be read.
+///
+/// Removing a column storage writes none into the fields of listed records only (see `RatingData.removed`).
+Future<Set<String>?> listedRecordIds(RefBase ref) async {
+  try {
+    final active = await ref.read(charaDetailRecordStorageLoaderProvider.future);
+    final archive = await ref.read(charaDetailArchiveStorageLoaderProvider.future);
+    return {
+      for (final record in [...active, ...archive]) record.id,
+    };
+  } catch (error, stackTrace) {
+    logger.w("Could not list the records a column storage removal writes into.", error, stackTrace);
+    return null;
+  }
+}
+
+/// Waits for a storage's [load] to finish, so a removal is applied to what it holds.
+///
+/// A failed load is left for the mutator to refuse ([commitStorageChange]).
+Future<void> settleStorageLoad(Future<Object?> load) async {
+  try {
+    await load;
+  } catch (_) {}
 }
 
 final ratingFormatter = NumberFormat("0.0");
@@ -567,8 +592,9 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
       final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
       commitStorageChange(() {
-        ratingController.updateTitle(title);
-        ratingController.save();
+        if (ratingController.updateTitle(title)) {
+          ratingController.save();
+        }
       });
 
       final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
@@ -626,16 +652,18 @@ class _StorageController extends ConsumerWidget {
         TextButton(
           onPressed: () {},
           onLongPress: () async {
+            final provider = charaDetailRecordRatingProvider(storageKey);
+            final listed = await listedRecordIds(ref.base);
+            await settleStorageLoad(ref.read(provider.future));
+            if (!commitStorageChange(() => ref.read(provider.notifier).remove(listed))) {
+              return;
+            }
+
             final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
             ratingStorageController.update((state) {
               state.removeWhere((e) => e.key == storageKey);
               return [...state];
             });
-
-            final storageFile = ref.read(pathInfoProvider).charaDetailRatingDir.filePath("$storageKey.json");
-            if (await storageFile.exists()) {
-              await storageFile.deleteWithCheck();
-            }
 
             ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);

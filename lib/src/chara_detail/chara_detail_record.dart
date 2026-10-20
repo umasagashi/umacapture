@@ -5,6 +5,8 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:version/version.dart';
 
+import '/src/chara_detail/record_body.dart';
+import '/src/chara_detail/record_quarantine_ledger.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/path_entity.dart';
@@ -292,6 +294,15 @@ class Metadata extends JsonEquatable with MetadataMappable {
   final int? relationBonus;
   final RecordType? recordType;
 
+  /// The images the body was read from ([RecordBinding]), or null where it is not worked out yet. A capture writes
+  /// none; it is placed ([placeOnRecord]) the first time the record needs it, and goes with the body after that.
+  final RecordBinding? binding;
+
+  /// When the body was written ([valueWriteTime]), in milliseconds since the epoch, or null for a body written
+  /// before bodies carried a time — older than any body written with one. Only a body write sets it
+  /// ([composeBodyWrite], and a merge that changes the body); placing a value on the record leaves it.
+  final int? bodyWrittenAt;
+
   const Metadata(
     this.formatVersion,
     this.region,
@@ -303,6 +314,8 @@ class Metadata extends JsonEquatable with MetadataMappable {
     this.strategy,
     this.relationBonus,
     this.recordType,
+    this.binding,
+    this.bodyWrittenAt,
   );
 
   @override
@@ -316,7 +329,59 @@ class Metadata extends JsonEquatable with MetadataMappable {
     stage,
     strategy,
     relationBonus,
+    binding,
+    bodyWrittenAt,
   ];
+}
+
+/// The binding of a record's body to the images it was read from, as `metadata.binding`: for each of the three
+/// images, the SHA-256 (64 lowercase hex digits) of its PNG and of its reduced JPEG, or null where that one is not
+/// known. A null value writes no key, which the sync server reads the same as null.
+///
+/// Two bindings disagree when a field both know holds two values ([agreesWith]); else they are one binding, and
+/// together they know what either knows ([mergedWith]).
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class RecordBinding extends JsonEquatable with RecordBindingMappable {
+  final String? skillPng;
+  final String? skillJpeg;
+  final String? factorPng;
+  final String? factorJpeg;
+  final String? campaignPng;
+  final String? campaignJpeg;
+
+  const RecordBinding({
+    this.skillPng,
+    this.skillJpeg,
+    this.factorPng,
+    this.factorJpeg,
+    this.campaignPng,
+    this.campaignJpeg,
+  });
+
+  List<String?> get _fields => [skillPng, skillJpeg, factorPng, factorJpeg, campaignPng, campaignJpeg];
+
+  /// Whether no field both this and [other] know holds two values.
+  bool agreesWith(RecordBinding other) {
+    final mine = _fields;
+    final theirs = other._fields;
+    for (var i = 0; i < mine.length; i++) {
+      if (mine[i] != null && theirs[i] != null && mine[i] != theirs[i]) return false;
+    }
+    return true;
+  }
+
+  /// Each field as this knows it, else as [other] does. Of two that disagree, this one's value stands.
+  RecordBinding mergedWith(RecordBinding other) => RecordBinding(
+    skillPng: skillPng ?? other.skillPng,
+    skillJpeg: skillJpeg ?? other.skillJpeg,
+    factorPng: factorPng ?? other.factorPng,
+    factorJpeg: factorJpeg ?? other.factorJpeg,
+    campaignPng: campaignPng ?? other.campaignPng,
+    campaignJpeg: campaignJpeg ?? other.campaignJpeg,
+  );
+
+  @override
+  List<Object?> properties() => _fields;
 }
 
 /// Outcome of attempting to load a single record directory.
@@ -513,12 +578,23 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     }
   }
 
-  /// [load] for a caller that holds the store's root scope, which also persists a format upgrade.
+  /// [load] for a caller that holds the store's root scope, which also persists a format upgrade and
+  /// composes a recognizer result that is waiting ([composeRecognizedSyncUnlocked]).
   ///
   /// The desktop bulk scan runs this on its worker isolates: they read and decode synchronously, and
   /// the root scope the scan holds on the UI isolate is what excludes every other writer of the record,
   /// the same way it covers the quarantine move a decode failure performs here.
+  ///
+  /// A result waiting in `recognized.json` is a record the recognizer finished and no arrival has
+  /// composed yet — a capture that landed while the store was rebuilding, or one cut short by a crash —
+  /// so it is composed here rather than read as a record without its `record.json`. A result that cannot
+  /// be composed is left in place, and the record is then loaded as it stands.
   static Future<RecordLoadResult> loadUpgradingSyncReadUnlocked(DirectoryPath directory) async {
+    try {
+      composeRecognizedSyncUnlocked(directory);
+    } catch (exception, stackTrace) {
+      logger.e("Failed to compose the recognizer's result for ${directory.name}.", exception, stackTrace);
+    }
     final ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded;
     try {
       decoded = _decodeStored(directory, directory.filePath("record.json").readAsStringSync());
@@ -568,6 +644,17 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     return _persistUpgradeUnlocked(directory, decoded);
   }
 
+  /// Whether the `record.json` [content] reads as the record [id] — what a loader would load rather than quarantine.
+  static bool readsAs(String content, String id) {
+    try {
+      final stored = CharaDetailRecordMapper.fromJson(content);
+      stored.upgradeFormat();
+      return stored.id == id;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Decodes the `record.json` [content] read from [directory], and upgrades it to [recordFormatVersion].
   ///
   /// Throws what the loaders quarantine on: a body that does not decode, one that names another record,
@@ -609,9 +696,42 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// The file [replaceRecordJsonUnlocked] writes before renaming it over `record.json`.
   ///
   /// One fixed name, so a file an interrupted replacement left behind is overwritten and renamed away by
-  /// the next one. Nothing reads it as a record: a record is its directory's `record.json`. The native
-  /// recognizer stages its own `record.json` write under the same name (`io_util::replace`).
+  /// the next one. Nothing reads it as a record: a record is its directory's `record.json`.
   static const recordJsonReplacementName = "record.json.part";
+
+  /// The file the native recognizer writes its result to in a record's directory, last and by replacement.
+  ///
+  /// Only the app writes `record.json`. The recognizer's result is not a record: its being there is the
+  /// fact that a recognition finished and the result waits to be composed into `record.json`
+  /// ([composeRecognizedSyncUnlocked]).
+  static const recognizedJsonName = "recognized.json";
+
+  /// Composes the recognizer's result waiting in [directory] into its `record.json` ([composeBodyWrite]),
+  /// and does nothing when there is none.
+  ///
+  /// `recognized.json` is removed only after `record.json` holds the result — written now, or found to
+  /// hold the same body already — so a composition that throws leaves the result where it was, and running
+  /// this again over a directory it has finished changes nothing. That is what lets each desktop entry a
+  /// result can reach first call it: the capture merge, a re-recognition's arrival and the store scan,
+  /// whichever comes first composes and the others read the record.
+  ///
+  /// Synchronous, for the desktop capture merge, which has to finish inside the stream-delivery microtask.
+  /// The caller holds [directory]'s record lock or the store's root scope, or is that merge.
+  static void composeRecognizedSyncUnlocked(DirectoryPath directory) {
+    final recognizedFile = directory.filePath(recognizedJsonName);
+    if (!recognizedFile.existsSync()) {
+      return;
+    }
+    final recognized = fromRecordJson(recognizedFile.readAsStringSync());
+    validateDirectoryId(directory, recognized);
+    final recordFile = directory.filePath("record.json");
+    final stored = recordFile.existsSync() ? _decodeStored(directory, recordFile.readAsStringSync()).upgraded : null;
+    final composed = composeBodyWrite(stored, recognized);
+    if (composed != null) {
+      replaceRecordJsonSyncUnlocked(directory, composed.toRecordJsonBytes());
+    }
+    recognizedFile.deleteSync();
+  }
 
   /// Replaces [directory]'s `record.json` with [bytes] so that a crash at any point leaves the old file or
   /// the new one whole, never a torn one the next scan would quarantine. Every app write that changes a
@@ -760,7 +880,9 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     for (var n = 1; destination.existsSync(); n++) {
       destination = quarantineRoot / "${name}_$n";
     }
-    return directory.moveSyncSafe(destination);
+    final moved = directory.moveSyncSafe(destination);
+    if (moved != null) noteQuarantineOriginSync(directory, moved);
+    return moved;
   }
 
   /// Asynchronous counterpart of [_quarantineOnFailure], for a caller which
@@ -821,7 +943,9 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     for (var n = 1; await destination.exists(); n++) {
       destination = quarantineRoot / "${name}_$n";
     }
-    return directory.moveAsyncSafe(destination);
+    final moved = await directory.moveAsyncSafe(destination);
+    if (moved != null) await noteQuarantineOrigin(directory, moved);
+    return moved;
   }
 
   /// Decodes a `record.json` body and upgrades it to [recordFormatVersion], for a reader that is not one
@@ -868,6 +992,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
         m.strategy,
         m.relationBonus,
         m.recordType,
+        m.binding,
+        m.bodyWrittenAt,
       ),
       trainee,
       evaluationValue,
@@ -890,7 +1016,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     );
   }
 
-  /// This record as the `record.json` bytes the native recognizer writes: UTF-8, 4-space indent.
+  /// This record as `record.json` bytes, in the form the native recognizer writes its result in: UTF-8,
+  /// 4-space indent.
   Uint8List toRecordJsonBytes() => utf8.encode(const JsonEncoder.withIndent('    ').convert(toMap()));
 
   /// Determines if another record represents the same character based on key attributes.

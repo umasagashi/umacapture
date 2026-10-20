@@ -22,7 +22,10 @@ import 'dart:isolate';
 import 'package:archive/archive_io.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_export_shape.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
@@ -80,7 +83,10 @@ Future<StorageZipDelivery> platformStorageZipRunner(
   // taking the record lock around it would stall the capture merge for exactly
   // that long, and none of that time is spent reading the folder. What has to be
   // excluded is the walk the encoder does, and this is where that begins.
-  await guard(() => _buildOnIsolate(directory.path, destination, onProgress));
+  await guard(() async {
+    final records = await placeStorageZipRecordBindings(ref, directory);
+    await _buildOnIsolate(directory.path, destination, records, onProgress);
+  });
   // The encoder reports a position within its own listing, and its last entry
   // may be a directory rather than a file, so the last fraction it sends can be
   // short of one. The bar reaches the end when the work does.
@@ -88,7 +94,12 @@ Future<StorageZipDelivery> platformStorageZipRunner(
   return StorageZipDelivery.written;
 }
 
-Future<void> _buildOnIsolate(String sourcePath, String destinationPath, StorageZipProgressSink onProgress) async {
+Future<void> _buildOnIsolate(
+  String sourcePath,
+  String destinationPath,
+  StorageZipRecords records,
+  StorageZipProgressSink onProgress,
+) async {
   final port = ReceivePort();
   final sink = port.sendPort;
   final subscription = port.listen((message) {
@@ -97,7 +108,7 @@ Future<void> _buildOnIsolate(String sourcePath, String destinationPath, StorageZ
     }
   });
   try {
-    await _spawnBuild(sourcePath, destinationPath, sink);
+    await _spawnBuild(sourcePath, destinationPath, records, sink);
   } finally {
     await subscription.cancel();
     port.close();
@@ -118,8 +129,8 @@ Future<void> _buildOnIsolate(String sourcePath, String destinationPath, StorageZ
 /// `Isolate.run` and not `compute`: the worker reports while it runs, and
 /// `compute` has one channel, used by its return value. The port travels with
 /// this closure, which is what makes it reach the worker.
-Future<void> _spawnBuild(String sourcePath, String destinationPath, SendPort progress) {
-  return Isolate.run(() => _buildZip(sourcePath, destinationPath, progress));
+Future<void> _spawnBuild(String sourcePath, String destinationPath, StorageZipRecords records, SendPort progress) {
+  return Isolate.run(() => _buildZip(sourcePath, destinationPath, records, progress));
 }
 
 /// Runs on the worker isolate.
@@ -153,7 +164,10 @@ Future<void> _spawnBuild(String sourcePath, String destinationPath, SendPort pro
 /// user can point the dialog at the folder being bundled, and the walk starts
 /// after the staging file exists; `zipOwnOutputFilter` says why that has to be a
 /// filter rather than a staging file elsewhere.
-Future<void> _buildZip(String sourcePath, String destinationPath, SendPort progress) async {
+///
+/// Each file of a record directory in [records] goes in as the export table says (`recordFileForExport`), from the
+/// `record.json` bytes [records] names in place of the file's.
+Future<void> _buildZip(String sourcePath, String destinationPath, StorageZipRecords records, SendPort progress) async {
   // A sibling, so the rename below stays on one volume and is a move rather
   // than a copy; suffixed with the microsecond clock so a concurrent export, or
   // a file the user happens to keep beside the destination, is not what gets
@@ -162,12 +176,41 @@ Future<void> _buildZip(String sourcePath, String destinationPath, SendPort progr
   final encoder = ZipFileEncoder();
   encoder.create(stagingPath);
   try {
+    final ownOutput = zipOwnOutputFilter(stagingPath: stagingPath, destinationPath: destinationPath);
+    final rewritten = <MapEntry<String, Uint8List>>[];
     await encoder.addDirectory(
       Directory(sourcePath),
       followLinks: false,
       onProgress: (fraction) => progress.send(fraction),
-      filter: zipOwnOutputFilter(stagingPath: stagingPath, destinationPath: destinationPath),
+      filter: (entity, fraction) {
+        final inRecord = entity is File && records.recordDirs.any((dir) => p.equals(dir, p.dirname(entity.path)));
+        if (!inRecord) {
+          return ownOutput(entity, fraction);
+        }
+        final name = p.basename(entity.path);
+        switch (recordFileExportOf(name)) {
+          case RecordFileExport.asIs:
+            return ownOutput(entity, fraction);
+          case RecordFileExport.left:
+            return ZipFileOperation.skip;
+          case RecordFileExport.body || RecordFileExport.archiveState:
+            final stored =
+                records.recordJsons.entries.where((entry) => p.equals(entry.key, entity.path)).firstOrNull?.value ??
+                entity.readAsBytesSync();
+            final bytes = recordFileForExport(name, stored);
+            if (bytes != null) rewritten.add(MapEntry(entity.path, bytes));
+            return ZipFileOperation.skip;
+        }
+      },
     );
+    // Named the way `addDirectory` names what it walks: the source folder's name, then the path below it.
+    for (final MapEntry(key: dir, value: note) in records.archiveNotes.entries) {
+      rewritten.add(MapEntry(p.join(dir, recordArchiveNoteName), note));
+    }
+    for (final file in rewritten) {
+      final name = [p.basename(sourcePath), ...p.split(p.relative(file.key, from: sourcePath))].join('/');
+      encoder.addArchiveFile(ArchiveFile.bytes(name, file.value));
+    }
     await encoder.close();
     // Replaces the destination if it exists, which is what the user answered the
     // overwrite prompt for; `rename` is the operating system's replace on both

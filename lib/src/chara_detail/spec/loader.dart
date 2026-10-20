@@ -14,6 +14,7 @@ import '/src/chara_detail/spec/item_cell.dart';
 import '/src/chara_detail/spec/item_display.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/chara_detail/value_write_time.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
@@ -345,15 +346,86 @@ T? _dataForMutation<T>(AsyncValue<T> state, {required String storage, required S
   return value;
 }
 
-@MappableClass()
+// A rating or memo storage file holds two kinds of value, each with the time it was written ([valueWriteTime]): one
+// per record (`data`, timed in `writtenAt`) and the column's title (`title`, timed in `titleWrittenAt`). A value is
+// "none" as well as a string or a number: a record field written to none keeps its time in `writtenAt` and has no
+// entry in `data`, and a title written to none is `titleCleared` — `title` keeps its last text, because `title` and
+// `data` keep the shape every earlier version reads and writes. A value with no time is one written before times
+// existed, and reads as older than every timed write. A storage whose title is none is a removed column storage: it is
+// not listed, and its file stays to hold the times of what the removal wrote.
+
+/// Each record field's time, kept for every field written to none as well, from [current] written over to none.
+///
+/// What removing a column storage leaves: a field a listed record holds a value in becomes none, written
+/// now; a field already none keeps its time, since nothing changes there; and nothing at all is kept for a record
+/// that is not listed, whose old value goes with the file's former contents. A null [listed] is a listing that could
+/// not be read, and counts every record as listed.
+Map<String, int> _writtenAtAfterRemoval(Map<String, Object> current, Map<String, int> writtenAt, Set<String>? listed) {
+  bool isListed(String id) => listed?.contains(id) ?? true;
+  return {
+    for (final MapEntry(:key, :value) in writtenAt.entries)
+      if (isListed(key) && !current.containsKey(key)) key: value,
+    for (final key in current.keys)
+      if (isListed(key)) key: valueWriteTime(writtenAt[key]),
+  };
+}
+
+@MappableClass(ignoreNull: true)
 class RatingData with RatingDataMappable {
   final String title;
   final Map<String, double> data;
 
-  RatingData({required this.title, required this.data});
+  /// When each record field was written, in milliseconds since the epoch, for fields with a value and fields
+  /// written to none alike. Mutable, as [data] is, for the in-place edit of a drag.
+  final Map<String, int> writtenAt;
 
-  RatingData copyWith({String? title, Map<String, double>? data}) {
-    return RatingData(title: title ?? this.title, data: data ?? this.data);
+  /// When [title] (or its being none) was written, or null for a title written before times existed.
+  final int? titleWrittenAt;
+
+  /// Whether the title is none: the column storage was removed.
+  final bool titleCleared;
+
+  RatingData({
+    required this.title,
+    required this.data,
+    Map<String, int>? writtenAt,
+    this.titleWrittenAt,
+    this.titleCleared = false,
+  }) : writtenAt = writtenAt ?? {};
+
+  RatingData copyWith({
+    String? title,
+    Map<String, double>? data,
+    Map<String, int>? writtenAt,
+    int? titleWrittenAt,
+    bool? titleCleared,
+  }) {
+    return RatingData(
+      title: title ?? this.title,
+      data: data ?? this.data,
+      writtenAt: writtenAt ?? this.writtenAt,
+      titleWrittenAt: titleWrittenAt ?? this.titleWrittenAt,
+      titleCleared: titleCleared ?? this.titleCleared,
+    );
+  }
+
+  /// This storage with its title set to [next], or null where it already holds it.
+  RatingData? withTitle(String next) {
+    if (!titleCleared && title == next) {
+      return null;
+    }
+    return copyWith(title: next, titleCleared: false, titleWrittenAt: valueWriteTime(titleWrittenAt));
+  }
+
+  /// This storage removed ([_writtenAtAfterRemoval]), its title none from now unless it already was.
+  RatingData removed(Set<String>? listed) {
+    return RatingData(
+      title: title,
+      data: {},
+      writtenAt: _writtenAtAfterRemoval(data, writtenAt, listed),
+      titleWrittenAt: titleCleared ? titleWrittenAt : valueWriteTime(titleWrittenAt),
+      titleCleared: true,
+    );
   }
 
   static RatingData get empty {
@@ -588,30 +660,53 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
   // Mutates the live map in place to avoid rebuilding the data grid on every
   // rating change. [save] snapshots the map before handing it to the writer
   // isolate, so this in-place edit cannot race the serialization.
-  void updateWithoutNotify(String recordId, double rating) {
+  //
+  // The mutators answer whether the value changed: a rating set to the one it
+  // already holds is not a write, so it neither advances the time nor needs a save.
+  bool updateWithoutNotify(String recordId, double rating) {
     final data = _dataFor("a rating for $recordId");
-    if (data == null) {
-      return;
+    if (data == null || data.data[recordId] == rating) {
+      return false;
     }
+    data.writtenAt[recordId] = valueWriteTime(data.writtenAt[recordId]);
     data.data[recordId] = rating;
+    return true;
   }
 
   // Named `updateRating` (not `update`) to avoid colliding with the inherited
   // `AsyncNotifier.update` modifier, which has an incompatible signature.
-  void updateRating(String recordId, double rating) {
+  bool updateRating(String recordId, double rating) {
     final data = _dataFor("a rating for $recordId");
-    if (data == null) {
-      return;
+    if (data == null || data.data[recordId] == rating) {
+      return false;
     }
-    state = AsyncData(data.copyWith(data: {...data.data, recordId: rating}));
+    state = AsyncData(
+      data.copyWith(
+        data: {...data.data, recordId: rating},
+        writtenAt: {...data.writtenAt, recordId: valueWriteTime(data.writtenAt[recordId])},
+      ),
+    );
+    return true;
   }
 
-  void updateTitle(String title) {
+  bool updateTitle(String title) {
     final data = _dataFor("a title change");
+    final next = data?.withTitle(title);
+    if (next == null) {
+      return false;
+    }
+    state = AsyncData(next);
+    return true;
+  }
+
+  /// Removes this column storage: its title and every value a [listed] record holds become none, written now.
+  void remove(Set<String>? listed) {
+    final data = _dataFor("removing the storage");
     if (data == null) {
       return;
     }
-    state = AsyncData(data.copyWith(title: title));
+    state = AsyncData(data.removed(listed));
+    save();
   }
 
   void save() {
@@ -619,7 +714,7 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
     if (data == null) {
       return;
     }
-    final contents = data.copyWith(data: {...data.data}).toJson();
+    final contents = data.copyWith(data: {...data.data}, writtenAt: {...data.writtenAt}).toJson();
     enqueueWrite(() => _writeFile(path, contents));
   }
 }
@@ -643,8 +738,11 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
   final result = <RatingStorageData>[];
   await for (final e in directoryPath.list()) {
     try {
-      final title = RatingDataMapper.fromJson(await e.asFilePath.readAsString()).title;
-      result.add(RatingStorageData(key: e.stem, title: title));
+      final stored = RatingDataMapper.fromJson(await e.asFilePath.readAsString());
+      // A removed storage keeps its file for the times its removal wrote, and is not listed.
+      if (!stored.titleCleared) {
+        result.add(RatingStorageData(key: e.stem, title: stored.title));
+      }
     } catch (error, stackTrace) {
       logger.w("Skipping unreadable rating file: path=${e.asFilePath.path}", error, stackTrace);
     }
@@ -679,15 +777,61 @@ final charaDetailRecordRatingProvider =
       CharaDetailRecordRatingController.new,
     );
 
-@MappableClass()
+@MappableClass(ignoreNull: true)
 class MemoData with MemoDataMappable {
   final String title;
   final Map<String, String> data;
 
-  MemoData({required this.title, required this.data});
+  /// As [RatingData.writtenAt]; a memo emptied by the user is a field written to none.
+  final Map<String, int> writtenAt;
 
-  MemoData copyWith({String? title, Map<String, String>? data}) {
-    return MemoData(title: title ?? this.title, data: data ?? this.data);
+  /// As [RatingData.titleWrittenAt].
+  final int? titleWrittenAt;
+
+  /// As [RatingData.titleCleared].
+  final bool titleCleared;
+
+  MemoData({
+    required this.title,
+    required this.data,
+    Map<String, int>? writtenAt,
+    this.titleWrittenAt,
+    this.titleCleared = false,
+  }) : writtenAt = writtenAt ?? {};
+
+  MemoData copyWith({
+    String? title,
+    Map<String, String>? data,
+    Map<String, int>? writtenAt,
+    int? titleWrittenAt,
+    bool? titleCleared,
+  }) {
+    return MemoData(
+      title: title ?? this.title,
+      data: data ?? this.data,
+      writtenAt: writtenAt ?? this.writtenAt,
+      titleWrittenAt: titleWrittenAt ?? this.titleWrittenAt,
+      titleCleared: titleCleared ?? this.titleCleared,
+    );
+  }
+
+  /// As [RatingData.withTitle].
+  MemoData? withTitle(String next) {
+    if (!titleCleared && title == next) {
+      return null;
+    }
+    return copyWith(title: next, titleCleared: false, titleWrittenAt: valueWriteTime(titleWrittenAt));
+  }
+
+  /// As [RatingData.removed].
+  MemoData removed(Set<String>? listed) {
+    return MemoData(
+      title: title,
+      data: {},
+      writtenAt: _writtenAtAfterRemoval(data, writtenAt, listed),
+      titleWrittenAt: titleCleared ? titleWrittenAt : valueWriteTime(titleWrittenAt),
+      titleCleared: true,
+    );
   }
 
   static MemoData get empty {
@@ -742,20 +886,23 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
     return state.value?.title ?? MemoData.empty.title;
   }
 
-  void _update({required String recordId, required String memo, required MemoData data}) {
-    state = AsyncData(data.copyWith(data: {...data.data, recordId: memo}));
-  }
-
-  void _remove({required String recordId, required MemoData data}) {
-    state = AsyncData(data.copyWith(data: {...data.data}..remove(recordId)));
-  }
-
   void updateTitle({required String title}) {
     final data = _dataFor("a title change");
+    final next = data?.withTitle(title);
+    if (next == null) {
+      return;
+    }
+    state = AsyncData(next);
+    _save();
+  }
+
+  /// As [CharaDetailRecordRatingController.remove].
+  void remove(Set<String>? listed) {
+    final data = _dataFor("removing the storage");
     if (data == null) {
       return;
     }
-    state = AsyncData(data.copyWith(title: title));
+    state = AsyncData(data.removed(listed));
     _save();
   }
 
@@ -764,22 +911,27 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
     if (data == null) {
       return;
     }
-    final contents = data.copyWith(data: {...data.data}).toJson();
+    final contents = data.copyWith(data: {...data.data}, writtenAt: {...data.writtenAt}).toJson();
     enqueueWrite(() => _writeFile(path, contents));
   }
 
   // Named `updateMemo` (not `update`) to avoid colliding with the inherited
   // `AsyncNotifier.update` modifier, which has an incompatible signature.
+  //
+  // An empty memo is none. A memo the field already holds — none included — is
+  // not a write: nothing is saved and its time does not advance.
   void updateMemo({required String recordId, required String? memo}) {
     final data = _dataFor("a memo for $recordId");
-    if (data == null) {
+    final next = memo == null || memo.isEmpty ? null : memo;
+    if (data == null || data.data[recordId] == next) {
       return;
     }
-    if (memo == null || memo.isEmpty) {
-      _remove(recordId: recordId, data: data);
-    } else {
-      _update(recordId: recordId, memo: memo, data: data);
-    }
+    state = AsyncData(
+      data.copyWith(
+        data: next == null ? ({...data.data}..remove(recordId)) : {...data.data, recordId: next},
+        writtenAt: {...data.writtenAt, recordId: valueWriteTime(data.writtenAt[recordId])},
+      ),
+    );
     _save();
   }
 }
@@ -803,8 +955,11 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   final result = <MemoStorageData>[];
   await for (final e in directoryPath.list()) {
     try {
-      final title = MemoDataMapper.fromJson(await e.asFilePath.readAsString()).title;
-      result.add(MemoStorageData(key: e.stem, title: title));
+      final stored = MemoDataMapper.fromJson(await e.asFilePath.readAsString());
+      // A removed storage keeps its file for the times its removal wrote, and is not listed.
+      if (!stored.titleCleared) {
+        result.add(MemoStorageData(key: e.stem, title: stored.title));
+      }
     } catch (error, stackTrace) {
       logger.w("Skipping unreadable memo file: path=${e.asFilePath.path}", error, stackTrace);
     }

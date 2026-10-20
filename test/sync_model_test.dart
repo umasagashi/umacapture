@@ -20,6 +20,8 @@
 // tool/sync_model_random.dart.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
 
 import 'support/sync_model/accepted_cases.dart';
 import 'support/sync_model/detections.dart';
@@ -694,7 +696,8 @@ void main() {
     FState of(List<FRec> records) => FState()..records.addAll({for (final r in records) r.id: r});
     String? row(FState? base, FState local, FState server) => merge3(base, local, server).rows['X'];
     Set<String> result(FState? base, FState local, FState server) => {
-      for (final r in merge3(base, local, server).result.records.values) '${r.id.split('~').first}=${r.recognisedFrom}',
+      for (final r in merge3(base, local, server).result.records.values)
+        '${r.id.split(recordSyncSplitSeparator).first}=${r.recognisedFrom}',
     };
 
     final x = rec('X');
@@ -733,8 +736,7 @@ void main() {
 
     test('what a record shows and its stage are values: the later written stands, whatever the base and whatever '
         'the record is made of; of one time, the server\'s', () {
-      FRec merge(FRec? b, FRec l, FRec s, {FileMutation? mutation}) =>
-          merge3(b == null ? null : of([b]), of([l]), of([s]), mutation: mutation).result.records['X']!;
+      FRec merge(FRec? b, FRec l, FRec s) => merge3(b == null ? null : of([b]), of([l]), of([s])).result.records['X']!;
       FRec at(FRec r, {int body = 0, int stage = 0}) => r.copy()
         ..bodyTime = body
         ..stageTime = stage;
@@ -761,15 +763,6 @@ void main() {
       expect(merge(x, at(again, body: 2), at(older, body: 3)).body, older.body);
       expect(merge(x, at(merged, body: 2), at(again, body: 3)).body, again.body);
       expect(merge(x, at(merged, body: 3), at(again, body: 2)).body, merged.body);
-      // Broken on purpose, the higher R# and the nearer stage stand where the two differ, whichever is later.
-      expect(
-        merge(x, at(again, body: 2), at(older, body: 3), mutation: FileMutation.bodyOfTheHigherRecognition).body,
-        again.body,
-      );
-      expect(
-        merge(x, at(jpeg, stage: 2), at(none, stage: 3), mutation: FileMutation.nearerStageWhereTheTwoDiffer).stage,
-        FStage.resizedJpeg,
-      );
     });
 
     test('a record split off under an id that holds a record already meets it as a record of that id met with no '
@@ -796,15 +789,6 @@ void main() {
       expect(landed(FStage.none, there()..stageTime = 3, time: 2).stage, FStage.active);
       expect(landed(FStage.active, there(stage: FStage.none), time: 2).stage, FStage.active);
       expect(landed(FStage.active, there(stage: FStage.none)).stage, FStage.none);
-      expect(
-        landed(
-          FStage.active,
-          there(stage: FStage.none),
-          time: 2,
-          mutation: FileMutation.splitOffStageYieldsToTheIdsOwn,
-        ).stage,
-        FStage.none,
-      );
       // The one record shows the later written content (F1), with the parents that go with it (S-13).
       final mine = rec('X', recognisedFrom: 'Y', absorbed: {'Y'})
         ..r = 2
@@ -815,9 +799,6 @@ void main() {
       final one = lands(mine, [held()]).result.records[split]!;
       expect(one.r, 2);
       expect(one.parents, {'parent1': 'P'});
-      final yielded = lands(mine, [held()], mutation: FileMutation.splitOffRecordYieldsToTheIdsOwn);
-      expect(yielded.result.records[split]!.r, 1);
-      expect(yielded.result.records[split]!.parents, {'parent2': 'Q'});
 
       // A record made of the same that shows other content is one with it too: what the one record
       // shows is the content written later.
@@ -835,7 +816,7 @@ void main() {
       );
       final beside = lands(mine, [elsewhere()]);
       final again = beside.moved['X']!;
-      expect(again, startsWith('$split~'));
+      expect(again, startsWith('$split$recordSyncSplitSeparator'));
       expect(beside.result.records.keys, ['X', split, again]);
       expect(beside.result.records[split]!.recognisedFrom, 'W');
       expect(beside.result.records[again]!.body, 'Y@2');
@@ -852,13 +833,9 @@ void main() {
         elsewhere(),
         rec(again, recognisedFrom: 'V', absorbed: {'Y', 'V'}),
       ]);
-      expect(twice.moved['X'], startsWith('$again~'));
+      expect(twice.moved['X'], startsWith('$again$recordSyncSplitSeparator'));
       expect(twice.result.records.keys, ['X', split, again, twice.moved['X']]);
       expect(twice.result.records[again]!.recognisedFrom, 'V');
-      final dropped = lands(mine, [elsewhere()], mutation: FileMutation.splitOffRecordYieldsToTheIdsOwn);
-      expect(dropped.moved['X'], split);
-      expect(dropped.result.records.keys, ['X', split]);
-      expect(dropped.result.records[split]!.recognisedFrom, 'W');
 
       // What the device wrote on its record goes with it, to the id it comes to.
       FPlan written({FileMutation? mutation}) => merge3(
@@ -871,9 +848,6 @@ void main() {
       );
       expect(written().result.cells, {('c', split): const FCell('1', 9), ('c', again): const FCell('5', 3)});
       expect(written().result.dismissed, {pairOf(again, 'W')});
-      final lost = written(mutation: FileMutation.splitOffRecordYieldsToTheIdsOwn).result;
-      expect(lost.cells, {('c', split): const FCell('1', 9)});
-      expect(lost.dismissed, {pairOf(split, 'W')});
 
       // The pair the device's record brings is dismissed under the id it comes to, whatever the three
       // hold of that id's pair; a pair it does not bring is that id's own, compared as any other.
@@ -889,8 +863,6 @@ void main() {
       expect(pairs(mine: false, theirs: true), {pairOf(split, 'W')});
       expect(pairs(mine: false), isEmpty);
       expect(pairs(mine: false, agreed: true), isEmpty);
-      expect(pairs(agreed: true, mutation: FileMutation.splitOffDismissalYieldsToThePairsOwn), isEmpty);
-      expect(pairs(mutation: FileMutation.splitOffDismissalsStay), {pairOf('X', 'W')});
       // The pair of the device's record and the record it is one with from here names one record twice.
       final joined = merge3(
         of([x, w]),
@@ -934,7 +906,6 @@ void main() {
         mutation: mutation,
       ).result.dismissed;
       expect(read({}, {'Y+Z'}, {}), {'X+Z'});
-      expect(read({}, {'Y+Z'}, {}, mutation: FileMutation.absorbedDismissalsAreDropped), isEmpty);
       // What the two agreed on of Y, re-keyed by the merging device: as it was.
       expect(read({'Y+Z'}, {'Y+Z'}, {'X+Z'}), {'X+Z'});
       // Agreed on of Y, and the merging device's is gone since: gone.
@@ -982,9 +953,6 @@ void main() {
       expect(plan({'Y+Z'}).result.dismissed, {'X+Z'});
       expect(plan({'X+Z'}).result.dismissed, {pairOf(split, 'Z')});
       expect(plan({'X+Z', 'Y+Z'}).result.dismissed, {'X+Z', pairOf(split, 'Z')});
-      expect(plan({'Y+Z'}, mutation: FileMutation.rereadDismissalsGoWithTheSplit).result.dismissed, {
-        pairOf(split, 'Z'),
-      });
       // The pair of the device's X and the record the server merged into its X is no pair of one record.
       expect(plan({'X+Y'}).result.dismissed, {pairOf(split, 'X')});
       // The pair the two agreed on of X is the server's still: the device's own went with its record.
@@ -992,6 +960,116 @@ void main() {
       expect(plan({}, agreed: {'X+Z'}).result.dismissed, {'X+Z'});
       // A pair read as the pair of the id split off is compared as that id's: new here, it is put in.
       expect(plan({'Y+Z'}, agreed: {'X+Z'}).result.dismissed, {'X+Z'});
+    });
+  });
+
+  group('file sync rules: the app\'s merge', () {
+    test('gives the same whatever order its inputs hold their records, cells, titles, pairs and ids in', () {
+      SyncRecord rec(
+        String id, {
+        Set<String> absorbed = const {},
+        int time = 0,
+        Map<String, String> parents = const {},
+      }) => SyncRecord(
+        id,
+        body: SyncBody('$id@$time', parents: parents, time: time),
+        absorbed: absorbed,
+      );
+      SyncSide side(
+        List<SyncRecord> records, {
+        Map<(String, String), SyncValue<String?>> cells = const {},
+        Map<String, SyncValue<String?>> titles = const {},
+        Set<String> dismissed = const {},
+      }) => SyncSide(records: {for (final r in records) r.id: r}, cells: cells, titles: titles, dismissed: dismissed);
+      Map<K, V> backwards<K, V>(Map<K, V> map) => Map.fromEntries(map.entries.toList().reversed);
+      SyncSide reversed(SyncSide s) => SyncSide(
+        records: {
+          for (final r in s.records.values.toList().reversed)
+            r.id: SyncRecord(
+              r.id,
+              body: SyncBody(
+                r.body.content,
+                binding: r.body.binding,
+                parents: backwards(r.body.parents),
+                time: r.body.time,
+              ),
+              absorbed: r.absorbed.toList().reversed.toSet(),
+              stage: r.stage,
+              splitFrom: r.splitFrom,
+            ),
+        },
+        cells: backwards(s.cells),
+        titles: backwards(s.titles),
+        dismissed: s.dismissed.toList().reversed.toSet(),
+      );
+      List<String> sorted(Iterable<Object?> all) => all.map((x) => '$x').toList()..sort();
+      String held(RecordSyncOutcome o) => [
+        for (final r in o.result.records.values)
+          '${r.id}=${r.body.content}^${r.body.time}/${sorted(r.body.parents.entries)}/${r.stage}/'
+              '${sorted(r.absorbed)}/${r.splitFrom}',
+        ...sorted(o.result.cells.entries),
+        ...sorted(o.result.titles.entries),
+        ...sorted(o.result.dismissed),
+        ...sorted(o.moved.entries),
+        ...sorted(o.rows.entries),
+      ].join('|');
+
+      // Both devices merged another record into X (a split), the device's merge retired W's parent Y, and Z, which
+      // the server's merge retired, the device kept as the base held it.
+      final base = side(
+        [
+          rec('X'),
+          rec('Y'),
+          rec('Z'),
+          rec('W', parents: {'parent1': 'Y'}),
+        ],
+        cells: {('memo', 'X'): const SyncValue('a', 1)},
+        titles: {'memo': const SyncValue('Memo', 1)},
+        dismissed: {'W+X'},
+      );
+      final local = side(
+        [
+          rec('X', absorbed: {'Y'}, time: 2),
+          rec('Z'),
+          rec('W', parents: {'parent1': 'Y', 'parent2': 'Z'}),
+        ],
+        cells: {('memo', 'X'): const SyncValue('b', 3), ('rating', 'Z'): const SyncValue('4', 2)},
+        titles: {'memo': const SyncValue('Notes', 2)},
+        dismissed: {'W+X', 'X+Z'},
+      );
+      final server = side(
+        [
+          rec('X', absorbed: {'Z'}, time: 3),
+          rec('Y'),
+          rec('W'),
+        ],
+        cells: {('memo', 'X'): const SyncValue('c', 4)},
+        titles: {'rating': const SyncValue('Stars', 3)},
+        dismissed: {'W+X', 'W+Y'},
+      );
+      final once = mergeRecordSync(base, local, server);
+      expect(once.moved.keys, ['X']);
+      expect(held(mergeRecordSync(reversed(base), reversed(local), reversed(server))), held(once));
+    });
+
+    test('reads two bindings of one content that each know other fields as one, and keeps what either knows', () {
+      // R from before the binding, on two devices: each worked its binding out of its own directory, after A had
+      // let go of campaign.png and B of skill.png. Neither body carries a time.
+      SyncSide holding(RecordBinding? binding) => SyncSide(
+        records: {'R': SyncRecord('R', body: SyncBody('content', binding: binding))},
+      );
+      const a = RecordBinding(skillPng: 'skill', factorPng: 'factor');
+      const b = RecordBinding(factorPng: 'factor', campaignPng: 'campaign');
+
+      final agreed = mergeRecordSync(holding(null), holding(a), holding(b)).result.records['R']!.body;
+      expect(agreed.sameAs(SyncBody('content', binding: b)), isTrue);
+      expect(agreed.binding, const RecordBinding(skillPng: 'skill', factorPng: 'factor', campaignPng: 'campaign'));
+
+      // A field both know with two values: two bodies, of one time, and the server's stands.
+      const other = RecordBinding(factorPng: 'another factor', campaignPng: 'campaign');
+      final disagreed = mergeRecordSync(holding(null), holding(a), holding(other)).result.records['R']!.body;
+      expect(SyncBody('content', binding: a).sameAs(SyncBody('content', binding: other)), isFalse);
+      expect(disagreed.binding, other);
     });
   });
 
@@ -1148,11 +1226,6 @@ void main() {
       FileMutation.noBase: 'delete after sync is delivered',
       FileMutation.removalWinsOverChange: 'C2 a merge against a delete that had not received it, merge first',
       FileMutation.noSplit: 'CE-1 overlapping merges',
-      FileMutation.versionWithoutAbsorbed: 'U-S32 a merge that keeps the survivor content, merge first',
-      FileMutation.versionReadsWhatItShows: 'the same pair merged on both devices, each keeping the other side',
-      FileMutation.bodyOfTheHigherRecognition: 'a record recognised again on both devices, the later at the lower R#',
-      FileMutation.nearerStageWhereTheTwoDiffer:
-          'a record archived without images on one device after the other archived it with resized images',
       FileMutation.writesWhatItLeavesAsItWas:
           'a record recognised again on one device, merged on keeping its own content on the other',
       FileMutation.editsWhatItLeavesAsItWas: 'a memo opened and closed with OK after another device wrote it',
@@ -1163,10 +1236,8 @@ void main() {
           'a zip of other content put over a record, its rating and its dismissed pair kept',
       FileMutation.swapIgnoresGeneration: 'a list sent after the server moved on',
       FileMutation.cellsOfRemovedRecordsSent: 'the memo of a record the other device deleted',
-      FileMutation.cellsWithoutTimes: 'edits of one cell, the later one sent first',
       FileMutation.longMemoSent: 'a memo over the send limit',
       FileMutation.appliesWithoutBodies: 'capture reaches the other device',
-      FileMutation.restoredLeavesAbsorbed: 'a merge over a record the other device merged away',
       FileMutation.forgetsSentList: 'the answer to a swap lost, then a delete',
       FileMutation.sameGenerationUsesARead: 'a delete under a daily limit of one read',
       FileMutation.rereadTakesRecordsOnly: 'a pair dismissed in a swap whose answer was lost, then offered again',
@@ -1176,23 +1247,6 @@ void main() {
           'the answer to a swap lost, then a delete sent by the sending half of a round',
       FileMutation.dismissalsFollowIds: 'a pair dismissed, one of its records deleted and taken back from a zip',
       FileMutation.mergeLeavesDismissals: 'a pair dismissed, one of its records merged into another',
-      FileMutation.absorbedDismissalsAreDropped:
-          'a pair dismissed elsewhere, one of its records merged into another before the dismissal arrived',
-      FileMutation.unheldPairSilencesAHeldOne:
-          'two pairs dismissed that a merge reads as one, a record of one deleted and the file of dismissed pairs deleted there',
-      FileMutation.pairInOneRecordIsHeld:
-          'a pair dismissed, one of its records merged into the other on one device and kept by a merge on the other',
-      FileMutation.endHeldElsewhereSpeaks:
-          'a pair dismissed, one of its records merged into a third on one device and kept by a merge on the other',
-      FileMutation.splitOffYieldsToTheBase:
-          'a pair dismissed, one of its records merged on one device into a record the other device splits off, the '
-          'file of dismissed pairs deleted there',
-      FileMutation.listedFormIgnored:
-          'a pair dismissed on a device that holds one of its records both apart and in a record that absorbed it, '
-          'that record merged into a third there and into a fourth on the other device',
-      FileMutation.noneOfHeldReadingsOnly:
-          'a pair dismissed, its records merged into a third one on each device, that record split off on the '
-          'second, and the file of dismissed pairs deleted on the first',
       FileMutation.pairsWaitForTheRoundsEnd:
           'a pair dismissed, one of its records deleted on one device and merged on the other, a round cut between '
           'the merge and records captured since',
@@ -1201,28 +1255,12 @@ void main() {
           'once it took in the merge',
       FileMutation.dismissalsOfMissingRecordsStay: 'a pair dismissed, one of its records deleted elsewhere',
       FileMutation.splitOffDismissalsStay: 'a pair dismissed on a record split off',
-      FileMutation.rereadDismissalsGoWithTheSplit:
-          'a pair dismissed on a record merged elsewhere into a record this device\'s own is split off',
       FileMutation.mergeEditsEveryCellItSettles: 'an edit made elsewhere before a merge that leaves its cell as it was',
-      FileMutation.splitOffDismissalYieldsToThePairsOwn:
-          'a pair dismissed on a record split off under the id a record made of the same was split off under',
-      FileMutation.splitOffStageYieldsToTheIdsOwn:
-          'a record archived without images, split off under the id a record made of the same was split off under',
-      FileMutation.splitOffRecordYieldsToTheIdsOwn:
-          'a record recognised again and linked, split off under the id a record made of the same was split off under',
-      FileMutation.splitOffMeetsItsLikeWithNoBase:
-          'a merge that makes a record of what one split off before is made of, which the other device merged away',
-      FileMutation.splitOffYieldsToTheDevicesOwnChange:
-          'a zip that makes a record of what one split off before is made of, after removing that record',
       FileMutation.columnStoreDeletionLeavesNoTime:
           'a column\'s store deleted on a device that had not received the memo another device typed before',
-      FileMutation.parentsApartFromTheContent: 'a merge on the other device keeping a content that names other parents',
       FileMutation.resolverWritesTheContent: 'a parent found on one device after the other recognised the record again',
       FileMutation.legacyDeleteDropsCells:
           'a record deleted by the app from before the upgrade, its memo from then, taken back from a zip',
-      FileMutation.ownListedPairIgnored:
-          'a pair dismissed of two records a third absorbed, taken back from their zips, one merged into the third '
-          'again and the third taken back',
     };
     for (final MapEntry(key: mutation, value: name) in turnsRed.entries) {
       test(mutation.name, () {
@@ -1232,77 +1270,11 @@ void main() {
       });
     }
 
-    test('splitOffRecordYieldsToTheIdsOwn, where the id holds a record made of something else', () {
-      final c = fileCases.singleWhere(
-        (c) =>
-            c.name ==
-            'a record split off where the id a record made of the same was split off under holds another content since',
-      );
-      expect(meets(c, runFileCase(c)), isTrue);
-      final broken = runFileCase(c, mutation: FileMutation.splitOffRecordYieldsToTheIdsOwn);
-      expect(meets(c, broken), isFalse);
-      // The record split off is listed nowhere, and its rating shows on the record the id held.
-      expect(broken.rest, {'R1=R1', 'R1~=R4 rating1=5'});
-    });
-
-    test('splitOffMeetsItsLikeWithNoBase, where the other device merged the record on', () {
-      final c = fileCases.singleWhere(
-        (c) =>
-            c.name ==
-            'a merge that makes a record of what one split off before is made of, which the other device merged on',
-      );
-      expect(meets(c, runFileCase(c)), isTrue);
-      final broken = runFileCase(c, mutation: FileMutation.splitOffMeetsItsLikeWithNoBase);
-      expect(meets(c, broken), isFalse);
-      // The record split off is split off the id once more, with the content A's merge kept.
-      expect(broken.rest, {'R1=R3', 'R1~=R4', 'R1~~=R1'});
-    });
-
-    test('splitOffYieldsToTheDevicesOwnChange, where the device merged another into its record of the id', () {
-      for (final (tail, rest) in [
-        ('', {'R1=R3', 'R1~=R1', 'R2=R2'}),
-        (', which the other device merged away', {'R1=R1', 'R1~=R1', 'R2=R2'}),
-      ]) {
-        final c = fileCases.singleWhere(
-          (c) =>
-              c.name ==
-              'a zip that makes a record of what one split off before is made of, after merging another into that '
-                  'record$tail',
-        );
-        expect(meets(c, runFileCase(c)), isTrue, reason: tail);
-        final broken = runFileCase(c, mutation: FileMutation.splitOffYieldsToTheDevicesOwnChange);
-        expect(broken.rest, rest, reason: tail);
-      }
-    });
-
-    test('splitOffMeetsItsLikeWithNoBase changes nothing where the base holds the id made of something else', () {
-      final c = fileCases.singleWhere(
-        (c) =>
-            c.name ==
-            'a merge that makes a record of what one split off before is made of, the base holding that id made of more',
-      );
-      expect(meets(c, runFileCase(c)), isTrue);
-      expect(meets(c, runFileCase(c, mutation: FileMutation.splitOffMeetsItsLikeWithNoBase)), isTrue);
-    });
-
-    test('absentRecordTakesItsPairsOut, whichever device syncs first', () {
-      for (final first in ['merge first', 'delete first']) {
-        final c = fileCases.singleWhere(
-          (c) => c.name == 'a pair dismissed, one of its records deleted on one device and merged on the other, $first',
-        );
-        expect(meets(c, runFileCase(c)), isTrue, reason: first);
-        final broken = runFileCase(c, mutation: FileMutation.absentRecordTakesItsPairsOut);
-        expect(meets(c, broken), isFalse, reason: first);
-        // The record stays, and the pair dismissed of it is gone.
-        expect(broken.rest, {'R1=R1', 'R3=R3'}, reason: first);
-      }
-    });
-
     test('the mutations no named sequence sees are known', () {
       // A record a waiting merge retired leaving the list early shows only while the storage is full. A base that
       // keeps, after a round that stops, a pair read as one a record split off brought is read the same as one that
       // does not wherever the round that ends reads the pair: a side speaks of it only where it holds a record that is
-      // the record split off ([sideSays]), and none was found where the server does and lists no such pair.
+      // the record split off ([syncSideSays]), and none was found where the server does and lists no such pair.
       final seen = {...turnsRed.keys, for (final c in fileJudgeCases) ?c.broken};
       expect(FileMutation.values.toSet().difference(seen), {
         FileMutation.retiredLeavesBeforeSurvivor,
@@ -1399,9 +1371,6 @@ void main() {
       final asItIs = judgeFileCase(ops);
       expect(asItIs.rest, {'R1=R1 memo=late rating1=5'});
       expect(asItIs.violations, isEmpty);
-      final earlierKept = judgeFileCase(ops, mutation: FileMutation.cellsWithoutTimes);
-      expect(earlierKept.rest, {'R1=R1 memo=early rating1=1'});
-      expect(_keys(earlierKept.violations), {'memoLost:R1', 'memoLost:R1/rating1'});
     });
 
     test('a merge that leaves its result under the newer record\'s id is reported from what the two showed before '
@@ -1440,7 +1409,7 @@ void main() {
       // [ops] leave the judge reporting [reports] (an id split off another shortened to `X~`) under [names].
       void expectNamed(List<Op> ops, Set<String> reports, Set<Candidate> names) {
         final r = judgeFileCase(ops);
-        expect({for (final key in _keys(r.violations)) key.replaceFirst(RegExp(r'~\w+'), '~')}, reports);
+        expect({for (final key in _keys(r.violations)) plainSplitIds(key)}, reports);
         expect(r.candidates, names);
       }
 
@@ -1602,18 +1571,16 @@ void main() {
 
     test('of two edits of a cell, one on a record split off and one on the record made of the same its id was '
         'split off under before, the later is kept', () {
-      Set<String> plain(Iterable<String> all) => {for (final x in all) x.replaceAll(RegExp('~[a-z0-9]+'), '~')};
-      for (final (name, laterKept, earlierKept) in [
+      Set<String> plain(Iterable<String> all) => {for (final x in all) plainSplitIds(x)};
+      for (final (name, laterKept) in [
         (
           'the later of two ratings, on a record split off under the id a record made of the same was split off '
               'under',
           {'R1=R1', 'R1~=R2 rating1=4', 'R2=R2'},
-          {'R1=R1', 'R1~=R2 rating1=5', 'R2=R2'},
         ),
         (
           'the later of two ratings of records one device lists, the second split off under the id of the first',
           {'R1=R1', 'R1~=R1 rating1=2'},
-          {'R1=R1', 'R1~=R1 rating1=4'},
         ),
       ]) {
         final ops = judgeCaseOps(name);
@@ -1623,10 +1590,6 @@ void main() {
           expect(plain(listed), laterKept, reason: name);
         }
         expect(asItIs.violations, isEmpty, reason: name);
-        final yielded = judgeFileCase(ops, mutation: FileMutation.splitOffCellYieldsToTheIdsOwn);
-        expect(plain(yielded.rest), earlierKept, reason: name);
-        expect(plain(_keys(yielded.violations)), {'memoLost:R1~/rating1'}, reason: name);
-        expect(yielded.candidates, isEmpty, reason: name);
       }
       // The later may as well be the one the id held: B rates its record once more before A's lands on it.
       final ownLater = judgeFileCase([

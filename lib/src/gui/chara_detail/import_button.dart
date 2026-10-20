@@ -57,9 +57,9 @@ List<PathEntity> recordImportLongReadPaths(PathInfo pathInfo) => [pathInfo.chara
 /// list, and the storage view no longer holds the right size — belong to the same
 /// fact.
 ///
-/// The stores are rescanned rather than patched: `build()` re-lists `active/`,
-/// and the archive rescan keeps the dedup and inheritance views consistent even
-/// though the import only writes into `active/`. [effects] is handed the record
+/// The stores are rescanned rather than patched: an import writes into the
+/// store of each record's archive state and takes the record out of the other,
+/// so both are re-listed. [effects] is handed the record
 /// root for the totals, which is what makes a size shown on an open storage tab
 /// follow an import that finishes behind it, and the directories of
 /// [writtenIds] for the pictures: an import publishes over a record id that is
@@ -83,10 +83,31 @@ void applyRecordImportCompletion(
   effects.images.apply(
     RecordImageScope(
       info: pathInfo,
-      changed: [for (final id in writtenIds) recordDirOfId(pathInfo, RecordSource.active, id).path],
+      // Both stores: an import lands a record in the store of its archive state, and takes it out of the other.
+      changed: [
+        for (final id in writtenIds)
+          for (final source in [RecordSource.active, RecordSource.archive]) recordDirOfId(pathInfo, source, id).path,
+      ],
     ),
   );
   effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+}
+
+/// Runs the resolution a capture runs over the records an import wrote ([writtenIds]), once both
+/// stores have been re-listed after [applyRecordImportCompletion].
+///
+/// A failure here leaves every record on disk and in the table; only the links and relation bonuses
+/// the resolution would have written are missing, and the manual whole-store resolution fills them.
+/// So it is reported with the resolution's own sentence and does not turn the import into a failure.
+Future<void> _resolveImportedInheritance(ProviderContainer container, Iterable<String> writtenIds) async {
+  try {
+    await container.read(charaDetailRecordStorageLoaderProvider.future);
+    await container.read(charaDetailArchiveStorageLoaderProvider.future);
+    await container.read(charaDetailRecordStorageLoaderProvider.notifier).resolveImportedInheritance(writtenIds);
+  } catch (error, stackTrace) {
+    logger.e("Failed to resolve inheritance for imported records.", error, stackTrace);
+    Toaster.show(ToastData.error(description: "app.inheritance.failed".tr()));
+  }
 }
 
 /// What a record import declares: the written records' cached pictures and previews are dropped,
@@ -107,22 +128,18 @@ RecordWriteEffects recordImportEffects(RefBase base) =>
 /// fixed here is precisely a refusal that reached the user as nothing at all.
 @visibleForTesting
 String importRefusalKey(RecordImportRefusal refusal) => switch (refusal) {
-  RecordImportRefusal.alreadyArchived => "$tr_import.refused.already_archived",
   RecordImportRefusal.duplicateOfExisting => "$tr_import.refused.duplicate_of_existing",
   RecordImportRefusal.notStored => "$tr_import.refused.not_stored",
 };
 
 /// How prominently [refusal] is shown.
 ///
-/// [RecordImportRefusal.alreadyArchived] is a warning, not an error: the user
-/// already owns that record and is asked to do nothing. Anything else is a
-/// record they wanted and did not get.
+/// [RecordImportRefusal.duplicateOfExisting] is a warning, not an error: the
+/// record the user wanted is in the table, under the id it was captured with,
+/// and they are asked to do nothing. Anything else is a record they wanted and
+/// did not get.
 @visibleForTesting
 ToastType importRefusalToastType(RecordImportRefusal refusal) => switch (refusal) {
-  RecordImportRefusal.alreadyArchived => ToastType.warning,
-  // A duplicate is the same "you already own this, do nothing" as an archived
-  // copy: the record the user wanted is in the table, under the id it was
-  // captured with.
   RecordImportRefusal.duplicateOfExisting => ToastType.warning,
   RecordImportRefusal.notStored => ToastType.error,
 };
@@ -343,6 +360,9 @@ class CharaDetailImportButton extends ConsumerWidget {
       // app-scoped stores are stale whether or not it survived, so the toast (published to an
       // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
       // user navigated away from stays invisible in the table until the app is restarted.
+      // Asked before the rescan below rebuilds the store: a container that never built it has no
+      // record set to resolve against, the same silence the duplicate check above takes.
+      final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
       if (committed) {
         applyRecordImportCompletion(
           container.read(containerRefProvider),
@@ -402,6 +422,9 @@ class CharaDetailImportButton extends ConsumerWidget {
       // anything) to do about it.
       for (final toast in importRefusalToasts(refusals)) {
         Toaster.show(toast);
+      }
+      if (committed && resolvesAfterImport) {
+        await _resolveImportedInheritance(container, importedIds);
       }
     } catch (error, stackTrace) {
       // Reached when the import could not be attempted at all (e.g. the storage

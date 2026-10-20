@@ -5,7 +5,7 @@
 """Golden integration test for the native recognition pipeline.
 
 Drives the real ``umacapture_cli`` over recorded clips and compares the recognized
-``record.json`` set against committed golden files. Each case states its ``mode``: a
+``recognized.json`` set against committed golden files. Each case states its ``mode``: a
 ``video`` case goes through the ``video`` subcommand (OpenCV decode of a plain clip),
 a ``replay`` case is a lossless FFV1 recording driven through ``replay`` (the recorded
 frames enter the pipeline directly). This exercises the full ONNX/WinRT/FFmpeg pipeline
@@ -165,13 +165,13 @@ def _sort_key(record: dict) -> str:
 
 
 def collect_records(output_dir: Path) -> list[dict]:
-    """Collect and normalize every record.json a `video` run wrote, in a stable order.
+    """Collect and normalize every recognized.json a `video` run wrote, in a stable order.
 
     The per-record output dirs are UUID-named, so a batch clip's records arrive in a
     nondeterministic filesystem order; sort by canonical content to make the set comparable.
     """
     active = output_dir / "storage" / "chara_detail" / "active"
-    records = [normalize(json.loads(path.read_text(encoding="utf-8"))) for path in active.glob("*/record.json")]
+    records = [normalize(json.loads(path.read_text(encoding="utf-8"))) for path in active.glob("*/recognized.json")]
     return sorted(records, key=_sort_key)
 
 
@@ -614,7 +614,7 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
         output_dir = Path(tmp)
         # A `replay` case is a lossless FFV1 recording (from `capture --record`): the `replay`
         # subcommand reads the recorded frames straight into the pipeline. A `video` case is a plain
-        # clip decoded by OpenCV. Both write the same storage/chara_detail/active/*/record.json set,
+        # clip decoded by OpenCV. Both write the same storage/chara_detail/active/*/recognized.json set,
         # so collection and comparison are identical.
         if case_mode(case) == "replay":
             input_args = ["replay", "--record", str(video)]
@@ -661,13 +661,13 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
     expected_records = case.get("expect_records")
     if expected_records is None:
         if not actual:
-            return "fail", "cli produced no record.json (recognition failed or clip yielded nothing)"
+            return "fail", "cli produced no recognized.json (recognition failed or clip yielded nothing)"
     else:
         if len(actual) != expected_records:
-            return "fail", f"cli produced {len(actual)} record.json, expected {expected_records}"
+            return "fail", f"cli produced {len(actual)} recognized.json, expected {expected_records}"
         _, summary = read_summary(completed.stderr)  # already validated by check_run
         if summary["records"] != expected_records:  # type: ignore[index]
-            return "fail", "cli wrote {} record.json but reports records={!r}".format(
+            return "fail", "cli wrote {} recognized.json but reports records={!r}".format(
                 len(actual), summary["records"]  # type: ignore[index]
             )
 

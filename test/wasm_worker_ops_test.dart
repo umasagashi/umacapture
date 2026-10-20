@@ -13,10 +13,15 @@
 //     bound, on main-thread OPFS writes, so a hung write wedged the capture button exactly as a silent worker
 //     had -- and expiring the timeout ran straight back into the same unbounded wait.
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/core/wasm_worker_ops.dart';
 
@@ -76,6 +81,36 @@ void main() {
       final selection = selectPublishableRecordFiles([_file('chara_detail/active/id/backup/record.json')]);
       expect(selection.publishable, isEmpty);
       expect(selection.incompleteRecordIds, ['id']);
+    });
+
+    test('publishes a finished recognition as its composed record.json, without the result itself', () {
+      // The composed record carries the time it was composed at; one clock reading for both sides.
+      final clock = valueWriteClock;
+      addTearDown(() => valueWriteClock = clock);
+      valueWriteClock = () => 1767225600000;
+      // What the worker actually hands over from a live capture or a video import: the recognizer's result.
+      final bytes = File('test/fixtures/recognized.json').readAsBytesSync();
+      final recognized = CharaDetailRecord.fromRecordJson(utf8.decode(bytes));
+      final selection = selectPublishableRecordFiles([
+        _file('chara_detail/active/rec/skill.png'),
+        (path: 'chara_detail/active/rec/recognized.json', bytes: bytes),
+        _file('chara_detail/active/half/skill.png'),
+      ]);
+      expect(_paths(selection.publishable), [
+        'chara_detail/active/rec/skill.png',
+        'chara_detail/active/rec/record.json',
+      ]);
+      expect(selection.publishable.last.bytes, composeBodyWrite(null, recognized)!.toRecordJsonBytes());
+      expect(selection.incompleteRecordIds, ['half']);
+    });
+
+    test('drops a record whose result does not decode, and keeps the others', () {
+      final selection = selectPublishableRecordFiles([
+        _file('chara_detail/active/bad/recognized.json'),
+        _file('chara_detail/active/good/record.json'),
+      ]);
+      expect(_paths(selection.publishable), ['chara_detail/active/good/record.json']);
+      expect(selection.incompleteRecordIds, ['bad']);
     });
 
     test('passes a complete batch through untouched', () {

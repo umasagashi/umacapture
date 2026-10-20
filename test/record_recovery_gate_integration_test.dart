@@ -267,7 +267,7 @@ void main() {
       return [(path: 'chara_detail/active/$updateId/record.json', bytes: _recordJson(updateId, marker: 'updated'))];
     });
 
-    expect(updated, isTrue);
+    expect(updated, RecordUpdateOutcome.published);
     expect(builders, 1);
     expect(await (activeRoot / updateId).filePath('record.json').readAsString(), contains('updated'));
   });

@@ -1,6 +1,6 @@
 // Verifies the async (web / OPFS) per-record archive path used on the main
 // isolate: recognition PNGs are dropped or replaced with JPEGs, the record
-// directory is moved from active/ to archive/, record.json / trainee.jpg survive,
+// directory is moved from active/ to archive/, record.json survives (trainee.jpg only where images are kept),
 // the large prediction.json is always dropped, and the geometry *.json is rescaled
 // to the downscaled JPEG (kept) or dropped (imageless). Mirrors record_archive_test
 // for the sync isolate path, exercising archiveRecordAsync / archiveRecordsAsync
@@ -15,7 +15,9 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:umacapture/src/chara_detail/archive_executor_shared.dart';
+import 'package:umacapture/src/chara_detail/record_archive_state.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/record_directory_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
@@ -142,7 +144,8 @@ void main() {
     expect(ok, isTrue);
     final dst = DirectoryPath('${archiveDir.path}/id-none');
     expect(File('${dst.path}/record.json').readAsStringSync(), '{"id":"id-none"}');
-    expect(File('${dst.path}/trainee.jpg').existsSync(), isTrue);
+    // The icon is an image too, cut from the factor image.
+    expect(File('${dst.path}/trainee.jpg').existsSync(), isFalse);
     // The overlay data is always dropped.
     expect(File('${dst.path}/prediction.json').existsSync(), isFalse);
     for (final name in ['skill', 'factor', 'campaign']) {
@@ -163,6 +166,21 @@ void main() {
     await archiveRecordAsync(argsFor('id-meta', ArchiveImageOption.none));
 
     expect(rating.readAsStringSync(), '{"id-meta":5}');
+  });
+
+  test('the transaction carries the archive state and its time with the record', () async {
+    final clock = valueWriteClock;
+    addTearDown(() => valueWriteClock = clock);
+    valueWriteClock = () => 1767225600000;
+    seedRecord('id-state');
+
+    final ok = await archiveRecordAsync(argsFor('id-state', ArchiveImageOption.none));
+
+    expect(ok, isTrue);
+    expect(await readRecordArchiveState(DirectoryPath('${archiveDir.path}/id-state'), archiveStore: true), (
+      state: RecordArchiveState.none,
+      writtenAt: 1767225600000,
+    ));
   });
 
   test('returns false when the source directory is missing', () async {

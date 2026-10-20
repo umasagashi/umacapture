@@ -999,7 +999,11 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
     // not logged as an error, neither of which the runner's generic arm can do.
     try {
         const auto record_dir = record_root_dir / raw_info.record_id;
+        // record.json is the app's: only Dart writes it, and the recognizer only reads it (record_type recovery
+        // and the update-mode metadata). The recognizer's result goes to recognized.json, which the app composes
+        // into record.json.
         const auto record_path = record_dir / "record.json";
+        const auto recognized_path = record_dir / "recognized.json";
         auto record_info = raw_info;
 
         // Load the existing record.json at most once and reuse it: both the record_type recovery below and the
@@ -1103,11 +1107,10 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             log_warning("trainee icon crop is empty; skipping trainee.jpg for record_id={}", raw_info.record_id);
         }
 
-        // Write record.json last so its presence implies the sidecars (prediction.json, trainee.jpg) are
-        // already on disk; a throw in between leaves no new record.json behind. Replaced rather than
-        // overwritten: in update mode the file is a listed record's, and the app quarantines a record.json it
-        // cannot decode, so a crash mid-write would take the record off the list.
-        json_util::replace(record_path, record, 4);
+        // Write recognized.json last so its presence implies the sidecars (prediction.json, trainee.jpg) are
+        // already on disk; a throw in between leaves no new recognized.json behind. Replaced rather than
+        // overwritten, so a crash mid-write never leaves a torn result for the app to compose into record.json.
+        json_util::replace(recognized_path, record, 4);
 
         if (isUpdateMode) {
             on_update_completed->send(record_info);

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_quarantine_ledger.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/record_store_unavailable.dart';
@@ -128,7 +129,11 @@ Future<RecordScanResult> _loadRecordsUnderDeclared(
     // an earlier sweep.
     return await gate.runForRoot(
       storageRoot,
-      (_) => _scanRecordsUnder(directory),
+      (_) async {
+        // Under the same root scope, before the listing, so a record put back from the shelf is listed by this scan.
+        await releaseRepairedQuarantinesUnlocked(directory);
+        return _scanRecordsUnder(directory);
+      },
       declaration: _declaredByTheScanFrame,
       reason: RootMaintenanceReason.readyToUse,
       beforeMaintenance: const BeforeRootMaintenance.none(

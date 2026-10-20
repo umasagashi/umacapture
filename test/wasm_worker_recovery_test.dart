@@ -13,6 +13,7 @@
 //     `startLive` / `updateRecord` coalesced onto it, so the client answered nothing for the rest of the page's
 //     life. `issueBoundedRequest` is what makes that failure ordinary and retryable.
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -84,6 +85,25 @@ void main() {
 
       expect(plan.recoverable.map((record) => record.recordId), ['whole']);
       expect(plan.unrecoverablePaths, ['chara_detail/active/partial/skill.png']);
+    });
+
+    test('recovers a finished recognition composed, and reports a record with no result and no record', () {
+      final bytes = File('test/fixtures/recognized.json').readAsBytesSync();
+      final plan = planLateHarvestRecovery([
+        (path: 'chara_detail/active/rec/recognized.json', bytes: bytes),
+        _file('chara_detail/active/rec/skill.png'),
+        _file('chara_detail/active/partial/skill.png'),
+      ], <String>{});
+
+      expect(plan.recoverable.map((record) => record.recordId), ['rec']);
+      expect(_paths(plan.recoverable.single.files), [
+        'chara_detail/active/rec/record.json',
+        'chara_detail/active/rec/skill.png',
+      ]);
+      expect(plan.unrecoverablePaths, ['chara_detail/active/partial/skill.png']);
+      // The record handed to the per-record sink is composed already, and passes the same selection again unchanged.
+      final again = selectPublishableRecordFiles(plan.recoverable.single.files);
+      expect(again.publishable, plan.recoverable.single.files);
     });
 
     test('accounts for every file: a path that is not a record file is reported, never dropped', () {

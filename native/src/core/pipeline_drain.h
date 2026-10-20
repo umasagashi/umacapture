@@ -145,7 +145,7 @@ template<typename Api>
 // instead of a hung process (the predecessor always terminated, and the golden harness depends on that).
 // Reaching it means work was discarded, which is why it is REPORTED rather than merely logged -- the caller
 // turns it into a non-zero exit, so a wedged run is distinguishable from a successful one instead of surfacing
-// to the golden harness as a content diff or a missing record.json.
+// to the golden harness as a content diff or a missing recognized.json.
 [[nodiscard]] inline DrainOutcome runUntilDrainedThenJoin(
     const DrainBarrier &barrier,
     const std::chrono::steady_clock::duration deadline = std::chrono::minutes(5),

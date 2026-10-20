@@ -24,8 +24,24 @@ class ImageConvertArgs {
   /// JPEG quality (0-100).
   final int quality;
 
-  const ImageConvertArgs(this.srcPngPaths, this.dstJpgPaths, {this.maxWidth = 720, this.quality = 75});
+  const ImageConvertArgs(
+    this.srcPngPaths,
+    this.dstJpgPaths, {
+    this.maxWidth = archiveJpegMaxWidth,
+    this.quality = archiveJpegQuality,
+  });
 }
+
+/// The width an archive clamps a reduced JPEG to.
+const archiveJpegMaxWidth = 720;
+
+/// The JPEG quality an archive encodes a reduced JPEG at.
+const archiveJpegQuality = 75;
+
+/// The reduced JPEG an archive makes of the PNG [png] — the same bytes [convertPngBatch] writes — or null where the
+/// PNG cannot be decoded. Pure, FS-free and isolate-safe.
+Uint8List? archiveJpegOf(Uint8List png) =>
+    _encodeJpegFromPng(png, maxWidth: archiveJpegMaxWidth, quality: archiveJpegQuality)?.bytes;
 
 /// Pixel dimensions of one converted image, paired by index with the inputs of
 /// [convertPngBatch].

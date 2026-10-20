@@ -1053,7 +1053,7 @@ function startDrainLoop() {
         // Stage 5 live-only incremental harvest: when a record COMPLETES during a live session, copy its files
         // out to OPFS and free its MEMFS dir at once, so a long session neither delays records until stop nor
         // grows MEMFS unbounded. onCharaDetailFinished(success) fires only AFTER the recognizer has written the
-        // whole record dir (prediction.json, trainee.jpg, then record.json LAST -- see harvestLiveRecord's
+        // whole record dir (prediction.json, trainee.jpg, then recognized.json LAST -- see harvestLiveRecord's
         // native-ordering reference), so the dir is complete here; harvesting mid-write is impossible. Skipped
         // for a failed finish (success !== true, no complete record).
         //
@@ -1786,8 +1786,8 @@ async function updateRecordBody(message, recordId, replyUpdated, failUpdate) {
       await sleep(50);
     }
 
-    // Collect the regenerated record dir (record.json, prediction.json, trainee.jpg, the record_<ts>.json backup,
-    // and the input PNGs) and ship it to main, which writes it back to OPFS.
+    // Collect the regenerated record dir (recognized.json, the untouched record.json, prediction.json, trainee.jpg,
+    // the record_<ts>.json backup, and the input PNGs) and ship it to main, which writes it back to OPFS.
     const files = [];
     const transfers = [];
     collectFiles(recordDir, files, transfers, SHARED_ROOTS.storage);
@@ -3727,7 +3727,7 @@ function makeSyntheticRgba(w, h, frameIndex, total) {
 
 // Harvests every record file under storage_dir/chara_detail/active/<uuid>/ (layout authority: `stitcher_dir` in
 // native/src/core/native_api.cpp) and posts them to main as a structured `harvest` message (transferable
-// ArrayBuffers -- record.json/prediction.json/trainee.jpg and the stitch PNGs + their geometry json).
+// ArrayBuffers -- recognized.json/prediction.json/trainee.jpg and the stitch PNGs + their geometry json).
 // Paths are storage-relative (chara_detail/active/<uuid>/<file>) so main can write them straight under
 // the record store's active dir. Afterwards the harvested record dirs and any temp fragments are removed from
 // MEMFS to return memory (they persist in OPFS on the main thread).
@@ -3791,9 +3791,9 @@ function harvestAndCleanup(roots) {
 // message the Dart side persists to OPFS + merges at once), then retain that record's MEMFS dir until main
 // acknowledges a durable commit. An unacknowledged record is re-harvested by stopLive's final sweep. Called
 // from the drain loop when a record's onCharaDetailFinished(success) is observed during a live session, at which
-// point the whole record dir is on disk -- native writes record.json LAST (native/src/chara_detail/
-// chara_detail_recognizer.cpp, currently :882-883: sidecars first, record.json last, so its presence implies
-// they are already on disk). A missing / already-gone dir is skipped throwing on the drain interval.
+// point the whole record dir is on disk -- native writes recognized.json LAST (CharaDetailRecognizer::recognize
+// in native/src/chara_detail/chara_detail_recognizer.cpp: sidecars first, recognized.json last, so its presence
+// implies they are already on disk). A missing / already-gone dir is skipped throwing on the drain interval.
 // collectFiles returns MEMFS-independent buffers, so freeing the dir afterwards cannot corrupt the shipped
 // bytes, and the pipeline never revisits a completed record.
 //

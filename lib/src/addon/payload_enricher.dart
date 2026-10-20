@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import '/src/addon/execution/execution_models.dart';
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_body.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
@@ -69,10 +73,10 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
     // Storage not ready yet; fall through to the on-disk copy.
   }
   final directory = ref.read(pathInfoProvider).charaDetailActiveDir / recordId;
-  final file = directory.filePath(recordJsonName);
   try {
-    if (!file.existsSync()) return null;
-    final record = CharaDetailRecord.fromRecordJson(file.readAsStringSync());
+    final json = _recordJsonOf(directory);
+    if (json == null) return null;
+    final record = CharaDetailRecord.fromRecordJson(json);
     // The same check the canonical loader applies, called rather than respelled:
     // skipping the quarantine side effect is what this path wants, and that is not
     // a reason to skip the identity check too. Without it a directory whose
@@ -100,6 +104,25 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
   }
 }
 
+/// The `record.json` text [directory] holds or, for a capture the store has not composed yet, the text it is about
+/// to hold; null when it has neither. Reads only.
+///
+/// A capture listener hears of a record at the moment the store does, and the store composes the recognizer's result
+/// into `record.json` in its own listener ([CharaDetailRecord.composeRecognizedSyncUnlocked]). A listener that runs
+/// first finds only `recognized.json`, and reads what that composition writes from it.
+String? _recordJsonOf(DirectoryPath directory) {
+  final file = directory.filePath(recordJsonName);
+  if (file.existsSync()) {
+    return file.readAsStringSync();
+  }
+  final recognized = directory.filePath(CharaDetailRecord.recognizedJsonName);
+  if (!recognized.existsSync()) {
+    return null;
+  }
+  final composed = composeBodyWrite(null, CharaDetailRecord.fromRecordJson(recognized.readAsStringSync()));
+  return composed == null ? null : utf8.decode(composed.toRecordJsonBytes());
+}
+
 void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
   final activeDir = _safe(() => ref.read(pathInfoProvider).charaDetailActiveDir);
   if (activeDir != null) {
@@ -109,9 +132,9 @@ void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
     p["record_json_path"] = jsonFile.path;
     // The decoded record.json contents, so a template can send the record body
     // directly (e.g. a webhook) instead of just its path. Best-effort: if the
-    // file isn't on disk yet (a just-captured record resolved from memory before
-    // it is flushed), leave the placeholder absent so it expands to empty.
-    final json = _safe(() => jsonFile.readAsStringSync());
+    // directory holds neither a record.json nor a result about to become one,
+    // leave the placeholder absent so it expands to empty.
+    final json = _safe(() => _recordJsonOf(recordDir));
     if (json != null) p["record_json"] = json;
     // Reuse the record's own relative icon path so the "trainee.jpg" literal
     // lives only on CharaDetailRecord.traineeIconPath.

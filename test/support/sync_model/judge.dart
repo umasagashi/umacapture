@@ -146,7 +146,8 @@
 // reached it, by the time on the clock of the device that made each, right after every operation of
 // the device that holds it and at rest ([bodiesAreTimedValues]).
 
-import 'dismissed_pairs.dart';
+import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
+
 import 'observation.dart';
 import 'ops.dart';
 
@@ -2557,15 +2558,15 @@ class Judge {
     // [R4-4], [R4-7]. Of a pair the two agreed on, a side says "none" of every reading of it — each pair of
     // the records the device lists after the round that hold its ends as the side holds them — where it holds
     // the pair's two records apart, each a record of its own, and lists the pair in no form its own records give
-    // it; else what the two agreed on ([sideSays], which the model calls too). The device's record of an id the
-    // round split off is the record split off, and the pairs that went with it are among what the device lists.
+    // it; else what the two agreed on ([syncSideSays], which the model's merge calls too). The device's record of an
+    // id the round split off is the record split off, and the pairs that went with it are among what the device lists.
     // A reading a side says "none" of is the pair the two agreed on, in that form.
-    SideSays says(
-      Iterable<SideRecord> records, {
+    SyncSideSays says(
+      Iterable<SyncSideRecord> records, {
       required Set<String> said,
       required Set<String> lists,
       Map<String, String> self = const {},
-    }) => sideSays(
+    }) => syncSideSays(
       _pairsAgreed[device] ?? const <String>{},
       records,
       ends: ends,
@@ -4252,18 +4253,18 @@ class Judge {
     if (told == null || pre == null) return const {};
     String? listed(ObservedRow? row) => row != null && row.alive ? row.state : null;
     bool reached(String from, String to, String state) {
-      if (!to.startsWith('$from~')) return false;
-      final marks = to.substring(from.length + 1).split('~');
+      if (!to.startsWith('$from$recordSyncSplitSeparator')) return false;
+      final marks = to.substring(from.length + 1).split(recordSyncSplitSeparator);
       var at = from;
       for (final (i, mark) in marks.indexed) {
         if (mark.isEmpty || mark != marks.first) return false;
         if (i == 0) {
-          at = '$at~$mark';
+          at = '$at$recordSyncSplitSeparator$mark';
           continue;
         }
         final held = [listed(before.rows[at]), pre.records[at]?.state];
         if (!held.any((s) => s != null && s != state)) return false;
-        at = '$at~$mark';
+        at = '$at$recordSyncSplitSeparator$mark';
       }
       return true;
     }

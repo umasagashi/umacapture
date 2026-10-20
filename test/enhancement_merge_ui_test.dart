@@ -70,7 +70,7 @@ class _Calls {
     needsReload: false,
   );
   EnhancementDismissOutcome dismissed = EnhancementDismissOutcome.dismissed;
-  MergedIds? merged = (ids: const [], metadataDefaults: null);
+  Map<String, MergeDefaults>? inProgress = const {};
   EnhancementMergeChoices? lastChoices;
   String? lastKeptContentId;
 
@@ -97,9 +97,9 @@ class _Calls {
       return dismissed;
     },
     resolveInheritance: () async => log.add('resolve'),
-    readMerged: (recordId) async {
+    readMergesInProgress: (recordId) async {
       await markerGate?.future;
-      return merged;
+      return inProgress;
     },
   );
 }
@@ -691,7 +691,7 @@ void main() {
       // The marker is the record that the user already said they are the same, so the
       // dismissal is gone and the content side is not theirs to move any more.
       final pair = _pair(enhanced: null);
-      final unfinished = _Calls()..merged = (ids: ['newer'], metadataDefaults: null);
+      final unfinished = _Calls()..inProgress = {'newer': _settingsDefaults};
       final container = _container(calls: unfinished, records: pair.records);
       await _pump(
         tester,
@@ -739,7 +739,7 @@ void main() {
       tester,
     ) async {
       final pair = _pair();
-      final calls = _Calls()..merged = (ids: ['newer'], metadataDefaults: null);
+      final calls = _Calls()..inProgress = {'newer': _settingsDefaults};
       await _pump(
         tester,
         _container(calls: calls, records: pair.records),
@@ -764,16 +764,14 @@ void main() {
       for (final MapEntry(key: direction, value: (identical, contentFromOlder, enhancedIsOlder, expected))
           in directions.entries) {
         final calls = _Calls()
-          ..merged = (
-            ids: ['newer'],
-            metadataDefaults: (
-              retiredId: 'newer',
+          ..inProgress = {
+            'newer': (
               route: EnhancementMergeRoute.settings,
               identical: identical,
               contentFromOlder: contentFromOlder,
               enhancedIsOlder: enhancedIsOlder,
             ),
-          );
+          };
         await _pump(
           tester,
           _container(
@@ -818,16 +816,7 @@ void main() {
       };
       for (final MapEntry(key: label, value: (route, rating, memoPick, ratingPick)) in cases.entries) {
         final calls = _Calls()
-          ..merged = (
-            ids: ['newer'],
-            metadataDefaults: (
-              retiredId: 'newer',
-              route: route,
-              identical: false,
-              contentFromOlder: false,
-              enhancedIsOlder: false,
-            ),
-          );
+          ..inProgress = {'newer': (route: route, identical: false, contentFromOlder: false, enhancedIsOlder: false)};
         await _pump(
           tester,
           _container(
@@ -2330,3 +2319,11 @@ void main() {
     });
   });
 }
+
+/// The relation a first run on the settings tab records for a pair whose newer side is enhanced.
+const MergeDefaults _settingsDefaults = (
+  route: EnhancementMergeRoute.settings,
+  identical: false,
+  contentFromOlder: false,
+  enhancedIsOlder: false,
+);
