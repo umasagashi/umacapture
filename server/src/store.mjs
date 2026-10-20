@@ -6,15 +6,14 @@
 // statements apply only if the row the first one inserted exists. "That row exists" has to mean
 // "this batch inserted it": each batch says below how a row from before cannot pass for its own.
 // The outcome is then read from the first statement's `meta.changes` (the deciding statement's, for
-// a withdrawal), never inferred from how far the code got.
+// an unshare), never inferred from how far the code got.
 
 /** D1 answered with an error (overload, daily quota): nothing was committed and a retry is safe. */
 export class Unavailable extends Error {}
 
 const CONSTRAINTS = [
-  ["duplicateKey", /UNIQUE constraint failed: records\.delete_key_hash\b/],
+  ["duplicateKey", /UNIQUE constraint failed: records\.client_key\b/],
   ["idCollision", /UNIQUE constraint failed: records\.id\b/],
-  ["duplicateTicket", /UNIQUE constraint failed: tickets\.hash\b/],
 ];
 
 /** The constraint a failed batch broke, or throws Unavailable for any other error. */
@@ -32,57 +31,121 @@ async function query(op) {
   }
 }
 
-/** The posted form and publish day of record `id`, or null when no such row exists. */
+const gunzipJson = (payload) =>
+  new Response(new Blob([new Uint8Array(payload)]).stream().pipeThrough(new DecompressionStream("gzip"))).json();
+
+/** The posted form and share day of record `id`, or null when no such row exists. */
 export async function readRecord(db, id) {
-  const row = await db
-    .prepare("SELECT schema, payload, published_day FROM records WHERE id = ?")
-    .bind(id)
-    .first();
+  const row = await db.prepare("SELECT schema, payload, shared_day FROM records WHERE id = ?").bind(id).first();
   if (row === null) return null;
   if (row.schema !== 1) throw new Error(`record ${id} has posted-form schema ${row.schema}`);
-  const stream = new Blob([new Uint8Array(row.payload)]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return { form: await new Response(stream).json(), publishedDay: row.published_day };
-}
-
-/** The public id stored under delete key hash `keyHash`, or null. */
-export async function findIdByKeyHash(db, keyHash) {
-  const row = await query(() => db.prepare("SELECT id FROM records WHERE delete_key_hash = ?").bind(keyHash).first());
-  return row === null ? null : row.id;
+  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day };
 }
 
 /**
- * Publishes one record (the batch of the design's publish step 4) and judges the outcome.
- *
- * `p`: `{id, keyHash, payload, charge, ticketHash, day, now, budget, dailyLimit}`.
- * Returns `{status: "created"}`, `{status: "existing", id}` (the same key committed first),
- * `{status: "refused", reason: "ticket" | "storage" | "daily" | "changed"}` or
- * `{status: "idCollision"}`. Throws Unavailable when D1 fails.
+ * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, trainerIds}`, or null when no such
+ * account exists. Throws Unavailable.
  */
-export async function publishRecord(db, p) {
+export async function readAccount(db, id) {
+  const [account, trainers] = await query(() =>
+    db.batch([
+      db.prepare("SELECT share_count, deleting_since FROM accounts WHERE id = ?1").bind(id),
+      db.prepare("SELECT trainer_id FROM account_trainers WHERE account_id = ?1 ORDER BY trainer_id").bind(id),
+    ]),
+  );
+  const row = account.results[0];
+  if (row === undefined) return null;
+  return {
+    shareCount: row.share_count,
+    deleting: row.deleting_since !== null,
+    trainerIds: trainers.results.map((t) => t.trainer_id),
+  };
+}
+
+/** Whether account `id` exists. Throws Unavailable. */
+export async function accountExists(db, id) {
+  return (await query(() => db.prepare("SELECT 1 AS found FROM accounts WHERE id = ?1").bind(id).first())) !== null;
+}
+
+/**
+ * Registers trainer `trainerId` under account `owner`, while the account holds fewer than `cap` of
+ * them and is not being deleted; one already registered is left as it is. The cap is judged inside
+ * the insert, so racing registrations cannot pass it together. Returns "deleting" (the account is
+ * being deleted, judged before anything else), "gone" (no such account), "registered" (the trainer
+ * is registered now, whether by this request or before) or "limit". Throws Unavailable.
+ */
+export async function registerTrainer(db, owner, trainerId, cap) {
+  const results = await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `INSERT INTO account_trainers (account_id, trainer_id)
+           SELECT ?1, ?2 WHERE (SELECT count(*) FROM account_trainers WHERE account_id = ?1) < ?3
+             AND EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)
+           ON CONFLICT (account_id, trainer_id) DO NOTHING`,
+        )
+        .bind(owner, trainerId, cap),
+      db.prepare("SELECT 1 FROM account_trainers WHERE account_id = ?1 AND trainer_id = ?2").bind(owner, trainerId),
+      db.prepare("SELECT deleting_since FROM accounts WHERE id = ?1").bind(owner),
+    ]),
+  );
+  const account = results[2].results[0];
+  if (account === undefined) return "gone";
+  if (account.deleting_since !== null) return "deleting";
+  return results[1].results.length > 0 ? "registered" : "limit";
+}
+
+/** The public id stored under client key hash `clientKey`, or null. */
+export async function findIdByClientKey(db, clientKey) {
+  const row = await query(() => db.prepare("SELECT id FROM records WHERE client_key = ?").bind(clientKey).first());
+  return row === null ? null : row.id;
+}
+
+/** The charge account ?1 has shared on day ?3, read from its row. */
+const ACCOUNT_SHARED_TODAY = "(SELECT CASE WHEN quota_day = ?3 THEN quota_bytes ELSE 0 END FROM accounts WHERE id = ?1)";
+
+/**
+ * Shares one record for account `owner` (one batch) and judges the outcome.
+ *
+ * `p`: `{id, owner, clientKey, payload, charge, day, budget, dailyLimit, accountCap, accountDailyLimit}`.
+ * Returns `{status: "created"}`, `{status: "existing", id}` (the same client key committed first),
+ * `{status: "refused", reason: "gone" | "deleting" | "storage" | "daily" | "account" | "changed"}` or
+ * `{status: "idCollision"}`.
+ * Throws Unavailable when D1 fails.
+ */
+export async function shareRecord(db, p) {
   const exists = "EXISTS (SELECT 1 FROM records WHERE id = ?2)";
   const statements = [
     // A row already holding this id makes the insert run and break the primary key even when a
-    // condition fails, so a refused publish can never find that row and commit statements 2 to 4.
+    // condition fails, so a refused share can never find that row and commit statements 2 to 4.
     db
       .prepare(
-        `INSERT INTO records (id, delete_key_hash, schema, payload, charge, published_day)
-         SELECT ?1, ?2, 1, ?3, ?4, ?5
-         WHERE EXISTS (SELECT 1 FROM records WHERE id = ?1)
-            OR ((SELECT remaining FROM tickets WHERE hash = ?6 AND expires_at > ?7) > 0
-                AND (SELECT bytes FROM totals WHERE id = 1) + ?4 <= ?8
-                AND COALESCE((SELECT publish_bytes FROM daily WHERE day = ?5), 0) + ?4 <= ?9)`,
+        `INSERT INTO records (id, owner_id, client_key, schema, payload, charge, shared_day)
+         SELECT ?2, ?1, ?4, 1, ?5, ?6, ?3
+         WHERE EXISTS (SELECT 1 FROM records WHERE id = ?2)
+            OR (EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)
+                AND (SELECT bytes FROM totals WHERE id = 1) + ?6 <= ?7
+                AND COALESCE((SELECT share_bytes FROM daily WHERE day = ?3), 0) + ?6 <= ?8
+                AND (SELECT share_count FROM accounts WHERE id = ?1) < ?9
+                AND ${ACCOUNT_SHARED_TODAY} + ?6 <= ?10)`,
       )
-      .bind(p.id, p.keyHash, p.payload, p.charge, p.day, p.ticketHash, p.now, p.budget, p.dailyLimit),
-    db.prepare(`UPDATE tickets SET remaining = remaining - 1 WHERE hash = ?1 AND ${exists}`).bind(p.ticketHash, p.id),
+      .bind(p.owner, p.id, p.day, p.clientKey, p.payload, p.charge, p.budget, p.dailyLimit, p.accountCap, p.accountDailyLimit),
+    db
+      .prepare(
+        `UPDATE accounts SET share_count = share_count + 1,
+           quota_bytes = CASE WHEN quota_day = ?3 THEN quota_bytes + ?4 ELSE ?4 END, quota_day = ?3
+         WHERE id = ?1 AND ${exists}`,
+      )
+      .bind(p.owner, p.id, p.day, p.charge),
     db
       .prepare(`UPDATE totals SET bytes = bytes + ?1, count = count + 1 WHERE id = 1 AND ${exists}`)
       .bind(p.charge, p.id),
     db
       .prepare(
-        `INSERT INTO daily (day, publish_bytes, publish_count)
+        `INSERT INTO daily (day, share_bytes, share_count)
          SELECT ?1, ?3, 1 WHERE ${exists}
-         ON CONFLICT (day) DO UPDATE SET publish_bytes = publish_bytes + excluded.publish_bytes,
-                                         publish_count = publish_count + 1`,
+         ON CONFLICT (day) DO UPDATE SET share_bytes = share_bytes + excluded.share_bytes,
+                                         share_count = share_count + 1`,
       )
       .bind(p.day, p.id, p.charge),
   ];
@@ -94,106 +157,391 @@ export async function publishRecord(db, p) {
     // Rolled back: this request consumed nothing.
     const broken = brokenConstraint(error);
     if (broken === "idCollision") return { status: "idCollision" };
-    if (broken === "duplicateKey") return existingOrUnavailable(db, p.keyHash);
+    if (broken === "duplicateKey") return existingOrUnavailable(db, p.clientKey);
     throw new Unavailable("unexpected constraint", { cause: error });
   }
   if (results[0].meta.changes === 1) return { status: "created" };
 
   // Nothing changed. A request with the same key may have committed after this one looked for it
-  // and used the ticket's last publish or the last of the budget, so the condition failed here
-  // before the unique constraint could: look for the key again before refusing.
-  const id = await findIdByKeyHash(db, p.keyHash);
+  // and used the last of a limit, so the condition failed here before the unique constraint could:
+  // look for the key again before refusing.
+  const id = await findIdByClientKey(db, p.clientKey);
   if (id !== null) return { status: "existing", id };
   return { status: "refused", reason: await refusalReason(db, p) };
 }
 
-async function existingOrUnavailable(db, keyHash) {
-  const id = await findIdByKeyHash(db, keyHash);
+async function existingOrUnavailable(db, clientKey) {
+  const id = await findIdByClientKey(db, clientKey);
   if (id === null) throw new Unavailable("the key that broke the constraint is gone");
   return { status: "existing", id };
 }
 
 /**
- * Why a publish was refused, read after the refusal. Other requests may have changed the state in
+ * Why a share was refused, read after the refusal. Other requests may have changed the state in
  * between; the refusal itself was decided atomically, and "changed" reports that none of the
- * conditions fails any more.
+ * conditions fails any more. The account is judged first: "gone" (its deletion completed, so the
+ * session that authorised the request is gone too) and "deleting" say nothing about any limit.
  */
 async function refusalReason(db, p) {
   const row = await query(() =>
     db
       .prepare(
-        `SELECT (SELECT remaining FROM tickets WHERE hash = ?1 AND expires_at > ?2) AS remaining,
-                (SELECT bytes FROM totals WHERE id = 1) AS bytes,
-                COALESCE((SELECT publish_bytes FROM daily WHERE day = ?3), 0) AS published`,
+        `SELECT (SELECT bytes FROM totals WHERE id = 1) AS bytes,
+                COALESCE((SELECT share_bytes FROM daily WHERE day = ?3), 0) AS shared,
+                EXISTS (SELECT 1 FROM accounts WHERE id = ?1) AS account_exists,
+                (SELECT deleting_since FROM accounts WHERE id = ?1) AS deleting_since,
+                (SELECT share_count FROM accounts WHERE id = ?1) AS account_count,
+                ${ACCOUNT_SHARED_TODAY} AS account_shared`,
       )
-      .bind(p.ticketHash, p.now, p.day)
+      .bind(p.owner, null, p.day)
       .first(),
   );
-  if (row.remaining === null || row.remaining <= 0) return "ticket";
+  if (row.account_exists === 0) return "gone";
+  if (row.deleting_since !== null) return "deleting";
   if (row.bytes + p.charge > p.budget) return "storage";
-  if (row.published + p.charge > p.dailyLimit) return "daily";
+  if (row.shared + p.charge > p.dailyLimit) return "daily";
+  if (row.account_count >= p.accountCap) return "account";
+  if (row.account_shared + p.charge > p.accountDailyLimit) return "account";
   return "changed";
 }
 
 /**
- * Registers ticket hash `hash` (the batch of the design's ticket step 2).
+ * Records a begun login (the begin's batch) and counts it against the day's logins. A begin of an
+ * `h` already present replaces that row only when the row has expired at `now`, or when `markHash`
+ * (the SHA-256 of the request's `uc_begin_<h>`, or null) is the row's `begin_hash`: the later begin
+ * then wins and the earlier state is void. That is the user who goes back from the provider's screen
+ * to the start page and presses login again in the same browser. Another browser that learnt `h`
+ * (and the Windows port) from the start URL holds no such mark, so it cannot take the row over and
+ * complete it as itself. A completed row (stage 1) cannot be replaced while it lives, because its
+ * callback removed the mark. The replacement counts as one login like any other begin.
  *
- * `t`: `{hash, uses, expiresAt, day, limit}`. Returns "issued", "limit" (the day's tickets are
- * used up) or "alreadyIssued" (the same hash was registered before). Throws Unavailable.
+ * `l`: `{h, provider, stateHash, pkceVerifier, nonceHash, beginHash, port, expiresAt, day, limit,
+ * now, markHash}`. Returns "begun", "taken" (a live row of `h` begun in another browser stays), or
+ * "limit" (the day's logins are used up). Throws Unavailable.
  */
-export async function issueTicket(db, t) {
+export async function beginLogin(db, l) {
   const statements = [
     db
       .prepare(
-        `INSERT INTO tickets (hash, remaining, expires_at)
-         SELECT ?1, ?2, ?3 WHERE COALESCE((SELECT tickets FROM daily WHERE day = ?4), 0) < ?5`,
+        `INSERT INTO logins (h, provider, state_hash, pkce_verifier, nonce_hash, begin_hash, port, stage, expires_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8
+         WHERE COALESCE((SELECT logins FROM daily WHERE day = ?9), 0) < ?10
+         ON CONFLICT (h) DO UPDATE SET provider = excluded.provider, state_hash = excluded.state_hash,
+           pkce_verifier = excluded.pkce_verifier, nonce_hash = excluded.nonce_hash,
+           begin_hash = excluded.begin_hash, port = excluded.port, stage = 0, account_id = NULL,
+           proof_hash = NULL, expires_at = excluded.expires_at
+         WHERE logins.expires_at < ?11 OR logins.begin_hash = ?12`,
       )
-      .bind(t.hash, t.uses, t.expiresAt, t.day, t.limit),
-    // Counts only the row this batch inserted: an older row with the same hash would have broken
-    // the primary key above, and one left from before does not carry this expiry.
+      .bind(
+        l.h,
+        l.provider,
+        l.stateHash,
+        l.pkceVerifier,
+        l.nonceHash,
+        l.beginHash,
+        l.port,
+        l.expiresAt,
+        l.day,
+        l.limit,
+        l.now,
+        l.markHash,
+      ),
+    // Counts only the row this batch wrote: the state hash is this request's own random value, so
+    // a row from before (including the one this batch replaced) cannot match it.
     db
       .prepare(
-        `INSERT INTO daily (day, tickets)
-         SELECT ?1, 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE hash = ?2 AND expires_at = ?3)
-         ON CONFLICT (day) DO UPDATE SET tickets = tickets + 1`,
+        `INSERT INTO daily (day, logins)
+         SELECT ?1, 1 WHERE EXISTS (SELECT 1 FROM logins WHERE h = ?2 AND state_hash = ?3)
+         ON CONFLICT (day) DO UPDATE SET logins = logins + 1`,
       )
-      .bind(t.day, t.hash, t.expiresAt),
+      .bind(l.day, l.h, l.stateHash),
+    // Read in the same batch, so whether another begin's row stood in the way is decided against the
+    // row the insert met, not one a later request wrote.
+    db.prepare("SELECT 1 FROM logins WHERE h = ?1 AND state_hash <> ?2").bind(l.h, l.stateHash),
   ];
-  try {
-    const results = await db.batch(statements);
-    return results[0].meta.changes === 1 ? "issued" : "limit";
-  } catch (error) {
-    if (brokenConstraint(error) === "duplicateTicket") return "alreadyIssued";
-    throw new Unavailable("unexpected constraint", { cause: error });
-  }
-}
-
-/** Removes up to `limit` expired tickets, through the expires_at index. */
-export async function sweepTickets(db, now, limit) {
-  await db
-    .prepare("DELETE FROM tickets WHERE hash IN (SELECT hash FROM tickets WHERE expires_at < ?1 LIMIT ?2)")
-    .bind(now, limit)
-    .run();
+  const results = await query(() => db.batch(statements));
+  if (results[0].meta.changes === 1) return "begun";
+  return results[2].results.length > 0 ? "taken" : "limit";
 }
 
 /**
- * Withdraws record `id` if `keyHash` is its delete key hash, giving its charge back to the totals
- * in the same transaction. Returns "withdrawn", "forbidden" (the row exists under another key) or
- * "notFound" (no such row, including one a concurrent withdrawal removed). Throws Unavailable.
+ * The login a callback's state belongs to, while it can still be completed: `{h, provider,
+ * pkce_verifier, nonce_hash, begin_hash, port}` of the stage-0 row whose state hash is `stateHash`
+ * and which has not expired at `now`, or null. Throws Unavailable.
  */
-export async function withdrawRecord(db, id, keyHash) {
-  const match = "id = ?1 AND delete_key_hash = ?2";
+export async function findStartedLogin(db, stateHash, now) {
+  return query(() =>
+    db
+      .prepare(
+        `SELECT h, provider, pkce_verifier, nonce_hash, begin_hash, port FROM logins
+         WHERE state_hash = ?1 AND stage = 0 AND expires_at >= ?2`,
+      )
+      .bind(stateHash, now)
+      .first(),
+  );
+}
+
+/**
+ * Completes a login (the callback's batch): finds the account of identity (`provider`,
+ * `subjectHmac`), creating it under `newAccountId` when there is none and the day's account limit
+ * allows, and moves the login to stage 1 with that account and `proofHash`.
+ *
+ * The login moves only while it is still the stage-0 row with `stateHash` and unexpired at `now`, so
+ * a begin that replaced it, or a callback that completed it first, leaves it alone. It also moves
+ * only while the account row exists, so a login cannot complete onto an account whose deletion
+ * finished in between: the deletion's batch removes the identity and the account, and D1 runs the
+ * two batches one after the other.
+ *
+ * `c`: `{h, stateHash, provider, subjectHmac, newAccountId, proofHash, now, day, limit}`. Returns
+ * "completed", "limit" (no account and the day's new accounts are used up) or "gone" (the login can
+ * no longer be completed). Throws Unavailable.
+ */
+export async function completeLogin(db, c) {
+  const identity = "SELECT account_id FROM identities WHERE provider = ?1 AND subject_hmac = ?2";
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO accounts (id, created_day)
+         SELECT ?3, ?4 WHERE NOT EXISTS (${identity})
+           AND COALESCE((SELECT accounts_created FROM daily WHERE day = ?4), 0) < ?5`,
+      )
+      .bind(c.provider, c.subjectHmac, c.newAccountId, c.day, c.limit),
+    // The account id is this request's own random value, so only the account inserted above matches.
+    db
+      .prepare(
+        `INSERT INTO identities (provider, subject_hmac, account_id)
+         SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM accounts WHERE id = ?3)`,
+      )
+      .bind(c.provider, c.subjectHmac, c.newAccountId),
+    db
+      .prepare(
+        `INSERT INTO daily (day, accounts_created)
+         SELECT ?1, 1 WHERE EXISTS (SELECT 1 FROM accounts WHERE id = ?2)
+         ON CONFLICT (day) DO UPDATE SET accounts_created = accounts_created + 1`,
+      )
+      .bind(c.day, c.newAccountId),
+    db
+      .prepare(
+        `UPDATE logins SET stage = 1, account_id = (${identity}), proof_hash = ?5
+         WHERE h = ?3 AND state_hash = ?4 AND stage = 0 AND expires_at >= ?6
+           AND EXISTS (SELECT 1 FROM accounts WHERE id = (${identity}))`,
+      )
+      .bind(c.provider, c.subjectHmac, c.h, c.stateHash, c.proofHash, c.now),
+  ];
+  const results = await query(() => db.batch(statements));
+  if (results[3].meta.changes === 1) return "completed";
+  const found = await query(() => db.prepare(identity).bind(c.provider, c.subjectHmac).first());
+  return found === null ? "limit" : "gone";
+}
+
+/** `{stage, port, proof_hash}` of login `h` unexpired at `now`, or null. Throws Unavailable. */
+export async function findLogin(db, h, now) {
+  return query(() =>
+    db.prepare("SELECT stage, port, proof_hash FROM logins WHERE h = ?1 AND expires_at >= ?2").bind(h, now).first(),
+  );
+}
+
+/**
+ * Exchanges a completed login for a session (the claim's batch): a session row for the login's
+ * account, and the login removed. Only the stage-1 row of `h` holding `proofHash`, unexpired at
+ * `now`, is exchanged; the login is removed only once the session this batch inserted exists.
+ *
+ * The session is a full one expiring at `expiresAt`, or, when the account is being deleted, one that
+ * can only continue the deletion (scope "delete") expiring at `deleteExpiresAt`: an account being
+ * deleted is never given a full session again.
+ *
+ * `s`: `{h, proofHash, tokenHash, now, expiresAt, deleteExpiresAt}`. Returns `{accountId, scope,
+ * expiresAt}` of the session, or null when the login was replaced, claimed or expired in between.
+ * Throws Unavailable.
+ */
+export async function claimLogin(db, s) {
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO sessions (token_hash, account_id, expires_at, scope)
+         SELECT ?3, logins.account_id,
+                CASE WHEN accounts.deleting_since IS NULL THEN ?5 ELSE ?6 END,
+                CASE WHEN accounts.deleting_since IS NULL THEN 'full' ELSE 'delete' END
+         FROM logins JOIN accounts ON accounts.id = logins.account_id
+         WHERE logins.h = ?1 AND logins.stage = 1 AND logins.proof_hash = ?2 AND logins.expires_at >= ?4`,
+      )
+      .bind(s.h, s.proofHash, s.tokenHash, s.now, s.expiresAt, s.deleteExpiresAt),
+    db
+      .prepare("DELETE FROM logins WHERE h = ?1 AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2)")
+      .bind(s.h, s.tokenHash),
+    db.prepare("SELECT account_id, scope, expires_at FROM sessions WHERE token_hash = ?1").bind(s.tokenHash),
+  ];
+  const results = await query(() => db.batch(statements));
+  const row = results[2].results[0];
+  return row === undefined ? null : { accountId: row.account_id, scope: row.scope, expiresAt: row.expires_at };
+}
+
+/** `{account_id, scope}` of the session `tokenHash` unexpired at `now`, or null. Throws Unavailable. */
+export async function findSession(db, tokenHash, now) {
+  return query(() =>
+    db
+      .prepare("SELECT account_id, scope FROM sessions WHERE token_hash = ?1 AND expires_at >= ?2")
+      .bind(tokenHash, now)
+      .first(),
+  );
+}
+
+/** Removes session `tokenHash`. Throws Unavailable. */
+export async function deleteSession(db, tokenHash) {
+  await query(() => db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(tokenHash).run());
+}
+
+/** Removes up to `limit` expired logins and up to `limit` expired sessions, through their expiry indexes. */
+export async function sweepLogins(db, now, limit) {
+  await db.batch([
+    db.prepare("DELETE FROM logins WHERE h IN (SELECT h FROM logins WHERE expires_at < ?1 LIMIT ?2)").bind(now, limit),
+    db
+      .prepare("DELETE FROM sessions WHERE token_hash IN (SELECT token_hash FROM sessions WHERE expires_at < ?1 LIMIT ?2)")
+      .bind(now, limit),
+  ]);
+}
+
+/**
+ * Unshares record `id` if account `owner` holds it, giving its charge back to the totals and its
+ * place back to the account's cap in the same transaction, while the account is not being deleted
+ * (its deletion removes its records itself, under the opposite condition: `deleteShareChunk`).
+ * Returns "unshared", "deleting" (the account is being deleted, or its deletion completed), "forbidden"
+ * (another account holds it) or "notFound" (no such row, including one a concurrent unshare removed).
+ * Throws Unavailable.
+ */
+export async function unshareRecord(db, id, owner) {
+  const match = "id = ?1 AND owner_id = ?2 AND EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL)";
   const statements = [
     db
       .prepare(
         `UPDATE totals SET bytes = bytes - (SELECT charge FROM records WHERE ${match}), count = count - 1
          WHERE id = 1 AND EXISTS (SELECT 1 FROM records WHERE ${match})`,
       )
-      .bind(id, keyHash),
-    db.prepare(`DELETE FROM records WHERE ${match}`).bind(id, keyHash),
+      .bind(id, owner),
+    db
+      .prepare(`UPDATE accounts SET share_count = share_count - 1 WHERE id = ?2 AND EXISTS (SELECT 1 FROM records WHERE ${match})`)
+      .bind(id, owner),
+    db.prepare(`DELETE FROM records WHERE ${match}`).bind(id, owner),
   ];
   const results = await query(() => db.batch(statements));
-  if (results[1].meta.changes === 1) return "withdrawn";
-  const row = await query(() => db.prepare("SELECT 1 AS found FROM records WHERE id = ?").bind(id).first());
-  return row === null ? "notFound" : "forbidden";
+  if (results[2].meta.changes === 1) return "unshared";
+  const row = await query(() =>
+    db
+      .prepare(
+        `SELECT EXISTS (SELECT 1 FROM records WHERE id = ?1) AS found,
+                EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL) AS writable`,
+      )
+      .bind(id, owner)
+      .first(),
+  );
+  if (row.writable === 0) return "deleting";
+  return row.found === 0 ? "notFound" : "forbidden";
+}
+
+/**
+ * Begins deleting account `accountId` from its full session `tokenHash` (one batch): marks the
+ * account as being deleted since `now`, removes every other session of it, and turns this one into a
+ * deletion-only session (scope "delete") expiring at `expiresAt`. Returns "begun", "deleting" (the
+ * account was being deleted already) or "gone" (no such account). Throws Unavailable.
+ */
+export async function beginAccountDeletion(db, accountId, tokenHash, now, expiresAt) {
+  // Only the account this batch marked: its deletion began at this request's `now`, and this request's
+  // full session is still there. A competing start in the same second has the same `now`; once it
+  // marked the account it removed this session, so this batch must not remove its session in turn.
+  const marked =
+    "EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since = ?3) " +
+    "AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2 AND account_id = ?1 AND scope = 'full')";
+  const results = await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `UPDATE accounts SET deleting_since = ?3
+           WHERE id = ?1 AND deleting_since IS NULL
+             AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2 AND account_id = ?1 AND scope = 'full')`,
+        )
+        .bind(accountId, tokenHash, now),
+      db.prepare(`DELETE FROM sessions WHERE account_id = ?1 AND token_hash <> ?2 AND ${marked}`).bind(accountId, tokenHash, now),
+      db
+        .prepare(`UPDATE sessions SET scope = 'delete', expires_at = ?4 WHERE token_hash = ?2 AND account_id = ?1 AND ${marked}`)
+        .bind(accountId, tokenHash, now, expiresAt),
+    ]),
+  );
+  if (results[0].meta.changes === 1) return "begun";
+  return (await accountExists(db, accountId)) ? "deleting" : "gone";
+}
+
+/**
+ * Removes up to `limit` records of account `accountId` (one batch), giving their charge back to the
+ * totals and their places back to the account's cap. Allowed only to a deletion-only session
+ * `tokenHash` of the account, while the account is being deleted: the opposite of an unshare's
+ * condition, which the mark of the deletion makes fail. Throws Unavailable.
+ */
+export async function deleteShareChunk(db, accountId, tokenHash, limit) {
+  const allowed = `EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?3 AND account_id = ?1 AND scope = 'delete')
+    AND EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL)`;
+  // The same rows in every statement: the batch is one transaction and the order is total.
+  const chunk = "SELECT id FROM records WHERE owner_id = ?1 ORDER BY id LIMIT ?2";
+  await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `UPDATE totals SET bytes = bytes - COALESCE((SELECT sum(charge) FROM records WHERE id IN (${chunk})), 0),
+             count = count - (SELECT count(*) FROM records WHERE id IN (${chunk}))
+           WHERE id = 1 AND ${allowed}`,
+        )
+        .bind(accountId, limit, tokenHash),
+      db
+        .prepare(
+          `UPDATE accounts SET share_count = share_count - (SELECT count(*) FROM records WHERE id IN (${chunk}))
+           WHERE id = ?1 AND ${allowed}`,
+        )
+        .bind(accountId, limit, tokenHash),
+      db.prepare(`DELETE FROM records WHERE id IN (${chunk}) AND ${allowed}`).bind(accountId, limit, tokenHash),
+    ]),
+  );
+}
+
+/** How many records account `accountId` still shares. Throws Unavailable. */
+export async function countShares(db, accountId) {
+  const row = await query(() => db.prepare("SELECT count(*) AS n FROM records WHERE owner_id = ?1").bind(accountId).first());
+  return row.n;
+}
+
+/**
+ * Completes the deletion of account `accountId` (one batch), once nothing else of it remains: its
+ * trainers, identities, sessions (the deletion-only one included), the logins completed onto it and
+ * not claimed, then the account. Children go before the account, whose references D1 enforces; a
+ * login holds no reference, but is removed with the rest so no record of a login onto the account
+ * outlives it. Throws Unavailable.
+ */
+export async function finishAccountDeletion(db, accountId) {
+  const deleting = "EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL)";
+  await query(() =>
+    db.batch([
+      db.prepare(`DELETE FROM account_trainers WHERE account_id = ?1 AND ${deleting}`).bind(accountId),
+      db.prepare(`DELETE FROM identities WHERE account_id = ?1 AND ${deleting}`).bind(accountId),
+      db.prepare(`DELETE FROM sessions WHERE account_id = ?1 AND ${deleting}`).bind(accountId),
+      db.prepare(`DELETE FROM logins WHERE account_id = ?1 AND ${deleting}`).bind(accountId),
+      db.prepare("DELETE FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL").bind(accountId),
+    ]),
+  );
+}
+
+/**
+ * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, form}`
+ * each. ACCOUNT_SHARE_CAP bounds how many there are. Throws Unavailable.
+ */
+export async function listOwnShares(db, owner) {
+  const { results } = await query(() =>
+    db
+      .prepare("SELECT id, client_key, schema, payload, shared_day FROM records WHERE owner_id = ?1 ORDER BY shared_day DESC, id")
+      .bind(owner)
+      .all(),
+  );
+  return Promise.all(
+    results.map(async (row) => {
+      if (row.schema !== 1) throw new Error(`record ${row.id} has posted-form schema ${row.schema}`);
+      return { id: row.id, clientKey: row.client_key, sharedDay: row.shared_day, form: await gunzipJson(row.payload) };
+    }),
+  );
 }

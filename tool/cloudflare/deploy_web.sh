@@ -7,7 +7,7 @@
 #     staging               https://umacapture-web-staging.umasagashi.workers.dev
 #                           (env.staging of the config)
 #   --sharing  whether the record-sharing Worker comes with the assets
-#     on (default)  server/wrangler.jsonc: the Worker answers /r/* and /api/*
+#     on (default)  server/wrangler.jsonc: the Worker answers /r/*, /u/* and /api/*
 #                   and every path that matches no file, with its D1
 #     off           server/wrangler.assets-only.jsonc: no Worker script at all,
 #                   so those paths get the static 404. This is how sharing is

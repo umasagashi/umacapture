@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "0123456789",
   "url": "https://umacapture.example/r/0123456789",
-  "published_on": "2026-10-05",
+  "shared_on": "2026-10-05",
   "region": "ja",
   "recognizer_version": "2026-09-01",
   "tables_version": "2026-10-01T00:00:00Z",

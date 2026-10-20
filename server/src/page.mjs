@@ -93,7 +93,7 @@ function body(record) {
     row("育成日", record.trained_on ?? "-"),
   ].join("");
   const provenance = [
-    row("公開日", record.published_on),
+    row("共有日", record.shared_on),
     row("地域", record.region),
     row("認識器の版", record.recognizer_version),
     row("表の版", record.tables_version),
@@ -114,7 +114,7 @@ function body(record) {
 <h2>記録</h2><table>${provenance}</table>`;
 }
 
-/** The full HTML document for one published record. */
+/** The full HTML document for one shared record. */
 export function renderPage(record, env) {
   const og = ogImage(env, record.id);
   const t = title(record);

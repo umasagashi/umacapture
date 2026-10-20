@@ -9,7 +9,7 @@ import { Keys } from "./tables.mjs";
 const SCHEMA = 1;
 const DAY_MS = 86_400_000;
 
-/** `published_day` (UTC days since the epoch) as `YYYY-MM-DD`. */
+/** A UTC day (days since the epoch, as `records.shared_day` holds it) as `YYYY-MM-DD`. */
 export function dayToIso(day) {
   return new Date(day * DAY_MS).toISOString().slice(0, 10);
 }
@@ -79,27 +79,19 @@ function race(tables, r) {
 
 /**
  * @param {object} form the stored posted form v1
- * @param {{id: string, publishedDay: number, origin: string}} meta
+ * @param {{id: string, sharedDay: number, origin: string}} meta
  * @param {import("./tables.mjs").Tables} tables
  */
 export function buildPublicRecord(form, meta, tables) {
-  const inheritanceOnly = form.record_type === "InheritanceOnly";
   return {
     schema: SCHEMA,
     id: meta.id,
     url: `${meta.origin}/r/${meta.id}`,
-    published_on: dayToIso(meta.publishedDay),
+    shared_on: dayToIso(meta.sharedDay),
     region: form.region,
     recognizer_version: form.recognizer_version,
     tables_version: tables.version,
-    record_type: inheritanceOnly ? "inheritance_only" : "standard",
-    trainee: {
-      card: tables.label(Keys.card, form.trainee.card),
-      character: tables.label(Keys.character, form.trainee.character),
-      rank: form.trainee.rank === undefined ? null : tables.label(Keys.rank, form.trainee.rank),
-    },
-    // An inheritance-only record never reads the evaluation value, so its 0 means "unknown".
-    evaluation: inheritanceOnly ? null : form.evaluation_value,
+    ...recordSummary(form, tables),
     status: { ...form.status },
     aptitudes: aptitudes(tables, form.aptitudes),
     strategy: tables.label(Keys.strategy, form.strategy),
@@ -121,5 +113,26 @@ export function buildPublicRecord(form, meta, tables) {
     scenario: { name: tables.name(Keys.scenario, form.scenario.id).split("\n")[0] },
     trained_on: trainedOn(form.trained_date),
     races: form.races.map((r) => race(tables, r)),
+  };
+}
+
+/**
+ * The part of a public record that names it in a list: its type, trainee and evaluation. The public
+ * record carries the same keys.
+ *
+ * @param {object} form the stored posted form v1
+ * @param {import("./tables.mjs").Tables} tables
+ */
+export function recordSummary(form, tables) {
+  const inheritanceOnly = form.record_type === "InheritanceOnly";
+  return {
+    record_type: inheritanceOnly ? "inheritance_only" : "standard",
+    trainee: {
+      card: tables.label(Keys.card, form.trainee.card),
+      character: tables.label(Keys.character, form.trainee.character),
+      rank: form.trainee.rank === undefined ? null : tables.label(Keys.rank, form.trainee.rank),
+    },
+    // An inheritance-only record never reads the evaluation value, so its 0 means "unknown".
+    evaluation: inheritanceOnly ? null : form.evaluation_value,
   };
 }

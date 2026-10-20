@@ -1,8 +1,9 @@
 // Static-assets-only deployment of the web app: build/web/ served by Workers Static Assets, with
 // no Worker script at all. It is the record-sharing feature switched off:
 // `tool/cloudflare/deploy_web.sh --sharing off` deploys it in place of server/wrangler.jsonc, at the
-// top level for production and under env.staging for staging. With no script, /r/*, /api/* and any
-// path that matches no file are answered by the static 404 and use none of the Worker request quota.
+// top level for production and under env.staging for staging. With no script, /r/*, /u/*, /api/*
+// and any path that matches no file are answered by the static 404 and use none of the Worker
+// request quota.
 //
 // It deliberately has no `main`. A Worker script, if present, is invoked for every path that
 // matches no static file -- not only for the paths a `run_worker_first` list names -- so leaving
