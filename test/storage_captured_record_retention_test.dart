@@ -170,6 +170,47 @@ void main() {
     expect(capturedRecordRetention.pending, ['wired']);
   });
 
+  /// Places a real recognizer result (`umacapture_cli video` over a golden clip) where the recognizer leaves it,
+  /// with no record.json beside it, and returns its id.
+  String placeRecognized(DirectoryPath storeDir) {
+    final bytes = File('test/fixtures/recognized.json').readAsBytesSync();
+    final id = CharaDetailRecord.fromRecordJson(utf8.decode(bytes)).id;
+    File((storeDir / id).filePath(CharaDetailRecord.recognizedJsonName).path)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(bytes);
+    return id;
+  }
+
+  // The scan meets the result before the drain does: the directory holds recognized.json alone when it is listed,
+  // whichever way the capture got there. Retained is a capture that finished while the store was rebuilding; not
+  // retained is one whose app went down before it was merged.
+  for (final retained in [true, false]) {
+    test('a result waiting in recognized.json is listed once, not quarantined (retained: $retained)', () async {
+      final root = DirectoryPath(tempRoot.path);
+      final activeDir = pathInfoFor(root).charaDetailActiveDir;
+      writeRecord(activeDir, makeRecord(id: 'existing', card: 1));
+      final id = placeRecognized(activeDir);
+      if (retained) {
+        capturedRecordRetention.retain(id);
+      }
+
+      final container = makeContainer(root);
+      addTearDown(container.dispose);
+      final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+      await container.read(charaDetailArchiveStorageLoaderProvider.future);
+      await pumpEventQueue();
+
+      expect(active.records.where((e) => e.id == id), hasLength(1));
+      expect(active.length, 2);
+      expect(Directory(pathInfoFor(root).charaDetailQuarantineDir.path).existsSync(), isFalse);
+      expect(File((activeDir / id).filePath('record.json').path).existsSync(), isTrue);
+      expect(File((activeDir / id).filePath('recognized.json').path).existsSync(), isFalse);
+      expect(capturedRecordRetention.pending, isEmpty, reason: "the drain's merge of the composed record succeeds");
+      expect(container.read(charaDetailRecordStorageLoaderProvider).hasError, isFalse);
+    });
+  }
+
   test('a retained id whose record cannot be decoded is quarantined, not retried forever', () async {
     final root = DirectoryPath(tempRoot.path);
     final activeDir = pathInfoFor(root).charaDetailActiveDir;

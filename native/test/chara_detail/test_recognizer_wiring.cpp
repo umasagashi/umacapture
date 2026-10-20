@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <random>
@@ -188,7 +189,7 @@ TEST_CASE("an update request for a record that cannot be read is reported on the
     CHECK_FALSE(std::filesystem::exists(missingRecordRoot()));
 }
 
-TEST_CASE("a re-recognized record is saved with the app's record format, not the one it was read with") {
+TEST_CASE("a re-recognized record is saved to recognized.json with the app's record format, leaving record.json") {
     // A record written before the format change carries 1.0.0, and the loader corrects every record below 2.0.0
     // once more; a re-recognition that kept the old value would have its fresh reading corrected a second time.
     const auto root = std::filesystem::temp_directory_path()
@@ -209,6 +210,11 @@ TEST_CASE("a re-recognized record is saved with the app's record format, not the
     old_record.metadata.record_id.self = "old_record";
     old_record.metadata.record_type = record::RecordType::Standard;
     json_util::write(record_dir / "record.json", old_record, 4);
+    const auto readBytes = [](const std::filesystem::path &path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    const auto old_bytes = readBytes(record_dir / "record.json");
 
     {
         Wiring wiring(root);
@@ -216,8 +222,20 @@ TEST_CASE("a re-recognized record is saved with the app's record format, not the
         CHECK(wiring.errors.empty());
         REQUIRE(wiring.updated.size() == 1);
     }
-    const auto saved = json_util::read(record_dir / "record.json").get<record::CharaDetailRecord>();
+    // The result goes to recognized.json; record.json is the app's and is only read here.
+    const auto saved = json_util::read(record_dir / "recognized.json").get<record::CharaDetailRecord>();
     CHECK(saved.metadata.format_version == "2.0.0");
+    CHECK(readBytes(record_dir / "record.json") == old_bytes);
+    // The record_<ts>.json backup is still a copy of the record.json that was re-recognized.
+    std::vector<std::filesystem::path> backups;
+    for (const auto &entry : std::filesystem::directory_iterator(record_dir)) {
+        const auto name = entry.path().filename().string();
+        if (name.rfind("record_", 0) == 0 && entry.path().extension() == ".json") {
+            backups.push_back(entry.path());
+        }
+    }
+    REQUIRE(backups.size() == 1);
+    CHECK(readBytes(backups.front()) == old_bytes);
 
     std::error_code ignored;
     std::filesystem::remove_all(root, ignored);

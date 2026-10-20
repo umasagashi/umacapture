@@ -18,6 +18,7 @@ import 'package:umacapture/src/addon/payload_enricher.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
 import 'package:umacapture/src/addon/trigger_catalog.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
@@ -660,6 +661,27 @@ void main() {
 
       // The modules_dir placeholder is install-constant, so present even here.
       expect(result['modules_dir'], info.modulesDir.path);
+    });
+
+    test('fills the record placeholders of a capture the store has not composed yet', () {
+      // The capture listener can run before the store's, which is the one that turns the recognizer's result into
+      // record.json; the directory then holds only recognized.json (a real result, from `umacapture_cli video`).
+      final recognizedJson = File('test/fixtures/recognized.json').readAsStringSync();
+      final recognized = CharaDetailRecord.fromRecordJson(recognizedJson);
+      final dir = Directory('${tempDir.path}/storage/chara_detail/active/${recognized.id}')
+        ..createSync(recursive: true);
+      File('${dir.path}/recognized.json').writeAsStringSync(recognizedJson);
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+
+      final result = enrichPayload(refOf(container), {'event': 'record_captured', 'record_id': recognized.id});
+
+      expect(result['record_dir'], (container.read(pathInfoProvider).charaDetailActiveDir / recognized.id).path);
+      expect(
+        recognizedContentKey(CharaDetailRecord.fromRecordJson(result['record_json'] ?? '')),
+        recognizedContentKey(recognized),
+      );
+      expect(result['_enriched'], '1');
     });
 
     test('every user-facing key the enricher sets is a catalogued placeholder', () {

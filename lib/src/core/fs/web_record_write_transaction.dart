@@ -337,14 +337,24 @@ final class WebRecordWriteTransaction {
   /// [store] or in another. The caller may delete [baseFrom] once this commits,
   /// which is why the copy is verified: the staged tree may become the only
   /// copy of those bytes.
+  ///
+  /// [removals] names files of the base, by their names in the record
+  /// directory, that the staged tree does not carry: they are taken out of the
+  /// staged copy before the overlays are written, so the record directory a
+  /// publication leaves holds the base less [removals], plus the overlays. A
+  /// name the base does not hold removes nothing.
   Future<WebRecordWriteResult> publish(
     DirectoryPath dataRoot,
     String recordId,
     List<WebRecordWriteFile> overlays, {
     String store = activeStoreName,
     DirectoryPath? baseFrom,
+    Set<String> removals = const {},
   }) async {
-    if (!isSafeRecordId(recordId) || !_validOverlays(overlays) || !recordStoreNames.contains(store)) {
+    if (!isSafeRecordId(recordId) ||
+        !_validOverlays(overlays) ||
+        !_validRemovals(removals) ||
+        !recordStoreNames.contains(store)) {
       return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'unsafe record id, overlay path or store');
     }
 
@@ -439,6 +449,9 @@ final class WebRecordWriteTransaction {
       }
       await _checkpoint(WebRecordWriteCheckpoint.baseCopied);
 
+      for (final name in removals) {
+        await desiredDir.filePath(name).delete(emptyOk: true);
+      }
       for (final overlay in overlays) {
         final target = FilePath([...desiredDir.segments, ...overlay.relativeSegments]);
         await target.parent.create(recursive: true);
@@ -1210,6 +1223,11 @@ final class WebRecordWriteTransaction {
     }
     return true;
   }
+
+  /// Each removal names one file directly in the record directory.
+  static bool _validRemovals(Set<String> removals) => removals.every(
+    (name) => name.isNotEmpty && name != '.' && name != '..' && !name.contains('/') && !name.contains(r'\'),
+  );
 
   static bool _samePath(DirectoryPath left, DirectoryPath right) {
     return PathEntity.context.equals(PathEntity.context.normalize(left.path), PathEntity.context.normalize(right.path));

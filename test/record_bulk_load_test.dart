@@ -37,6 +37,8 @@ CharaDetailRecord makeRecord({required String id}) {
     0,
     null,
     RecordType.standard,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

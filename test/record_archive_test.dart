@@ -1,6 +1,6 @@
 // Verifies the per-record archive file operation: recognition PNGs are dropped
 // or replaced with JPEGs, the record directory is moved from active/ to
-// archive/, and record.json / trainee.jpg survive. The large prediction.json is
+// archive/, and record.json survives (trainee.jpg only where images are kept). The large prediction.json is
 // always dropped; the geometry *.json is rescaled to the downscaled JPEG when
 // images are kept and dropped when images are dropped. A one-time migration
 // brings already-archived records into the same state. Metadata stored outside
@@ -13,10 +13,19 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_archive_state.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
+import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/record_binding_seed.dart';
+
 void main() {
+  setUpAll(initializeMappers);
+
   late Directory tempRoot;
   late Directory activeDir;
   late Directory archiveDir;
@@ -138,7 +147,8 @@ void main() {
     expect(ok, isTrue);
     final dst = DirectoryPath('${archiveDir.path}/id-none');
     expect(File('${dst.path}/record.json').readAsStringSync(), '{"id":"id-none"}');
-    expect(File('${dst.path}/trainee.jpg').existsSync(), isTrue);
+    // The icon is an image too, cut from the factor image.
+    expect(File('${dst.path}/trainee.jpg').existsSync(), isFalse);
     // The overlay data is always dropped.
     expect(File('${dst.path}/prediction.json').existsSync(), isFalse);
     for (final name in ['skill', 'factor', 'campaign']) {
@@ -149,6 +159,22 @@ void main() {
     }
     // No image of any kind for an image-less archive.
     expect(resolveImagePathSync(dst, CharaDetailRecordImageMode.skillPlain), isNull);
+  });
+
+  test('none drops the reduced JPEGs and the icon of a record that holds no PNG', () async {
+    final dir = Directory('${activeDir.path}/id-jpeg-only')..createSync(recursive: true);
+    File('${dir.path}/record.json').writeAsStringSync('{"id":"id-jpeg-only"}');
+    File('${dir.path}/trainee.jpg').writeAsBytesSync(jpgBytes(60, 60));
+    for (final name in ['skill', 'factor', 'campaign']) {
+      File('${dir.path}/$name.jpg').writeAsBytesSync(jpgBytes(100, 150));
+      File('${dir.path}/$name.json').writeAsStringSync(intersectionJson(100, 150));
+    }
+
+    final ok = await archiveRecordOnNative(argsFor('id-jpeg-only', ArchiveImageOption.none));
+
+    expect(ok, isTrue);
+    final dst = '${archiveDir.path}/id-jpeg-only';
+    expect(Directory(dst).listSync().map((e) => e.uri.pathSegments.last).toSet(), {'record.json', 'archive.json'});
   });
 
   test('archiving leaves id-keyed metadata outside the record tree untouched', () async {
@@ -264,5 +290,133 @@ void main() {
       expect(File('$dst/$name.json').readAsStringSync(), afterFirst[name]);
       expect(intersectionSizeOf('$dst/$name.json'), (width: 720, height: 1280));
     }
+  });
+
+  group('a record without a binding has one worked out from its PNGs before the archive lets go of them', () {
+    for (final option in ArchiveImageOption.values) {
+      for (final kind in UnboundRecord.values) {
+        test('${option.name}, ${kind.name}', () async {
+          final pngs = bindingImagePngs();
+          seedUnboundRecord(activeDir.path, kind, pngs);
+
+          final ok = await archiveRecordOnNative(argsFor(kind.id, option));
+
+          expect(ok, isTrue);
+          final archived = File('${archiveDir.path}/${kind.id}/record.json').readAsBytesSync();
+          expect(bindingIn(archived), expectedBinding(pngs));
+          expect(File('${archiveDir.path}/${kind.id}/skill.png').existsSync(), isFalse, reason: 'the PNGs went');
+        });
+      }
+    }
+
+    test(
+      'a record.json that cannot be rewritten does not stop the archive',
+      () async {
+        final source = seedUnboundRecord(activeDir.path, UnboundRecord.captured, bindingImagePngs());
+        final before = File('$source/record.json').readAsBytesSync();
+        await setReadOnly('$source/record.json', readOnly: true);
+        final id = UnboundRecord.captured.id;
+        addTearDown(() => setReadOnly('${archiveDir.path}/$id/record.json', readOnly: false));
+
+        final ok = await archiveRecordOnNative(argsFor(id, ArchiveImageOption.resizedJpeg));
+
+        expect(ok, isTrue);
+        expect(File('${archiveDir.path}/$id/skill.jpg').existsSync(), isTrue);
+        expect(File('${archiveDir.path}/$id/record.json').readAsBytesSync(), before);
+        expect(File('${archiveDir.path}/$id/record.json.part').existsSync(), isFalse);
+      },
+      skip: Platform.isWindows ? false : windowsOnlyReadOnly,
+    );
+
+    test('placing the binding moves no body time and leaves the body', () async {
+      final source = seedUnboundRecord(activeDir.path, UnboundRecord.captured, bindingImagePngs());
+      final record = File('$source/record.json');
+      final map = (jsonDecode(record.readAsStringSync()) as Map).cast<String, dynamic>();
+      (map['metadata'] as Map)['body_written_at'] = 1700000000000;
+      record.writeAsStringSync(jsonEncode(map));
+      final before = CharaDetailRecord.fromRecordJson(record.readAsStringSync());
+      final id = UnboundRecord.captured.id;
+
+      final ok = await archiveRecordOnNative(argsFor(id, ArchiveImageOption.resizedJpeg));
+
+      expect(ok, isTrue);
+      final after = CharaDetailRecord.fromRecordJson(File('${archiveDir.path}/$id/record.json').readAsStringSync());
+      expect(after.metadata.binding, isNotNull, reason: 'the binding was placed');
+      expect(after.metadata.bodyWrittenAt, 1700000000000);
+      expect(recognizedContentKey(after), recognizedContentKey(before));
+    });
+  });
+
+  group('the archive state and its time', () {
+    late int Function() clock;
+    setUp(() {
+      clock = valueWriteClock;
+      valueWriteClock = () => 1767225600000;
+    });
+    tearDown(() => valueWriteClock = clock);
+
+    for (final (option, state) in [
+      (ArchiveImageOption.resizedJpeg, RecordArchiveState.jpeg),
+      (ArchiveImageOption.none, RecordArchiveState.none),
+    ]) {
+      test(
+        'archiving with ${option.name} writes ${state.name} at the time of the archive, read back after it',
+        () async {
+          seedRecord('id-state');
+          final before = await readRecordArchiveState(DirectoryPath('${activeDir.path}/id-state'), archiveStore: false);
+
+          final ok = await archiveRecordOnNative(argsFor('id-state', option));
+
+          expect(ok, isTrue);
+          expect(before, (state: RecordArchiveState.normal, writtenAt: null));
+          final dst = DirectoryPath('${archiveDir.path}/id-state');
+          expect(await readRecordArchiveState(dst, archiveStore: true), (state: state, writtenAt: 1767225600000));
+        },
+      );
+    }
+
+    test('a record archived before the state was noted reads as a reduced JPEG with no time', () async {
+      final dir = Directory('${archiveDir.path}/id-old')..createSync(recursive: true);
+      File('${dir.path}/record.json').writeAsStringSync('{}');
+
+      expect(await readRecordArchiveState(DirectoryPath(dir.path), archiveStore: true), (
+        state: RecordArchiveState.jpeg,
+        writtenAt: null,
+      ));
+    });
+
+    test('the state is written after the time of the state it replaces, on a clock behind it', () async {
+      final source = seedRecord('id-behind');
+      File('$source/$recordArchiveNoteName').writeAsStringSync(jsonEncode({'normal_written_at': 1800000000000}));
+
+      expect(await archiveRecordOnNative(argsFor('id-behind', ArchiveImageOption.none)), isTrue);
+
+      expect(await readRecordArchiveState(DirectoryPath('${archiveDir.path}/id-behind'), archiveStore: true), (
+        state: RecordArchiveState.none,
+        writtenAt: 1800000000001,
+      ));
+    });
+
+    test(
+      'an archive stopped before the move leaves the record normal at the time it had',
+      () async {
+        final source = seedRecord('id-stopped');
+        File('$source/$recordArchiveNoteName').writeAsStringSync(jsonEncode({'normal_written_at': 1700000000000}));
+        // An open handle inside the directory refuses its rename on Windows: the move is stopped after everything that
+        // comes before it.
+        final handle = File('$source/trainee.jpg').openSync();
+        addTearDown(handle.closeSync);
+
+        final ok = await archiveRecordOnNative(argsFor('id-stopped', ArchiveImageOption.none));
+
+        expect(ok, isFalse);
+        expect(Directory('${archiveDir.path}/id-stopped').existsSync(), isFalse);
+        expect(await readRecordArchiveState(DirectoryPath(source), archiveStore: false), (
+          state: RecordArchiveState.normal,
+          writtenAt: 1700000000000,
+        ));
+      },
+      skip: Platform.isWindows ? false : 'an open file holds a directory in place only on Windows',
+    );
   });
 }

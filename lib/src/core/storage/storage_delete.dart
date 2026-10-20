@@ -42,10 +42,14 @@ import 'dart:io' show FileSystemException;
 
 import 'package:easy_localization/easy_localization.dart';
 
+import '/src/chara_detail/enhancement_merge.dart';
+import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/record_quarantine_ledger.dart';
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_reason.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
 import 'long_read_registry.dart';
@@ -127,10 +131,14 @@ Future<StorageDeleteReport> _deleteStorageEntry(
         surveyed = await _surveyTree(target);
       }),
       action: (outcome) async {
+        await _placeBindingBeforeImageDelete(ref, target);
+        final quarantined = await _quarantinedRecordsUnder(ref, group, target);
         // A scope that runs no whole-store maintenance leaves [surveyed] null,
         // and surveying here is the same set: the exclusion was taken before
         // either point and no drain ran between them.
-        return _deleteSurveyed(surveyed ?? await _surveyTree(target), outcome);
+        final report = await _deleteSurveyed(surveyed ?? await _surveyTree(target), outcome);
+        await _noteQuarantinedRecordsDeleted(ref, quarantined, report);
+        return report;
       },
     );
   } on RecordMutationLockBusy catch (error, stackTrace) {
@@ -150,6 +158,72 @@ Future<StorageDeleteReport> _deleteStorageEntry(
       detail: StorageDeletePlatformDetail(error),
     );
   }
+}
+
+/// Places the binding on the record whose image [target] is ([isRecordBindingImage]) before the image is let go of,
+/// so the record keeps the binding a capture of those images would have carried. A target that removes a whole record
+/// (its directory, its store, its `record.json`) works nothing out: the binding goes with the record and nothing reads
+/// it. Runs inside the delete's exclusion; a binding that cannot be placed does not stop the delete.
+Future<void> _placeBindingBeforeImageDelete(RefBase ref, PathEntity target) async {
+  final info = await ref.read(pathLayoutLoader.future);
+  if (isRecordBindingImage(info, target)) {
+    await placeRecordBindingUnlocked(target.parent);
+  }
+}
+
+/// The records on the quarantine shelf that a delete of [target] in [group] can remove — the shelf itself, or one of
+/// the directories on it — by the directory each is in. Read inside the delete's exclusion, which for the shelf is the
+/// exclusive root, before anything is removed: a directory's note goes with it.
+Future<Map<String, String>> _quarantinedRecordsUnder(RefBase ref, StorageGroup group, PathEntity target) async {
+  if (group.id != StorageGroupId.quarantine) return const {};
+  final info = await ref.read(pathLayoutLoader.future);
+  final shelf = info.charaDetailQuarantineDir;
+  final onShelf = target.path == shelf.path || target.parent.path == shelf.path;
+  if (!onShelf || target is! DirectoryPath) return const {};
+  try {
+    final kept = (await readQuarantineLedger(shelf)).kept;
+    return {
+      for (final record in kept)
+        if (target.path == shelf.path || record.directory.path == target.path) record.directory.path: record.id,
+    };
+  } catch (error, stackTrace) {
+    logger.e('The quarantine shelf could not be read before a delete of ${target.path}.', error, stackTrace);
+    return const {};
+  }
+}
+
+/// Notes as deleted by the user the ids of the [quarantined] records whose directories [report] removed ([N15-22] (d)):
+/// a record taken off the shelf this way is a delete, where one put back is not. Still inside the delete's exclusive
+/// root, which is the lock the shelf's list is written under.
+Future<void> _noteQuarantinedRecordsDeleted(
+  RefBase ref,
+  Map<String, String> quarantined,
+  StorageDeleteReport report,
+) async {
+  if (quarantined.isEmpty) return;
+  final deleted = report.deletedPaths.toSet();
+  final ids = {
+    for (final MapEntry(key: path, value: id) in quarantined.entries)
+      if (deleted.contains(path)) id,
+  };
+  if (ids.isEmpty) return;
+  final info = await ref.read(pathLayoutLoader.future);
+  try {
+    await noteQuarantineUserDeletedUnlocked(info.charaDetailQuarantineDir, ids);
+  } catch (error, stackTrace) {
+    logger.e('Could not note the deleted quarantined records ${ids.join(', ')}.', error, stackTrace);
+  }
+}
+
+/// The ids of the records whose whole directories [report] removed from a record store: the directories directly
+/// under `active/` or `archive/` it names as deleted. A record whose `record.json` or images alone went is not one.
+Set<String> _recordsDeletedBy(PathInfo info, StorageGroup group, StorageDeleteReport report) {
+  if (group.id != StorageGroupId.activeRecords && group.id != StorageGroupId.archivedRecords) return const {};
+  final stores = {info.charaDetailActiveDir.path, info.charaDetailArchiveDir.path};
+  return {
+    for (final subject in report.deleted)
+      if (subject.path case final path? when stores.contains(DirectoryPath(path).parent.path)) DirectoryPath(path).name,
+  };
 }
 
 /// Deletes several targets of one group and reports them together.
@@ -175,7 +249,12 @@ Future<StorageDeleteReport> deleteStorageEntries(
 }) async {
   final reports = <StorageDeleteReport>[];
   for (final target in targets) {
-    reports.add(await _deleteStorageEntry(ref, group: group, target: target));
+    final report = await _deleteStorageEntry(ref, group: group, target: target);
+    // A whole record directory is the record's delete ([N15-22] (a)), so what it carried outside the directory goes
+    // as it does from the list. After the delete's own exclusion: that is a record lock, and this takes the root.
+    final info = await ref.read(pathLayoutLoader.future);
+    await forgetDeletedRecords(ref, info, _recordsDeletedBy(info, group, report));
+    reports.add(report);
   }
   return StorageDeleteReport.merge(reports);
 }

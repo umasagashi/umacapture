@@ -3,7 +3,7 @@
 // WHAT THESE GUARD. All three open their file in binary mode. On Windows the CRT
 // otherwise translates newlines in *both* directions: a text-mode write expands every "\n" to
 // "\r\n", and a text-mode read collapses "\r\n" back to "\n". io_util::write emits the scene
-// definitions that `umacapture_cli build` checks in, and io_util::replace emits record.json at
+// definitions that `umacapture_cli build` checks in, and io_util::replace emits recognized.json at
 // runtime, so a text-mode write puts CR into files the repo diffs (and the Dart side writes) as LF.
 //
 // WHY NO ROUND TRIP. A test that writes through io_util::write and reads back through
@@ -137,9 +137,9 @@ TEST_CASE("io_util::replace puts the exact bytes over an existing file and leave
     // The staging name io_util::replace derives, owned here too so a failed case cleans it up.
     const ScopedTempFile staging("umacapture_io_util_replace.tmp.part");
     // Longer than the replacement, so a write that reused the old file without truncating it would
-    // leave its tail behind. Re-recognition replaces an existing record.json, so the target existing
+    // leave its tail behind. Re-recognition replaces an existing recognized.json, so the target existing
     // is the case that matters: it is what std::filesystem::rename has to overwrite rather than refuse.
-    writeRawBytes(temp.path(), "an older record.json that is longer than the new one\n");
+    writeRawBytes(temp.path(), "an older recognized.json that is longer than the new one\n");
     const std::string text = "{\n  \"a\": 1\r\n}\n";
 
     replace(temp.path(), text);

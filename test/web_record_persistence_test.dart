@@ -5,7 +5,10 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock_shared.dart';
@@ -13,6 +16,7 @@ import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/fs/web_record_persistence.dart';
 import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/wasm_worker_ops.dart';
 
 import 'support/web_like_fs_backend.dart';
 
@@ -188,7 +192,7 @@ void main() {
     final bothEntered = Completer<void>();
     var entered = 0;
     final releaseDifferent = Completer<void>();
-    Future<bool> different(String id) => persistPlatformRecordUpdateToOpfs(id, storageDir, () async {
+    Future<RecordUpdateOutcome> different(String id) => persistPlatformRecordUpdateToOpfs(id, storageDir, () async {
       entered++;
       if (entered == 2) bothEntered.complete();
       await releaseDifferent.future;
@@ -299,11 +303,11 @@ void main() {
     final persistence = WebRecordPersistence();
     expect(
       await persistPlatformRecordUpdateToOpfs('update', storageDir, () async => null, persistence: persistence),
-      isFalse,
+      RecordUpdateOutcome.failed,
     );
     expect(
       await persistPlatformRecordUpdateToOpfs('update', storageDir, () async => const [], persistence: persistence),
-      isFalse,
+      RecordUpdateOutcome.failed,
     );
     await expectLater(
       persistPlatformRecordUpdateToOpfs(
@@ -314,6 +318,108 @@ void main() {
       ),
       throwsFormatException,
     );
+  });
+
+  group('the recognizer result', () {
+    // The worker hands over the recognizer's own output, `recognized.json`, read from the real fixture; the store
+    // keeps only the `record.json` composed from it ([composeRecordFiles]).
+    final recognizedBytes = File('test/fixtures/recognized.json').readAsBytesSync();
+    final recognized = CharaDetailRecord.fromRecordJson(utf8.decode(recognizedBytes));
+    final id = recognized.metadata.recordId.self;
+    final dir = 'chara_detail/active/$id';
+
+    late List<String> recordJsonWrites;
+    late WebRecordPersistence persistence;
+    setUp(() {
+      recordJsonWrites = [];
+      persistence = WebRecordPersistence(
+        writeFile: (target, bytes) async {
+          if (target.name == 'record.json') recordJsonWrites.add(target.path);
+          await target.writeAsBytes(bytes);
+        },
+      );
+    });
+
+    Future<List<String>> storedNames() async => [
+      for (final entity in Directory((storageDir / 'chara_detail' / 'active' / id).path).listSync())
+        entity.uri.pathSegments.lastWhere((segment) => segment.isNotEmpty),
+    ]..sort();
+
+    Future<Uint8List> storedRecordJson() =>
+        (storageDir / 'chara_detail' / 'active' / id).filePath('record.json').readAsBytes();
+
+    test('a harvested record is published once, as the record.json composed from its result', () async {
+      // The composed record carries the time it was composed at; one clock reading for both sides.
+      final clock = valueWriteClock;
+      addTearDown(() => valueWriteClock = clock);
+      valueWriteClock = () => 1767225600000;
+      final selection = selectPublishableRecordFiles([
+        (path: '$dir/skill.png', bytes: Uint8List.fromList([1, 2, 3])),
+        (path: '$dir/recognized.json', bytes: recognizedBytes),
+      ]);
+      final result = await persistPlatformHarvestToOpfs(selection.publishable, storageDir, persistence: persistence);
+
+      expect(result.committedIds, {id});
+      expect(recordJsonWrites, hasLength(1));
+      expect(await storedNames(), ['record.json', 'skill.png']);
+      expect(await storedRecordJson(), composeBodyWrite(null, recognized)!.toRecordJsonBytes());
+    });
+
+    test('the publication still refuses a result that was not composed', () async {
+      // The store accepts a record by its record.json and nothing else; the result alone is not one.
+      await expectLater(
+        persistPlatformHarvestToOpfs([(path: '$dir/recognized.json', bytes: recognizedBytes)], storageDir),
+        throwsFormatException,
+      );
+      expect(Directory((storageDir / 'chara_detail' / 'active' / id).path).existsSync(), isFalse);
+    });
+
+    // A re-recognition: the worker hands back the stored record.json it was given, with its result beside it.
+    Future<RecordUpdateOutcome> regenerate(Uint8List stored, Uint8List result) =>
+        persistPlatformRecordUpdateToOpfs(id, storageDir, () async {
+          return [
+            (path: '$dir/record.json', bytes: stored),
+            (path: '$dir/record_20261021120000.json', bytes: result),
+            (path: '$dir/recognized.json', bytes: result),
+          ];
+        }, persistence: persistence);
+
+    Future<Uint8List> storeWithPlacements() async {
+      final placed = placeOnRecord(
+        composeBodyWrite(null, recognized)!,
+        parents: (parent1: 'parent-one', parent2: 'parent-two'),
+        relationBonus: (value: 151),
+      );
+      final bytes = placed.toRecordJsonBytes();
+      await (storageDir / 'chara_detail' / 'active' / id).create(recursive: true);
+      await (storageDir / 'chara_detail' / 'active' / id).filePath('record.json').writeAsBytes(bytes);
+      return bytes;
+    }
+
+    test('a re-recognition that read the same body publishes nothing and succeeds', () async {
+      final stored = await storeWithPlacements();
+
+      expect(await regenerate(stored, recognizedBytes), RecordUpdateOutcome.unchanged);
+      expect(recordJsonWrites, isEmpty);
+      expect(await storedRecordJson(), stored);
+      expect(await storedNames(), ['record.json']);
+    });
+
+    test('a re-recognition that read another body publishes once and keeps what was placed', () async {
+      final stored = await storeWithPlacements();
+      final map = jsonDecode(utf8.decode(recognizedBytes)) as Map<String, dynamic>;
+      map['evaluation_value'] = recognized.evaluationValue + 1;
+      final changed = Uint8List.fromList(utf8.encode(jsonEncode(map)));
+
+      expect(await regenerate(stored, changed), RecordUpdateOutcome.published);
+      expect(recordJsonWrites, hasLength(1));
+      final written = CharaDetailRecord.fromRecordJson(utf8.decode(await storedRecordJson()));
+      expect(written.evaluationValue, recognized.evaluationValue + 1);
+      expect(written.metadata.recordId.parent1, 'parent-one');
+      expect(written.metadata.recordId.parent2, 'parent-two');
+      expect(written.metadata.relationBonus, 151);
+      expect(await storedNames(), ['record.json', 'record_20261021120000.json']);
+    });
   });
 
   test('multi-record persistence reports committed IDs when a later record fails', () async {

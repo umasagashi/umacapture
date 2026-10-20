@@ -34,6 +34,8 @@ library;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_export_shape.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
@@ -103,7 +105,10 @@ Future<StorageZipDelivery> platformStorageZipRunner(
   // there. The encode below is arithmetic over bytes already in memory, and the
   // handover is the browser's; holding a Web Lock across either would keep other
   // tabs out of the record store for work that no longer touches it.
-  final bundle = await guard(() => _readBundle(directory, onProgress));
+  final bundle = await guard(() async {
+    final records = await placeStorageZipRecordBindings(ref, directory);
+    return _readBundle(directory, records, onProgress);
+  });
 
   final bytes = buildStorageZipBytes(
     rootName: directory.name,
@@ -124,9 +129,11 @@ Future<StorageZipDelivery> platformStorageZipRunner(
 }
 
 /// Walks [directory] and reads every file in it — the part of the export that
-/// touches the store, and therefore the part that runs under the exclusion.
+/// touches the store, and therefore the part that runs under the exclusion. Each file of a record directory in
+/// [records] goes in as the export table says (`recordFileForExport`).
 Future<({List<StorageZipSourceFile> sources, List<List<String>> emptyDirectorySegments})> _readBundle(
   DirectoryPath directory,
+  StorageZipRecords records,
   StorageZipProgressSink onProgress,
 ) async {
   final listings = await directory.listWithMetadata(recursive: true);
@@ -145,6 +152,9 @@ Future<({List<StorageZipSourceFile> sources, List<List<String>> emptyDirectorySe
   for (final listing in listings) {
     final entity = listing.entity;
     if (entity is FilePath) {
+      if (records.recordDirs.contains(entity.parent.path) && recordFileExportOf(entity.name) == RecordFileExport.left) {
+        continue;
+      }
       files.add(entity);
       // Kept from the enumeration rather than asked for again: the walk already
       // resolved it, and it is what dates the archive's entries. Dropping it
@@ -166,12 +176,17 @@ Future<({List<StorageZipSourceFile> sources, List<List<String>> emptyDirectorySe
     // Paired by index, which `planStorageZipLayout` promises: the bytes still
     // have to be read from the entity, and re-deriving the path here would be a
     // second implementation of the slicing that was just moved out.
-    sources.add((
-      relativeSegments: layout.fileSegments[index],
-      bytes: await files[index].readAsBytes(),
-      modified: modified[index],
-    ));
+    final file = files[index];
+    final stored = records.recordJsons[file.path] ?? await file.readAsBytes();
+    final bytes = records.recordDirs.contains(file.parent.path) ? recordFileForExport(file.name, stored) : stored;
+    if (bytes != null) {
+      sources.add((relativeSegments: layout.fileSegments[index], bytes: bytes, modified: modified[index]));
+    }
     onProgress((index + 1) / files.length);
+  }
+  for (final MapEntry(key: recordDir, value: note) in records.archiveNotes.entries) {
+    final segments = DirectoryPath(recordDir).filePath(recordArchiveNoteName).segments;
+    sources.add((relativeSegments: segments.sublist(directory.segments.length), bytes: note, modified: null));
   }
   return (sources: sources, emptyDirectorySegments: layout.emptyDirectorySegments);
 }

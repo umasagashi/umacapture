@@ -78,7 +78,7 @@ typedef EnhancementMergeActions = ({
   merge,
   Future<EnhancementDismissOutcome> Function(EnhancementCandidate candidate) dismiss,
   Future<void> Function() resolveInheritance,
-  Future<MergedIds?> Function(String recordId) readMerged,
+  Future<Map<String, MergeDefaults>?> Function(String recordId) readMergesInProgress,
 });
 
 final enhancementMergeActionsProvider = Provider<EnhancementMergeActions>((ref) {
@@ -95,9 +95,9 @@ final enhancementMergeActionsProvider = Provider<EnhancementMergeActions>((ref) 
     resolveInheritance: () => ref
         .read(charaDetailRecordStorageLoaderProvider.notifier)
         .resolveAllInheritance(effects: inheritanceResolutionDeclaration(ref.read(containerRefProvider))),
-    readMerged: (recordId) async {
+    readMergesInProgress: (recordId) async {
       final directory = recordDirectoryOf(ref, recordId);
-      return directory == null ? (ids: const <String>[], metadataDefaults: null) : await readMergedIds(directory);
+      return directory == null ? const <String, MergeDefaults>{} : await readMergesInProgress(directory);
     },
   );
 });
@@ -245,11 +245,11 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
   bool? _unfinished;
 
   /// The relation the first run of this unfinished merge resolved its memo and rating defaults
-  /// from, as its marker records it; null when there is no such run or the marker carries none.
+  /// from, as the older record's merges in progress record it; null when there is no such run.
   ///
   /// The merge re-run resolves its defaults from the same relation, so prefilling from it is what
   /// keeps the fields showing the values the merge writes.
-  MergedIds? _marker;
+  MergeDefaults? _marker;
 
   /// The selection the user made, or null while they made none and [_defaultSelection] applies.
   ///
@@ -281,7 +281,7 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
   }
 
   Future<void> _readMarker() async {
-    final merged = await ref.read(enhancementMergeActionsProvider).readMerged(widget.candidate.olderId);
+    final inProgress = await ref.read(enhancementMergeActionsProvider).readMergesInProgress(widget.candidate.olderId);
     if (!mounted) {
       return;
     }
@@ -289,8 +289,8 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
     // (`refusedStorageUnreadable`), and offering the choice for a state nobody could read is the
     // direction that loses content.
     _moveKeptSide(() {
-      _unfinished = merged == null || merged.ids.contains(widget.candidate.newerId);
-      _marker = merged;
+      _marker = inProgress?[widget.candidate.newerId];
+      _unfinished = inProgress == null || _marker != null;
     });
   }
 
@@ -559,11 +559,10 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
   /// A key neither side holds is left out: there is nothing to choose, and the merge keeps the
   /// absence without being asked.
   List<Widget> _metadataRows(_Side older, _Side newer, bool identical, {required bool enabled}) {
-    final recorded = _marker?.metadataDefaults;
-    final defaults = _unfinished == true && recorded != null && recorded.retiredId == newer.id
+    final recorded = _marker;
+    final MergeDefaults defaults = _unfinished == true && recorded != null
         ? recorded
         : (
-            retiredId: newer.id,
             route: widget.route,
             identical: identical,
             contentFromOlder: _contentFromOlder,

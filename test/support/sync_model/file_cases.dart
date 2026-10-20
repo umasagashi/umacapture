@@ -4,6 +4,8 @@
 // rules give something else, the case says why ([FileCase.open]) and what they give
 // ([FileCase.gives]), and stays in the list as an open question.
 
+import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
+
 import 'file_core.dart';
 import 'file_mutations.dart';
 import 'file_world.dart';
@@ -170,9 +172,16 @@ bool meets(FileCase c, FileCaseResult r) {
 
 /// [op] with each id written `X~` — the record its device lists that was split off X, the first of
 /// them by id where it lists several — as the device lists it.
+/// [s] with each id split off another written as the cases write it: each mark of the content the record split
+/// off is made of ([recordSyncSplitId]) as `~`.
+String plainSplitIds(String s) => s.replaceAll(RegExp('$recordSyncSplitSeparator[a-z0-9]+'), '~');
+
+/// The prefix of the id a case writes `X~` as.
+String _splitIdOf(String written) => written.replaceAll('~', recordSyncSplitSeparator);
+
 Op _named(FileWorld w, Op op) {
   String named(String device, String id) =>
-      id.endsWith('~') ? w.recordIds(device).firstWhere((listed) => listed.startsWith(id)) : id;
+      id.endsWith('~') ? w.recordIds(device).firstWhere((listed) => listed.startsWith(_splitIdOf(id))) : id;
   return switch (op) {
     Merge(:final device, :final a, :final b, :final contentFrom, :final untracked) => Merge(
       device,
@@ -219,7 +228,7 @@ FileCaseResult runFileCase(FileCase c, {FileMutation? mutation}) {
   for (final op in c.ops) {
     op is Link ? w.execute(op) : w.apply(_named(w, op));
   }
-  String plain(String s) => s.replaceAll(RegExp('~[a-z0-9]+'), '~');
+  String plain(String s) => plainSplitIds(s);
   Set<String> shown(FState store, FDevice? d) => {
     for (final r in store.records.values) ...[
       '${plain(r.id)}.stage=${r.stage.name}',
@@ -3107,47 +3116,37 @@ final fileJudgeCases = <FileJudgeCase>[
   // Both devices took R1 back from a zip as what the record split off its id before is made of, removing that
   // record: R1 meets no conflict, and A's memo on it is owed. A round that tells it split R1 off onto R1~, which the
   // server lists no more, is not believed for that: the memo it lost is reported.
-  FileJudgeCase(
-    'a memo on a record the round has no call to split off, onto an id the other side took away',
-    [
-      ..._zipLikePrefix,
-      Delete('A', 'R1~'),
-      ImportZip('A', 'z'),
-      EditMemo('A', 'R1', 'kept'),
-      Delete('B', 'R1~'),
-      ImportZip('B', 'z'),
-      SyncRound('B'),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.splitOffWithoutAConflict,
-    whenBroken: {ViolationKind.memoLost},
-  ),
+  FileJudgeCase('a memo on a record the round has no call to split off, onto an id the other side took away', [
+    ..._zipLikePrefix,
+    Delete('A', 'R1~'),
+    ImportZip('A', 'z'),
+    EditMemo('A', 'R1', 'kept'),
+    Delete('B', 'R1~'),
+    ImportZip('B', 'z'),
+    SyncRound('B'),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // As above, A's base of R1 being what A lists, while B changed R1 twice. A's push between B's two changes has nothing
   // to send, and tells R1 sent while the server lists B's first change: A's base stays as it was, and R1, which only B
   // changed since, meets no conflict on A's round.
-  FileJudgeCase(
-    'a memo on a record the round has no call to split off, after a push that had nothing to send',
-    [
-      ..._zipLikePrefix,
-      ImportZip('A', 'z'),
-      SyncRound('A'),
-      SyncRound('B'),
-      Capture('B', 'R3', 3),
-      Merge('B', 'R1', 'R3', contentFrom: 'R3'),
-      SyncRound('B'),
-      Push('A'),
-      Delete('B', 'R1~'),
-      Capture('B', 'R4', 4),
-      Merge('B', 'R1', 'R4', contentFrom: 'R4'),
-      SyncRound('B'),
-      EditMemo('A', 'R1', 'kept'),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.splitOffWithoutAConflict,
-    whenBroken: {ViolationKind.memoLost},
-  ),
+  FileJudgeCase('a memo on a record the round has no call to split off, after a push that had nothing to send', [
+    ..._zipLikePrefix,
+    ImportZip('A', 'z'),
+    SyncRound('A'),
+    SyncRound('B'),
+    Capture('B', 'R3', 3),
+    Merge('B', 'R1', 'R3', contentFrom: 'R3'),
+    SyncRound('B'),
+    Push('A'),
+    Delete('B', 'R1~'),
+    Capture('B', 'R4', 4),
+    Merge('B', 'R1', 'R4', contentFrom: 'R4'),
+    SyncRound('B'),
+    EditMemo('A', 'R1', 'kept'),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // The returns given up for stores that share no base, by why they share none.
   FileJudgeCase(
     'a delete made before the first sync',
@@ -3705,17 +3704,12 @@ final fileJudgeCases = <FileJudgeCase>[
   // The parents go with what a record shows (S-13). A's resolver places R1's parent after A's first round,
   // which sent R1 without it; the server's R1, the same write, stands at A's next round and its empty slot
   // with it, and A places the parent again.
-  FileJudgeCase(
-    'a parent placed after a round is not sent with a content its device did not write',
-    [
-      Capture('A', 'P1', 1),
-      Capture('A', 'R1', 2, parents: {1: 'P1'}),
-      SyncRound('A'),
-      SyncRound('A'),
-    ],
-    broken: FileMutation.parentsApartFromTheContent,
-    whenBroken: {ViolationKind.linkLost},
-  ),
+  FileJudgeCase('a parent placed after a round is not sent with a content its device did not write', [
+    Capture('A', 'P1', 1),
+    Capture('A', 'R1', 2, parents: {1: 'P1'}),
+    SyncRound('A'),
+    SyncRound('A'),
+  ]),
   // B places the parent of the R1 it received, and placing it moves no time: at B's next round the server's
   // R1 stands, and the server takes no parent.
   FileJudgeCase(
@@ -3743,24 +3737,17 @@ final fileJudgeCases = <FileJudgeCase>[
       Merge('A', 'R2', 'R1', contentFrom: 'R1'),
       SyncRound('A'),
     ],
-    broken: FileMutation.tieLeavesTheParentsOut,
-    whenBroken: {ViolationKind.linkLost},
   ),
   // A's resolver places R1's parent after A's first round, which sent R1 without it; the re-recognition writes
   // a later content, with that parent, and A's next round sends the two together (S-13): the server's empty
   // slot, of the earlier write A had agreed on, is not the server's side of this one.
-  FileJudgeCase(
-    'a later content sends the parent its device had placed over the empty slot of the one it agreed on',
-    [
-      Capture('A', 'P1', 1),
-      Capture('A', 'R1', 2, parents: {1: 'P1'}),
-      SyncRound('A'),
-      Rerecognize('A', 'R1', 2),
-      SyncRound('A'),
-    ],
-    broken: FileMutation.laterContentKeepsTheOthersParents,
-    whenBroken: {ViolationKind.linkLost},
-  ),
+  FileJudgeCase('a later content sends the parent its device had placed over the empty slot of the one it agreed on', [
+    Capture('A', 'P1', 1),
+    Capture('A', 'R1', 2, parents: {1: 'P1'}),
+    SyncRound('A'),
+    Rerecognize('A', 'R1', 2),
+    SyncRound('A'),
+  ]),
   // A lists P1 when its round is done, and the resolver runs after the round: R1's slot is not left empty.
   FileJudgeCase(
     'the resolver fills the slot of a parent its device lists after a round',
@@ -3775,25 +3762,20 @@ final fileJudgeCases = <FileJudgeCase>[
   // A merges P1 into S; B has merged X into P1 meanwhile, so B's round keeps the P1 it changed (S4) and S keeps
   // having absorbed it. R1's parent P1 is listed in the result, and is not read as S (S-13). The PNG gives B's
   // re-recognition images to read.
-  FileJudgeCase(
-    'a parent whose record a round keeps against its merge is not read as the record that absorbed it',
-    [
-      SetImageForm('A', 'png'),
-      Capture('A', 'S', 1),
-      Capture('A', 'P1', 2),
-      Capture('A', 'R1', 3, parents: {1: 'P1'}),
-      Capture('A', 'X', 4),
-      SyncRound('A'),
-      SyncRound('B'),
-      Merge('B', 'X', 'P1', contentFrom: 'P1'),
-      Rerecognize('B', 'R1', 2),
-      Merge('A', 'P1', 'S', contentFrom: 'S'),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.listedParentReadAsItsAbsorber,
-    whenBroken: {ViolationKind.linkLost},
-  ),
+  FileJudgeCase('a parent whose record a round keeps against its merge is not read as the record that absorbed it', [
+    SetImageForm('A', 'png'),
+    Capture('A', 'S', 1),
+    Capture('A', 'P1', 2),
+    Capture('A', 'R1', 3, parents: {1: 'P1'}),
+    Capture('A', 'X', 4),
+    SyncRound('A'),
+    SyncRound('B'),
+    Merge('B', 'X', 'P1', contentFrom: 'P1'),
+    Rerecognize('B', 'R1', 2),
+    Merge('A', 'P1', 'S', contentFrom: 'S'),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // The checks that read no log, each with a rule broken on purpose that it sees.
   FileJudgeCase(
     'a zip put over a record shows what the zip holds',
@@ -3941,22 +3923,17 @@ final fileJudgeCases = <FileJudgeCase>[
   ),
   // A cannot tell whether the server took its archive, and needs not: the stage carries the time it was
   // written, and the archive is the later write. Broken so that the nearer stage stands, it is undone.
-  FileJudgeCase(
-    'an archive whose swap was lost stands where another device sent meanwhile',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      SyncRound('A'),
-      SyncRound('B'),
-      Archive('A', 'R1', 'none'),
-      PushCut('A', 0, stored: false),
-      Capture('B', 'R2', 2),
-      SyncRound('B'),
-      SyncRound('A'),
-    ],
-    broken: FileMutation.nearerStageWhereTheTwoDiffer,
-    whenBroken: {ViolationKind.archiveUndone},
-  ),
+  FileJudgeCase('an archive whose swap was lost stands where another device sent meanwhile', [
+    _png,
+    Capture('A', 'R1', 1),
+    SyncRound('A'),
+    SyncRound('B'),
+    Archive('A', 'R1', 'none'),
+    PushCut('A', 0, stored: false),
+    Capture('B', 'R2', 2),
+    SyncRound('B'),
+    SyncRound('A'),
+  ]),
   FileJudgeCase(
     'a device that holds a memo over the send limit, at rest',
     [
@@ -4423,35 +4400,25 @@ final fileJudgeCases = <FileJudgeCase>[
   ]),
   // Where the two meet with no base, the stage written later stands all the same: the archive. Broken so
   // that the nearer stage stands, it is undone.
-  FileJudgeCase(
-    'an archive of a copy from a zip stands where it first meets the record it is a copy of',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      ExportZip('A', 'R1', 'z1'),
-      ImportZip('B', 'z1'),
-      Archive('B', 'R1', 'none'),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.nearerStageWhereTheTwoDiffer,
-    whenBroken: {ViolationKind.archiveUndone},
-  ),
-  FileJudgeCase(
-    'an archive stands where a device that lost its base meets the server',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      SyncRound('A'),
-      SyncRound('B'),
-      Archive('A', 'R1', 'none'),
-      SyncRound('A'),
-      LoseStateFile('B'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.nearerStageWhereTheTwoDiffer,
-    whenBroken: {ViolationKind.archiveUndone},
-  ),
+  FileJudgeCase('an archive of a copy from a zip stands where it first meets the record it is a copy of', [
+    _png,
+    Capture('A', 'R1', 1),
+    ExportZip('A', 'R1', 'z1'),
+    ImportZip('B', 'z1'),
+    Archive('B', 'R1', 'none'),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
+  FileJudgeCase('an archive stands where a device that lost its base meets the server', [
+    _png,
+    Capture('A', 'R1', 1),
+    SyncRound('A'),
+    SyncRound('B'),
+    Archive('A', 'R1', 'none'),
+    SyncRound('A'),
+    LoseStateFile('B'),
+    SyncRound('B'),
+  ]),
   FileJudgeCase(
     'an archive without images undone where another device archived the record with resized ones meanwhile',
     [
@@ -4548,27 +4515,22 @@ final fileJudgeCases = <FileJudgeCase>[
     SyncRound('B'),
   ]),
   // The record's id is one a user merged: its last edits are read on the record the server lists.
-  FileJudgeCase(
-    'the later of two edits of a cell, made on a record after a merge both devices hold, is the one kept',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      Capture('A', 'R2', 2),
-      SyncRound('A'),
-      SyncRound('B'),
-      Merge('A', 'R1', 'R2', contentFrom: 'R1'),
-      SyncRound('A'),
-      SyncRound('B'),
-      EditMemo('B', 'R1', 'early'),
-      EditRating('B', 'R1', _rating, 1),
-      EditMemo('A', 'R1', 'late'),
-      EditRating('A', 'R1', _rating, 5),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.cellsWithoutTimes,
-    whenBroken: {ViolationKind.memoLost},
-  ),
+  FileJudgeCase('the later of two edits of a cell, made on a record after a merge both devices hold, is the one kept', [
+    _png,
+    Capture('A', 'R1', 1),
+    Capture('A', 'R2', 2),
+    SyncRound('A'),
+    SyncRound('B'),
+    Merge('A', 'R1', 'R2', contentFrom: 'R1'),
+    SyncRound('A'),
+    SyncRound('B'),
+    EditMemo('B', 'R1', 'early'),
+    EditRating('B', 'R1', _rating, 1),
+    EditMemo('A', 'R1', 'late'),
+    EditRating('A', 'R1', _rating, 5),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // Both devices merge R2 into R1 the same way, with no base between them: B's result is split off R1
   // first, with the rating B gave it, and A's — rated later — is split off under the same id.
   FileJudgeCase(
@@ -4588,8 +4550,6 @@ final fileJudgeCases = <FileJudgeCase>[
       LoseStateFile('A'),
       Merge('A', 'R1', 'R2', contentFrom: 'R2'),
     ],
-    broken: FileMutation.splitOffCellYieldsToTheIdsOwn,
-    whenBroken: {ViolationKind.memoLost},
   ),
   // B lists the record split off R1 and, having made the merge again, another made of the same under
   // R1 itself, which it rates last; a round splits that one off under the id of the first.
@@ -4609,8 +4569,6 @@ final fileJudgeCases = <FileJudgeCase>[
       Merge('B', 'R1', 'R3', contentFrom: 'R1'),
       EditRating('B', 'R1', _rating, 2),
     ],
-    broken: FileMutation.splitOffCellYieldsToTheIdsOwn,
-    whenBroken: {ViolationKind.memoLost},
   ),
   // B's merge leaves R1 showing the memo and the rating it showed: neither is an edit made as the merge
   // is, and what A wrote in those cells before the merge, sent after it, is the later.
@@ -4806,8 +4764,6 @@ final fileJudgeCases = <FileJudgeCase>[
     'a recognition made apart from a zip put over the record, earlier on the clocks, stands nowhere',
     _zipOverAMergeThenARecognition,
     clockAhead: {'B': 100},
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.discardedReturned},
   ),
   // A merges R2 into R1 keeping R2's content; B, which had not received it, recognises R1 again later, and
   // once it received the merge, again: what R1 shows is a write of R1's capture made over the one that
@@ -4857,8 +4813,6 @@ final fileJudgeCases = <FileJudgeCase>[
     'a recognition made apart from a merge, earlier on the clocks, stands nowhere, nor one written over it',
     _mergeThenRecognitions,
     clockAhead: {'A': 100},
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.recordLost, ViolationKind.discardedReturned},
   ),
   // A merges R2 into R1 keeping R2's content, and deletes R1; B, which had recognised R1 again before, puts
   // a zip of R1 made of R1 alone over its R1, made of R1 and R3: B's record is made of something else than
@@ -4915,8 +4869,6 @@ final fileJudgeCases = <FileJudgeCase>[
     'a record deleted while it shows a recognition made apart from a merge, earlier on the clocks, loses the merge',
     _mergeThenARecognitionThenADelete,
     clockAhead: {'B': 100},
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.recordLost},
   ),
   // As above, A deleting R1 before it received the merge: B changed the record meanwhile, and its merge stays
   // ([R3-1] (a)). Broken so that the delete wins, R2's content goes, though A's write never stood over it on a
@@ -5057,14 +5009,10 @@ final fileJudgeCases = <FileJudgeCase>[
   FileJudgeCase(
     'a device that holds no record of a pair the two agreed on says of it what they agreed on',
     _caseOps('a pair dismissed, one of its records deleted on one device and merged on the other, merge first'),
-    broken: FileMutation.absentRecordTakesItsPairsOut,
-    whenBroken: {ViolationKind.dismissalLost},
   ),
   FileJudgeCase(
     'a server that lists no record of a pair the two agreed on says of it what they agreed on',
     _caseOps('a pair dismissed, one of its records deleted on one device and merged on the other, delete first'),
-    broken: FileMutation.absentRecordTakesItsPairsOut,
-    whenBroken: {ViolationKind.dismissalLost},
   ),
   // B holds no R2 but both records of R1+R3, which the two pairs they agreed on read as once A merged R2 into
   // R1, and its deleted file takes that pair out: B says of it what it holds, not what the two agreed on.
@@ -5074,26 +5022,18 @@ final fileJudgeCases = <FileJudgeCase>[
     _caseOps(
       'two pairs dismissed that a merge reads as one, a record of one deleted and the file of dismissed pairs deleted there',
     ),
-    broken: FileMutation.unheldPairSilencesAHeldOne,
-    whenBroken: {ViolationKind.dismissedUnasked},
   ),
   FileJudgeCase(
     'a pair that names a record merged away elsewhere is the pair of the record it was merged into',
     _caseOps('a pair dismissed elsewhere, one of its records merged into another before the dismissal arrived'),
-    broken: FileMutation.absorbedDismissalsAreDropped,
-    whenBroken: {ViolationKind.dismissalLost},
   ),
   FileJudgeCase(
     'a pair read off a record merged away elsewhere is not the pair of the record this device split off',
     _caseOps('a pair dismissed on a record merged elsewhere into a record this device\'s own is split off'),
-    broken: FileMutation.rereadDismissalsGoWithTheSplit,
-    whenBroken: {ViolationKind.dismissalLost, ViolationKind.dismissedUnasked},
   ),
   FileJudgeCase(
     'a pair a record split off brings is dismissed whatever became of the pair of the id it comes to',
     _caseOps('a pair dismissed on a record split off under the id a record made of the same was split off under'),
-    broken: FileMutation.splitOffDismissalYieldsToThePairsOwn,
-    whenBroken: {ViolationKind.dismissalLost},
   ),
   // A round that stops once it split a record off: the pair goes with the record to the id it lands on, and
   // of the id it left the device says what the base does.
@@ -5147,21 +5087,16 @@ final fileJudgeCases = <FileJudgeCase>[
   ),
   // A recognises R1 again, and B, later, again with an older module: the later write is what R1 shows
   // ([R2-5]). Broken so that the higher recognition stands, the earlier write is everywhere.
-  FileJudgeCase(
-    'what a record shows is the later of two re-recognitions, whichever module is the newer',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      SyncRound('A'),
-      SyncRound('B'),
-      Rerecognize('A', 'R1', 3),
-      Rerecognize('B', 'R1', 2),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.bodyNotLatest},
-  ),
+  FileJudgeCase('what a record shows is the later of two re-recognitions, whichever module is the newer', [
+    _png,
+    Capture('A', 'R1', 1),
+    SyncRound('A'),
+    SyncRound('B'),
+    Rerecognize('A', 'R1', 3),
+    Rerecognize('B', 'R1', 2),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // B's clock runs ahead: B recognises R1 again, then A, before either received the other's. B's write
   // carries the later time and is what R1 shows, though it was made first ([R5-2]).
   FileJudgeCase(
@@ -5169,39 +5104,26 @@ final fileJudgeCases = <FileJudgeCase>[
     _clockAheadRecognitions,
     clockAhead: {'B': 100},
   ),
-  // The same, where the higher recognition stands: A's write, the earlier on the clocks, is everywhere.
-  FileJudgeCase(
-    'of two re-recognitions, the higher standing where it is the earlier on the clocks is reported',
-    _clockAheadRecognitions,
-    clockAhead: {'B': 100},
-    mutation: FileMutation.bodyOfTheHigherRecognition,
-    reports: {ViolationKind.bodyNotLatest},
-  ),
   // A and B each merge another record into R1: B's round splits its own off. A then recognises the record
   // listed as R1 again, and B, later, again with an older module: what the record split off from shows
   // goes on from what each device held there. Broken so that the higher recognition stands, the earlier
   // write is everywhere.
-  FileJudgeCase(
-    'what a record that kept its id through a split shows is the later of two re-recognitions',
-    [
-      _png,
-      Capture('A', 'R1', 1),
-      Capture('A', 'R2', 2),
-      Capture('A', 'R3', 3),
-      SyncRound('A'),
-      SyncRound('B'),
-      Merge('A', 'R1', 'R2', contentFrom: 'R1'),
-      Merge('B', 'R1', 'R3', contentFrom: 'R1'),
-      SyncRound('A'),
-      SyncRound('B'),
-      Rerecognize('A', 'R1', 3),
-      Rerecognize('B', 'R1', 2),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.bodyNotLatest},
-  ),
+  FileJudgeCase('what a record that kept its id through a split shows is the later of two re-recognitions', [
+    _png,
+    Capture('A', 'R1', 1),
+    Capture('A', 'R2', 2),
+    Capture('A', 'R3', 3),
+    SyncRound('A'),
+    SyncRound('B'),
+    Merge('A', 'R1', 'R2', contentFrom: 'R1'),
+    Merge('B', 'R1', 'R3', contentFrom: 'R1'),
+    SyncRound('A'),
+    SyncRound('B'),
+    Rerecognize('A', 'R1', 3),
+    Rerecognize('B', 'R1', 2),
+    SyncRound('A'),
+    SyncRound('B'),
+  ]),
   // B's re-recognition of R2 is the later, and A's round takes it in; A then merges R1 and R2 keeping
   // R2's content, so the merge writes what A's R2 shows then. Broken so that the higher recognition
   // stands, A's round keeps its own, and the merge writes that on: at rest every holder shows the
@@ -5222,8 +5144,6 @@ final fileJudgeCases = <FileJudgeCase>[
       SyncRound('A'),
       SyncRound('B'),
     ],
-    broken: FileMutation.bodyOfTheHigherRecognition,
-    whenBroken: {ViolationKind.bodyNotLatest},
   ),
   // A memo from before the limit, on a record merged before it, holds A's rounds back: the round changes
   // nothing on A (S-10). Broken so that a refused round drops the memo, it has left A.

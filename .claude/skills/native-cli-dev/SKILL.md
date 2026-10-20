@@ -347,7 +347,9 @@ downstream. There is no aspect-ratio `crop_profiles` config and no manual
 orientation switch: the same shared detector used by live capture owns the
 decision. A successful run
 logs `{"type":"onCharaDetailFinished",...,"success":true}` and writes
-`record.json` + `prediction.json` + `skill/factor/campaign.png` + `trainee.jpg`
+`recognized.json` (the recognizer's result; the app composes it into
+`record.json`, which only the app writes) + `prediction.json` +
+`skill/factor/campaign.png` + `trainee.jpg`
 under `<build-dir>/storage/chara_detail/active/<uuid>/`. The `onCharaDetailFinished`
 log line (or that artifact) marks a completed record. The `video` run then
 self-terminates once the pipeline drains (see the self-termination note above),

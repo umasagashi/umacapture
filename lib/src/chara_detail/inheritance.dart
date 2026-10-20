@@ -1,5 +1,6 @@
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/factor_enhancement.dart';
+import '/src/chara_detail/record_body.dart';
 
 /// Resolves parent/child inheritance links between captured records, and (when
 /// race-grade data is supplied) recomputes each record's graded-race relation
@@ -53,10 +54,6 @@ import '/src/chara_detail/factor_enhancement.dart';
 class InheritanceResolver {
   const InheritanceResolver._();
 
-  /// Sentinel for [_rebuild] meaning "leave relationBonus unchanged", so the
-  /// field can be set to a new value (including null) when a real one is passed.
-  static const Object _keepBonus = Object();
-
   /// Fills every still-empty parent slot across [records] (manual, whole-storage
   /// re-resolution).
   ///
@@ -102,7 +99,7 @@ class InheritanceResolver {
     final byId = <String, CharaDetailRecord>{};
     for (final record in records) {
       final links = resolvedLinks[record.id]!;
-      byId[record.id] = _rebuild(record, parent1: links.parent1, parent2: links.parent2);
+      byId[record.id] = placeOnRecord(record, parents: links);
     }
 
     final changed = <CharaDetailRecord>[];
@@ -181,11 +178,11 @@ class InheritanceResolver {
     // Build a record-by-id map with all resolved links applied, so relation-bonus
     // lookups see the new lineage (newRecord's parents and the children's new
     // parent that turns newRecord into a grandparent).
-    final updatedNewRecord = _rebuild(newRecord, parent1: parent1, parent2: parent2);
+    final updatedNewRecord = placeOnRecord(newRecord, parents: (parent1: parent1, parent2: parent2));
     final byId = <String, CharaDetailRecord>{updatedNewRecord.id: updatedNewRecord};
     for (final record in existing) {
       final links = childLinks[record.id];
-      byId[record.id] = links == null ? record : _rebuild(record, parent1: links.parent1, parent2: links.parent2);
+      byId[record.id] = links == null ? record : placeOnRecord(record, parents: links);
     }
 
     // Emit newRecord and every record whose links or bonus changed. Links change
@@ -280,11 +277,10 @@ class InheritanceResolver {
       return;
     }
     changed.add(
-      _rebuild(
+      placeOnRecord(
         original,
-        parent1: updatedLinks.metadata.recordId.parent1,
-        parent2: updatedLinks.metadata.recordId.parent2,
-        relationBonus: newBonus,
+        parents: (parent1: updatedLinks.metadata.recordId.parent1, parent2: updatedLinks.metadata.recordId.parent2),
+        relationBonus: (value: newBonus),
       ),
     );
   }
@@ -304,49 +300,6 @@ class InheritanceResolver {
       ambiguities.add(AmbiguousMatch(childId, slot, candidates.length));
     }
     return null;
-  }
-
-  /// Returns a copy of [record] with its parent record-id slots replaced, and
-  /// optionally its [Metadata.relationBonus] (left untouched unless a value,
-  /// including null, is passed).
-  ///
-  /// The models opt out of generated `copyWith` (build.yaml limits dart_mappable
-  /// to decode/encode), so the record is rebuilt through its constructors.
-  static CharaDetailRecord _rebuild(
-    CharaDetailRecord record, {
-    required String? parent1,
-    required String? parent2,
-    Object? relationBonus = _keepBonus,
-  }) {
-    final metadata = record.metadata;
-    final recordId = RecordId(metadata.recordId.self, parent1, parent2);
-    final newMetadata = Metadata(
-      metadata.formatVersion,
-      metadata.region,
-      recordId,
-      metadata.trainerId,
-      metadata.capturedDate,
-      metadata.recognizerVersion,
-      metadata.stage,
-      metadata.strategy,
-      identical(relationBonus, _keepBonus) ? metadata.relationBonus : relationBonus as int?,
-      metadata.recordType,
-    );
-    return CharaDetailRecord(
-      newMetadata,
-      record.trainee,
-      record.evaluationValue,
-      record.status,
-      record.aptitudes,
-      record.skills,
-      record.factors,
-      record.supportCards,
-      record.family,
-      record.fans,
-      record.scenario,
-      record.trainedDate,
-      record.races,
-    );
   }
 }
 

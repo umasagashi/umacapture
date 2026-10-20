@@ -17,10 +17,14 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
+import 'package:umacapture/src/chara_detail/spec/memo.dart';
+import 'package:umacapture/src/chara_detail/spec/rating.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/utils.dart';
 
 import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
@@ -208,6 +212,233 @@ void main() {
     readGate.complete();
     await container.read(charaDetailRecordMemoProvider('pending').future);
     expect(pending.title, 'stored');
+  });
+
+  // Each rating, memo and title is a value held with the time it was written. These drive the entries the column UI
+  // calls — `saveRating` (a drag or the dialog's OK), `saveMemo` (the memo dialog's OK), the memo title's commit, and
+  // a column storage's removal — over the real storage files, and read the bytes those files hold.
+  group('value times', () {
+    const t0 = 1767225600000;
+    late int now;
+    late int writes;
+    late RefBase ref;
+    late ProviderContainer container;
+    late DirectoryPath ratingDir;
+    late DirectoryPath memoDir;
+
+    setUp(() async {
+      final clock = valueWriteClock;
+      addTearDown(() => valueWriteClock = clock);
+      now = t0;
+      valueWriteClock = () => now;
+      writes = 0;
+      container = ProviderContainer(
+        retry: (retryCount, error) => null,
+        overrides: [
+          pathInfoLoader.overrideWith((ref) async => pathInfoFor(DirectoryPath(tempRoot.path))),
+          metadataFileWriterProvider.overrideWithValue((path, contents) async {
+            writes++;
+            await path.writeAsString(contents);
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(pathInfoLoader.future);
+      ref = container.read(containerRefProvider);
+      ratingDir = pathInfoFor(DirectoryPath(tempRoot.path)).charaDetailRatingDir;
+      memoDir = pathInfoFor(DirectoryPath(tempRoot.path)).charaDetailMemoDir;
+    });
+
+    Future<RatingData> reopenRating(String key) {
+      container.invalidate(charaDetailRecordRatingProvider(key));
+      return container.read(charaDetailRecordRatingProvider(key).future);
+    }
+
+    Future<MemoData> reopenMemo(String key) {
+      container.invalidate(charaDetailRecordMemoProvider(key));
+      return container.read(charaDetailRecordMemoProvider(key).future);
+    }
+
+    Future<void> flushRating(String key) => container.read(charaDetailRecordRatingProvider(key).notifier).flush();
+
+    Future<void> flushMemo(String key) => container.read(charaDetailRecordMemoProvider(key).notifier).flush();
+
+    test('rating: changing a value advances its time', () async {
+      await container.read(charaDetailRecordRatingProvider('s').future);
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 3, notify: false);
+      await flushRating('s');
+      now = t0 + 1000;
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 4, notify: true);
+      await flushRating('s');
+      final stored = RatingDataMapper.fromJson(File((ratingDir / 's.json').path).readAsStringSync());
+      expect(stored.data['r1'], 4);
+      expect(stored.writtenAt['r1'], t0 + 1000);
+    });
+
+    test('rating: saving the value it holds changes neither the time nor the bytes', () async {
+      await container.read(charaDetailRecordRatingProvider('s').future);
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 3, notify: false);
+      await flushRating('s');
+      final file = File((ratingDir / 's.json').path);
+      final before = file.readAsBytesSync();
+      final writesBefore = writes;
+      now = t0 + 1000;
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 3, notify: false);
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 3, notify: true);
+      await flushRating('s');
+      expect(writes, writesBefore, reason: 'the same rating is not a write');
+      expect(file.readAsBytesSync(), before);
+      expect(container.read(charaDetailRecordRatingProvider('s')).requireValue.writtenAt['r1'], t0);
+    });
+
+    test('rating: a reopened storage reads the time it was written at', () async {
+      await container.read(charaDetailRecordRatingProvider('s').future);
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 3, notify: true);
+      await flushRating('s');
+      expect((await reopenRating('s')).writtenAt['r1'], t0);
+    });
+
+    test('memo: changing a value advances its time, emptying it included', () async {
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'a');
+      now = t0 + 1000;
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'b');
+      now = t0 + 2000;
+      saveMemo(ref, storageKey: 's', recordId: 'r2', memo: 'c');
+      saveMemo(ref, storageKey: 's', recordId: 'r2', memo: '');
+      await flushMemo('s');
+      final stored = MemoDataMapper.fromJson(File((memoDir / 's.json').path).readAsStringSync());
+      expect(stored.data, {'r1': 'b'});
+      expect(stored.writtenAt, {'r1': t0 + 1000, 'r2': t0 + 2001}, reason: 'an emptied memo is none, written');
+    });
+
+    test('memo: saving the value it holds changes neither the time nor the bytes', () async {
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'a');
+      saveMemo(ref, storageKey: 's', recordId: 'r2', memo: 'gone');
+      saveMemo(ref, storageKey: 's', recordId: 'r2', memo: null);
+      await flushMemo('s');
+      final file = File((memoDir / 's.json').path);
+      final before = file.readAsBytesSync();
+      final writesBefore = writes;
+      now = t0 + 1000;
+      // The dialog's OK over an unchanged memo, over a memo already none, and over a field that never held one.
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'a');
+      saveMemo(ref, storageKey: 's', recordId: 'r2', memo: '');
+      saveMemo(ref, storageKey: 's', recordId: 'r3', memo: null);
+      await flushMemo('s');
+      expect(writes, writesBefore, reason: 'the same memo is not a write');
+      expect(file.readAsBytesSync(), before);
+    });
+
+    test('memo: a reopened storage reads the time it was written at', () async {
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'a');
+      await flushMemo('s');
+      expect((await reopenMemo('s')).writtenAt['r1'], t0);
+    });
+
+    test('title: changing it advances its time', () async {
+      final controller = container.read(charaDetailRecordMemoProvider('s').notifier);
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      controller.updateTitle(title: 'first');
+      now = t0 + 1000;
+      controller.updateTitle(title: 'second');
+      await flushMemo('s');
+      final stored = MemoDataMapper.fromJson(File((memoDir / 's.json').path).readAsStringSync());
+      expect(stored.title, 'second');
+      expect(stored.titleWrittenAt, t0 + 1000);
+    });
+
+    test('title: confirming the title it holds changes neither the time nor the bytes', () async {
+      final controller = container.read(charaDetailRecordMemoProvider('s').notifier);
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      controller.updateTitle(title: 'first');
+      await flushMemo('s');
+      final file = File((memoDir / 's.json').path);
+      final before = file.readAsBytesSync();
+      final writesBefore = writes;
+      now = t0 + 1000;
+      controller.updateTitle(title: 'first');
+      await flushMemo('s');
+      expect(writes, writesBefore, reason: 'the same title is not a write');
+      expect(file.readAsBytesSync(), before);
+    });
+
+    test('title: a reopened storage reads the time it was written at', () async {
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      container.read(charaDetailRecordMemoProvider('s').notifier).updateTitle(title: 'first');
+      await flushMemo('s');
+      expect((await reopenMemo('s')).titleWrittenAt, t0);
+    });
+
+    test('a clock behind the value it writes over writes just after that value', () async {
+      seedStorage(ratingDir, 's', RatingData(title: 't', data: {'r1': 2}, writtenAt: {'r1': t0 + 5000}).toJson());
+      seedStorage(memoDir, 's', MemoData(title: 't', data: {'r1': 'x'}, writtenAt: {'r1': t0 + 5000}).toJson());
+      seedStorage(memoDir, 'u', MemoData(title: 't', data: {}, titleWrittenAt: t0 + 5000).toJson());
+      await container.read(charaDetailRecordRatingProvider('s').future);
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      await container.read(charaDetailRecordMemoProvider('u').future);
+      // `now` is t0: five seconds behind every value held.
+      saveRating(ref, storageKey: 's', recordId: 'r1', rating: 4, notify: true);
+      saveMemo(ref, storageKey: 's', recordId: 'r1', memo: 'y');
+      container.read(charaDetailRecordMemoProvider('u').notifier).updateTitle(title: 'renamed');
+      await flushRating('s');
+      await flushMemo('s');
+      await flushMemo('u');
+      expect((await reopenRating('s')).writtenAt['r1'], t0 + 5001);
+      expect((await reopenMemo('s')).writtenAt['r1'], t0 + 5001);
+      expect((await reopenMemo('u')).titleWrittenAt, t0 + 5001);
+    });
+
+    test('removing a column storage writes none into its title and the fields listed records hold', () async {
+      seedStorage(
+        memoDir,
+        's',
+        MemoData(
+          title: 'notes',
+          data: {'listed': 'a', 'unlisted': 'b', 'untimed': 'c'},
+          writtenAt: {'listed': t0 - 10, 'unlisted': t0 - 10, 'emptied': t0 - 20, 'never': t0 - 30},
+          titleWrittenAt: t0 - 10,
+        ).toJson(),
+      );
+      await container.read(charaDetailRecordMemoProvider('s').future);
+      now = t0 + 1000;
+      container.read(charaDetailRecordMemoProvider('s').notifier).remove({'listed', 'untimed', 'emptied', 'held'});
+      await flushMemo('s');
+      final stored = MemoDataMapper.fromJson(File((memoDir / 's.json').path).readAsStringSync());
+      expect(stored.data, isEmpty);
+      // A field that held a value is none from now; a field already none keeps its time; a record not listed, and a
+      // listed record with no field here, leave nothing.
+      expect(stored.writtenAt, {'listed': t0 + 1000, 'untimed': t0 + 1000, 'emptied': t0 - 20});
+      expect(stored.titleCleared, isTrue);
+      expect(stored.titleWrittenAt, t0 + 1000);
+      expect(await container.read(charaDetailRecordMemoStorageDataLoader.future), isEmpty);
+    });
+
+    // The two files as v0.3.0 wrote them: its `RatingData` and `MemoData` encoded a title and a record map, and
+    // nothing else, so these are the bytes that version leaves on disk.
+    test('the rating and memo files v0.3.0 wrote read as values with no time', () async {
+      seedStorage(ratingDir, 'old', '{"title":"評価","data":{"r1":4.0}}');
+      seedStorage(memoDir, 'old', '{"title":"メモ","data":{"r1":"昔のメモ"}}');
+      final rating = await container.read(charaDetailRecordRatingProvider('old').future);
+      final memo = await container.read(charaDetailRecordMemoProvider('old').future);
+      expect(rating.data, {'r1': 4.0});
+      expect(memo.data, {'r1': '昔のメモ'});
+      for (final (writtenAt, titleWrittenAt, titleCleared) in [
+        (rating.writtenAt, rating.titleWrittenAt, rating.titleCleared),
+        (memo.writtenAt, memo.titleWrittenAt, memo.titleCleared),
+      ]) {
+        expect(writtenAt, isEmpty);
+        expect(titleWrittenAt, isNull);
+        expect(titleCleared, isFalse);
+      }
+      expect((await container.read(charaDetailRecordMemoStorageDataLoader.future)).single.title, 'メモ');
+      // A later write over an untimed value is an ordinary write at the clock.
+      saveMemo(ref, storageKey: 'old', recordId: 'r1', memo: '新しいメモ');
+      await flushMemo('old');
+      expect((await reopenMemo('old')).writtenAt, {'r1': t0});
+    });
   });
 }
 

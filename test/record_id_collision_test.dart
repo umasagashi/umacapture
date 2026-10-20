@@ -1,17 +1,17 @@
 // One record id belongs to one store.
 //
 // The record zip packs every record under `chara_detail/active/<id>/` whatever
-// store it was exported from, so re-importing a zip taken from the archive view
-// used to write a second copy of an archived record into `active/` — reported as
-// a plain success, with the archived copy still in place. From then on the id
-// existed in two stores at once, which `storage.dart` states elsewhere is
-// impossible, and inheritance write-back resolved to whichever copy it happened
-// to find.
+// store it was exported from. Writing such a record into `active/` while the
+// archive still held it would leave the id in two stores at once, which
+// `storage.dart` states elsewhere is impossible, and inheritance write-back
+// would resolve to whichever copy it happened to find.
 //
 // These tests pin the invariant itself ("no id in two stores"), the refusal that
 // upholds it at the layer that owns publishing — so it covers live harvest and
-// regeneration too, not only zip import — and the negative controls that stop a
-// "refuse everything" or "abort the whole zip" implementation from passing.
+// regeneration too — the zip import, which places a record in the store of its
+// archive state and takes it out of the other, and the negative controls that
+// stop a "refuse everything" or "abort the whole zip" implementation from
+// passing.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_id_collision_test.dart
 import 'dart:convert';
@@ -106,8 +106,10 @@ void main() {
   group('archive-sourced zip import', () {
     // The V-exec B3 construction: a zip produced from the archive view carries
     // `chara_detail/active/<id>/`, because the `active/` segment is a fixed part
-    // of the interchange format.
-    test('does not create a second copy of an archived record', () async {
+    // of the interchange format. The store the record lands in is the one its
+    // archive state is held in, and a zip that notes none is normal: the
+    // archived copy leaves `archive/` as the record arrives in `active/`.
+    test("makes an archived record the zip's, in one store", () async {
       await seedArchived('record-1');
 
       final result = await RecordZipService.import(
@@ -118,9 +120,9 @@ void main() {
         storageDir,
       );
 
-      expect(result.recordIds, isEmpty);
-      expect(await (dataRoot / 'active' / 'record-1').exists(), isFalse);
-      expect(await (dataRoot / 'archive' / 'record-1').filePath('trainee.jpg').readAsBytes(), [9, 9, 9]);
+      expect(result.recordIds, {'record-1'});
+      expect(await (dataRoot / 'archive' / 'record-1').exists(), isFalse);
+      expect(await (dataRoot / 'active' / 'record-1').filePath('trainee.jpg').readAsBytes(), [1, 2, 3]);
       await expectNoIdInTwoStores(dataRoot);
     });
 
@@ -133,13 +135,12 @@ void main() {
       );
 
       expect(result.recordIds, {'record-2'});
-      expect(await (dataRoot / 'active' / 'record-2').filePath('record.json').readAsBytes(), _recordJson('record-2'));
+      expect(await (dataRoot / 'active' / 'record-2').filePath('record.json').exists(), isTrue);
       await expectNoIdInTwoStores(dataRoot);
     });
 
-    // One colliding record must not cost the user the rest of the zip. This is
-    // what an implementation that threw and aborted the whole import fails.
-    test('a mixed zip imports the records that do not collide', () async {
+    // One record the archive held must not cost the user the rest of the zip.
+    test('a mixed zip imports every record, each in one store', () async {
       await seedArchived('record-1');
 
       final result = await RecordZipService.import(
@@ -150,8 +151,8 @@ void main() {
         storageDir,
       );
 
-      expect(result.recordIds, {'record-2'});
-      expect(await (dataRoot / 'active' / 'record-1').exists(), isFalse);
+      expect(result.recordIds, {'record-1', 'record-2'});
+      expect(await (dataRoot / 'active' / 'record-1').exists(), isTrue);
       expect(await (dataRoot / 'active' / 'record-2').exists(), isTrue);
       await expectNoIdInTwoStores(dataRoot);
     });

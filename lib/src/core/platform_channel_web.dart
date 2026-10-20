@@ -794,14 +794,15 @@ class PlatformChannel {
 
   /// Writes the live session's harvested [files] into OPFS under the record store's
   /// `active/` dir (mirroring [updateRecord]'s write-back), returning the ids of the
-  /// distinct records that landed. The bytes are the recognizer's own output, written
-  /// verbatim so the on-disk schema stays byte-identical to a desktop capture.
+  /// distinct records that landed. Each record's `recognized.json` is composed into the
+  /// `record.json` that is written in its place ([selectPublishableRecordFiles]), as the
+  /// desktop store composes it; every other file is the recognizer's own, written verbatim.
   ///
   /// One bad record may never cost the others, and no failure here may escape. The
   /// persistence layer validates the **whole batch** before writing anything, and the
   /// worker's final sweep collects every directory under its active root with no
-  /// completeness check — so a recognizer that threw part-way (it writes `record.json`
-  /// last, and logs-and-continues on failure) parks a `record.json`-less directory there
+  /// completeness check — so a recognizer that threw part-way (it writes `recognized.json`
+  /// last, and logs-and-continues on failure) parks a directory with no result there
   /// for the rest of the session. Handed on unfiltered, that one directory threw a
   /// `FormatException` that discarded every completed record of the session *and*
   /// escaped [stopCapture] as an unhandled asynchronous error. The incomplete groups are
@@ -819,7 +820,10 @@ class PlatformChannel {
     for (final id in selection.incompleteRecordIds) {
       // Not "the record failed to store": it was never a complete record. Reported at warning level so a
       // recognizer that keeps dying mid-record is visible without being mistaken for a storage failure.
-      logger.w('Skipping harvested record $id: it has no record.json, so its recognition never finished');
+      logger.w(
+        'Skipping harvested record $id: it has no recognition result that composes into a record.json, '
+        'so its recognition never finished',
+      );
     }
     for (final path in selection.rejectedPaths) {
       logger.w('Skipping harvested file outside the active record layout: $path');
@@ -934,8 +938,10 @@ class PlatformChannel {
 
   /// Regenerates the record [id]: reads its 7 input files from OPFS, re-runs the
   /// recognizer in the worker over them, writes the regenerated record dir back
-  /// to OPFS (every returned file, including the `record_<ts>.json` backup), then
-  /// synthesizes `onCharaDetailUpdated` so the shared relay reloads the record.
+  /// to OPFS (every returned file, including the `record_<ts>.json` backup, with the
+  /// result composed into `record.json`), then synthesizes `onCharaDetailUpdated` so
+  /// the shared relay reloads the record. A result that holds the body the record
+  /// already has writes nothing and is still a success: the record is up to date.
   ///
   /// The worker suppresses the pipeline's own terminal `onCharaDetailUpdated` for
   /// this record, so the synthesized one (emitted only after the OPFS write-back)
@@ -990,10 +996,10 @@ class PlatformChannel {
       // them apart, so without this every record's seven input files (megabytes each) would be
       // resident on the main thread while the worker's own gate let one through at a time. See
       // [admitRecordRegeneration] for why this is a second gate rather than a move of that one.
-      final updated = await admitRecordRegeneration(
+      final outcome = await admitRecordRegeneration(
         () => persistPlatformRecordUpdateToOpfs(id, storageDir, () => _buildRegeneratedPayloadUnlocked(id, storageDir)),
       );
-      if (!updated) {
+      if (outcome == RecordUpdateOutcome.failed) {
         _notifyUpdateFailed(id);
         return;
       }

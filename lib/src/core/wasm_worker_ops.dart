@@ -12,8 +12,11 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_body.dart';
 import '/src/core/video_import_ops.dart';
 
 /// One record file crossing the worker boundary: [path] is storage-relative
@@ -24,10 +27,14 @@ import '/src/core/video_import_ops.dart';
 /// are structural, so the helpers here accept either without a conversion.
 typedef WorkerRecordFile = ({String path, Uint8List bytes});
 
-/// The file every record directory must contain to be publishable: the recognizer
-/// writes it **last** (`chara_detail_recognizer.cpp`), so its absence is precisely the
-/// signature of a record whose recognition did not finish.
+/// The stored record of a record directory. Only the app writes it: what is published is
+/// composed from the recognizer's result ([composeRecordFiles]).
 const String _recordJsonName = 'record.json';
+
+/// The recognizer's result in a record directory. The recognizer writes it **last**
+/// (`chara_detail_recognizer.cpp`), so a directory with neither it nor a stored record is
+/// precisely the signature of a record whose recognition did not finish.
+const String _recognizedJsonName = CharaDetailRecord.recognizedJsonName;
 
 /// Splits a harvested storage-relative path into its segments, or returns null when it
 /// is not a `chara_detail/active/<id>/…` record file.
@@ -65,38 +72,45 @@ typedef HarvestSelection = ({
   List<String> rejectedPaths,
 });
 
-/// Keeps only the files of records that are complete enough to publish.
+/// Keeps only the files of records that are complete enough to publish, each composed
+/// into the record the store keeps ([composeRecordFiles]).
 ///
 /// The worker's final sweep collects **every** directory under its MEMFS active root
 /// with no completeness check, and a recognizer that threw part-way leaves a directory
-/// with no `record.json` behind for the rest of the session. The persistence layer
+/// with no `recognized.json` behind for the rest of the session. The persistence layer
 /// validates the whole batch before writing anything, so handing it one such directory
 /// throws away every completed record of the same session. Grouping here and dropping
-/// only the incomplete group is what keeps one failed record from costing the others.
+/// only the incomplete group is what keeps one failed record from costing the others;
+/// a result that does not decode is dropped the same way, for the same reason.
 ///
-/// Order is preserved, and a record is judged solely on whether its own `record.json`
-/// is present in this batch.
+/// Every harvest the web app publishes passes through here, so this is where the
+/// recognizer's result becomes `record.json`: the persistence layer accepts a record only
+/// by its `record.json`. A group that is already composed passes through as it is, which
+/// is what lets a late harvest be planned here and published through here again.
+///
+/// Order is preserved, and a record is judged solely on its own files in this batch.
 HarvestSelection selectPublishableRecordFiles(Iterable<WorkerRecordFile> files) {
   final rejectedPaths = <String>[];
   final byRecord = <String, List<WorkerRecordFile>>{};
-  final complete = <String>{};
   for (final file in files) {
     final parts = _splitHarvestPath(file.path);
     if (parts == null) {
       rejectedPaths.add(file.path);
       continue;
     }
-    final recordId = parts[2];
-    byRecord.putIfAbsent(recordId, () => <WorkerRecordFile>[]).add(file);
-    if (parts.length == 4 && parts[3] == _recordJsonName) {
-      complete.add(recordId);
-    }
+    byRecord.putIfAbsent(parts[2], () => <WorkerRecordFile>[]).add(file);
   }
   final publishable = <WorkerRecordFile>[];
   final incompleteRecordIds = <String>[];
   for (final entry in byRecord.entries) {
-    if (complete.contains(entry.key)) {
-      publishable.addAll(entry.value);
+    ComposedRecordFiles? composed;
+    try {
+      composed = composeRecordFiles(entry.value);
+    } on FormatException {
+      composed = null;
+    }
+    if (composed != null) {
+      publishable.addAll(composed.files);
     } else {
       incompleteRecordIds.add(entry.key);
     }
@@ -106,6 +120,69 @@ HarvestSelection selectPublishableRecordFiles(Iterable<WorkerRecordFile> files) 
     incompleteRecordIds: List.unmodifiable(incompleteRecordIds),
     rejectedPaths: List.unmodifiable(rejectedPaths),
   );
+}
+
+/// One record's files with the recognizer's result composed into `record.json`.
+///
+/// [bodyUnchanged] is true when the result holds the body the stored `record.json` among
+/// the same files already holds ([composeBodyWrite] wrote nothing): a re-recognition that
+/// read the same, which has nothing to publish.
+typedef ComposedRecordFiles = ({List<WorkerRecordFile> files, bool bodyUnchanged});
+
+/// Composes the files of one record directory into the files the store keeps, or returns
+/// null when they hold neither the recognizer's result nor a stored record.
+///
+/// The result (`recognized.json`) lands on the stored `record.json` among the same files
+/// when there is one — a re-recognition, whose input the worker hands back with it — and
+/// is the record as read otherwise ([composeBodyWrite]). The composed `record.json` takes
+/// the result's place and the result itself is left out, so it never reaches the store.
+/// Files with a stored record and no result are already composed and come back as they are.
+///
+/// Every file must belong to one record; only the files directly in its directory are
+/// read. Throws [FormatException] when the result or the stored record does not decode.
+ComposedRecordFiles? composeRecordFiles(List<WorkerRecordFile> files) {
+  int? recognizedAt;
+  int? storedAt;
+  for (var i = 0; i < files.length; i++) {
+    final parts = _splitHarvestPath(files[i].path);
+    if (parts == null || parts.length != 4) {
+      continue;
+    }
+    if (parts[3] == _recognizedJsonName) {
+      recognizedAt = i;
+    } else if (parts[3] == _recordJsonName) {
+      storedAt = i;
+    }
+  }
+  if (recognizedAt == null) {
+    return storedAt == null ? null : (files: List.unmodifiable(files), bodyUnchanged: false);
+  }
+  final recognizedFile = files[recognizedAt];
+  final stored = storedAt == null ? null : _decodeRecordJson(files[storedAt].bytes);
+  final composed = composeBodyWrite(stored, _decodeRecordJson(recognizedFile.bytes));
+  final directory = recognizedFile.path.substring(0, recognizedFile.path.length - _recognizedJsonName.length);
+  final out = <WorkerRecordFile>[];
+  for (var i = 0; i < files.length; i++) {
+    if (i == recognizedAt) {
+      if (composed != null) {
+        out.add((path: '$directory$_recordJsonName', bytes: composed.toRecordJsonBytes()));
+      }
+    } else if (i != storedAt || composed == null) {
+      out.add(files[i]);
+    }
+  }
+  return (files: List.unmodifiable(out), bodyUnchanged: composed == null);
+}
+
+/// Decodes a `record.json`-shaped file, reporting every way it can fail as a [FormatException].
+CharaDetailRecord _decodeRecordJson(Uint8List bytes) {
+  try {
+    return CharaDetailRecord.fromRecordJson(utf8.decode(bytes));
+  } on FormatException {
+    rethrow;
+  } catch (error) {
+    throw FormatException('Undecodable record file: $error');
+  }
 }
 
 /// Drops the files of records the incremental live path already committed to OPFS, so
@@ -1024,8 +1101,9 @@ typedef LateHarvestPlan = ({List<LateHarvestRecord> recoverable, List<String> un
 ///
 /// The rules are the ones the ordinary paths already apply, and for the same reasons:
 /// records the incremental path committed to OPFS are dropped as duplicates rather than
-/// counted as losses (they are on disk — [filterUncommittedHarvest]), and a record with no
-/// `record.json` is not publishable and cannot be made so ([selectPublishableRecordFiles]),
+/// counted as losses (they are on disk — [filterUncommittedHarvest]), and a record with
+/// neither a `recognized.json` nor a `record.json` is not publishable and cannot be made so
+/// ([selectPublishableRecordFiles]),
 /// so it is reported rather than handed to a persistence layer that would reject the whole
 /// batch. Grouping by record is what lets the surviving records be written one at a time,
 /// through the same sink the incremental live path uses.
@@ -1033,9 +1111,7 @@ LateHarvestPlan planLateHarvestRecovery(Iterable<WorkerRecordFile> files, Set<St
   final uncommitted = filterUncommittedHarvest(files, committedRecordIds);
   final selection = selectPublishableRecordFiles(uncommitted);
   final grouped = <String, List<WorkerRecordFile>>{};
-  final publishable = <String>{};
   for (final file in selection.publishable) {
-    publishable.add(file.path);
     final recordId = recordIdFromHarvestPath(file.path);
     if (recordId == null) {
       // Unreachable: a file is only publishable once its path parsed into a record id.
@@ -1046,9 +1122,11 @@ LateHarvestPlan planLateHarvestRecovery(Iterable<WorkerRecordFile> files, Set<St
   final recoverable = <LateHarvestRecord>[
     for (final entry in grouped.entries) (recordId: entry.key, files: List.unmodifiable(entry.value)),
   ];
+  // By record and not by path: composing replaces a record's result with its record.json, so a recovered
+  // record's harvested paths are not all among the files it is recovered as.
   final unrecoverablePaths = <String>[
     for (final file in uncommitted)
-      if (!publishable.contains(file.path)) file.path,
+      if (!grouped.containsKey(recordIdFromHarvestPath(file.path))) file.path,
   ];
   return (recoverable: List.unmodifiable(recoverable), unrecoverablePaths: List.unmodifiable(unrecoverablePaths));
 }

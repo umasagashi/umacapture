@@ -20,11 +20,16 @@
 /// and the wait is answered with progress instead.
 library;
 
+import 'dart:typed_data';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_binding.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
@@ -582,6 +587,42 @@ Future<StorageZipOutcome> exportDirectoryAsZip(
     // entries stay disabled for the rest of the session.
     progress.finish();
   }
+}
+
+/// The records a folder zip carries: the path of each record directory the folder is or holds, and the `record.json`
+/// bytes the zip carries for each of them with a binding, by the path of that `record.json`.
+///
+/// [archiveNotes] is the archive state note each record goes out with ([exportedArchiveNoteOf]), by the record
+/// directory's path; a record directory not named there is normal and goes out with none.
+typedef StorageZipRecords = ({
+  List<String> recordDirs,
+  Map<String, Uint8List> recordJsons,
+  Map<String, Uint8List> archiveNotes,
+});
+
+/// Places the binding on each record [directory] is or holds ([recordDirectoriesAt]), and answers those records.
+///
+/// A folder zip of a store or of a record directory is a form the zip import accepts, so the records go out the way
+/// the record exports send them: with a binding, worked out on this device before they leave it, and each file of a
+/// record directory packed as the export table says (`recordFileForExport`). Each leg calls this inside its exclusion
+/// and packs the answered bytes in place of the files, so a `record.json` that could not be rewritten still goes out
+/// with the binding.
+Future<StorageZipRecords> placeStorageZipRecordBindings(RefBase ref, DirectoryPath directory) async {
+  final info = await ref.read(pathLayoutLoader.future);
+  final recordDirs = <String>[];
+  final recordJsons = <String, Uint8List>{};
+  final archiveNotes = <String, Uint8List>{};
+  for (final recordDir in await recordDirectoriesAt(info, directory)) {
+    recordDirs.add(recordDir.path);
+    final bytes = await placeRecordBindingUnlocked(recordDir);
+    if (bytes != null) {
+      recordJsons[recordDir.filePath('record.json').path] = bytes;
+    }
+    if (await exportedArchiveNoteOf(recordDir) case final note?) {
+      archiveNotes[recordDir.path] = note;
+    }
+  }
+  return (recordDirs: recordDirs, recordJsons: recordJsons, archiveNotes: archiveNotes);
 }
 
 void _announce(bool silent, String key) {

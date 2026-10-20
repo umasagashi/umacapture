@@ -38,6 +38,8 @@ CharaDetailRecord makeRecord({required String id, required List<Race> races}) {
     0,
     null,
     RecordType.standard,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

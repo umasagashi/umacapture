@@ -8,9 +8,13 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/record_export_shape.dart';
 import '/src/chara_detail/record_zip.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -477,7 +481,15 @@ class _ZipExporterArgs {
   final List<DirectoryPath> recordDirs;
   final FilePath labelsFile;
 
-  _ZipExporterArgs(this.path, this.recordDirs, this.labelsFile);
+  /// The `record.json` bytes each record goes out with, by the record directory's path; a record directory not
+  /// named here goes out as its files are.
+  final Map<String, Uint8List> recordJsons;
+
+  /// The archive state note each record goes out with ([exportedArchiveNoteOf]), by the record directory's path; a
+  /// record directory not named here is normal and goes out with none.
+  final Map<String, Uint8List> archiveNotes;
+
+  _ZipExporterArgs(this.path, this.recordDirs, this.labelsFile, this.recordJsons, this.archiveNotes);
 }
 
 class ZipExporter extends Exporter {
@@ -534,7 +546,39 @@ class ZipExporter extends Exporter {
       // says why that is a filter rather than a staging file elsewhere.
       final ownOutput = zipOwnOutputFilter(stagingPath: staging.path, destinationPath: args.path.path);
       for (final dir in args.recordDirs) {
-        await encoder.addDirectory(dir.toDirectory(), followLinks: false, filter: ownOutput);
+        final recordJson = args.recordJsons[dir.path];
+        // Each file is packed as the export table says: one packed as it is streams from the walk, one rewritten
+        // for the export is skipped there and added from the rewritten bytes, and one left on the device is skipped.
+        final rewritten = <String, Uint8List>{};
+        await encoder.addDirectory(
+          dir.toDirectory(),
+          followLinks: false,
+          filter: (entity, progress) {
+            final name = p.basename(entity.path);
+            if (!p.equals(p.dirname(entity.path), dir.path)) {
+              return ownOutput(entity, progress);
+            }
+            switch (recordFileExportOf(name)) {
+              case RecordFileExport.asIs:
+                return ownOutput(entity, progress);
+              case RecordFileExport.left:
+                return ZipFileOperation.skip;
+              case RecordFileExport.body || RecordFileExport.archiveState:
+                final stored = name == 'record.json' && recordJson != null
+                    ? recordJson
+                    : FilePath(entity.path).readAsBytesSync();
+                final bytes = recordFileForExport(name, stored);
+                if (bytes != null) rewritten[name] = bytes;
+                return ZipFileOperation.skip;
+            }
+          },
+        );
+        for (final entry in rewritten.entries) {
+          encoder.addArchiveFile(ArchiveFile.bytes('${dir.name}/${entry.key}', entry.value));
+        }
+        if (args.archiveNotes[dir.path] case final note?) {
+          encoder.addArchiveFile(ArchiveFile.bytes('${dir.name}/$recordArchiveNoteName', note));
+        }
       }
       await encoder.addFile(args.labelsFile.toFile());
       await encoder.close();
@@ -624,7 +668,22 @@ class ZipExporter extends Exporter {
     return gate.runForRecords(
       info.storageDir,
       records.map((record) => record.id),
-      () => compute(_run, _ZipExporterArgs(path, recordDirs, labelsFile)),
+      () async {
+        // The binding goes out with each record, placed first where the record carries none, under the locks
+        // taken here; the zip carries it even where `record.json` could not be rewritten.
+        final recordJsons = <String, Uint8List>{};
+        final archiveNotes = <String, Uint8List>{};
+        for (final dir in recordDirs) {
+          final recordJson = await placeRecordBindingUnlocked(dir);
+          if (recordJson != null) {
+            recordJsons[dir.path] = recordJson;
+          }
+          if (await exportedArchiveNoteOf(dir) case final note?) {
+            archiveNotes[dir.path] = note;
+          }
+        }
+        return compute(_run, _ZipExporterArgs(path, recordDirs, labelsFile, recordJsons, archiveNotes));
+      },
       declaration: exportLongReadDeclaration(
         ref,
         recordExportLongReadPaths(

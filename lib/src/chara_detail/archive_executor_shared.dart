@@ -1,4 +1,7 @@
+import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/image_converter.dart';
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_binding.dart';
 import '/src/core/fs/record_directory_transaction.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
@@ -30,6 +33,9 @@ Future<bool> archiveRecordOnNative(ArchiveRecordArgs args) async {
       logger.e('Cannot archive ${args.srcDirPath}: destination ${args.dstDirPath} already exists.');
       return false;
     }
+    await placeRecordBindingUnlocked(srcDir);
+    // The rename carries the choice with the record: it is in archive/ with this state, or still in active/.
+    await noteArchiveChoiceUnlocked(srcDir, args.option);
     final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));
     if (dstDir == null) return false;
     await _disposeArchivedImagesAsync(dstDir, args.option);
@@ -76,6 +82,10 @@ Future<bool> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
   try {
     final srcDir = DirectoryPath(args.srcDirPath);
     final dstDir = DirectoryPath(args.dstDirPath);
+    // Before the images are let go of, under the record lock this leg holds; the desktop leg does the same.
+    await placeRecordBindingUnlocked(srcDir);
+    // The transaction carries the choice with the record, and a reload resumes or rolls back both together.
+    await noteArchiveChoiceUnlocked(srcDir, args.option);
     final result = await RecordDirectoryTransaction().execute(
       RecordDirectoryTransactionSpec(
         recordId: srcDir.name,
@@ -151,6 +161,18 @@ Future<void> cleanupCommittedArchiveTransactionUnlocked(
   await _disposeArchivedImagesAsync(spec.destination, option, failOnError: failOnError);
 }
 
+/// Gives the images of the archived record in [recordDir] the form [state] holds them in, as an archive does: reduced
+/// JPEGs for [RecordArchiveState.jpeg], none for [RecordArchiveState.none]. Best-effort, as an archive's disposition
+/// is. The caller holds the record's lock.
+Future<void> shapeArchivedImagesUnlocked(DirectoryPath recordDir, RecordArchiveState state) async {
+  final option = switch (state) {
+    RecordArchiveState.normal => null,
+    RecordArchiveState.jpeg => ArchiveImageOption.resizedJpeg,
+    RecordArchiveState.none => ArchiveImageOption.none,
+  };
+  if (option != null) await _disposeArchivedImagesAsync(recordDir, option);
+}
+
 /// Drops or downscales a committed archive's recognition images.
 ///
 /// Image disposition is best-effort on every platform ("once the move succeeded,
@@ -208,10 +230,14 @@ Future<void> _disposeArchivedImagesAsync(
         }
       }
     } else {
+      // Every form of every image goes, the reduced JPEGs as well as the PNGs, and the icon cut from the factor image
+      // with them: a record with no images holds none of either form.
       for (final imageName in _archiveImageNames) {
         await recordDir.filePath(imageName).delete(emptyOk: true);
+        await recordDir.filePath(imageName.replaceAll('.png', '.jpg')).delete(emptyOk: true);
         await recordDir.filePath(imageName.replaceAll('.png', '.json')).delete(emptyOk: true);
       }
+      await recordDir.filePath(traineeIconFileName).delete(emptyOk: true);
     }
   } catch (error, stackTrace) {
     logger.e('Failed to dispose archived images in ${recordDir.path}.', error, stackTrace);

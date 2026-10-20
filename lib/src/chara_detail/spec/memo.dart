@@ -540,16 +540,18 @@ class _StorageController extends ConsumerWidget {
         TextButton(
           onPressed: () {},
           onLongPress: () async {
+            final provider = charaDetailRecordMemoProvider(storageKey);
+            final listed = await listedRecordIds(ref.base);
+            await settleStorageLoad(ref.read(provider.future));
+            if (!commitStorageChange(() => ref.read(provider.notifier).remove(listed))) {
+              return;
+            }
+
             final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
             memoStorageController.update((state) {
               state.removeWhere((e) => e.key == storageKey);
               return [...state];
             });
-
-            final storageFile = ref.read(pathInfoProvider).charaDetailMemoDir.filePath("$storageKey.json");
-            if (await storageFile.exists()) {
-              await storageFile.deleteWithCheck();
-            }
 
             ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);

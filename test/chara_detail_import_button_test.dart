@@ -24,6 +24,8 @@ import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
+import 'package:umacapture/src/chara_detail/spec/base.dart';
+import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -837,6 +839,112 @@ void main() {
 
     expect(toasts, isEmpty);
     expect(activeDir(root).existsSync(), isFalse);
+  });
+
+  // The relation bonus is a value only this device holds: a zip does not carry it, and what an import
+  // changes is the lineage it is derived from. So an import runs the resolution a capture runs, over
+  // the records it wrote, through the real stores on the real tree.
+  group('an import re-derives the relation bonus', () {
+    const g1 = 100;
+
+    /// Writes [record] as a stored record of the active store, as a capture leaves it.
+    void store(DirectoryPath root, CharaDetailRecord record) {
+      final dir = Directory('${activeDir(root).path}${Platform.pathSeparator}${record.id}')
+        ..createSync(recursive: true);
+      File('${dir.path}${Platform.pathSeparator}record.json').writeAsStringSync(jsonEncode(record.toMap()));
+    }
+
+    /// The relation bonus `<id>/record.json` holds on disk.
+    int? bonusOnDisk(DirectoryPath root, String id) {
+      final file = File('${activeDir(root).path}${Platform.pathSeparator}$id${Platform.pathSeparator}record.json');
+      return CharaDetailRecordMapper.fromMap(
+        (jsonDecode(file.readAsStringSync()) as Map).cast<String, dynamic>(),
+      ).metadata.relationBonus;
+    }
+
+    /// Imports [zip] through the button with real stores built beforehand. [raceTitlesLoaded] false
+    /// leaves the race-title module pending, which is the state the resolver cannot derive in.
+    Future<void> importWithStores(
+      WidgetTester tester,
+      DirectoryPath root,
+      String zip, {
+      bool raceTitlesLoaded = true,
+    }) async {
+      picker.answerWithPaths([zip]);
+      await tapImport(
+        tester,
+        root,
+        extraOverrides: [
+          raceTitleInfoLoader.overrideWith(
+            (ref) => raceTitlesLoaded
+                ? Future.value([
+                    RaceTitleInfo(g1, 0, const [], const [], const {g1RaceGradeTag}),
+                  ])
+                : Completer<List<RaceTitleInfo>>().future,
+          ),
+        ],
+        prepare: (container) async {
+          // Built inside `runAsync`, and only then listened to: a provider first read in the fake-async
+          // zone builds there, and its file reads never complete.
+          await tester.runAsync(() async {
+            await container.read(charaDetailRecordStorageLoaderProvider.future);
+            await container.read(charaDetailArchiveStorageLoaderProvider.future);
+            if (raceTitlesLoaded) await container.read(raceTitleInfoLoader.future);
+          });
+          addTearDown(container.listen(charaDetailRecordStorageLoaderProvider, (_, _) {}).close);
+          addTearDown(container.listen(charaDetailArchiveStorageLoaderProvider, (_, _) {}).close);
+          addTearDown(container.listen(raceTitleInfoLoader, (_, _) {}).close);
+        },
+      );
+    }
+
+    CharaDetailRecord parent(String id, int card) => makeRecord(id: id, card: card, races: [race(g1)]);
+
+    testWidgets('a record the device lacks gains the bonus its stored parents give, and none without them', (
+      tester,
+    ) async {
+      final root = DirectoryPath(tempRoot.path);
+      store(root, parent('p1', 301));
+      store(root, parent('p2', 302));
+      final child = makeRecord(id: 'c', card: 303, parent1Id: 'p1', parent2Id: 'p2', relationBonus: 99);
+      final orphan = makeRecord(id: 'o', card: 304, parent1Id: 'x1', parent2Id: 'x2', relationBonus: 99);
+
+      await importWithStores(tester, root, writeRecordZip('records.zip', [child, orphan]));
+
+      // p1 x p2 share one G1 win; neither parent has a stored parent of its own.
+      expect(bonusOnDisk(root, 'c'), 3);
+      expect(bonusOnDisk(root, 'o'), isNull, reason: 'neither parent is stored, so there is nothing to derive from');
+    });
+
+    testWidgets('a record the device holds is re-derived, and so is a stored record it is the parent of', (
+      tester,
+    ) async {
+      final root = DirectoryPath(tempRoot.path);
+      store(root, parent('p1', 301));
+      store(root, parent('p2', 302));
+      store(root, makeRecord(id: 'c', card: 303, parent1Id: 'p1', parent2Id: 'p2', relationBonus: 7));
+      store(root, makeRecord(id: 'k', card: 305, parent1Id: 'c', parent2Id: 'p2', relationBonus: 0));
+      // The zip's c has won the G1 its parents won, which k's bonus counts c for.
+      final imported = makeRecord(id: 'c', card: 303, parent1Id: 'p1', parent2Id: 'p2', races: [race(g1)]);
+
+      await importWithStores(tester, root, writeRecordZip('c.zip', [imported]));
+
+      expect(bonusOnDisk(root, 'c'), 3);
+      // c x p2, c x p1 and c x p2 (c's parents) each share one G1 win.
+      expect(bonusOnDisk(root, 'k'), 9);
+    });
+
+    testWidgets('a record the device holds keeps its value while the bonus cannot be derived', (tester) async {
+      final root = DirectoryPath(tempRoot.path);
+      store(root, parent('p1', 301));
+      store(root, parent('p2', 302));
+      store(root, makeRecord(id: 'c', card: 303, parent1Id: 'p1', parent2Id: 'p2', relationBonus: 7));
+      final imported = makeRecord(id: 'c', card: 303, parent1Id: 'p1', parent2Id: 'p2', races: [race(g1)]);
+
+      await importWithStores(tester, root, writeRecordZip('c.zip', [imported]), raceTitlesLoaded: false);
+
+      expect(bonusOnDisk(root, 'c'), 7);
+    });
   });
 }
 

@@ -34,9 +34,12 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
@@ -205,4 +208,276 @@ void main() {
       expect(notifier.failureCount, 2);
     });
   });
+
+  // A desktop re-recognition leaves its result in recognized.json beside the stored record.json, and announces it
+  // with `onCharaDetailUpdated`. Driven through the real dispatch.
+  group('a re-recognition composed into record.json', () {
+    late Directory tempRoot;
+    setUpAll(TestWidgetsFlutterBinding.ensureInitialized);
+    setUp(() {
+      tempRoot = Directory.systemTemp.createTempSync('uma_regen_compose');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        (call) async => null,
+      );
+    });
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        null,
+      );
+      tempRoot.deleteSync(recursive: true);
+    });
+
+    PathInfo pathInfoFor(DirectoryPath root) => PathInfo(
+      documentDir: root,
+      supportDir: root,
+      executableDir: root / 'exe',
+      downloadDir: root / 'dl',
+      dataRoot: root,
+    );
+
+    // A real result: `umacapture_cli video` over a golden clip.
+    final recognizedJson = File('test/fixtures/recognized.json').readAsStringSync();
+
+    List<int> encode(Map<String, dynamic> map) => utf8.encode(const JsonEncoder.withIndent('    ').convert(map));
+
+    /// [record] as a `record.json` in a form the app never writes, so that any write of it shows in the bytes.
+    List<int> compact(CharaDetailRecord record) => utf8.encode(jsonEncode(record.toMap()));
+
+    /// [recognizedJson] with [edit] applied to its decoded map.
+    List<int> recognizedWith(void Function(Map<String, dynamic> map) edit) {
+      final map = (jsonDecode(recognizedJson) as Map).cast<String, dynamic>();
+      edit(map);
+      return encode(map);
+    }
+
+    /// Stores [stored] as `<id>/record.json`, writes [recognized] beside it once the store has been built (the
+    /// recognizer runs after the record was listed), announces the re-recognition of [id], and returns once the batch
+    /// has counted it.
+    ///
+    /// [storedAfterBuild] writes [stored] after the build as well, for a stored file the build's scan must not upgrade
+    /// first.
+    Future<({List<int> recordJson, bool recognizedLeft, int successes, int failures})> regenerate(
+      String id, {
+      required List<int> stored,
+      required List<int> recognized,
+      bool storedAfterBuild = false,
+    }) async {
+      final root = DirectoryPath(tempRoot.path);
+      final directory = pathInfoFor(root).charaDetailActiveDir / id;
+      void writeStored() => File(directory.filePath('record.json').path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(stored);
+      if (!storedAfterBuild) {
+        writeStored();
+      }
+      final container = ProviderContainer(
+        overrides: [
+          pathInfoLoader.overrideWith((ref) async => pathInfoFor(root)),
+          moduleVersionLoader.overrideWith((ref) async => null),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+      if (storedAfterBuild) {
+        writeStored();
+      }
+      File(directory.filePath('recognized.json').path).writeAsBytesSync(recognized);
+      final notifier = container.read(charaDetailRecordRegenerationControllerProvider.notifier);
+      notifier.beginBatch(1);
+      final controller = PlatformController(container.read(_refProvider), const {});
+      addTearDown(controller.dispose);
+
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailUpdated', 'id': id}));
+      await waitUntil(
+        () => notifier.successCount + notifier.failureCount == 1,
+        describe: 'the re-recognition to be counted',
+      );
+      return (
+        recordJson: File(directory.filePath('record.json').path).readAsBytesSync().toList(),
+        recognizedLeft: File(directory.filePath('recognized.json').path).existsSync(),
+        successes: notifier.successCount,
+        failures: notifier.failureCount,
+      );
+    }
+
+    test('a result with the stored body leaves record.json byte for byte, and counts as a success', () async {
+      final stored = compact(CharaDetailRecord.fromRecordJson(recognizedJson));
+      final id = CharaDetailRecord.fromRecordJson(recognizedJson).id;
+
+      final outcome = await regenerate(id, stored: stored, recognized: utf8.encode(recognizedJson));
+
+      expect(outcome.recordJson, stored);
+      expect(outcome.recognizedLeft, isFalse);
+      expect((outcome.successes, outcome.failures), (1, 0));
+    });
+
+    test('a result with the stored body leaves record.json alone when only parents were placed on it', () async {
+      final record = CharaDetailRecord.fromRecordJson(recognizedJson);
+      final stored = compact(
+        placeOnRecord(record, parents: (parent1: 'parent-a', parent2: 'parent-b'), relationBonus: (value: 7)),
+      );
+
+      final outcome = await regenerate(record.id, stored: stored, recognized: utf8.encode(recognizedJson));
+
+      expect(outcome.recordJson, stored);
+      expect(outcome.recognizedLeft, isFalse);
+      expect((outcome.successes, outcome.failures), (1, 0));
+    });
+
+    test("a result with another body is written over the record's own id, date, parents and bonus", () async {
+      final record = CharaDetailRecord.fromRecordJson(recognizedJson);
+      final stored = placeOnRecord(
+        record,
+        parents: (parent1: 'parent-a', parent2: 'parent-b'),
+        relationBonus: (value: 7),
+      ).toRecordJsonBytes();
+      final recognized = recognizedWith((map) {
+        map['fans'] = (map['fans'] as int) + 1;
+        final metadata = (map['metadata'] as Map).cast<String, dynamic>();
+        metadata['recognizer_version'] = '2030-01-01T00:00:00+0900';
+        metadata['captured_date'] = '2030-01-01T00:00:00+0900';
+      });
+
+      final outcome = await regenerate(record.id, stored: stored, recognized: recognized);
+
+      final written = CharaDetailRecord.fromRecordJson(utf8.decode(outcome.recordJson));
+      expect(written.fans, record.fans + 1);
+      expect(written.metadata.recognizerVersion, '2030-01-01T00:00:00+0900');
+      expect(written.metadata.recordId, const RecordId('8459ade1-7d9b-4846-b961-ecc4d8fe22ac', 'parent-a', 'parent-b'));
+      expect(written.metadata.capturedDate, record.metadata.capturedDate);
+      expect(written.metadata.relationBonus, 7);
+      expect(outcome.recognizedLeft, isFalse);
+      expect((outcome.successes, outcome.failures), (1, 0));
+    });
+
+    // A body time far ahead of any clock this runs under, so the time written over it is the one after it, whatever
+    // the isolate that composes reads off its clock.
+    const aheadOfTheClock = 4102444800000;
+
+    test(
+      'a result with another body is written with its time in the same record.json, and reads back reopened',
+      () async {
+        final storedMap = (jsonDecode(recognizedJson) as Map).cast<String, dynamic>();
+        (storedMap['metadata'] as Map)['body_written_at'] = aheadOfTheClock;
+        final id = CharaDetailRecord.fromRecordJson(recognizedJson).id;
+        final recognized = recognizedWith((map) => map['fans'] = (map['fans'] as int) + 1);
+
+        final outcome = await regenerate(id, stored: encode(storedMap), recognized: recognized);
+
+        final written = CharaDetailRecord.fromRecordJson(utf8.decode(outcome.recordJson));
+        expect(written.fans, CharaDetailRecord.fromRecordJson(recognizedJson).fans + 1);
+        expect(written.metadata.bodyWrittenAt, aheadOfTheClock + 1, reason: 'after the time of the body it replaced');
+        final reopened = ProviderContainer(
+          overrides: [
+            pathInfoLoader.overrideWith((ref) async => pathInfoFor(DirectoryPath(tempRoot.path))),
+            moduleVersionLoader.overrideWith((ref) async => null),
+          ],
+        );
+        addTearDown(reopened.dispose);
+        await reopened.read(charaDetailRecordStorageLoaderProvider.future);
+        final listed = reopened.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id);
+        expect(listed?.metadata.bodyWrittenAt, aheadOfTheClock + 1);
+      },
+    );
+
+    test('a result with the stored body leaves a record.json that carries a body time byte for byte', () async {
+      final record = CharaDetailRecord.fromRecordJson(recognizedJson);
+      final storedMap = record.toMap();
+      (storedMap['metadata'] as Map)['body_written_at'] = aheadOfTheClock;
+      final stored = utf8.encode(jsonEncode(storedMap));
+
+      final outcome = await regenerate(record.id, stored: stored, recognized: utf8.encode(recognizedJson));
+
+      expect(outcome.recordJson, stored);
+      expect(outcome.recognizedLeft, isFalse);
+    });
+
+    test('a result with another body whose record.json cannot be replaced leaves the old body and its time', () async {
+      final storedMap = (jsonDecode(recognizedJson) as Map).cast<String, dynamic>();
+      (storedMap['metadata'] as Map)['body_written_at'] = aheadOfTheClock;
+      final stored = encode(storedMap);
+      final id = CharaDetailRecord.fromRecordJson(recognizedJson).id;
+      final directory = pathInfoFor(DirectoryPath(tempRoot.path)).charaDetailActiveDir / id;
+      // The replacement stages its bytes in record.json.part; a directory standing there stops the write before the
+      // new record.json is put in place.
+      Directory(directory.filePath(CharaDetailRecord.recordJsonReplacementName).path).createSync(recursive: true);
+
+      final outcome = await regenerate(
+        id,
+        stored: stored,
+        recognized: recognizedWith((map) => map['fans'] = (map['fans'] as int) + 1),
+      );
+
+      expect(outcome.recordJson, stored, reason: 'neither a new body with the old time nor the reverse');
+      expect(outcome.recognizedLeft, isTrue, reason: 'the result waits to be composed again');
+    });
+
+    test('a result with another body keeps the binding placed on the stored record', () async {
+      const binding = RecordBinding(skillPng: 'skill-png', factorJpeg: 'factor-jpeg');
+      final record = CharaDetailRecord.fromRecordJson(recognizedJson);
+      final stored = placeOnRecord(record, binding: binding).toRecordJsonBytes();
+      final recognized = recognizedWith((map) => map['fans'] = (map['fans'] as int) + 1);
+
+      final outcome = await regenerate(record.id, stored: stored, recognized: recognized);
+
+      final written = CharaDetailRecord.fromRecordJson(utf8.decode(outcome.recordJson));
+      expect(written.fans, record.fans + 1);
+      expect(written.metadata.binding, binding);
+      expect((outcome.successes, outcome.failures), (1, 0));
+    });
+
+    test(
+      "a major-1 record's binding survives the upgrade the build writes back and the body written over it",
+      () async {
+        const binding = RecordBinding(campaignPng: 'campaign-png', campaignJpeg: 'campaign-jpeg');
+        final storedJson = File('test/fixtures/chara_detail_record_v1.json').readAsStringSync();
+        final storedMap = (jsonDecode(storedJson) as Map).cast<String, dynamic>();
+        (storedMap['metadata'] as Map)['binding'] = binding.toMap();
+        final upgraded = CharaDetailRecord.fromRecordJson(storedJson);
+
+        // Same body: the build's scan writes the upgrade back, and nothing else is written over it.
+        final same = await regenerate(upgraded.id, stored: encode(storedMap), recognized: upgraded.toRecordJsonBytes());
+        final kept = CharaDetailRecord.fromRecordJson(utf8.decode(same.recordJson));
+        expect(kept.metadata.formatVersion, recordFormatVersion);
+        expect(kept.metadata.binding, binding);
+
+        // Another body over the major-1 file itself (written after the build, so the scan did not upgrade it).
+        tempRoot.deleteSync(recursive: true);
+        tempRoot.createSync();
+        final other = await regenerate(
+          upgraded.id,
+          stored: encode(storedMap),
+          recognized: encode(upgraded.toMap()..['fans'] = upgraded.fans + 1),
+          storedAfterBuild: true,
+        );
+        expect(CharaDetailRecord.fromRecordJson(utf8.decode(other.recordJson)).metadata.binding, binding);
+      },
+    );
+
+    test('a result with the body of a stored major-1 record leaves the major-1 file as it is', () async {
+      final storedJson = File('test/fixtures/chara_detail_record_v1.json').readAsStringSync();
+      final stored = utf8.encode(storedJson);
+      // What the recognizer writes when it reads the same: the same values, in the current format.
+      final recognized = CharaDetailRecord.fromRecordJson(storedJson);
+      expect(recognized.metadata.formatVersion, isNot(jsonDecode(storedJson)['metadata']['format_version']));
+
+      // Written after the build: the build's scan upgrades a major-1 file it lists, so a major-1 file under a
+      // re-recognition is one whose upgrade was not written back.
+      final outcome = await regenerate(
+        recognized.id,
+        stored: stored,
+        recognized: recognized.toRecordJsonBytes(),
+        storedAfterBuild: true,
+      );
+
+      expect(outcome.recordJson, stored);
+      expect(outcome.recognizedLeft, isFalse);
+      expect((outcome.successes, outcome.failures), (1, 0));
+    });
+  });
 }
+
+/// Hands the controller the same [Ref] its own provider would.
+final _refProvider = Provider<Ref>((ref) => ref);

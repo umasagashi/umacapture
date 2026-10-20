@@ -25,13 +25,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
+import 'package:umacapture/src/chara_detail/record_archive_state.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
@@ -514,15 +519,19 @@ void main() {
       expect(survivor.metadata.recognizerVersion, retired.metadata.recognizerVersion);
     });
 
-    test('a parent slot takes the older link, then the retired one, and never names the pair', () {
-      // The three parent-slot rows, in one case because they are one rule read at
-      // three inputs.
+    test("the parents are the kept side's, and never name the pair", () {
+      // The parents travel with the body: whichever side's content is kept, its two slots are the survivor's, an empty
+      // one included, and the other side's links are not consulted.
       final older = makeRecord(id: 'older', card: 7, self: whites(5), parent1Id: 'p-older');
       final retired = makeRecord(id: 'retired', card: 7, self: whites(5), parent1Id: 'p-retired', parent2Id: 'p-two');
 
-      final both = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: true);
-      expect(both.metadata.recordId.parent1, 'p-older', reason: 'a set link of the surviving id is never re-pointed');
-      expect(both.metadata.recordId.parent2, 'p-two', reason: 'an empty slot takes the retired record link');
+      final keptOlder = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: true);
+      expect(keptOlder.metadata.recordId.parent1, 'p-older');
+      expect(keptOlder.metadata.recordId.parent2, isNull, reason: 'an empty slot of the kept side stays empty');
+
+      final keptRetired = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: false);
+      expect(keptRetired.metadata.recordId.parent1, 'p-retired', reason: "the older side's link is not the kept one");
+      expect(keptRetired.metadata.recordId.parent2, 'p-two');
 
       final dropped = synthesizeSurvivor(
         older: makeRecord(id: 'older', card: 7, self: whites(5)),
@@ -596,7 +605,10 @@ void main() {
         final retired = postRecord('retired');
         writeRecord(stores[layout.older]!, older);
         writeRecord(stores[layout.retired]!, retired);
-        final retiredTree = Map.of(treeBytes(stores[layout.retired]! / 'retired'))..remove('record.json');
+        // The archive note is the survivor's state at the survivor's time, not the retired record's bytes.
+        final retiredTree = Map.of(treeBytes(stores[layout.retired]! / 'retired'))
+          ..remove('record.json')
+          ..remove(recordArchiveNoteName);
 
         final container = await loadedContainer();
         final result = await mergeOne(container);
@@ -605,14 +617,15 @@ void main() {
         final survivorDir = stores[layout.retired]! / 'older';
         final survivorTree = Map.of(treeBytes(survivorDir))
           ..remove('record.json')
-          ..remove(mergedIdsFileName);
+          ..remove(mergedIdsFileName)
+          ..remove(recordArchiveNoteName);
         expect(survivorTree, retiredTree, reason: 'the survivor carries the enhanced files byte for byte ($layout)');
 
         final survivor = readRecord(stores[layout.retired]!, 'older');
         expect(survivor.id, 'older');
         expect(survivor.metadata.capturedDate, older.metadata.capturedDate);
         expect(survivor.factors.self, retired.factors.self);
-        expect((await readMergedIds(survivorDir))?.ids, ['retired']);
+        expect((await readMergedIds(survivorDir)), ['retired']);
 
         expect(Directory((stores[layout.retired]! / 'retired').path).existsSync(), isFalse, reason: '$layout');
         final otherStore = layout.retired == 'active' ? stores['archive']! : stores['active']!;
@@ -621,7 +634,200 @@ void main() {
       }
     });
 
-    test('keeping the older content: its own tree is untouched and its empty slots are filled', () async {
+    test("the survivor's binding is the kept side's, worked out from the kept tree where it had none", () async {
+      // The older side carries a binding of its own images, which the survivor must not keep: its content goes.
+      const olderBinding = RecordBinding(skillPng: 'older-png', factorJpeg: 'older-jpeg');
+      // A PNG wider than an archive's reduced JPEG, so the JPEG field is the downscaled encode.
+      final png = Uint8List.fromList(img.encodePng(img.Image(width: 800, height: 4)));
+      final factorJpeg = utf8.encode('the factor JPEG of retired');
+      String hash(List<int> bytes) => sha256.convert(bytes).toString();
+      final jpeg = img.encodeJpg(
+        img.copyResize(img.decodePng(png)!, width: 720, interpolation: img.Interpolation.average),
+        quality: 75,
+      );
+
+      for (final retiredBinding in [null, const RecordBinding(campaignPng: 'retired-png')]) {
+        useFreshRoot();
+        writeRecord(info.charaDetailActiveDir, placeOnRecord(preRecord('older'), binding: olderBinding));
+        final retired = postRecord('retired');
+        writeRecord(
+          info.charaDetailActiveDir,
+          retiredBinding == null ? retired : placeOnRecord(retired, binding: retiredBinding),
+          files: {'front.png': 'front of retired'},
+        );
+        final retiredDir = info.charaDetailActiveDir / 'retired';
+        File(retiredDir.filePath('skill.png').path).writeAsBytesSync(png);
+        File(retiredDir.filePath('factor.jpg').path).writeAsBytesSync(factorJpeg);
+
+        final container = await loadedContainer();
+        final result = await mergeOne(container);
+
+        expect(result.outcome, EnhancementMergeOutcome.merged);
+        expect(
+          readRecord(info.charaDetailActiveDir, 'older').metadata.binding,
+          retiredBinding ?? RecordBinding(skillPng: hash(png), skillJpeg: hash(jpeg), factorJpeg: hash(factorJpeg)),
+          reason: 'retired carried $retiredBinding',
+        );
+        container.dispose();
+      }
+    });
+
+    test('the body time moves only where the kept body is another, and no re-pointed record moves its own', () async {
+      // Times far ahead of any clock this runs under, so a time written over one is the one after it.
+      CharaDetailRecord timed(CharaDetailRecord record, int time) => CharaDetailRecordMapper.fromMap(
+        record.toMap()..update('metadata', (m) => <String, dynamic>{...(m as Map), 'body_written_at': time}),
+      );
+      const olderTime = 4102444800000;
+      const retiredTime = 4102444900000;
+      const childTime = 4102444700000;
+      // The enhanced pair keeps the retired body; the identical pair, by default, the older one, which is the body the
+      // survivor already shows.
+      for (final (retired, survivorTime) in [
+        (postRecord('retired'), olderTime + 1),
+        (
+          makeRecord(
+            id: 'retired',
+            card: 7,
+            self: [...coloured(1, 1, 1), ...whites(5)],
+            capturedDate: '2026-02-01T00:00:00+0900',
+          ),
+          olderTime,
+        ),
+      ]) {
+        useFreshRoot();
+        writeRecord(info.charaDetailActiveDir, timed(preRecord('older'), olderTime));
+        writeRecord(info.charaDetailActiveDir, timed(retired, retiredTime));
+        final child = timed(makeRecord(id: 'child', card: 3, self: whites(2), parent1Id: 'retired'), childTime);
+        writeRecord(info.charaDetailActiveDir, child);
+
+        final container = await loadedContainer();
+        final result = await mergeOne(container);
+
+        expect(result.outcome, EnhancementMergeOutcome.merged);
+        expect(
+          readRecord(info.charaDetailActiveDir, 'older').metadata.bodyWrittenAt,
+          survivorTime,
+          reason: 'written over the older body where it changed, never carrying the retired time',
+        );
+        final repointed = readRecord(info.charaDetailActiveDir, 'child');
+        expect(repointed.metadata.recordId.parent1, 'older');
+        expect(repointed.metadata.bodyWrittenAt, childTime);
+        expect(recognizedContentKey(repointed), recognizedContentKey(child));
+        container.dispose();
+      }
+    });
+
+    test("the survivor's parents are the kept side's, and never name the pair", () async {
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'p-older', card: 1, self: whites(1, from: 1100)));
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'p-retired', card: 2, self: whites(1, from: 1200)));
+      final older = preRecord('older');
+      writeRecord(
+        info.charaDetailActiveDir,
+        CharaDetailRecordMapper.fromMap(
+          older.toMap()..update('metadata', (m) {
+            final metadata = <String, dynamic>{...(m as Map)};
+            metadata['record_id'] = <String, dynamic>{...(metadata['record_id'] as Map), 'parent1': 'p-older'};
+            return metadata;
+          }),
+        ),
+      );
+      final retired = postRecord('retired');
+      writeRecord(
+        info.charaDetailActiveDir,
+        CharaDetailRecordMapper.fromMap(
+          retired.toMap()..update('metadata', (m) {
+            final metadata = <String, dynamic>{...(m as Map)};
+            metadata['record_id'] = <String, dynamic>{
+              ...(metadata['record_id'] as Map),
+              'parent1': 'p-retired',
+              'parent2': 'older',
+            };
+            return metadata;
+          }),
+        ),
+      );
+
+      final container = await loadedContainer();
+      expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged);
+
+      final parents = readRecord(info.charaDetailActiveDir, 'older').metadata.recordId;
+      expect(parents.parent1, 'p-retired', reason: 'the kept body brings its parents, not the older record\'s');
+      expect(parents.parent2, isNull, reason: 'a link naming either side of the merge is dropped');
+      container.dispose();
+    });
+
+    test('the archive state moves only where the kept state is another', () async {
+      // Each case: where the two records are, the notes they carry, and the note the survivor ends with. The clock
+      // reads 1767225600000; the older record's state is the value the survivor already shows.
+      final clock = valueWriteClock;
+      addTearDown(() => valueWriteClock = clock);
+      valueWriteClock = () => 1767225600000;
+      final cases = <String, (String, String, String?, String?, String, Map<String, Object?>)>{
+        'both normal: the older time stays': (
+          'active',
+          'active',
+          '{"normal_written_at": 1000}',
+          '{"normal_written_at": 2000}',
+          'active',
+          {'normal_written_at': 1000},
+        ),
+        'normal kept over no-image: back to normal at the merge time': (
+          'archive',
+          'active',
+          '{"archived": {"state": "none", "written_at": 3000}}',
+          '{"normal_written_at": 2000}',
+          'active',
+          {'normal_written_at': 1767225600000},
+        ),
+        'no-image kept over normal: archived at the merge time': (
+          'active',
+          'archive',
+          '{"normal_written_at": 1000}',
+          '{"archived": {"state": "none", "written_at": 2000}}',
+          'archive',
+          {
+            'archived': {'state': 'none', 'written_at': 1767225600000},
+          },
+        ),
+        'the same no-image state: the older time stays': (
+          'archive',
+          'archive',
+          '{"archived": {"state": "none", "written_at": 3000}}',
+          '{"archived": {"state": "none", "written_at": 4000}}',
+          'archive',
+          {
+            'archived': {'state': 'none', 'written_at': 3000},
+          },
+        ),
+      };
+      for (final MapEntry(key: label, value: (olderStore, retiredStore, olderNote, retiredNote, survivorStore, note))
+          in cases.entries) {
+        useFreshRoot();
+        final stores = {'active': info.charaDetailActiveDir, 'archive': info.charaDetailArchiveDir};
+        writeRecord(stores[olderStore]!, preRecord('older'));
+        writeRecord(stores[retiredStore]!, postRecord('retired'));
+        for (final (store, id, contents) in [
+          (olderStore, 'older', olderNote),
+          (retiredStore, 'retired', retiredNote),
+        ]) {
+          if (contents != null) {
+            File((stores[store]! / id).filePath(recordArchiveNoteName).path).writeAsStringSync(contents);
+          }
+        }
+        final container = await loadedContainer();
+
+        expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged, reason: label);
+        final survivorDir = stores[survivorStore]! / 'older';
+        expect(
+          jsonDecode(File(survivorDir.filePath(recordArchiveNoteName).path).readAsStringSync()),
+          note,
+          reason: label,
+        );
+        container.dispose();
+      }
+    });
+
+    test('keeping the older content: its own tree and its own parents are untouched', () async {
       // An identical pair with the switch left at its default.
       final older = preRecord('older');
       final retired = makeRecord(
@@ -643,7 +849,7 @@ void main() {
         ..remove('record.json')
         ..remove(mergedIdsFileName);
       expect(survivorTree, olderImages, reason: 'the kept side images are not rewritten');
-      expect(readRecord(info.charaDetailActiveDir, 'older').metadata.recordId.parent1, 'p');
+      expect(readRecord(info.charaDetailActiveDir, 'older').metadata.recordId.parent1, isNull);
       expect(Directory((info.charaDetailActiveDir / 'retired').path).existsSync(), isFalse);
     });
 
@@ -876,7 +1082,19 @@ void main() {
       writeRecord(info.charaDetailActiveDir, preRecord('retired', capturedDate: '2026-02-01T00:00:00+0900'));
       File(
         '${(info.charaDetailActiveDir / 'older').path}/$mergedIdsFileName',
-      ).writeAsStringSync(utf8.decode(mergedIdsBytes((ids: ['retired'], metadataDefaults: null))));
+      ).writeAsStringSync(utf8.decode(mergedIdsBytes(['retired'])));
+      File('${(info.charaDetailActiveDir / 'older').path}/$mergesInProgressFileName').writeAsStringSync(
+        utf8.decode(
+          mergesInProgressBytes({
+            'retired': (
+              route: EnhancementMergeRoute.settings,
+              identical: true,
+              contentFromOlder: true,
+              enhancedIsOlder: false,
+            ),
+          }),
+        ),
+      );
     }
 
     /// Collects every breadcrumb assembled while the merge runs.
@@ -988,6 +1206,14 @@ void main() {
 
   // =========================================================================
   group('interrupted between the steps', () {
+    // A converged store is compared byte for byte with one an uninterrupted merge left, and each merge writes the
+    // survivor's body at the time it runs. One clock reading for both is what leaves the bytes comparable.
+    setUp(() {
+      final clock = valueWriteClock;
+      valueWriteClock = () => 1767225600000;
+      addTearDown(() => valueWriteClock = clock);
+    });
+
     void seedPair({bool withDescendant = false}) {
       writeRecord(info.charaDetailActiveDir, preRecord('older'));
       writeRecord(info.charaDetailActiveDir, postRecord('retired'));
@@ -1107,7 +1333,7 @@ void main() {
       final restarted = await loadedContainer();
       expect(File('${(info.charaDetailActiveDir / 'retired').path}/record.json').existsSync(), isTrue);
       expect(CharaDetailRecord.load(info.charaDetailActiveDir / 'retired'), isA<RecordLoaded>());
-      expect((await readMergedIds(info.charaDetailActiveDir / 'older'))?.ids, ['retired']);
+      expect((await readMergedIds(info.charaDetailActiveDir / 'older')), ['retired']);
       expect(candidatesIn(restarted).map((c) => c.pair), [RecordIdPair('older', 'retired')]);
       expect(readRecord(info.charaDetailActiveDir, 'kid').metadata.recordId.parent1, isNull);
       expect(hasQuarantineEntries(), isFalse, reason: 'nothing was set aside: the record.json never went');
@@ -1116,6 +1342,47 @@ void main() {
       expect((await mergeOne(restarted)).outcome, EnhancementMergeOutcome.merged);
       await resolve(restarted);
       expect(storeBytes(), expected);
+    });
+
+    test(
+      'a merge stopped in the strip reads as unsettled beside its absorbed ids until the retry finishes it',
+      () async {
+        seedPair();
+        final crashing = await loadedContainer(
+          seams: seamsWith(deleteEntry: (entry) async => throw const _Crash('strip')),
+        );
+        expect((await mergeOne(crashing)).outcome, EnhancementMergeOutcome.failedDelete);
+        crashing.dispose();
+
+        final survivorDir = info.charaDetailActiveDir / 'older';
+        final reopened = await loadedContainer();
+        bool isRecord(String id) =>
+            reopened.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id) != null;
+        expect(await readMergedIds(survivorDir), ['retired']);
+        expect((await readMergesInProgress(survivorDir))?.keys, ['retired']);
+        expect(await isRecordMergeSettled(survivorDir, isRecord: isRecord), isFalse);
+
+        expect((await mergeOne(reopened)).outcome, EnhancementMergeOutcome.merged);
+        expect(await readMergedIds(survivorDir), ['retired']);
+        expect(File(survivorDir.filePath(mergesInProgressFileName).path).existsSync(), isFalse);
+        expect(await isRecordMergeSettled(survivorDir, isRecord: isRecord), isTrue);
+        reopened.dispose();
+      },
+    );
+
+    test('absorbed ids that arrived with a record are not an unfinished merge: the pair merges as any other', () async {
+      // The older record already carries the retired id, as a merge on another device leaves it. Nothing here was
+      // started on this device, so the record is settled and the enhanced content is kept, not refused as a leftover.
+      seedPair();
+      final olderDir = info.charaDetailActiveDir / 'older';
+      File(olderDir.filePath(mergedIdsFileName).path).writeAsBytesSync(mergedIdsBytes(['retired']));
+      final container = await loadedContainer();
+      bool isRecord(String id) => container.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id) != null;
+      expect(await isRecordMergeSettled(olderDir, isRecord: isRecord), isTrue);
+
+      expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged);
+      expect(readRecord(info.charaDetailActiveDir, 'older').factors.self, postRecord('retired').factors.self);
+      container.dispose();
     });
 
     test('interrupted at the last file, or after the retirement: the store converges under a resolution', () async {
@@ -1163,9 +1430,15 @@ void main() {
           expect(hasQuarantineEntries(), isTrue, reason: 'alpha leaves remains for the loader to set aside');
         }
 
-        // Phase 2: a manual resolution finishes what step 6 would have done.
+        // Phase 2: a manual resolution finishes what step 6 would have done. Alpha stopped before the merge's entry
+        // was removed; its retired record is no longer one, so the entry leaves the survivor settled.
         await resolve(restarted);
-        expect(storeBytes(), expected, reason: '$variant converges to the uninterrupted run');
+        final survivorDir = info.charaDetailActiveDir / 'older';
+        bool isRecord(String id) =>
+            restarted.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: id) != null;
+        expect(await isRecordMergeSettled(survivorDir, isRecord: isRecord), isTrue, reason: variant);
+        final converged = storeBytes()..remove('active/${PathEntity.context.join('older', mergesInProgressFileName)}');
+        expect(converged, expected, reason: '$variant converges to the uninterrupted run');
         restarted.dispose();
       }
     });
@@ -1289,7 +1562,7 @@ void main() {
         reason: 'the retry finishes the applied merge; it does not make the content choice again',
       );
       expect(Directory((info.charaDetailActiveDir / 'retired').path).existsSync(), isFalse);
-      expect((await readMergedIds(info.charaDetailActiveDir / 'older'))?.ids, ['retired']);
+      expect((await readMergedIds(info.charaDetailActiveDir / 'older')), ['retired']);
     });
   });
 
@@ -1342,6 +1615,46 @@ void main() {
               PathEntity.context.basenameWithoutExtension(file.path),
             ),
     };
+
+    test('a rating or memo moves its time only where the kept value is another, and the retired time goes', () async {
+      // The settings route keeps the enhanced (retired) side's value. The clock reads 1767225600000.
+      final clock = valueWriteClock;
+      addTearDown(() => valueWriteClock = clock);
+      valueWriteClock = () => 1767225600000;
+      seedPair();
+      void writeTimed(DirectoryPath dir, String key, Map<String, Object> data, Map<String, int> writtenAt) =>
+          File(dir.filePath('$key.json').path)
+            ..createSync(recursive: true)
+            ..writeAsStringSync(
+              jsonEncode({'title': key, 'titleWrittenAt': 500, 'data': data, 'writtenAt': writtenAt}),
+            );
+      writeTimed(info.charaDetailRatingDir, 'differs', {'older': 1.0, 'retired': 4.0}, {'older': 100, 'retired': 200});
+      writeTimed(info.charaDetailMemoDir, 'same', {'older': 'a', 'retired': 'a'}, {'older': 100, 'retired': 200});
+      writeTimed(info.charaDetailMemoDir, 'cleared', {'older': 'a'}, {'older': 100, 'retired': 200});
+      Map<String, dynamic> file(DirectoryPath dir, String key) =>
+          (jsonDecode(File(dir.filePath('$key.json').path).readAsStringSync()) as Map).cast<String, dynamic>();
+
+      final container = await loadedContainer();
+      expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged);
+
+      final differs = file(info.charaDetailRatingDir, 'differs');
+      expect(differs['data'], {'older': 4.0});
+      expect(differs['writtenAt'], {
+        'older': 1767225600000,
+      }, reason: 'a value the survivor did not show is written now');
+      final same = file(info.charaDetailMemoDir, 'same');
+      expect(same['data'], {'older': 'a'});
+      expect(same['writtenAt'], {'older': 100}, reason: 'the value the survivor already shows keeps its time');
+      // The retired side is none here, written at 200, and the settings route keeps it: the survivor's value becomes
+      // none, written now.
+      final cleared = file(info.charaDetailMemoDir, 'cleared');
+      expect(cleared['data'], isEmpty);
+      expect(cleared['writtenAt'], {'older': 1767225600000});
+      for (final title in [differs, same, cleared]) {
+        expect(title['titleWrittenAt'], 500, reason: 'a merge writes no column title');
+      }
+      container.dispose();
+    });
 
     test('every memo and rating key file is re-keyed, including a key no column shows', () async {
       // The key list is the directory listing and not the descriptor providers:
@@ -1769,6 +2082,10 @@ void main() {
       for (final MapEntry(key: direction, value: (:seed, :kept, expected: _)) in directions.entries) {
         for (final first in EnhancementMergeRoute.values) {
           test('$direction / first run on ${first.name}', () async {
+            // One clock for every run, so the times the merge writes are the same bytes in each.
+            final clock = valueWriteClock;
+            addTearDown(() => valueWriteClock = clock);
+            valueWriteClock = () => 1767225600000;
             final failures = <String>[];
             useFreshRoot();
             seed();
@@ -2138,7 +2455,7 @@ void main() {
       expect(recordDeletes, isEmpty, reason: 'the record delete after the strip never ran');
       expect(toasts.countOf(appSentenceAt('app.file_deletion_error')), 1, reason: 'one error, whichever half failed');
       expect(File('${(info.charaDetailActiveDir / 'retired').path}/record.json').existsSync(), isTrue);
-      expect((await readMergedIds(info.charaDetailActiveDir / 'older'))?.ids, ['retired']);
+      expect((await readMergedIds(info.charaDetailActiveDir / 'older')), ['retired']);
       expect(
         container.read(charaDetailRecordStorageLoaderProvider).requireValue.map((r) => r.id),
         contains('retired'),
@@ -2176,7 +2493,7 @@ void main() {
       expect(result.outcome, EnhancementMergeOutcome.failedDelete);
       expect(result.needsReload, isTrue);
       expect(toasts.countOf(appSentenceAt('app.file_deletion_error')), 1, reason: 'one error, whichever call failed');
-      expect((await readMergedIds(info.charaDetailActiveDir / 'older'))?.ids, ['retired']);
+      expect((await readMergedIds(info.charaDetailActiveDir / 'older')), ['retired']);
     });
 
     test('record.json is the last file of the retired record to go, at every point the retirement can stop', () async {

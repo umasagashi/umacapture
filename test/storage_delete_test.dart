@@ -26,15 +26,21 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_quarantine_ledger.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
+import 'package:umacapture/src/core/fs/record_loader.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
+import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
 import 'support/long_read_declarations.dart';
+import 'support/record_binding_seed.dart';
+import 'support/records.dart';
 import 'support/storage_delete_claim.dart';
 
 /// The lock name `RecordMutationLock` builds for a record id, spelled here so a
@@ -379,6 +385,104 @@ void main() {
       parked.release.complete();
       await parked.delete;
       await writer;
+    });
+  });
+
+  group('an image the storage view deletes from a record directory', () {
+    test('has the binding of its record worked out from it first', () async {
+      final pngs = bindingImagePngs();
+      final dir = seedUnboundRecord(layout.charaDetailActiveDir.path, UnboundRecord.captured, pngs);
+      final container = containerWith(_RecordingLocks());
+
+      final report = await deleteUnderClaim(
+        container.read(containerRefProvider),
+        group: groupOf(StorageGroupId.activeRecords),
+        targets: [activeDir(UnboundRecord.captured.id).filePath('skill.png')],
+      );
+
+      expect(report.isComplete, isTrue);
+      expect(File('$dir/skill.png').existsSync(), isFalse);
+      expect(bindingIn(File('$dir/record.json').readAsBytesSync()), expectedBinding(pngs));
+    });
+  });
+
+  group('a delete from the storage view is read by what it removed', () {
+    /// A record the store loads at `active/<id>`, with an image, and a rating of it in one rating file.
+    void seedRatedRecord(String id) {
+      final dir = activeDir(id);
+      File(dir.filePath('record.json').path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode(makeRecord(id: id, card: 1).toMap()));
+      File(dir.filePath('skill.png').path).writeAsBytesSync(const [1, 2, 3]);
+      File(layout.charaDetailRatingDir.filePath('main.json').path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'title': 'main',
+            'data': {id: 3.0},
+            'writtenAt': {id: 100},
+          }),
+        );
+    }
+
+    Map<String, dynamic> ratings() =>
+        (jsonDecode(File(layout.charaDetailRatingDir.filePath('main.json').path).readAsStringSync())
+                as Map<String, dynamic>)['data']
+            as Map<String, dynamic>;
+
+    Future<List<String>> listed() async => [
+      for (final result in (await loadRecordsUnder(layout.charaDetailActiveDir, declaration: undeclaredInTest)).results)
+        if (result case RecordLoaded(:final record)) record.id,
+    ];
+
+    Future<StorageDeleteReport> delete(StorageGroupId group, PathEntity target) => deleteUnderClaim(
+      containerWith(_RecordingLocks()).read(containerRefProvider),
+      group: groupOf(group),
+      targets: [target],
+    );
+
+    setUpAll(initializeMappers);
+
+    test('the whole record directory is the record deleted: its rating goes with it', () async {
+      seedRatedRecord('x');
+
+      expect((await delete(StorageGroupId.activeRecords, activeDir('x'))).isComplete, isTrue);
+
+      expect(ratings(), isEmpty);
+    });
+
+    test('record.json alone is not a delete: the record goes to the quarantine shelf by its id', () async {
+      seedRatedRecord('x');
+
+      expect((await delete(StorageGroupId.activeRecords, activeDir('x').filePath('record.json'))).isComplete, isTrue);
+
+      expect(ratings(), {'x': 3.0});
+      expect(await listed(), isEmpty);
+      final ledger = await readQuarantineLedger(layout.charaDetailQuarantineDir);
+      expect([for (final record in ledger.kept) record.id], ['x']);
+      expect(ledger.userDeleted, isEmpty);
+    });
+
+    test('the images alone are not a delete: the record stays listed', () async {
+      seedRatedRecord('x');
+
+      expect((await delete(StorageGroupId.activeRecords, activeDir('x').filePath('skill.png'))).isComplete, isTrue);
+
+      expect(await listed(), ['x']);
+      expect(ratings(), {'x': 3.0});
+    });
+
+    test('the contents of the quarantine shelf deleted are a delete the user made', () async {
+      seedRatedRecord('x');
+      File(activeDir('x').filePath('record.json').path).writeAsStringSync('{');
+      expect(await listed(), isEmpty);
+      final [quarantined] = (await readQuarantineLedger(layout.charaDetailQuarantineDir)).kept;
+
+      expect((await delete(StorageGroupId.quarantine, quarantined.directory)).isComplete, isTrue);
+
+      final ledger = await readQuarantineLedger(layout.charaDetailQuarantineDir);
+      expect(ledger.kept, isEmpty);
+      expect(ledger.userDeleted, {'x'});
     });
   });
 

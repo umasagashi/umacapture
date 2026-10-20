@@ -464,7 +464,7 @@ add_custom_command(
 
 # ---------------------------------------------------------------------------
 # Integration (golden) tests -- drive the real umacapture_cli over recorded clips
-# and diff the recognized record.json against committed goldens. Unlike the unit
+# and diff the recognized.json results against committed goldens. Unlike the unit
 # tests above, this exercises the full ONNX/WinRT/FFmpeg pipeline, so it depends on
 # local-only assets (the testdata/clips/golden clips and sandbox/modules ONNX models,
 # neither of which is committed). Every case self-skips (exit 77) when its inputs are absent,

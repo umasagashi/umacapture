@@ -541,7 +541,7 @@ the linked `.cpp`s that no test reaches.
 The unit tests above deliberately stop at the ONNX/WinRT boundary. The
 integration test in [`integration/`](integration) closes the other end: it drives
 the real `umacapture_cli video` over recorded clips and diffs the recognized
-`record.json` set against committed goldens, catching regressions in the full
+`recognized.json` set against committed goldens, catching regressions in the full
 scrape → stitch → recognize pipeline that no unit test can see.
 
 Because it runs the real recognizer, it depends on **local-only assets** that are
@@ -811,7 +811,7 @@ browser). It is a three-part harness, and the last part is what makes it trustwo
    --color_matrix bt601` produces, byte for byte. Without this control, a difference in the
    CFR-30 retiming or the FFV1 round trip is indistinguishable from a colour finding. It was
    run for this file and it matched. **Records is what the comparison compares** — nothing in
-   the integration tooling compares images (`run.py` collects `*/record.json` only, and
+   the integration tooling compares images (`run.py` collects `*/recognized.json` only, and
    `run_dual_decode.py` diffs the same normalised text) — and that is no longer a formality:
    the core's own BT.601 reaches swscale's pixels only to within one unit per channel
    (`cv/decoded_frame_to_bgr.h`'s coarsened luma ramp), so the two runs' image dumps
