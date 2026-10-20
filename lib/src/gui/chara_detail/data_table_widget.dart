@@ -28,7 +28,7 @@ import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/delete_record_dialog.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
-import '/src/gui/chara_detail/publish_record_dialog.dart';
+import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
@@ -436,8 +436,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               ),
           ],
         ),
-        // Publish group: publishing, or the published page, its URL and withdrawing it.
-        publicationMenu(ref, record: record, source: source, constraints: constraints, style: style),
+        // Share group: sharing, or the shared page, its URL and unsharing it.
+        recordShareMenu(ref, record: record, source: source, constraints: constraints, style: style),
         // Destructive record actions, set off by a divider: archive (active-only;
         // archived records cannot be archived again) then delete (both sources).
         const MenuDivider(),

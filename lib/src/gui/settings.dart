@@ -30,7 +30,7 @@ import '/src/gui/app_widget.dart';
 import '/src/chara_detail/enhancement_merge.dart';
 import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
 import '/src/gui/chara_detail/enhancement_review_list.dart';
-import '/src/gui/chara_detail/published_records_dialog.dart';
+import '/src/gui/chara_detail/record_share_list_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_activity.dart';
@@ -647,7 +647,7 @@ class PrivacySettingsGroup extends ConsumerWidget {
           ),
           provider: allowPostUserDataStateProvider,
         ),
-        const PublishedRecordsTile(),
+        const RecordShareListTile(),
       ],
     );
   }

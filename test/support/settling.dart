@@ -90,6 +90,31 @@ Future<void> waitUntil(bool Function() ready, {required String describe, Duratio
   }
 }
 
+/// [settleUntil] for a step that also needs the **fake** clock to move: Dio's request and its answer
+/// both pass through timers on the `testWidgets` fake clock, and they are reached only after real work
+/// (a store read) has run. Each turn lets real time run, then elapses [fakeStep] of fake time, until
+/// [ready] holds. **Only under a `WidgetTester`**; the bound is the same wall-clock hang detector as
+/// [settleUntil], not a number of turns.
+///
+/// [settleUntil] alone is not enough: it pumps zero fake time, so a fake timer the step waits on never fires.
+Future<void> settleUntilElapsing(
+  WidgetTester tester,
+  bool Function() ready, {
+  required String describe,
+  Duration fakeStep = const Duration(seconds: 1),
+  Duration timeout = _defaultTimeout,
+}) async {
+  final waited = Stopwatch()..start();
+  while (!ready()) {
+    if (waited.elapsed > timeout) {
+      fail('waited ${waited.elapsed.inSeconds}s for $describe, which never happened');
+    }
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
+    await tester.pump(fakeStep);
+  }
+  await tester.pump();
+}
+
 /// Pumps a fixed window of real time: [rounds] turns of `runAsync(Future.delayed(step))` followed by a
 /// `pump`, for an assertion that something must *not* happen, or must happen no more than once.
 /// Neither has an arrival to poll for, so the window is the claim's reach: shortening [rounds] or
