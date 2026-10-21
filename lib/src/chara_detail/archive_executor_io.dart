@@ -20,9 +20,9 @@ import 'archive_executor_types.dart';
 ///
 /// Web does not need this wrapper: [archiveRecordsAsync] locks per record inside
 /// itself, and the locks are not re-entrant, so wrapping there would deadlock.
-Future<List<bool>> archiveRecords(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) {
+Future<List<ArchivedRecord?>> archiveRecords(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) {
   if (args.items.isEmpty) {
-    return Future.value(const <bool>[]);
+    return Future.value(const <ArchivedRecord?>[]);
   }
   final sources = args.items.map((item) => DirectoryPath(item.srcDirPath)).toList();
   // `<dataRoot>/chara_detail/active/<id>` -> `<dataRoot>`, the same storage root

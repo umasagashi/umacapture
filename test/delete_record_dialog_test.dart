@@ -63,7 +63,11 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
       deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) {
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     final gate = Completer<void>();
@@ -115,7 +119,11 @@ class _AnsweringRecordStorage extends CharaDetailRecordStorage {
   }
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) {
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) {
     calls.add('deleteAllAsync');
     return _answer(ref.read(longReadRegistryProvider.notifier), ids);
   }

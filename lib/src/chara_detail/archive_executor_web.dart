@@ -17,5 +17,5 @@ import 'archive_executor_types.dart';
 /// block in `convertPngBatchAsync` (`image_converter.dart`), whose doc carries
 /// the constraint, the measured per-image cost, and the worker alternatives that
 /// were considered and rejected.
-Future<List<bool>> archiveRecords(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) =>
+Future<List<ArchivedRecord?>> archiveRecords(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) =>
     archiveRecordsAsync(args, recoveryGate: recoveryGate);

@@ -38,6 +38,6 @@
 library;
 
 export 'archive_executor_shared.dart'
-    show archiveRecordAsync, archiveRecordOnNative, archiveRecordsAsync, archiveRecordsOnNative;
+    show ArchivedRecord, archiveRecordAsync, archiveRecordOnNative, archiveRecordsAsync, archiveRecordsOnNative;
 export 'archive_executor_types.dart';
 export 'archive_executor_io.dart' if (dart.library.js_interop) 'archive_executor_web.dart' show archiveRecords;

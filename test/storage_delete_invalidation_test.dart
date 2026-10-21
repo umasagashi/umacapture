@@ -59,6 +59,7 @@ import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
+import 'support/empty_record_stores.dart';
 import 'support/localization.dart';
 import 'support/record_write_effects_fixture.dart';
 
@@ -102,6 +103,7 @@ void main() {
         // than from `pathInfoProvider`, so it keeps working while the record
         // store is unavailable.
         pathLayoutLoader.overrideWith((ref) async => layout),
+        ...emptyRecordStoreOverrides,
         if (serializer != null) storageDeleteSerializerProvider.overrideWithValue(serializer),
       ],
     );
@@ -363,10 +365,12 @@ void main() {
         silent: true,
       );
 
-      expect(File(path.path).existsSync(), isFalse);
+      // The file stays, holding the removal of what it held (`storage_delete.dart`).
+      expect(File(path.path).existsSync(), isTrue);
       final after = await scope.read(charaDetailRecordRatingProvider('main').future);
-      // All three, not one: the file is the set, so nothing in it survives it.
+      // All three, not one: the file is the set, so nothing in it survives the removal.
       expect(after.data, isEmpty);
+      expect(after.titleCleared, isTrue);
     });
 
     // The same claim with the controller serialiser taken out of the picture, so

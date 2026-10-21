@@ -7,12 +7,10 @@ import 'package:web/web.dart' as web;
 
 import 'byte_compare.dart';
 import 'fs_backend.dart' show FsEntry;
+import 'fs_directory.dart';
+import 'opfs_directory.dart';
 import 'storage_persistence_web.dart' show requestPersistOnce;
 import 'vfs_path.dart' show vfsChildPath;
-
-/// Path separators accepted by the VFS. Hoisted because [WebVfs._split] runs at
-/// the head of every single filesystem operation.
-final RegExp _pathSeparator = RegExp(r'[/\\]');
 
 /// Thin async adapter over the Origin Private File System (OPFS).
 ///
@@ -38,7 +36,7 @@ class WebVfs {
 
   Future<web.FileSystemDirectoryHandle> _root() => _storage.getDirectory().toDart;
 
-  List<String> _split(String path) => path.split(_pathSeparator).where((s) => s.isNotEmpty).toList();
+  List<String> _split(String path) => splitVfsPath(path);
 
   /// Walks [segments] from the OPFS root, returning the directory handle, or
   /// `null` when a lookup ([create] false) finds a segment missing.
@@ -62,16 +60,7 @@ class WebVfs {
   /// caller needs, and [delete] already lets genuine failures through the same
   /// way.
   Future<web.FileSystemDirectoryHandle?> _dir(List<String> segments, {required bool create}) async {
-    var handle = await _root();
-    for (final segment in segments) {
-      try {
-        handle = await handle.getDirectoryHandle(segment, web.FileSystemGetDirectoryOptions(create: create)).toDart;
-      } catch (_) {
-        if (create) rethrow;
-        return null;
-      }
-    }
-    return handle;
+    return descendOpfs(await _root(), segments, create: create);
   }
 
   /// Resolves the file handle at [path], or `null` when the file (with [create]
@@ -167,14 +156,25 @@ class WebVfs {
   }
 
   Future<Uint8List> readBytes(String path) async {
-    final handle = await _file(path, create: false);
-    if (handle == null) {
+    final bytes = await readBytesIfPresent(path);
+    if (bytes == null) {
       throw _notFound(path);
     }
-    final file = await handle.getFile().toDart;
-    final buffer = await file.arrayBuffer().toDart;
-    return buffer.toDart.asUint8List();
+    return bytes;
   }
+
+  /// The bytes of the file at [path], or null where [_file] finds none: one walk and one file lookup.
+  Future<Uint8List?> readBytesIfPresent(String path) async {
+    final handle = await _file(path, create: false);
+    if (handle == null) {
+      return null;
+    }
+    return readOpfsFile(handle);
+  }
+
+  /// The directory at [path], walked to from the OPFS root once; its descendants are then reached from its handle.
+  /// See `FsBackend.openDirectory`.
+  Future<FsDirectory> openDirectory(String path) async => OpfsDirectory.open(await _root(), path);
 
   /// The first [maxBytes] bytes of the file at [path]; see `FsBackend.readHead`
   /// for the contract.
@@ -445,18 +445,6 @@ class WebVfs {
   Exception _notFound(String path) => FileSystemException('No such file or directory', path);
 
   Exception _notADirectory(String path) => FileSystemException('Not a directory', path);
-}
-
-/// A minimal, web-only stand-in for `dart:io`'s `FileSystemException`, thrown by
-/// the OPFS adapter so error handling reads the same as on desktop.
-class FileSystemException implements Exception {
-  final String message;
-  final String path;
-
-  FileSystemException(this.message, this.path);
-
-  @override
-  String toString() => 'FileSystemException: $message, path = $path';
 }
 
 /// Binds the async-iterator methods (`values()`) that `package:web` omits from

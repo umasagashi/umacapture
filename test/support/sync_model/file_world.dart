@@ -12,6 +12,27 @@
 // the parents go with the content (S-13), the relation bonus stays on the device. The resolver's filling a
 // slot is placed, not written — it moves no time, and nothing is sent for it alone. A [Link] is the
 // resolver's hand on a slot, and it runs once more after every round ([FDevice.resolve]).
+//
+// A round is the model's own ([FDevice.syncRound]) or the app's ([FDevice.appSyncRound]), as the world says
+// ([FileWorld.round]). There are two rounds while the app's lacks parts of sync: the model's own goes on checking the
+// sequences that need one of them ([OfTheModelsRound], each value saying when it leaves), and it is the round the
+// deliberately broken rules break ([FileMutation]) and the judge's sequences ([fileJudgeCases]) run on. It can go
+// once no value of [OfTheModelsRound] is left and those run on the app's round.
+
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:fake_async/fake_async.dart';
+import 'package:umacapture/src/chara_detail/archive_executor_types.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
+import 'package:umacapture/src/chara_detail/record_binding.dart';
+import 'package:umacapture/src/chara_detail/record_operation.dart';
+import 'package:umacapture/src/chara_detail/record_sync_list.dart';
+import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
+import 'package:umacapture/src/chara_detail/record_sync.dart';
+import 'package:umacapture/src/chara_detail/record_sync_place.dart';
+import 'package:umacapture/src/chara_detail/record_sync_round.dart';
 
 import 'file_core.dart';
 import 'file_mutations.dart';
@@ -19,6 +40,8 @@ import 'judge.dart';
 import 'observation.dart';
 import 'ops.dart';
 import 'world.dart';
+
+part 'file_place.dart';
 
 /// The accepted outcomes under these rules: the ones of the operation-log rules, the returns the
 /// owner gave up for stores that share no base, counted by why they share none, and the shapes that
@@ -61,6 +84,7 @@ const fileReadings = JudgeReadings(
   splitNeedsARival: true,
   annotationsStayWithTheirRecord: true,
   mergeEditsWhatItChanges: true,
+  mergeScreenKeepsAValue: true,
   archivesStay: true,
   importOverArchive: true,
   mergedArchiveIsOne: true,
@@ -100,8 +124,44 @@ class FServer {
   final Map<String, int> roomRefusals = {};
   int swapsRefused = 0;
 
+  /// Called with the device's name as it asks for a swap, before the server answers it: what runs here runs
+  /// between the device's read of the list and its swap, as another device's round can.
+  void Function(String device)? beforeSwap;
+
+  /// Called once a device's swap went through, with the device and the swap's place among those of its round: where a
+  /// device sends its list in several swaps, another device's round between two of them. Not [beforeSwap]: a list sent
+  /// whole has no swap after its first, and this is where another round falls in a round of either kind.
+  void Function(String device, int swap)? afterSwap;
+
   /// The ids of the records a swap took off the list. Counted for the runs; no rule reads it.
   final Set<String> removedEver = {};
+
+  // What the app's round reaches the server through ([_FileSyncServer]): the list as the Worker holds it, and its
+  // bodies, parts and roots under their names. [list] is the state of it.
+
+  /// Object name → its text: the bodies, parts and roots put.
+  final Map<String, String> syncObjects = {};
+  String? rootName;
+  SyncList syncList = const SyncList();
+
+  /// Generation → the list it is of, for the changes a replacement asks against the generation it read.
+  final Map<int, SyncList> _syncLists = {0: const SyncList()};
+
+  /// How the server has a round of the app's send its list in several replacements, as the Worker refuses a larger
+  /// one: a replacement of more operations ([syncListChanges]) than [operationsPerSwap] is refused as
+  /// `too_many_objects`, one that changes more slots of the root than [slotsPerSwap] as `too_many_parts`. Null: no
+  /// limit.
+  int? operationsPerSwap;
+  int? slotsPerSwap;
+
+  /// While a limit is set: the changes the first replacement of each attempt of a round of the app's asked, in order —
+  /// whose round, and the whole list that attempt sends, by operation —; and the replacements made, whose, and the
+  /// operations each changed.
+  final List<({String device, List<SyncListChange> changes})> attempts = [];
+  final List<({String device, List<SyncListChange> changes})> made = [];
+
+  /// How many rounds of the app's ended because no replacement they could make was within the limits.
+  int splitRefused = 0;
 
   /// A read: the list, a content or an image. False when the day's reads are used up. The generation
   /// is told without one.
@@ -190,18 +250,36 @@ class FServer {
     images.clear();
     releasing.clear();
     imageForm = 'none';
+    syncObjects.clear();
+    rootName = null;
+    syncList = const SyncList();
+    _syncLists
+      ..clear()
+      ..[0] = const SyncList();
   }
 }
 
-/// What a zip holds: the record's directory — its content, the ids it absorbed, its inheritance link,
-/// its stage and, when the directory had them, its images ([R4-6], S-06).
+/// What a zip holds: the record's directory — its content with its inheritance parents, the ids it absorbed,
+/// its stage and, when the directory had them, its images ([R4-6], S-06). Not the relation bonus: only the device
+/// that resolved it holds it (S-13).
 class FZip {
-  FZip(this.record, {required this.image, this.bonus});
+  FZip(this.record, {required this.image});
   final FRec record;
 
   /// The name of the image files; null when the directory had none.
   final String? image;
+}
+
+/// A record on the quarantine shelf ([FDevice.shelf]): its directory as the scan moved it — the record, the name of its
+/// image files (null where it had none) and the relation bonus its `record.json` held — whether the directory carries
+/// the note of its id ([noted]), and whether that `record.json` reads again as the record's own id ([readable]).
+class FShelved {
+  FShelved(this.record, {required this.image, required this.bonus, required this.noted});
+  final FRec record;
+  final String? image;
   final String? bonus;
+  final bool noted;
+  bool readable = false;
 }
 
 typedef FBase = ({int account, int generation, FState list});
@@ -234,6 +312,32 @@ class FDevice {
   /// ([_cellsBack]).
   final Map<String, Map<String, String?>> cellsLeftBehind = {};
 
+  /// The quarantine shelf, by the id of the record each directory holds: the records the store's scan could not read and
+  /// moved there whole ([Quarantine]). Data on the disk, as the notes are, so a restart reads it again as it was. The
+  /// app reads an id only off a directory's note ([FShelved.noted]); the model holds it of every directory, so a
+  /// property can say what happens to the record whatever the app can read of it.
+  final Map<String, FShelved> shelf = {};
+
+  /// The shelf's list of the ids of the records the user deleted from it ([DeleteQuarantined]).
+  final Set<String> shelfDeleted = {};
+
+  /// The ids of the records a scan put back from the shelf, repaired ([Restart]). Counted for the runs; no round reads
+  /// it.
+  final Set<String> putBack = {};
+
+  /// What a round's place reads of the shelf — the ids the notes name, and the number of directories with no note —
+  /// where a control of the properties makes it read otherwise; null, the shelf's ([shelfRead]).
+  ({Set<String> named, int unnamed})? shelfAsRead;
+
+  /// What the app reads of the shelf: the ids the notes name, and the number of directories whose note names none.
+  ({Set<String> named, int unnamed}) get shelfRead => (
+    named: {
+      for (final MapEntry(key: id, value: s) in shelf.entries)
+        if (s.noted) id,
+    },
+    unnamed: shelf.values.where((s) => !s.noted).length,
+  );
+
   /// The list last agreed with the server on, record by record as each was applied ([generation] is
   /// -1 while only part of a list has been); null when there is none.
   FBase? base;
@@ -241,9 +345,26 @@ class FDevice {
   /// The list the device asked the server to swap in, until it knows the answer ([_reread]).
   FState? _sent;
 
+  /// The two lists the app's round keeps ([SyncKept]), where the device runs it: the base, of which [base] is the
+  /// state, and the list sent.
+  SyncKeptList? keptBase;
+  SyncKeptList? keptSent;
+
+  /// How the device sends its list where it changes more than one operation of the server's: the app's changes
+  /// ([syncListChanges]) grouped into swaps, in order — null where one change alone is more than a swap takes, and the
+  /// round stops. Null: the whole list in one swap.
+  List<List<SyncListChange>>? Function(List<SyncListChange> changes)? swapsOf;
+
   /// The device asked for a swap and does not know the answer.
-  bool get unanswered => _sent != null;
-  bool syncEnabled = true;
+  bool get unanswered => _sent != null || keptSent != null;
+
+  /// The device's switch of sync, as the app keeps it ([RecordSyncState]): whether its rounds run is the app's switch's
+  /// to say ([syncRuns]), and turning it on or off goes through the app's ([RecordSyncState.withOn]).
+  RecordSyncState sync = const RecordSyncState(on: true);
+
+  /// Whether a round of this device runs against [server]: as the app's switch says, for the server's account.
+  bool syncRuns(FServer server) => sync.roundAccount('${server.account}') != null;
+
   bool paused = false;
 
   /// The device runs the app of these rules: it ran an operation of it ([FileWorld.execute]). Until then it
@@ -252,10 +373,6 @@ class FDevice {
 
   /// The contents held: of the records listed, and the ones taken for a round that did not end.
   final Set<String> bodies = {};
-
-  /// The images of records a round that did not end removed: kept until one that ends.
-  final Set<String> _spare = {};
-  Set<String> get imagesKept => {..._spare};
 
   /// What the last round did: took in all the server held, and left it holding all there was to send.
   bool receivedAll = false;
@@ -317,24 +434,40 @@ class FDevice {
 
   /// Writes the binding of [id]'s record where it carries none — a record from before the upgrade — by
   /// hashing the images its directory holds, which are taken for those of what it shows; where the
-  /// directory holds none, it stays without. Run the first time the record needs one: before a round
+  /// directory holds none, a binding that names none ([FRec.boundToNoImage]), as the app places one whose every field
+  /// is unknown. Run the first time the record needs one: before a round
   /// sends it, as a round compares a content it receives with the files the device holds, before an
   /// operation lets go of its images, and before a zip is made of it. Every operation that writes a
   /// content writes its binding with it, so the binding comes out the same whenever this runs.
   void _bind(String id) {
     final r = store.records[id];
-    if (r != null && r.img == null) r.img = images[id];
+    if (r == null || r.bound) return;
+    final image = images[id];
+    r
+      ..img = image
+      ..boundToNoImage = image == null;
   }
 
+  /// Works out the binding of every record it lists that carries none ([_bind]), at once: what the device does the
+  /// first time each is needed, made at another time than that — the earlier side of the K3 property of [R4-9].
+  void workOutEveryBinding() => store.records.keys.forEach(_bind);
+
   /// The memos over the send limit in the cells of the records the device lists — memos from before
-  /// the limit, which the app neither removes nor cuts. While there is one, no round runs: the round
-  /// leaves the device as it was and tells this many ([heldByLongMemos]). A rating is never that long,
-  /// so every cell that is is a memo's.
-  int get longMemos =>
-      store.cells.entries.where((e) => store.records.containsKey(e.key.$2) && overMemoLimit(e.value.value)).length;
+  /// the limit, which the app neither removes nor cuts — counted as the app's round counts them in the list it reads
+  /// ([syncLongMemos]). While there is one, no round runs: the round leaves the device as it was and tells this many
+  /// ([heldByLongMemos]).
+  int get longMemos => syncLongMemos(_listOf(store));
 
   /// How many memos over the send limit held the last round back; 0 where it ran.
   int heldByLongMemos = 0;
+
+  /// What the last round of the app's told ([SyncRoundOutcome] — the counts of [R3-5] the device tells its user);
+  /// null before any, and of the model's own round, which tells its counts to the judge alone ([RoundTold]).
+  SyncRoundOutcome? told;
+
+  /// What the app's round lacks that it runs without here rather than refuse ([appSyncRound]): a world that checks
+  /// what the app does where it lacks a part ([FileWorld.appRoundLacking]).
+  Set<OfTheModelsRound> appRoundLacking = const {};
 
   /// Whether a round runs, told for the round that asks: no round runs while the device holds a memo
   /// over the send limit. The round reads what the gate read: nothing runs between the two.
@@ -352,110 +485,82 @@ class FDevice {
   // --- the user's operations: what the app does today, and the times they write -------------------
   //
   // An operation writes each value it changes — what a record shows, its stage, a cell, a title — at
-  // the time it is made, and no value it leaves as it was: that keeps the time it had.
+  // the time it is made, and no value it leaves as it was: that keeps the time it had. The edit of a cell or a title,
+  // the deletion of a column's store, the body a capture or a re-recognition writes, the stage an archive writes and
+  // what a merge leaves are the app's decisions ([syncEdit], [syncRemoveColumn], [syncBodyWrite], [syncArchive],
+  // [syncMerge]), handed this device's
+  // clock: a mutation of them breaks them from outside, in the clock it hands them or in what it does with what they
+  // give. What the app from before the upgrade did has no decision of the app of these rules to call — that app wrote
+  // no time — and keeps a function of its own beside the operation of today's.
 
-  /// The time a value written [now] carries over one written at [current]: [now], unless that is not
-  /// later — the device's clock is behind the value it holds, one it received included — and then the
-  /// moment after [current]. So a value a device writes is later than the one it replaces.
-  int _after(int now, int? current) =>
-      current == null || now > current || mutation == FileMutation.writeTimeGoesBack ? now : current + 1;
+  /// The times this device writes at by a clock that read [now]: the app's ([syncWriteTime]), later than the value
+  /// replaced — one received from a device whose clock runs ahead included. [FileMutation.writeTimeGoesBack]: [now],
+  /// whatever it replaces.
+  SyncWriteTime _writeAt(int now) =>
+      (current) => mutation == FileMutation.writeTimeGoesBack ? now : syncWriteTime(now, current);
+
+  /// [_writeAt] by the clock read when a value is written, and not read where none is.
+  int _writeNow(int? current) => _writeAt(clock())(current);
+
+  /// The time a value written [now] carries over one written at [current] ([_writeAt]).
+  int _after(int now, int? current) => _writeAt(now)(current);
 
   /// The content is read from the capture's images, which the binding names whether or not the directory
-  /// keeps them. [beforeTheUpgrade]: a record the app from before the binding captured, which carries none,
-  /// and whose content and stage carry no time: they are read as written at 0, one time as early as any
-  /// write, the same on every device ([R5-5], [R7-6]).
+  /// keeps them, and written as the app writes a body over no record ([syncBodyWrite]). The capture writes no
+  /// stage: the record is active as of no time, as the app's is, whose capture writes `record.json` and no archive
+  /// note. A capture lands on no record the device lists: over one, the app's landing is a re-recognition
+  /// ([rerecognize]). [beforeTheUpgrade]: [_capturedBeforeTheUpgrade].
   void capture(String id, int captured, {required bool withImages, bool beforeTheUpgrade = false}) {
     final now = clock();
-    final was = store.records[id];
-    final r = store.records[id] = FRec(id, captured: captured, recognisedFrom: id, img: beforeTheUpgrade ? null : id);
-    if (!beforeTheUpgrade) {
-      r
-        ..bodyTime = was != null && was.sameBody(r) ? was.bodyTime : _after(now, was?.bodyTime)
-        ..stageTime = was?.stage == r.stage ? was!.stageTime : _after(now, was?.stageTime);
-    }
+    if (store.records.containsKey(id)) throw StateError('$name captures $id, a record it lists');
+    final read = FRec(id, captured: captured, recognisedFrom: id, img: id);
+    final r = store.records[id] = beforeTheUpgrade
+        ? _capturedBeforeTheUpgrade(id, captured)
+        : _bodyWrite(null, read, _writeAt(now)) ?? (throw StateError('the app writes the body of every capture'));
     bodies.add(r.body);
     if (withImages) images[id] = id;
     _cellsBack(id);
   }
 
-  /// The result keeps the older record's id and capture date, and is the kept content's directory:
-  /// its content with its parents, stage and images — whichever of the two is archived, or both. The merge
-  /// screen settles the annotations (per column
-  /// the kept content's record's, else the other's) and the relation bonus. A value settled that
-  /// the older record does not show already is an edit of the result's cell made as the merge is
-  /// ([annotate]). Where the older record shows the value settled, the merge writes nothing: the cell
-  /// stays as it was, as old as it was.
+  /// The record the app from before the binding captured ([capture]): it carries no binding, and its content and
+  /// stage carry no time — they are read as written at 0, one time as early as any write, the same on every device
+  /// ([R5-5], [R7-6]). Apart from [capture] because that app made no decision of the app of these rules: it wrote no
+  /// time.
+  static FRec _capturedBeforeTheUpgrade(String id, int captured) => FRec(id, captured: captured, recognisedFrom: id);
+
+  /// [held] (none where the device lists no record) with the body [read] shows written over its own, where the app's
+  /// decision writes one ([syncBodyWrite]); null where it writes none, the record showing that already.
+  FRec? _bodyWrite(FRec? held, FRec read, SyncWriteTime writeAt) {
+    final body = syncBodyWrite(
+      (value: held == null ? null : syncRecordOfRec(held).body, time: held?.bodyTime),
+      syncRecordOfRec(read).body,
+      writeAt: writeAt,
+    );
+    return body == null ? null : recWithBody(held ?? read, body);
+  }
+
+  /// A merge of the records [a] and [b], keeping [contentFrom]'s content: the result is under the older record's id, by
+  /// the app's order ([syncCompareAge] — of capture, then of id), and is the kept content's directory, its images
+  /// included. Every other record's parent that names the record retired names the one that stays
+  /// ([syncReparented]), and so does every dismissed pair, one that comes to name that record twice dropped
+  /// ([syncRekeyPairs]). What the result shows, its stage, the ids it absorbed, its cells and its relation bonus are the
+  /// merge of the app of today ([_merged]), or of the app from before the upgrade ([_mergedBeforeTheUpgrade]).
   ///
-  /// The dismissed pairs are re-keyed: a pair that names the record retired names the one that stays,
-  /// and one that comes to name that record twice is dropped.
-  ///
-  /// The ids a record absorbed are what tells it from the record before the merge: a merge that adds
-  /// none — the record merged in was merged in before and came back — leaves the record it was, with
-  /// the content it keeps as the record's value.
-  ///
-  /// [beforeTheUpgrade]: the app from before the upgrade merged, which binds nothing — the result carries
-  /// the kept content's record's files as they are — and whose writes carry no time, as a capture of that
-  /// app's does ([R5-5], [R7-6]).
+  /// [FileMutation.mergeKeepsNewerId] keeps the newer record's id instead, [FileMutation.mergeKeepsSurvivorsStage]
+  /// leaves the images of an older record without them out, and [FileMutation.mergeLeavesDismissals] leaves the pairs
+  /// as they were.
   void merge(String a, String b, {required String contentFrom, bool beforeTheUpgrade = false}) {
     final ra = _rec(a);
     final rb = _rec(b);
-    final sv = _older(ra, rb) != (mutation == FileMutation.mergeKeepsNewerId) ? ra : rb;
+    final aIsOlder = syncCompareAge(_ageOf(ra), _ageOf(rb)) <= 0;
+    final sv = aIsOlder != (mutation == FileMutation.mergeKeepsNewerId) ? ra : rb;
     final rv = identical(sv, ra) ? rb : ra;
     final kept = _rec(contentFrom);
-    final other = identical(kept, ra) ? rb : ra;
-    // The merge lets go of the images of the record it retires, and of the survivor's where it keeps the
-    // other content.
-    if (!beforeTheUpgrade) {
-      _bind(rv.id);
-      if (!identical(kept, sv)) _bind(sv.id);
-    }
     final time = clock();
-    final ofSurvivor = mutation == FileMutation.mergeKeepsSurvivorsStage;
-    final stage = ofSurvivor ? sv.stage : kept.stage;
-    final rewrites = mutation == FileMutation.writesWhatItLeavesAsItWas;
-    // Where the survivor shows the content kept already, the merge writes none of it: the survivor's
-    // stays, with what either knows of its binding.
-    final same = kept.sameBody(sv);
-    final merged = FRec(
-      sv.id,
-      captured: sv.captured,
-      recognisedFrom: kept.recognisedFrom,
-      r: kept.r,
-      bodyTime: same && !rewrites ? sv.bodyTime : _after(time, sv.bodyTime),
-      img: same && !beforeTheUpgrade ? kept.img ?? sv.img : kept.img,
-      absorbed: {...sv.absorbed, if (mutation != FileMutation.mergeLeavesWhatTheRetiredAbsorbed) ...rv.absorbed, rv.id},
-      stage: stage,
-      stageTime: stage == sv.stage && !rewrites ? sv.stageTime : _after(time, sv.stageTime),
-      // The kept content's record's parents, but one that names either of the two (S-04, S-13). The app from
-      // before the upgrade keeps, per slot, the older record's, else the retired one's.
-      parents: {
-        for (final slot in parentSlots)
-          if ((beforeTheUpgrade ? sv.parents[slot] ?? rv.parents[slot] : kept.parents[slot]) case final p?
-              when p != a && p != b)
-            slot: p,
-      },
-      forkedFrom: sv.forkedFrom,
-    );
-    if (beforeTheUpgrade) {
-      merged
-        ..bodyTime = 0
-        ..stageTime = mutation == FileMutation.legacyMergeTimesItsStage ? merged.stageTime : 0;
-    }
-    final settled = <String, String?>{};
-    for (final x in [other, kept]) {
-      for (final MapEntry(:key, value: cell) in store.cells.entries.where((e) => e.key.$2 == x.id)) {
-        settled[key.$1] = cell.value;
-      }
-    }
-    store.cells.removeWhere((key, _) => key.$2 == rv.id);
-    for (final MapEntry(key: column, :value) in settled.entries) {
-      final key = (column, sv.id);
-      final was = store.cells[key];
-      if (value == was?.value && mutation != FileMutation.mergeEditsEveryCellItSettles) continue;
-      store.cells[key] = FCell(value, beforeTheUpgrade ? 0 : _after(time, was?.time));
-    }
-    final image = ofSurvivor && sv.stage == FStage.none ? null : images[kept.id];
-    final settledBonus = bonus[kept.id] ?? bonus[sv.id];
+    final (merged, settledBonus) = beforeTheUpgrade
+        ? _mergedBeforeTheUpgrade(sv, rv, kept, time)
+        : _merged(sv, rv, kept, time);
+    final image = mutation == FileMutation.mergeKeepsSurvivorsStage && sv.stage == FStage.none ? null : images[kept.id];
     removedHere.add(rv.id);
     for (final id in [a, b]) {
       store.records.remove(id);
@@ -466,33 +571,167 @@ class FDevice {
     if (image != null) images[sv.id] = image;
     if (settledBonus != null) bonus[sv.id] = settledBonus;
     for (final r in store.records.values) {
-      r.parents.updateAll((_, p) => p == rv.id ? sv.id : p);
-      r.parents.removeWhere((_, p) => p == r.id);
+      if (syncReparented(r.parents, retired: rv.id, older: sv.id) case final parents?) {
+        r.parents
+          ..clear()
+          ..addAll(parents);
+      }
     }
     if (mutation == FileMutation.mergeLeavesDismissals) return;
-    final rekeyed = {
-      for (final pair in store.dismissed)
-        if (pair.split('+').map((id) => id == rv.id ? sv.id : id).toList() case [final x, final y] when x != y)
-          pairOf(x, y),
+    if (syncRekeyPairs(store.dismissed, retired: rv.id, older: sv.id) case final rekeyed?) {
+      store.dismissed
+        ..clear()
+        ..addAll(rekeyed);
+    }
+  }
+
+  static ({String id, int? captured}) _ageOf(FRec r) => (id: r.id, captured: r.captured);
+
+  /// The merge of the app of today, of the older record [sv] and the retired one [rv], keeping [kept]'s content: the
+  /// result the app's decision gives ([syncMerge]) of the two records as sync carries them, by this device's clock
+  /// read at [time] — what it shows, its stage, the ids it absorbed and the record whose relation bonus it keeps — and
+  /// each cell of the two settled as the merge screen settles it ([EnhancementMergeChoices.valueFor] of a pair the
+  /// screen takes as the same: the record that holds a value, and the kept content's where both do) and written as the
+  /// app's merge writes it ([syncMergeCell]): an edit of the result's cell where it shows another value, nothing where
+  /// it shows that one already. The kept content's binding is worked out first, as the app works it out before it
+  /// decides whether the result shows what the older record does; the other record's is not: its body goes with its
+  /// images.
+  ///
+  /// The mutations break the decision from outside: [FileMutation.writesWhatItLeavesAsItWas] writes again the body and
+  /// the stage it leaves as they were, [FileMutation.mergeKeepsSurvivorsStage] leaves the older record's stage,
+  /// [FileMutation.mergeLeavesWhatTheRetiredAbsorbed] takes out of what it absorbed the ids only the retired record
+  /// had, and [FileMutation.mergeEditsEveryCellItSettles] writes every cell it settles.
+  (FRec, String?) _merged(FRec sv, FRec rv, FRec kept, int time) {
+    _bind(kept.id);
+    final writeAt = _writeAt(time);
+    final contentFromOlder = identical(kept, sv);
+    SyncMergeSide sideOf(FRec r) => (
+      id: r.id,
+      body: syncRecordOfRec(r).body,
+      bodyTime: r.bodyTime,
+      stage: (value: r.stage.archiveOption, time: r.stageTime),
+      absorbed: r.absorbed,
+    );
+    final plan = syncMerge(
+      older: sideOf(sv),
+      retired: sideOf(rv),
+      contentFromOlder: contentFromOlder,
+      writeAt: writeAt,
+    );
+    final rewrites = mutation == FileMutation.writesWhatItLeavesAsItWas;
+    final stage = switch (plan.stage) {
+      _ when mutation == FileMutation.mergeKeepsSurvivorsStage => SyncValue(sv.stage.archiveOption, sv.stageTime),
+      final written? => written,
+      null => SyncValue(sv.stage.archiveOption, rewrites ? writeAt(sv.stageTime) : sv.stageTime),
     };
-    store.dismissed
-      ..clear()
-      ..addAll(rekeyed);
+    final merged = recOfSyncRecord(
+      SyncRecord(
+        sv.id,
+        body: plan.body,
+        absorbed: mutation == FileMutation.mergeLeavesWhatTheRetiredAbsorbed
+            ? plan.absorbed.difference(rv.absorbed.difference(sv.absorbed))
+            : plan.absorbed,
+        stage: stage,
+        splitFrom: sv.forkedFrom,
+      ),
+      captured: sv.captured,
+    );
+    if (!plan.writesBody && rewrites) merged.bodyTime = writeAt(sv.bodyTime);
+    final columns = {
+      for (final (column, id) in store.cells.keys)
+        if (id == sv.id || id == rv.id) column,
+    };
+    for (final column in columns) {
+      final (older, retired) = (store.cells[(column, sv.id)], store.cells[(column, rv.id)]);
+      final chosen =
+          EnhancementMergeChoices.valueFor(
+                overrides: const {},
+                key: column,
+                older: older?.value,
+                retired: retired?.value,
+                applied: false,
+                route: EnhancementMergeRoute.settings,
+                identical: true,
+                contentFromOlder: contentFromOlder,
+                enhancedIsOlder: contentFromOlder,
+              )
+              as String?;
+      final cell = syncMergeCell<String>(
+        older: heldOfCell(older),
+        retired: heldOfCell(retired),
+        chosen: chosen,
+        writeAt: writeAt,
+      );
+      store.cells.remove((column, rv.id));
+      final written =
+          cell.older ??
+          (mutation == FileMutation.mergeEditsEveryCellItSettles ? SyncValue(chosen, writeAt(older?.time)) : null);
+      if (written != null) _putCell((column, sv.id), cellOfSyncValue(written));
+    }
+    return (merged, bonus[plan.bonusFrom]);
   }
 
-  static bool _older(FRec a, FRec b) {
-    final c = a.captured.compareTo(b.captured);
-    if (c != 0) return c < 0;
-    if (a.forkedFrom == b.id) return false;
-    if (b.forkedFrom == a.id) return true;
-    return a.id.compareTo(b.id) <= 0;
+  /// The merge [_merged] makes, made by the app from before the upgrade: it bound nothing — the result carries the
+  /// kept content's record's files as they are — and its writes carry no time, as a capture of that app's does
+  /// ([R5-5], [R7-6]). Its result's parents are, per slot, the older record's, else the retired one's; its screen
+  /// settled each cell to the kept content's record's, else the other's; and it kept the relation bonus of the kept
+  /// content's record, else the older record's. Apart from [_merged] because that app made no decision of the app of
+  /// these rules: it wrote no time. The mutations of the merge act on it as they do on the app's, and
+  /// [FileMutation.legacyMergeTimesItsStage] writes its stage at this device's clock read at [time].
+  (FRec, String?) _mergedBeforeTheUpgrade(FRec sv, FRec rv, FRec kept, int time) {
+    final other = identical(kept, sv) ? rv : sv;
+    final stage = mutation == FileMutation.mergeKeepsSurvivorsStage ? sv.stage : kept.stage;
+    final rewrites = mutation == FileMutation.writesWhatItLeavesAsItWas;
+    final merged = FRec(
+      sv.id,
+      captured: sv.captured,
+      recognisedFrom: kept.recognisedFrom,
+      r: kept.r,
+      bodyTime: 0,
+      img: kept.img,
+      absorbed: {...sv.absorbed, if (mutation != FileMutation.mergeLeavesWhatTheRetiredAbsorbed) ...rv.absorbed, rv.id},
+      stage: stage,
+      stageTime: mutation != FileMutation.legacyMergeTimesItsStage
+          ? 0
+          : stage == sv.stage && !rewrites
+          ? sv.stageTime
+          : _after(time, sv.stageTime),
+      parents: {
+        for (final slot in parentSlots)
+          if (sv.parents[slot] ?? rv.parents[slot] case final p? when p != sv.id && p != rv.id) slot: p,
+      },
+      forkedFrom: sv.forkedFrom,
+    );
+    final settled = <String, String?>{};
+    for (final x in [other, kept]) {
+      for (final MapEntry(:key, value: cell) in store.cells.entries.where((e) => e.key.$2 == x.id)) {
+        settled[key.$1] = cell.value;
+      }
+    }
+    store.cells.removeWhere((key, _) => key.$2 == rv.id);
+    for (final MapEntry(key: column, :value) in settled.entries) {
+      final key = (column, sv.id);
+      if (value == store.cells[key]?.value && mutation != FileMutation.mergeEditsEveryCellItSettles) continue;
+      _putCell(key, FCell(value, 0));
+    }
+    return (merged, bonus[kept.id] ?? bonus[sv.id]);
   }
 
-  /// A dismissal is of the record the device listed when it was made: one the device deletes leaves
-  /// none to the record its id holds later.
-  void _forgetDismissals(String id) {
-    if (mutation == FileMutation.dismissalsFollowIds) return;
-    store.dismissed.removeWhere((pair) => pair.split('+').contains(id));
+  /// The annotations and dismissals of the record [id] go, as the app's delete decides ([syncForget]).
+  /// [FileMutation.cellsOfRemovedRecordsSent] and [FileMutation.dismissalsFollowIds] break it from outside: the cells,
+  /// or the pairs, stay as they were.
+  void _forget(String id) {
+    final kept = syncForget(cells: store.cells, pairs: store.dismissed, ids: {id});
+    if (mutation != FileMutation.dismissalsFollowIds) {
+      store.dismissed
+        ..clear()
+        ..addAll(kept.pairs);
+    }
+    if (mutation != FileMutation.cellsOfRemovedRecordsSent) {
+      store.cells
+        ..clear()
+        ..addAll(kept.cells);
+    }
   }
 
   /// Leaves no trace: the directory is gone, and the annotations of the record with it. [beforeTheUpgrade]: the
@@ -501,18 +740,23 @@ class FDevice {
   void delete(String id, {bool beforeTheUpgrade = false}) {
     _bind(id);
     removedHere.add(id);
-    _forgetDismissals(id);
-    store.records.remove(id);
-    images.remove(id);
-    bonus.remove(id);
     if (beforeTheUpgrade && mutation != FileMutation.legacyDeleteDropsCells) {
       cellsLeftBehind[id] = {
         for (final MapEntry(:key, :value) in store.cells.entries)
           if (key.$2 == id) key.$1: value.value,
       };
     }
-    if (mutation != FileMutation.cellsOfRemovedRecordsSent) store.cells.removeWhere((key, _) => key.$2 == id);
+    _letGo(id);
     paused = false;
+  }
+
+  /// What a delete of today does to the record [id]: its directory goes, and its annotations and dismissals with it
+  /// ([_forget]).
+  void _letGo(String id) {
+    _forget(id);
+    store.records.remove(id);
+    images.remove(id);
+    bonus.remove(id);
   }
 
   /// A record of [id] is in hand again: the values the column stores kept of it since the app from before the
@@ -521,42 +765,60 @@ class FDevice {
   void _cellsBack(String id) {
     for (final MapEntry(key: column, :value)
         in cellsLeftBehind.remove(id)?.entries ?? const <MapEntry<String, String?>>[]) {
-      store.cells.putIfAbsent((column, id), () => FCell(value, 0));
+      if (!store.cells.containsKey((column, id))) _putCell((column, id), FCell(value, 0));
     }
   }
 
-  /// An archive into the stage the record is in already writes nothing.
-  ///
-  /// [beforeTheUpgrade]: the app from before the upgrade archived, which binds nothing and writes no time
-  /// ([R5-5]); of its archive the app of these rules reads `resized_jpeg`, whichever the option ([R7-6]), and
-  /// the one without images left the directory without them.
+  /// The stage an archive writes is the app's decision ([syncArchive]): into the stage the record is in already, it
+  /// writes nothing. [beforeTheUpgrade]: [_archiveBeforeTheUpgrade].
   void archive(String id, String option, {bool beforeTheUpgrade = false}) {
-    final r = _rec(id);
     if (beforeTheUpgrade) {
-      r
-        ..stage = FStage.resizedJpeg
-        ..stageTime = 0;
-      if (option == 'none') images.remove(id);
+      _archiveBeforeTheUpgrade(id, option);
       return;
     }
-    final stage = option == 'none' ? FStage.none : FStage.resizedJpeg;
-    if (stage == FStage.none) _bind(id);
-    if (r.stage != stage) {
+    final r = _rec(id);
+    final archived = option == 'none' ? ArchiveImageOption.none : ArchiveImageOption.resizedJpeg;
+    if (archived == ArchiveImageOption.none) _bind(id);
+    if (syncArchive((value: r.stage.archiveOption, time: r.stageTime), archived, writeAt: _writeNow)
+        case final written?) {
       r
-        ..stage = stage
-        ..stageTime = _after(clock(), r.stageTime);
+        ..stage = FStage.ofArchiveOption(written.value)
+        ..stageTime = written.time;
     }
     if (r.stage == FStage.none) images.remove(id);
     paused = false;
+  }
+
+  /// The app from before the upgrade archived ([archive]), which binds nothing and writes no time ([R5-5]); of its
+  /// archive the app of these rules reads `resized_jpeg`, whichever the option ([R7-6]), and the one without images
+  /// left the directory without them. Apart from [archive] because that app made no decision of the app of these
+  /// rules: it wrote no time.
+  void _archiveBeforeTheUpgrade(String id, String option) {
+    _rec(id)
+      ..stage = FStage.resizedJpeg
+      ..stageTime = 0;
+    if (option == 'none') images.remove(id);
   }
 
   /// A save that leaves the cell's value as it was — the memo opened and closed with OK, the rating
   /// saved again — writes nothing, and the cell keeps the time it had ([R5-3]).
   void annotate(String id, Column column, String? value) {
     final key = (column.key, id);
-    final was = store.cells[key];
-    if (value == was?.value && mutation != FileMutation.editsWhatItLeavesAsItWas) return;
-    store.cells[key] = FCell(value, _after(clock(), was?.time));
+    if (_edit(store.cells[key], value) case final edit?) _putCell(key, cellOfSyncValue(edit));
+  }
+
+  /// A cell or a title that holds [was] set to [value] ([syncEdit]). [FileMutation.editsWhatItLeavesAsItWas]: written
+  /// also where it holds [value] already.
+  SyncValue<String?>? _edit(FCell? was, String? value) =>
+      syncEdit(heldOfCell(was), value, writeAt: _writeNow) ??
+      (mutation == FileMutation.editsWhatItLeavesAsItWas ? SyncValue(value, _writeNow(was?.time)) : null);
+
+  /// A value goes in its column's storage file, which the first value written to the column on this device makes,
+  /// titled [madeTitle] — as the app's file of a column holds a title from the moment it exists, and its list reads
+  /// that title of every file. A storage removed keeps its title as no value with the removal's time.
+  void _putCell((String, String) key, FCell cell) {
+    store.titles.putIfAbsent(key.$1, () => madeTitle);
+    store.cells[key] = cell;
   }
 
   /// A memo over the send limit is one from before the limit (S-03): a user types none. The app keeps
@@ -566,33 +828,40 @@ class FDevice {
   void memoFromBeforeTheLimit(String id, Column column, String value) {
     final key = (column.key, id);
     if (store.cells.containsKey(key)) throw StateError('$name: $key was written since the upgrade');
-    store.cells[key] = FCell(value, 0);
+    _putCell(key, FCell(value, 0));
   }
 
   /// A title confirmed as the column's name is no edit ([R5-3]).
   void title(String column, String? name) {
-    final was = store.titles[column];
-    if (name == was?.value && mutation != FileMutation.editsWhatItLeavesAsItWas) return;
-    store.titles[column] = FCell(name, _after(clock(), was?.time));
+    if (_edit(store.titles[column], name) case final edit?) store.titles[column] = cellOfSyncValue(edit);
   }
 
-  /// The store of [column] deleted: each value the device holds of the column, and its title, is written
-  /// as no value at the time of the deletion, and from then on stands or yields by the later write alone
-  /// (rule 5). A cell or a title that holds no value is not written ([R5-3]).
+  /// The store of [column] deleted ([syncRemoveColumn]): each value the device holds of the column in a record it
+  /// holds, and its title, is written as no value at the time of the deletion, and from then on stands or yields by
+  /// the later write alone (rule 5). A cell or a title that holds no value is not written ([R5-3]); a cell of a record
+  /// the device does not hold goes with the store.
   void deleteColumnStore(String column) {
     final now = clock();
+    final removal = syncRemoveColumn(
+      cells: {
+        for (final MapEntry(key: (of, id), :value) in store.cells.entries)
+          if (of == column) id: heldOfCell(value),
+      },
+      title: heldOfCell(store.titles[column]),
+      listed: store.records.keys.toSet(),
+      writeAt: _writeAt(now),
+    );
     if (mutation == FileMutation.columnStoreDeletionLeavesNoTime) {
       store.cells.removeWhere((k, _) => k.$1 == column);
       store.titles.remove(column);
       return;
     }
-    for (final key in store.cells.keys.where((k) => k.$1 == column).toList()) {
-      final was = store.cells[key]!;
-      if (was.value != null) store.cells[key] = FCell(null, _after(now, was.time));
+    store.cells.removeWhere((k, _) => k.$1 == column && !removal.cells.containsKey(k.$2));
+    for (final MapEntry(key: id, value: none) in removal.cells.entries) {
+      if (none != null) store.cells[(column, id)] = cellOfSyncValue(none);
     }
     if (mutation == FileMutation.columnStoreDeletionLeavesTheTitle) return;
-    final t = store.titles[column];
-    if (t != null && t.value != null) store.titles[column] = FCell(null, _after(now, t.time));
+    if (removal.title case final none?) store.titles[column] = cellOfSyncValue(none);
   }
 
   /// No pair is offered again by itself: the pairs are, all of them, where the file is deleted.
@@ -644,51 +913,118 @@ class FDevice {
       ..recognisedFrom = from
       ..r = version
       ..img = from;
-    if (r.sameBody(read)) return;
-    r
-      ..recognisedFrom = from
-      ..r = version
-      ..bodyTime = _after(clock(), r.bodyTime)
-      ..img = from;
-    bodies.add(r.body);
+    if (_bodyWrite(r, read, _writeNow) case final written?) {
+      store.records[id] = written;
+      bodies.add(written.body);
+    }
   }
 
-  /// The zip carries the record's binding with its content, and its stage. [beforeTheUpgrade]: a zip the
-  /// app from before the binding made, which carries neither, and is read as of an active record (S-07).
+  /// The zip carries the record's binding with its content, and its stage — and not its relation bonus, which only the
+  /// device that resolved it holds (S-13). [beforeTheUpgrade]: a zip the app from before the binding made, which
+  /// carries neither binding nor stage, and is read as of an active record (S-07).
   FZip exportZip(String id, {bool beforeTheUpgrade = false}) {
     if (!beforeTheUpgrade) _bind(id);
     final r = _rec(id).copy();
     if (beforeTheUpgrade) {
       r
         ..img = null
+        ..boundToNoImage = false
         ..stage = FStage.active;
     }
-    return FZip(r, image: images[id], bonus: bonus[id]);
+    return FZip(r, image: images[id]);
   }
 
   /// Writes the zip's files over the record of its id, whatever stage it is in, and leaves the record in
-  /// the zip's stage ([R4-6]). The ids absorbed are the zip's — none where it holds no `merged_ids.json` — as the
-  /// record's other files are, and so is the binding. The directory holds the images of what the record
-  /// shows ([R4-8] 4), and none where the zip's stage is an archive without images: the zip's, where it
-  /// holds them; the ones it held, where the record shows the
-  /// same content as it did ([FRec.sameBody]); else the images of the zip's content, by the hash the zip's
-  /// binding names them with — its own where they are those, another record's where it holds them — and none where the
-  /// zip carries no binding. A round takes them later where the server holds them ([round], step 8). A
-  /// zip put
-  /// over a record made of what the zip's is leaves the same record, whatever it shows; one made of
-  /// something else leaves another. Either way the cells and the dismissed pairs the device holds of
-  /// the record stay: the import writes the record's files, not what the device wrote of the record.
-  /// A zip carries no time: of what the record shows and its stage, the import writes what it changes,
-  /// at the time it is taken in — both, where the device listed no record of the id. [beforeTheUpgrade]: the
-  /// app from before the upgrade took it in, and what it wrote carries no time, as a capture of that app's
-  /// does ([R5-5], [R7-6]); a zip of that app taken in since is written at the time it is taken in. That
-  /// app compared nothing: where the zip held no images, the directory kept the ones it had, of whatever
-  /// content.
+  /// the zip's stage ([R4-6]). What the import writes of the record — what it shows, its stage, the times of the two
+  /// and where its images come from — is the app's decision ([syncImport]), handed this device's clock, what it holds
+  /// of the record and the bindings of its records. The ids absorbed are the zip's — none where it holds no
+  /// `merged_ids.json` — as the record's other files are. The directory holds the images of what the record shows
+  /// ([R4-8] 5), and none where the zip's stage is an archive without images: the zip's, where it holds any; the ones it
+  /// held, where the record shows the same content as it did; else the images of the zip's content, by the hash the
+  /// zip's binding names them with — its own where they are those, another record's where one holds them — and none
+  /// where the zip carries no binding. A round takes them later where the server holds them ([round], step 8). A zip
+  /// put over a record made of what the zip's is leaves the same record, whatever it shows; one made of something else
+  /// leaves another. Either way the cells and the dismissed pairs the device holds of the record stay, and so does the
+  /// relation bonus — none where the device holds no record of the id: the import writes the record's files, not what
+  /// the device wrote or resolved of the record. [beforeTheUpgrade]: [_importBeforeTheUpgrade].
+  ///
+  /// The mutations of the import break the decision from outside, in what it is handed or in what is done with what it
+  /// gives: [FileMutation.importKeepsWhatWasListed] and [FileMutation.importLeavesTheStageListed] hand it the zip as
+  /// showing, or in the stage of, the record the device listed; [FileMutation.importLeavesTheZipsImages] hands it the
+  /// zip as carrying no image; [FileMutation.writesWhatItLeavesAsItWas] writes again what it leaves as it was;
+  /// [FileMutation.importKeepsTheIdsAbsorbed] and [FileMutation.importOfOtherContentLetsGo] act on what is around it.
   void importZip(FZip zip, {bool beforeTheUpgrade = false}) {
+    if (beforeTheUpgrade) {
+      _importBeforeTheUpgrade(zip);
+      return;
+    }
     final id = zip.record.id;
-    // The import compares the zip's content with the files the device holds ([R4-9] (ii)) — but the app
-    // from before the upgrade, which compares nothing.
-    if (!beforeTheUpgrade) _bind(id);
+    // The import compares the zip's content with the files the device holds ([R4-9] (ii)).
+    _bind(id);
+    final had = store.records[id];
+    final z = zip.record.copy();
+    if (mutation == FileMutation.importLeavesTheStageListed && had != null) z.stage = had.stage;
+    if (mutation == FileMutation.importKeepsWhatWasListed && had != null) {
+      z
+        ..recognisedFrom = had.recognisedFrom
+        ..r = had.r
+        ..img = had.img;
+    }
+    // A zip of the app from before the binding carries none: its content is of the images it holds, where
+    // it holds them ([R4-8] 5).
+    z.img ??= zip.image;
+    final writeAt = _writeAt(clock());
+    final plan = syncImport(
+      id,
+      (
+        body: syncRecordOfRec(z).body,
+        stage: z.stage.archiveOption,
+        carriesImages: zip.image != null && mutation != FileMutation.importLeavesTheZipsImages,
+      ),
+      body: (value: had == null ? null : syncRecordOfRec(had).body, time: had?.bodyTime),
+      stage: had == null ? null : (value: had.stage.archiveOption, time: had.stageTime),
+      others: {for (final r in store.records.values) r.id: syncRecordOfRec(r).body.binding},
+      writeAt: writeAt,
+    );
+    final rewrites = mutation == FileMutation.writesWhatItLeavesAsItWas;
+    final r = recWithBody(z, plan.body);
+    if (rewrites && !plan.writesBody) r.bodyTime = writeAt(had?.bodyTime);
+    switch (plan.stage) {
+      case final written?:
+        r
+          ..stage = FStage.ofArchiveOption(written.value)
+          ..stageTime = written.time;
+      case null:
+        r.stageTime = rewrites ? writeAt(had?.stageTime) : had?.stageTime ?? r.stageTime;
+    }
+    if (mutation == FileMutation.importKeepsTheIdsAbsorbed && r.absorbed.isEmpty) r.absorbed = {...?had?.absorbed};
+    if (mutation == FileMutation.importOfOtherContentLetsGo && r.recognisedFrom != had?.recognisedFrom) {
+      _forget(id);
+    }
+    final mine = images[id];
+    store.records[id] = r;
+    _cellsBack(id);
+    bodies.add(r.body);
+    // The images: of the decision's sources, the first whose directory holds the image the binding names — the model's
+    // image is its hash, which the binding names it by.
+    bool named(String? image) => image != null && image == plan.body.binding?.skillPng;
+    final image = switch (plan.images) {
+      SyncImagesCarried() => zip.image,
+      SyncImagesKept() => mine,
+      SyncImagesBound(:final sources) => named(mine) ? mine : sources.map((s) => images[s]).where(named).firstOrNull,
+    };
+    image == null || r.stage == FStage.none ? images.remove(id) : images[id] = image;
+    if (had == null) bonus.remove(id);
+  }
+
+  /// The zip [importZip] takes in, taken in by the app from before the upgrade: what it wrote carries no time, as a
+  /// capture of that app's does ([R5-5], [R7-6]) — a zip of that app taken in since is the app's of today
+  /// ([importZip]). That app compared nothing: the zip's content is what the record shows, and where the zip held no
+  /// images, the directory kept the ones it had, of whatever content. Apart from [importZip] because that app made no
+  /// decision of the app of these rules: it wrote no time, and bound nothing. The mutations of the import act on it as
+  /// they do on the app's.
+  void _importBeforeTheUpgrade(FZip zip) {
+    final id = zip.record.id;
     final had = store.records[id];
     final r = zip.record.copy();
     if (mutation == FileMutation.importLeavesTheStageListed && had != null) r.stage = had.stage;
@@ -698,55 +1034,78 @@ class FDevice {
         ..r = had.r
         ..img = had.img;
     }
-    // A zip of the app from before the binding carries none: its content is of the images it holds, where
-    // it holds them ([R4-8] 5).
-    if (!beforeTheUpgrade) r.img ??= zip.image;
-    final same = had != null && had.sameBody(r);
     // Of one content, a zip that carries no binding says nothing of it.
-    if (same) r.img ??= had.img;
-    final now = clock();
-    final rewrites = mutation == FileMutation.writesWhatItLeavesAsItWas;
+    if (had != null && had.sameBody(r)) r.img ??= had.img;
     r
-      ..bodyTime = same && !rewrites ? had.bodyTime : _after(now, had?.bodyTime)
-      ..stageTime = had != null && had.stage == r.stage && !rewrites ? had.stageTime : _after(now, had?.stageTime);
-    if (beforeTheUpgrade) {
-      r
-        ..bodyTime = 0
-        ..stageTime = 0;
-    }
+      ..bodyTime = 0
+      ..stageTime = 0;
     if (mutation == FileMutation.importKeepsTheIdsAbsorbed && r.absorbed.isEmpty) r.absorbed = {...?had?.absorbed};
     if (mutation == FileMutation.importOfOtherContentLetsGo && r.recognisedFrom != had?.recognisedFrom) {
-      _forgetDismissals(id);
-      store.cells.removeWhere((key, _) => key.$2 == id);
+      _forget(id);
     }
     store.records[id] = r;
     _cellsBack(id);
     bodies.add(r.body);
-    if (zip.image case final image? when mutation != FileMutation.importLeavesTheZipsImages) {
-      images[id] = image;
-    } else if (beforeTheUpgrade) {
-      // The app from before the upgrade leaves the directory's images as they are, whatever the zip shows
-      // (v6 §4): the record carries no binding, and its directory is taken for its content's ([_bind]).
-    } else if (had != null && !same) {
-      final hash = r.img;
-      final mine = images.remove(id);
-      if (hash != null && (mine == hash || images.containsValue(hash))) images[id] = hash;
-    }
+    // The directory's images stay as they are, whatever the zip shows (v6 §4): the record carries no binding, and its
+    // directory is taken for its content's ([_bind]).
+    if (zip.image case final image? when mutation != FileMutation.importLeavesTheZipsImages) images[id] = image;
     if (r.stage == FStage.none) images.remove(id);
-    zip.bonus == null ? bonus.remove(id) : bonus[id] = zip.bonus!;
+    if (had == null) bonus.remove(id);
+  }
+
+  /// The scan of the record's store cannot read the record [id] and moves its directory whole onto the shelf, noting the
+  /// id where [noted] says so: the record, its images and its relation bonus go there. Its cells and the dismissed pairs
+  /// that name it stay in their files, which the move does not touch.
+  void quarantine(String id, {bool noted = true}) {
+    final r = store.records.remove(id) ?? (throw StateError('$name holds no record $id to quarantine'));
+    shelf[id] = FShelved(r, image: images.remove(id), bonus: bonus.remove(id), noted: noted);
+  }
+
+  /// The user deletes the record [id] on the shelf from the storage view: its directory goes, and the shelf notes the id
+  /// as one the user deleted. Its annotations and dismissals go as a delete from the list takes them ([_forget]), where
+  /// the storage view's delete decides they do ([syncShelfDeletesForgotten]). Of a directory with no note the storage
+  /// view knows no id, and notes and takes nothing.
+  void deleteQuarantined(String id) {
+    final s = shelf.remove(id) ?? (throw StateError('$name holds no record $id on the quarantine shelf'));
+    removedHere.add(id);
+    if (!s.noted) return;
+    shelfDeleted.add(id);
+    syncShelfDeletesForgotten({id}, stored: {...store.records.keys}).forEach(_forget);
+  }
+
+  /// The `record.json` of the record [id] on the shelf is made readable again from outside the app.
+  void repairQuarantined(String id) =>
+      (shelf[id] ?? (throw StateError('$name holds no record $id on the quarantine shelf'))).readable = true;
+
+  /// The app starts again, and each store's scan puts back from the shelf every record whose `record.json` reads again
+  /// and whose id neither store holds, as the app's scan does ([releaseRepairedQuarantinesUnlocked]); a record still
+  /// unreadable, one whose id a store holds again, or one with no note, which names no id to put it back as, stays on
+  /// the shelf.
+  void restart() {
+    for (final MapEntry(key: id, value: s) in [...shelf.entries]) {
+      if (!s.noted || !s.readable || store.records.containsKey(id)) continue;
+      shelf.remove(id);
+      store.records[id] = s.record;
+      if (s.image case final image?) images[id] = image;
+      if (s.bonus case final b?) bonus[id] = b;
+      putBack.add(id);
+    }
   }
 
   void loseStateFile() {
     if (base != null) baseGap = Unbased.stateLost;
     base = null;
     _sent = null;
+    keptBase = null;
+    keptSent = null;
     paused = false;
   }
 
   // --- one round of sync ---------------------------------------------------------------------------
 
   /// Steps 0–8. [send] false: the round ends once it applied what it received and took the images
-  /// (the server refused every write). [applyOnly]: the app stops after applying that many records.
+  /// (the server refused every write). [applyOnly]: the app stops after applying that many steps — a step puts
+  /// the records of one unit in place, and the last lets go of every record the result removes.
   /// [cut]: the sending ends at a write that gets no answer. [imageStep] false: no image is taken.
   void round(
     FServer server, {
@@ -766,7 +1125,6 @@ class FDevice {
       base = null;
       _sent = null;
       paused = false;
-      _spare.clear();
       resets++;
       onReset?.call();
     }
@@ -926,6 +1284,132 @@ class FDevice {
     return unknown;
   }
 
+  /// A round of the app's own ([runSyncRoundOn]), with this device as its place and [server] as the endpoints
+  /// (`file_place.dart`). It has none of what only the model's round does: it sends and takes no image, and neither
+  /// the server's room nor the day's rows and reads hold it back. A world that has any of those is refused here, not
+  /// run without them ([OfTheModelsRound]), but those of [appRoundLacking].
+  /// [placeWrites]: the place lands that many writes of the result and fails the rest ([PlaceCut]). [swapCut]: the
+  /// endpoints answer that many swaps and not the next ([SwapCut]).
+  void appSyncRound(FServer server, {int? placeWrites, SwapCut? swapCut}) {
+    final missing = {
+      if (server.imageForm != 'none') OfTheModelsRound.images,
+      if (server.full || paused) OfTheModelsRound.room,
+      if (server.dailyRows != null || server.dailyReads != null) OfTheModelsRound.dailyLimits,
+      if (cellsLeftBehind.isNotEmpty) OfTheModelsRound.cellsLeftBehind,
+    }.difference(appRoundLacking);
+    if (missing.isNotEmpty) throw UnsupportedError('$name: the app\'s round has no ${missing.map((m) => m.name)}');
+    receivedAll = false;
+    publishedAll = false;
+    heldByLongMemos = 0;
+    told = null;
+    _beginTold();
+    final listedBefore = {...server.list.records.keys};
+    final based = _basedForAppRound(server);
+    final endpoints = _FileSyncServer(server, name, cut: swapCut);
+    SyncRoundOutcome? outcome;
+    Object? failure;
+    // Neither the place nor the server waits on anything: the round ends once its microtasks have run.
+    fakeAsync((async) {
+      runSyncRoundOn(
+        _FilePlace(this, server, writesLanding: placeWrites),
+        endpoints,
+        account: '${server.account}',
+      ).then((o) => outcome = o, onError: (Object e, StackTrace _) => failure = e);
+      async.flushMicrotasks();
+    });
+    if (failure != null) throw StateError('$name: the app\'s round threw $failure');
+    final o = outcome ?? (throw StateError('$name: the app\'s round did not end'));
+    told = o;
+    heldByLongMemos = o.longMemos;
+    if (heldByLongMemos > 0) trace.add('held:longMemos=$heldByLongMemos');
+    receivedAll = !{
+      SyncRoundEnd.failed,
+      SyncRoundEnd.changedMeanwhile,
+      SyncRoundEnd.bodiesMissing,
+      SyncRoundEnd.heldByLongMemos,
+    }.contains(o.end);
+    publishedAll = o.end == SyncRoundEnd.done;
+    _tellAppRound(listedBefore, based);
+    if (o.end == SyncRoundEnd.operationTooLarge || (o.end == SyncRoundEnd.refused && endpoints.refusedAsTooLarge)) {
+      server.splitRefused++;
+    }
+    // The app holds a body as the record.json of a record it holds, and no other.
+    bodies
+      ..clear()
+      ..addAll(store.records.values.map((r) => r.body));
+  }
+
+  /// The base the app's round merges against, as the model's round reads it before it merges: none where the device
+  /// keeps none ([gap]: [baseGap]) or one of another account ([Unbased.accountRemade], which the device holds as its gap
+  /// from then on, as the model's round does); else the ids of the records the base holds ([held]), but those a swap
+  /// whose answer was lost leaves the device unable to tell ([unknown]) where the server has moved on since — read again
+  /// as the app's round reads it ([rereadSyncBase]), or kept by a round that read it again ([SyncKeptList.unconfirmed]).
+  ({Unbased? gap, Set<String> held, Set<String> unknown}) _basedForAppRound(FServer server) {
+    final kept = keptBase;
+    if (kept != null && kept.account != '${server.account}') baseGap = Unbased.accountRemade;
+    if (kept == null || kept.account != '${server.account}') return (gap: baseGap, held: const {}, unknown: const {});
+    final sent = keptSent;
+    final (reread, unknown) = sent == null || kept.generation == server.generation
+        ? (kept, kept.unconfirmed)
+        : switch (rereadSyncBase(kept.list, sent.list, server.syncList)) {
+            (final list, final unknown) => (kept.copyWith(list: list), {...kept.unconfirmed, ...unknown}),
+          };
+    return (gap: null, held: reread.agreed.rows.keys.toSet().difference(unknown), unknown: unknown);
+  }
+
+  /// What the app's round did, told to the judge as the model's round tells it ([RoundTold]), from what the round
+  /// left: [tookIn] and [splitOff] the place noted as the round published; the records split off are [splitting]; the
+  /// ids the device or the server ([listedBefore]) listed as it began that the base it merged against holds nothing of
+  /// ([based]) are [unbased]; where the round put its result in place ([receivedAll]), each id it met is [readAs] the
+  /// records of the device's list since that are it or absorbed it, the ids of the pairs the device holds since
+  /// included; and where the round ended with the server holding the device's list ([publishedAll]), the device's own
+  /// records of the ids it or the server listed as it began, or the round left, are [sentIds] — those it listed then
+  /// made of what they are made of now, and those the round split off. A round that ends otherwise tells nothing sent,
+  /// a replacement it made before it stopped included.
+  void _tellAppRound(Set<String> listedBefore, ({Unbased? gap, Set<String> held, Set<String> unknown}) based) {
+    splitting.addAll(splitOff.keys);
+    for (final id in {..._madeOfBefore.keys, ...listedBefore}) {
+      if (based.held.contains(id)) continue;
+      unbased[id] = based.gap ?? (based.unknown.contains(id) ? Unbased.answerLost : Unbased.notInBase);
+    }
+    if (receivedAll) {
+      final result = store.records.values;
+      readAs.addAll({
+        for (final id in {
+          ..._madeOfBefore.keys,
+          ...listedBefore,
+          ...based.held,
+          for (final pair in store.dismissed) ...pair.split('+'),
+          for (final r in result) ...r.absorbed,
+        })
+          id: store.records.containsKey(id)
+              ? {id}
+              : {
+                  for (final r in result)
+                    if (r.absorbed.contains(id)) r.id,
+                },
+      });
+    }
+    if (!publishedAll) return;
+    bool own(String id) {
+      final r = store.records[id];
+      return r?.content == _madeOfBefore[id] || (r?.forkedFrom != null && !_madeOfBefore.containsKey(id));
+    }
+
+    sentIds.addAll({..._madeOfBefore.keys, ...listedBefore, ...store.records.keys}.where(own));
+  }
+
+  /// A round of the app: a swap the server refused as stale is made once more in the same round, from the
+  /// generation on; a second refusal ends the round ([D-28]).
+  ///
+  /// The model's own round, kept beside the app's ([appSyncRound]) for what that one does not do yet
+  /// ([OfTheModelsRound]): this, [round], [push] and the cut rounds go with the last value of that list.
+  void syncRound(FServer server, {void Function()? onReset}) {
+    final refused = server.swapsRefused;
+    round(server, onReset: onReset);
+    if (server.swapsRefused != refused) round(server, onReset: onReset);
+  }
+
   /// The sending half of a round, for a device that holds a whole base: it sends against the
   /// generation it read then, and where the server has moved on, the round starts over.
   void push(FServer server, {void Function()? onReset}) {
@@ -948,10 +1432,25 @@ class FDevice {
     round(server, imageStep: false, onReset: onReset);
   }
 
+  /// The lists the device swaps in, one by one, to take the server from [there] to [next] ([swapsOf]); null where it
+  /// sends nothing, an operation being more than a swap takes.
+  List<FState>? _swaps(FState there, FState next) {
+    final group = swapsOf;
+    if (group == null) return [next];
+    final (from, to) = (syncListOfState(there), syncListOfState(next));
+    final swaps = group(syncListChanges(from, to));
+    if (swaps == null) return null;
+    var at = from;
+    return [
+      for (final changes in swaps)
+        stateOfSyncList(at = syncListWith(at, to, changes), from: there, fromList: from, to: next),
+    ];
+  }
+
   bool _apply(FPlan plan, ({int generation, FState list}) head, int account, int? applyOnly, FServer server) {
     final result = plan.result;
-    // The image files the device holds, each named by its hash: of its records, and kept for a round.
-    final held = {...images.values, ..._spare};
+    // The device's records as the round read them, which a record placed takes its images from.
+    final read = {...store.records};
     final next = base?.list.copy() ?? FState();
     void cellsOf(String id, FState from, FState to) {
       to.cells.removeWhere((key, _) => key.$2 == id);
@@ -961,11 +1460,25 @@ class FDevice {
       });
     }
 
+    // The records of the device [id]'s record, placed from [from]'s, takes its images from ([R4-8] 5): of those the
+    // round read, the ones but [id] whose binding names the image the result's binding does, or that carry none yet;
+    // in either store, and whatever the round does to them. Null where it shows the content the device's record
+    // showed ([FRec.sameBody]) and takes none.
+    List<String>? sourcesOf(String id, String? from) {
+      final r = result.records[id];
+      final listed = read[from ?? id];
+      if (r == null || r.stage == FStage.none || (listed != null && listed.sameBody(r))) return null;
+      return [
+        if (r.img != null)
+          for (final MapEntry(key: other, value: o) in read.entries)
+            if (other != id && (o.img == null || o.img == r.img)) other,
+      ]..sort();
+    }
+
     // [id]'s record as the result has it, with the images of the content it shows ([R4-8] 1–3). [from]:
     // the id of the device's record split off to [id]. The record the device listed of it keeps its
-    // images where it shows the same content as it did ([FRec.sameBody]); else the device compares the
-    // files it holds with the hash the record's binding names that content's images with, and takes the
-    // one that is those, or none.
+    // images where it shows the same content as it did ([FRec.sameBody]); else it lets go of its own and takes,
+    // of those and of the ones its sources ([sourcesOf]) hold now, the one the record's binding names, or none.
     void place(String id, String? from) {
       final r = result.records[id];
       final listed = store.records[from ?? id];
@@ -977,7 +1490,7 @@ class FDevice {
       } else {
         store.records[id] = r.copy();
       }
-      if (images.remove(id) case final gone?) _spare.add(gone);
+      final own = images.remove(id);
       if (mutation == FileMutation.appliedRecordDropsImage && from == null) {
         cellsOf(id, result, store);
         if (r != null) _cellsBack(id);
@@ -986,7 +1499,8 @@ class FDevice {
       if (r != null && r.stage != FStage.none) {
         if (mine != null && listed != null && listed.sameBody(r)) {
           images[id] = mine;
-        } else if (r.img case final hash? when held.contains(hash)) {
+        } else if (r.img case final hash?
+            when hash == own || (sourcesOf(id, from) ?? const []).any((other) => images[other] == hash)) {
           images[id] = hash;
         }
       }
@@ -1074,19 +1588,16 @@ class FDevice {
 
     // A record goes with the records whose ids it absorbed, the device's or the result's, as one: an end names a
     // record, and an id absorbed is the record that absorbed it ([R4-7]); a merge taken in is what the merge did
-    // on the device that made it ([R6-2]). Put in place one by one, a round that stops between them would leave
-    // the device holding no record of an end it holds before and after the round, and what it said of the pair
-    // would read as nothing said ([R4-4]).
+    // on the device that made it ([R6-2]). The ones the result removes go after every unit ([removes]): a round
+    // that stops between leaves the device holding both, and what it said of a pair of them says it still ([R4-4]).
     final up = <String, String>{};
     String root(String id) => switch (up[id]) {
       final u? => root(u),
       null => id,
     };
-    if (mutation != FileMutation.absorbedRecordsLandApart) {
-      for (final r in [...store.records.values, ...result.records.values]) {
-        for (final id in r.absorbed) {
-          if ((root(r.id), root(id)) case (final x, final y) when x != y) up[y] = x;
-        }
+    for (final r in [...store.records.values, ...result.records.values]) {
+      for (final id in r.absorbed) {
+        if ((root(r.id), root(id)) case (final x, final y) when x != y) up[y] = x;
       }
     }
     var applied = 0;
@@ -1102,7 +1613,43 @@ class FDevice {
     }
     bool changes(String id) =>
         '${store.records[id]}' != '${result.records[id]}' || '${next.records[id]}' != '${head.list.records[id]}';
-    for (final unit in units.values) {
+    // The records of the device the result removes go once every record is placed, as the user deletes them: until
+    // then the device holds them, and their images for a record placed to take ([sourcesOf]).
+    bool removes(String id) =>
+        mutation != FileMutation.removalsGoInTheirPlace &&
+        result.records[id] == null &&
+        read.containsKey(id) &&
+        !plan.moved.containsKey(id);
+    final removed = [
+      for (final id in ids)
+        if (removes(id)) id,
+    ];
+    // A unit goes after every unit that holds a record that takes images from one of its records it places, as that
+    // record's own placing lets go of the images the other reads, or writes others over them; else as [units] has
+    // them. Where each unit left waits for another, the first goes, and a record after it that reads from it takes
+    // what it holds then.
+    final unitOf = {
+      for (final MapEntry(key: u, value: unit) in units.entries)
+        for (final id in unit) id: u,
+    };
+    final readers = <String, Set<String>>{};
+    for (final MapEntry(key: u, value: unit) in units.entries) {
+      for (final id in unit) {
+        if (removes(id) || !changes(id)) continue;
+        final split = plan.moved[id];
+        for (final other in {...?sourcesOf(id, null), if (split != null) ...?sourcesOf(split, id)}) {
+          if (unitOf[other] case final v? when v != u && !removes(other) && changes(other)) (readers[v] ??= {}).add(u);
+        }
+      }
+    }
+    final left = units.keys.toList();
+    final order = <String>[];
+    while (left.isNotEmpty) {
+      final first = left.firstWhere((u) => readers[u]?.every(order.contains) ?? true, orElse: () => left.first);
+      left.remove(first);
+      order.add(first);
+    }
+    for (final unit in [for (final u in order) units[u]!.where((id) => !removes(id)).toList(), removed]) {
       if (unit.any(changes) && applied++ == applyOnly) {
         base = (account: account, generation: -1, list: next);
         return false;
@@ -1141,7 +1688,6 @@ class FDevice {
     next.dismissed
       ..clear()
       ..addAll(head.list.dismissed);
-    _spare.clear();
     bodies.retainAll({for (final r in store.records.values) r.body});
     base = (account: account, generation: head.generation, list: next);
     baseGap = null;
@@ -1268,22 +1814,100 @@ class FDevice {
       noteSent();
       return true;
     }
-    // A swap refused is answered; one asked before it whose answer was lost is still not.
-    final unanswered = mutation == FileMutation.refusedSwapForgetsTheNote ? null : _sent;
-    _sent = next.copy();
-    final generation = server.generation;
-    if (lost(() => server.swap(head.generation, next))) {
-      if (server.generation != generation) noteSent();
-      return false;
+    final swaps = _swaps(head.list, next);
+    if (swaps == null) return true;
+    var read = head.generation;
+    for (final (place, list) in swaps.indexed) {
+      // A swap refused is answered; one asked before it whose answer was lost is still not.
+      final unanswered = mutation == FileMutation.refusedSwapForgetsTheNote ? null : _sent;
+      _sent = list.copy();
+      final generation = server.generation;
+      if (lost(() => server.swap(read, list))) {
+        if (server.generation != generation) noteSent();
+        return false;
+      }
+      _sent = unanswered;
+      server.beforeSwap?.call(name);
+      if (server.swap(read, list) != true) return true;
+      _sent = null;
+      base = (account: server.account, generation: server.generation, list: list.copy());
+      read = server.generation;
+      server.afterSwap?.call(name, place);
     }
-    _sent = unanswered;
-    if (server.swap(head.generation, next) != true) return true;
-    _sent = null;
-    base = (account: server.account, generation: server.generation, list: next.copy());
     publishedAll = allSent;
     noteSent();
     return true;
   }
+}
+
+/// Whose round a [SyncRound] of a [FileWorld] runs.
+enum FileRound {
+  /// The model's own ([FDevice.syncRound]): for a sequence that needs what the app's round does not do yet
+  /// ([OfTheModelsRound]), and for a world under a [FileMutation].
+  model,
+
+  /// The app's ([FDevice.appSyncRound]).
+  app,
+}
+
+/// What only the model's own round has, which a world that runs the app's round has none of: the app's round refuses a
+/// world that holds any ([FDevice.appSyncRound]), and a sequence of operations that makes one runs on the model's round
+/// ([ofTheModelsRound]). Each but [rounds] is a part of sync the app does not do yet; the model's round goes on checking
+/// it until the app's does, and then it leaves this list, the app's round stops refusing it, and the sequences that
+/// need it move to the app's round with what they expect unchanged.
+enum OfTheModelsRound {
+  /// Images sent and taken: an account whose image form is not `none` ([SetImageForm]). Leaves when the app's round
+  /// sends and takes images; most named sequences need it.
+  images,
+
+  /// The server's room, and a device a full storage holds back ([SetStorageFull]). Leaves when the app's round waits
+  /// for room.
+  room,
+
+  /// The day's rows and reads ([SetDailyRows], [SetDailyReads]). Leaves when the app's round keeps to them.
+  dailyLimits,
+
+  /// The values the app from before the upgrade left in the column stores of a record it deleted
+  /// ([Untracked.legacyApp]). Not a part of sync the app lacks: the place the app's round runs on (`file_place.dart`)
+  /// does not show those values on a record the round puts back, as the model's round does ([FDevice._cellsBack]).
+  /// Leaves when that place does.
+  cellsLeftBehind,
+
+  /// A round the app does not run as it is: the receiving or the sending half of one ([Pull], [Push]), or one cut at
+  /// a step the model counts ([PushCut] but a [SwapCut], and [ReceiveCut] but a [PlaceCut]). The app's round runs
+  /// whole, and is cut only through its place and its endpoints. Leaves with the model's round: a sequence that needs a half round or a step the model
+  /// counts asks for what the app does not do, and one whose half round is a whole one is written with [SyncRound].
+  rounds,
+}
+
+/// What of the model's own round [ops] need ([OfTheModelsRound]); none, and they run on the app's round. The values
+/// left in the column stores are read off the edits a device made of a record before the app from before the upgrade
+/// deleted it there: values that reached it otherwise are not seen here, and the app's round refuses the world they
+/// leave.
+Set<OfTheModelsRound> ofTheModelsRound(Iterable<Op> ops) {
+  final edited = <(String, String)>{};
+  final needs = <OfTheModelsRound>{};
+  for (final op in ops) {
+    switch (op) {
+      case SetImageForm(:final form) when form != 'none':
+        needs.add(OfTheModelsRound.images);
+      case SetStorageFull(full: true):
+        needs.add(OfTheModelsRound.room);
+      case SetDailyRows(rows: _?) || SetDailyReads(reads: _?):
+        needs.add(OfTheModelsRound.dailyLimits);
+      case EditAnnotation(:final device, :final id):
+        edited.add((device, id));
+      case Delete(:final device, :final id, untracked: Untracked.legacyApp) when edited.contains((device, id)):
+        needs.add(OfTheModelsRound.cellsLeftBehind);
+      case PlaceCut() || SwapCut():
+        break;
+      case Pull() || Push() || PushCut() || ReceiveCut():
+        needs.add(OfTheModelsRound.rounds);
+      default:
+        break;
+    }
+  }
+  return needs;
 }
 
 class FileWorld extends SyncWorld {
@@ -1294,18 +1918,16 @@ class FileWorld extends SyncWorld {
     super.judgeReadings,
     List<String> bystanders = const [],
     Map<String, int> clockAhead = const {},
+    this.round = FileRound.model,
+    this.appRoundLacking = const {},
   }) : server = FServer(mutation: mutation),
        super(accepted: accepted ?? acceptedUnderFile) {
     for (final n in deviceNames) {
       // The devices read one clock, the world's. [clockAhead]: a device whose own runs that much ahead,
       // for the sequences that show what edit times of two clocks give.
       final ahead = clockAhead[n];
-      devices[n] = FDevice(
-        n,
-        ahead == null ? tick : () => tick() + ahead,
-        mutation: mutation,
-        inheritance: inheritance,
-      );
+      devices[n] = FDevice(n, ahead == null ? tick : () => tick() + ahead, mutation: mutation, inheritance: inheritance)
+        ..appRoundLacking = appRoundLacking;
     }
     for (final n in bystanders) {
       var clock = 0;
@@ -1337,6 +1959,14 @@ class FileWorld extends SyncWorld {
   final FServer server;
   final Map<String, FDevice> devices = {};
 
+  /// Whose round a [SyncRound] runs.
+  final FileRound round;
+
+  /// The parts of sync the app's round lacks ([OfTheModelsRound]) that its rounds here run without rather than refuse
+  /// the world: a world that checks what the app does today where a rule needs one of them, which a property then
+  /// finds wrong until the app's round has it. Empty, and the app's round refuses a world that needs any.
+  final Set<OfTheModelsRound> appRoundLacking;
+
   /// Capture → what its screens show of the inheritance, as each [Capture] made it ([FDevice.inheritance]).
   final Map<String, Map<int, String>> inheritance = {};
 
@@ -1359,7 +1989,7 @@ class FileWorld extends SyncWorld {
   int versionOf(String device, String id) => _holder(device).store.records[id]!.r;
 
   @override
-  bool syncEnabled(String device) => _holder(device).syncEnabled;
+  bool syncEnabled(String device) => _holder(device).sync.on;
 
   /// As the app of today: a merge takes an archived record as it takes an active one.
   @override
@@ -1381,6 +2011,8 @@ class FileWorld extends SyncWorld {
     EditMemo(:final value, :final fromBeforeTheLimit) => fromBeforeTheLimit || !overMemoLimit(value),
     Dismiss(:final dismissed) => dismissed,
     OldApp() || Upgrade() => false,
+    // Only the app's round reads the shelf; the model's own does not, and a record goes onto it on no other.
+    Quarantine() => round == FileRound.app,
     _ => true,
   };
 
@@ -1482,18 +2114,30 @@ class FileWorld extends SyncWorld {
         d.rerecognize(id, version);
       case SetImageForm(:final form):
         server.imageForm = form;
+      case SyncRound() when round == FileRound.app:
+        if (d.syncRuns(server)) d.appSyncRound(server);
+      case PlaceCut(:final received) when round == FileRound.app:
+        if (d.syncRuns(server)) d.appSyncRound(server, placeWrites: received);
+      case PlaceCut():
+        throw UnsupportedError('the model\'s round has no place to cut: $op');
+      case SwapCut() when round == FileRound.app:
+        if (d.syncRuns(server)) d.appSyncRound(server, swapCut: op);
+      case SwapCut():
+        throw UnsupportedError('the model\'s round counts what it sends, not swaps ([PushCut]): $op');
+      case Pull() || Push() || PushCut() || ReceiveCut() when round == FileRound.app:
+        throw UnsupportedError('the app\'s round runs whole: $op');
       case SyncRound():
-        if (d.syncEnabled) d.round(server, onReset: reset);
+        if (d.syncRuns(server)) d.syncRound(server, onReset: reset);
       case Pull():
-        if (d.syncEnabled) d.round(server, send: false, onReset: reset);
+        if (d.syncRuns(server)) d.round(server, send: false, onReset: reset);
       case Push():
-        if (d.syncEnabled) d.push(server, onReset: reset);
+        if (d.syncRuns(server)) d.push(server, onReset: reset);
       case PushCut():
-        if (d.syncEnabled) d.round(server, imageStep: false, cut: op, onReset: reset);
+        if (d.syncRuns(server)) d.round(server, imageStep: false, cut: op, onReset: reset);
       case ReceiveCut(:final received):
-        if (d.syncEnabled) d.round(server, send: false, imageStep: false, applyOnly: received, onReset: reset);
+        if (d.syncRuns(server)) d.round(server, send: false, imageStep: false, applyOnly: received, onReset: reset);
       case SetSyncEnabled(:final enabled):
-        d.syncEnabled = enabled;
+        d.sync = d.sync.withOn(enabled);
       case LoseStateFile():
         d.loseStateFile();
       case DeleteAccount():
@@ -1508,12 +2152,22 @@ class FileWorld extends SyncWorld {
         server.dailyReads = reads;
       case Resume():
         d.paused = false;
+      case Quarantine() when round == FileRound.model:
+        throw UnsupportedError('the model\'s round reads no quarantine shelf: $op');
+      case Quarantine(:final id, :final noted):
+        d.quarantine(id, noted: noted);
+      case DeleteQuarantined(:final id):
+        d.deleteQuarantined(id);
+      case RepairQuarantined(:final id):
+        d.repairQuarantined(id);
+      case Restart():
+        d.restart();
       case OldApp() || Upgrade():
         throw UnsupportedError('these rules have no path for $op');
     }
     // S-13: the resolver runs once after a round of a device that syncs.
     if (op is SyncRound || op is Pull || op is Push || op is PushCut || op is ReceiveCut) {
-      if (d.syncEnabled) d.resolveAll();
+      if (d.syncRuns(server)) d.resolveAll();
     }
   }
 
@@ -1524,7 +2178,7 @@ class FileWorld extends SyncWorld {
   List<Violation> finish() {
     final first = devices.keys.first;
     if (server.full || server.dailyRows != null || server.dailyReads != null) {
-      for (final d in devices.values.where((d) => !d.syncEnabled).toList()) {
+      for (final d in devices.values.where((d) => !d.sync.on).toList()) {
         apply(SetSyncEnabled(d.name, enabled: true));
       }
       for (var day = 0; day < maxDaysHeldBack; day++) {
@@ -1630,7 +2284,6 @@ class FileWorld extends SyncWorld {
       roomRefusals: server.roomRefusals[d.name] ?? 0,
       baseGap: d.baseGap,
       confirmedBodies: {for (final r in d.base?.list.records.values ?? const <FRec>[]) r.body},
-      imagesKept: d.imagesKept,
     );
   }
 

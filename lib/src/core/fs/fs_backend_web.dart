@@ -29,6 +29,12 @@ class WebFsBackend implements FsBackend {
   Future<Uint8List> readBytes(String path) => _vfs.readBytes(path);
 
   @override
+  Future<Uint8List?> readBytesIfPresent(String path) => _vfs.readBytesIfPresent(path);
+
+  @override
+  Future<FsDirectory> openDirectory(String path) => _vfs.openDirectory(path);
+
+  @override
   Future<Uint8List> readHead(String path, int maxBytes) => _vfs.readHead(path, maxBytes);
 
   @override
@@ -82,6 +88,9 @@ class WebFsBackend implements FsBackend {
 
   @override
   Uint8List readBytesSync(String path) => throw _sync('readBytesSync');
+
+  @override
+  Uint8List? readBytesIfPresentSync(String path) => throw _sync('readBytesIfPresentSync');
 
   @override
   void writeStringSync(String path, String contents) => throw _sync('writeStringSync');

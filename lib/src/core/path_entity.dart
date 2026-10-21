@@ -366,8 +366,26 @@ class FilePath extends PathEntity {
 
   Uint8List readAsBytesSync() => fsBackend.readBytesSync(path);
 
+  /// The file's bytes, or null where there is no file here; see [FsBackend.readBytesIfPresent].
+  Future<Uint8List?> readAsBytesIfPresent() => fsBackend.readBytesIfPresent(path);
+
+  Uint8List? readAsBytesIfPresentSync() => fsBackend.readBytesIfPresentSync(path);
+
   /// See [FsBackend.writeBytes] for what [flush] does on each backend.
   Future<void> writeAsBytes(List<int> bytes, {bool flush = false}) => fsBackend.writeBytes(path, bytes, flush: flush);
+
+  /// Replaces this file with [bytes] whole, so that a crash at any point leaves the old file or the new one and never a
+  /// torn one. Where a rename replaces a file atomically the bytes are staged beside it as `<name>.part` and renamed
+  /// over it; OPFS has no rename, and an OPFS writable is published whole when it closes. The directory exists.
+  Future<void> replaceWhole(List<int> bytes) async {
+    if (fsBackend.renameReplacesFileAtomically) {
+      final staging = parent.filePath('$name.part');
+      await staging.writeAsBytes(bytes, flush: true);
+      await staging.rename(this);
+    } else {
+      await writeAsBytes(bytes, flush: true);
+    }
+  }
 
   /// Synchronous counterpart of [writeAsBytes] (io backend only).
   void writeAsBytesSync(List<int> bytes, {bool flush = false}) => fsBackend.writeBytesSync(path, bytes, flush: flush);
@@ -405,6 +423,25 @@ class FilePath extends PathEntity {
   Future<T> deserialize<T>() async => MapperContainer.globals.fromJson<T>(await readAsString());
 }
 
+/// [directory] resolved once ([DirectoryPath.open]), answering for files and directories beneath it from that
+/// resolution; see [FsDirectory] for what holds between two questions.
+class OpenedDirectory {
+  OpenedDirectory._(this.directory, this._resolved);
+
+  final DirectoryPath directory;
+
+  final FsDirectory _resolved;
+
+  /// [FilePath.readAsString] of [file], which lies beneath [directory].
+  Future<String> readAsString(FilePath file) => _resolved.readString(file.path);
+
+  /// [FilePath.readAsBytesIfPresent] of [file], which lies beneath [directory].
+  Future<Uint8List?> readAsBytesIfPresent(FilePath file) => _resolved.readBytesIfPresent(file.path);
+
+  /// Whether [descendant], which lies beneath [directory], is a directory — false for a file and for nothing.
+  Future<bool> hasDirectory(DirectoryPath descendant) => _resolved.isDirectory(descendant.path);
+}
+
 class DirectoryPath extends PathEntity {
   DirectoryPath(super.src);
 
@@ -419,6 +456,9 @@ class DirectoryPath extends PathEntity {
   }
 
   DirectoryPath operator /(dynamic other) => _directoryPath(other);
+
+  /// This directory resolved once, for several questions about what lies beneath it; see [FsBackend.openDirectory].
+  Future<OpenedDirectory> open() async => OpenedDirectory._(this, await fsBackend.openDirectory(path));
 
   @override
   bool get isFileSync => false;

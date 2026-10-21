@@ -399,6 +399,9 @@ class RefBase {
 
   T read<T>(ProviderListenable<T> provider) => _ref.read(provider);
 
+  /// Whether [provider] has been built, without building it.
+  bool exists(ProviderBase<Object?> provider) => _ref.exists(provider);
+
   T watch<T>(ProviderListenable<T> provider) => _readOnly ? _ref.read(provider) : _ref.watch(provider);
 
   /// Discards [provider]'s state so the next read rebuilds it.

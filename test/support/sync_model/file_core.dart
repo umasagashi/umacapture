@@ -13,8 +13,12 @@
 // content was read from ([FRec.img]), which goes with the content wherever the record goes, and the
 // device places the images by it once the merge is done (`file_world.dart`).
 
+import 'dart:convert';
+
 import 'package:umacapture/src/chara_detail/archive_executor_types.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/record_operation.dart';
+import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
 
 import 'file_mutations.dart';
@@ -29,6 +33,19 @@ enum FStage {
     FStage.resizedJpeg => 'resized_jpeg',
     FStage.none => 'none',
   };
+
+  /// The stage as the app's list carries it.
+  ArchiveImageOption? get archiveOption => switch (this) {
+    FStage.active => null,
+    FStage.resizedJpeg => ArchiveImageOption.resizedJpeg,
+    FStage.none => ArchiveImageOption.none,
+  };
+
+  static FStage ofArchiveOption(ArchiveImageOption? option) => switch (option) {
+    null => FStage.active,
+    ArchiveImageOption.resizedJpeg => FStage.resizedJpeg,
+    ArchiveImageOption.none => FStage.none,
+  };
 }
 
 const parentSlots = ['parent1', 'parent2'];
@@ -41,6 +58,7 @@ class FRec {
     this.r = 1,
     this.bodyTime = 0,
     this.img,
+    this.boundToNoImage = false,
     Set<String>? absorbed,
     this.stage = FStage.active,
     this.stageTime = 0,
@@ -65,8 +83,17 @@ class FRec {
   /// The binding of what the record shows to its images: the hash of the images [body] was read from,
   /// written with the content by whatever writes it, and carried with it — by a round, a zip and a merge.
   /// Null on a record from before the upgrade, until the device works it out from the images its
-  /// directory holds, the first time it needs it; and where the directory holds none then, for good.
+  /// directory holds, the first time it needs it; and where the directory holds none then, for good — worked out
+  /// ([bound]) and naming no image.
   String? img;
+
+  /// The binding is worked out and names no image: the device worked it out from a directory that held none. The
+  /// app's binding of such a directory is one whose every field is unknown, which is a binding all the same: the
+  /// record is sent with it, and it is not worked out again. Read only where [img] is null.
+  bool boundToNoImage;
+
+  /// Whether the binding is worked out: false on a record from before the upgrade until the device works it out.
+  bool get bound => img != null || boundToNoImage;
 
   /// The ids of the records merged into this one (`merged_ids.json`).
   Set<String> absorbed;
@@ -87,6 +114,7 @@ class FRec {
     r: r,
     bodyTime: bodyTime,
     img: img,
+    boundToNoImage: boundToNoImage,
     absorbed: {...absorbed},
     stage: stage,
     stageTime: stageTime,
@@ -111,7 +139,7 @@ class FRec {
 
   @override
   String toString() =>
-      '$id=$body#$img^$bodyTime/${stage.name}^$stageTime/${absorbed.toList()..sort()}/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}/$forkedFrom';
+      '$id=$body#${bound ? img ?? '' : null}^$bodyTime/${stage.name}^$stageTime/${absorbed.toList()..sort()}/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}/$forkedFrom';
 }
 
 /// A value a user wrote into a cell or a column's name, and when.
@@ -129,6 +157,10 @@ class FCell {
   @override
   String toString() => '$value@$time';
 }
+
+/// The title of a column storage no one titled: the app's default name of the column, which every device makes its
+/// storage with, written at no time — a file whose title was never written reads as written at 0.
+const madeTitle = FCell('default title', 0);
 
 /// One side of a merge: what a device holds of what sync carries, or a list of the server.
 class FState {
@@ -251,70 +283,126 @@ FPlan merge3(FState? base, FState local, FState server, {FileMutation? mutation}
   final all = [server, local, ?base];
   final bodies = {
     for (final side in all)
-      for (final r in side.records.values) r.body: r,
+      for (final r in side.records.values) r.body,
   };
   FRec back(SyncRecord r) {
     final from = all.map((side) => side.records[r.id]).nonNulls.firstOrNull ?? local.records[r.splitFrom];
-    final shown = bodies[r.body.content];
-    if (from == null || shown == null) throw StateError('no record of the model gives $r');
-    return FRec(
-      r.id,
-      captured: from.captured,
-      recognisedFrom: shown.recognisedFrom,
-      r: shown.r,
-      bodyTime: r.body.time,
-      img: r.body.binding?.skillPng,
-      absorbed: {...r.absorbed},
-      stage: _stageOf(r.stage.value),
-      stageTime: r.stage.time,
-      parents: {...r.body.parents},
-      forkedFrom: r.splitFrom,
-    );
+    if (from == null || !bodies.contains(r.body.content)) throw StateError('no record of the model gives $r');
+    return recOfSyncRecord(r, captured: from.captured);
   }
 
   final out = FState()
     ..records.addAll({for (final r in result.records.values) r.id: back(r)})
-    ..cells.addAll({for (final MapEntry(:key, :value) in cells.entries) key: FCell(value.value, value.time)})
-    ..titles.addAll({for (final MapEntry(:key, :value) in result.titles.entries) key: FCell(value.value, value.time)})
+    ..cells.addAll({for (final MapEntry(:key, :value) in cells.entries) key: cellOfSyncValue(value)})
+    ..titles.addAll({for (final MapEntry(:key, :value) in result.titles.entries) key: cellOfSyncValue(value)})
     ..dismissed.addAll(dismissed);
   return FPlan(out, {
     for (final MapEntry(:key, :value) in outcome.rows.entries) key: value.name.toUpperCase(),
   }, outcome.reading);
 }
 
+// The bridge between the model's values and the values sync carries, which the app's merge and the app's decisions of
+// the user's operations (`record_operation.dart`) take and give: a record, a cell and a title, each way.
+
+/// [r] as sync carries it. The model's binding is one hash, known or not: it rides in one field of the app's binding,
+/// which is null where the model's is not worked out ([FRec.bound]).
+SyncRecord syncRecordOfRec(FRec r) => SyncRecord(
+  r.id,
+  body: SyncBody(
+    r.body,
+    binding: r.bound ? RecordBinding(skillPng: r.img) : null,
+    parents: {...r.parents},
+    time: r.bodyTime,
+  ),
+  absorbed: {...r.absorbed},
+  stage: SyncValue(r.stage.archiveOption, r.stageTime),
+  splitFrom: r.forkedFrom,
+);
+
+/// The model's record of [r] ([syncRecordOfRec] the other way), of the capture [captured]: what it shows is read off
+/// the name of its content ([FRec.body]).
+FRec recOfSyncRecord(SyncRecord r, {required int captured}) {
+  final content = r.body.content;
+  final at = content.lastIndexOf('@');
+  return FRec(
+    r.id,
+    captured: captured,
+    recognisedFrom: content.substring(0, at),
+    r: int.parse(content.substring(at + 1)),
+    bodyTime: r.body.time,
+    img: r.body.binding?.skillPng,
+    boundToNoImage: r.body.binding != null && r.body.binding?.skillPng == null,
+    absorbed: {...r.absorbed},
+    stage: FStage.ofArchiveOption(r.stage.value),
+    stageTime: r.stage.time,
+    parents: {...r.body.parents},
+    forkedFrom: r.splitFrom,
+  );
+}
+
+/// [r] with [body] put on it ([recOfSyncRecord]): what it shows, its binding, its parents and when it was written.
+FRec recWithBody(FRec r, SyncBody body) {
+  final s = syncRecordOfRec(r);
+  return recOfSyncRecord(
+    SyncRecord(r.id, body: body, absorbed: s.absorbed, stage: s.stage, splitFrom: s.splitFrom),
+    captured: r.captured,
+  );
+}
+
+/// A cell or a title as sync carries it: the model's value is the text itself.
+SyncValue<String?> syncValueOfCell(FCell c) => SyncValue(c.value, c.time);
+
+/// A cell or a title, or none ([c] null), as the decision of an operation reads what the device holds of it.
+SyncHeldValue<String> heldOfCell(FCell? c) => (value: c?.value, time: c?.time);
+
+FCell cellOfSyncValue(SyncValue<String?> v) => FCell(v.value, v.time);
+
 SyncSide _toSync(FState state) => SyncSide(
-  records: {
-    for (final r in state.records.values)
-      r.id: SyncRecord(
-        r.id,
-        // The model's binding is one hash, known or not as a whole: it rides in one field of the app's binding.
-        body: SyncBody(
-          r.body,
-          binding: r.img == null ? null : RecordBinding(skillPng: r.img),
-          parents: {...r.parents},
-          time: r.bodyTime,
-        ),
-        absorbed: {...r.absorbed},
-        stage: SyncValue(_optionOf(r.stage), r.stageTime),
-        splitFrom: r.forkedFrom,
-      ),
-  },
-  cells: {for (final MapEntry(:key, :value) in state.cells.entries) key: SyncValue(value.value, value.time)},
-  titles: {for (final MapEntry(:key, :value) in state.titles.entries) key: SyncValue(value.value, value.time)},
+  records: {for (final r in state.records.values) r.id: syncRecordOfRec(r)},
+  cells: {for (final MapEntry(:key, :value) in state.cells.entries) key: syncValueOfCell(value)},
+  titles: {for (final MapEntry(:key, :value) in state.titles.entries) key: syncValueOfCell(value)},
   dismissed: {...state.dismissed},
 );
 
+/// [state] as the app's list carries it ([SyncList]): each record's body named by what it shows, and its cells, titles
+/// and pairs as they are.
+SyncList syncListOfState(FState state) {
+  final side = _toSync(state);
+  return SyncList(
+    rows: {
+      for (final MapEntry(key: id, value: r) in side.records.entries)
+        id: SyncListRow(r, bodyName: state.records[id]!.body),
+    },
+    // The list carries a cell's value as JSON text; the model's is the text itself.
+    cells: {
+      for (final MapEntry(:key, :value) in side.cells.entries)
+        key: SyncValue(value.value == null ? null : jsonEncode(value.value), value.time),
+    },
+    titles: side.titles,
+    dismissed: {
+      for (final pair in state.dismissed)
+        if (pair.split('+') case [final a, final b]) (a, b),
+    },
+  );
+}
+
+/// The state of [list], one made of [from] and [to] ([syncListWith]): each record the model's own record of either
+/// state that the list's row is of, each value as the list holds it.
+FState stateOfSyncList(SyncList list, {required FState from, required SyncList fromList, required FState to}) =>
+    FState()
+      ..records.addAll({
+        for (final MapEntry(key: id, value: row) in list.rows.entries)
+          id: (identical(row, fromList.rows[id]) ? from.records[id]! : to.records[id]!).copy(),
+      })
+      ..cells.addAll({
+        for (final MapEntry(:key, :value) in list.cells.entries)
+          key: FCell(switch (value.value) {
+            final text? => jsonDecode(text) as String,
+            null => null,
+          }, value.time),
+      })
+      ..titles.addAll({for (final MapEntry(:key, :value) in list.titles.entries) key: cellOfSyncValue(value)})
+      ..dismissed.addAll({for (final (a, b) in list.dismissed) pairOf(a, b)});
+
 SyncSide _withRecords(SyncSide side, Map<String, SyncRecord> records) =>
     SyncSide(records: records, cells: side.cells, titles: side.titles, dismissed: side.dismissed);
-
-ArchiveImageOption? _optionOf(FStage stage) => switch (stage) {
-  FStage.active => null,
-  FStage.resizedJpeg => ArchiveImageOption.resizedJpeg,
-  FStage.none => ArchiveImageOption.none,
-};
-
-FStage _stageOf(ArchiveImageOption? option) => switch (option) {
-  null => FStage.active,
-  ArchiveImageOption.resizedJpeg => FStage.resizedJpeg,
-  ArchiveImageOption.none => FStage.none,
-};

@@ -142,6 +142,7 @@ class World extends SyncWorld {
     EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
+    ShelfOp() => false,
     _ => true,
   };
 
@@ -158,7 +159,8 @@ class World extends SyncWorld {
           SetDailyReads() ||
           PushCut() ||
           ReceiveCut() ||
-          Resume():
+          Resume() ||
+          ShelfOp():
         throw UnsupportedError('these rules have no path for $op');
       case Capture(:final id, :final captured, :final withImages):
         d.capture(id, captured, withImages: withImages);

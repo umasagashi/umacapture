@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 
 import 'fs_backend_io.dart' if (dart.library.js_interop) 'fs_backend_web.dart';
+import 'fs_directory.dart';
+
+export 'fs_directory.dart';
 
 /// One directory entry, carrying the kind the listing already determined and,
 /// when the caller asked for it, the metadata the listing could resolve.
@@ -59,6 +62,21 @@ abstract interface class FsBackend {
 
   /// Reads [path] as raw bytes.
   Future<Uint8List> readBytes(String path);
+
+  /// Reads [path] as raw bytes, or null where there is no file at [path].
+  ///
+  /// One lookup that answers both questions, for a file that is often not there: asking [exists] first is a
+  /// second lookup of the same name, and on web each lookup walks the path from the OPFS root. Any other
+  /// failure throws, as [readBytes] does.
+  Future<Uint8List?> readBytesIfPresent(String path);
+
+  /// The directory at [path], resolved once, for a caller with several questions about what lies beneath it.
+  ///
+  /// Never throws for a [path] that is not a directory: that directory has no descendants, so every read from it
+  /// finds nothing, which is what the same reads by path would find. On web it is the walk from the OPFS root, made
+  /// once instead of once per question; on io there is nothing to resolve, and the answer is a
+  /// [PassThroughFsDirectory] that asks this backend by path — the same answers at the same cost as before.
+  Future<FsDirectory> openDirectory(String path);
 
   /// Reads **at most** [maxBytes] bytes from the start of [path], never the
   /// whole file.
@@ -192,6 +210,9 @@ abstract interface class FsBackend {
   /// Synchronous counterpart of [readBytes] (io backend only).
   Uint8List readBytesSync(String path);
 
+  /// Synchronous counterpart of [readBytesIfPresent] (io backend only).
+  Uint8List? readBytesIfPresentSync(String path);
+
   /// Synchronous counterpart of [writeString] (io backend only).
   void writeStringSync(String path, String contents);
 
@@ -209,6 +230,38 @@ abstract interface class FsBackend {
 
   /// Whether [path] currently resolves to a file (io backend only).
   bool isFileSync(String path);
+}
+
+/// An [FsDirectory] that asks [backend] about each descendant by its full path, for a backend where resolving a
+/// directory first saves nothing (io, and the test doubles over it).
+class PassThroughFsDirectory implements FsDirectory {
+  PassThroughFsDirectory(this.backend, this.path);
+
+  final FsBackend backend;
+
+  @override
+  final String path;
+
+  /// [descendant], once [segmentsBelow] has accepted it.
+  String _checked(String descendant) {
+    segmentsBelow(path, descendant);
+    return descendant;
+  }
+
+  @override
+  Future<String> readString(String descendant) async => backend.readString(_checked(descendant));
+
+  @override
+  Future<Uint8List> readBytes(String descendant) async => backend.readBytes(_checked(descendant));
+
+  @override
+  Future<Uint8List?> readBytesIfPresent(String descendant) async => backend.readBytesIfPresent(_checked(descendant));
+
+  @override
+  Future<bool> isDirectory(String descendant) async {
+    final checked = _checked(descendant);
+    return await backend.exists(checked) && !await backend.isFile(checked);
+  }
 }
 
 /// The process-wide filesystem backend, selected at compile time by the

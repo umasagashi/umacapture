@@ -5,6 +5,9 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_archive_state.dart';
 import 'package:umacapture/src/chara_detail/record_body.dart';
@@ -19,6 +22,13 @@ import 'support/long_read_declarations.dart';
 import 'support/record_binding_seed.dart';
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
+
+/// A ref over a container whose record stores are never built, for an export that has no stores to update.
+RefBase _refWithoutStores() {
+  final container = ProviderContainer();
+  addTearDown(container.dispose);
+  return container.read(containerRefProvider);
+}
 
 void main() {
   late Directory tempRoot;
@@ -213,7 +223,11 @@ void main() {
     await (active / 'uuid-a').filePath('record.json').writeAsBytes(_recordJson('uuid-a'));
     await (active / 'uuid-a').filePath('trainee.jpg').writeAsBytes([9, 8, 7]);
     await (active / 'uuid-b').filePath('record.json').writeAsBytes(_recordJson('uuid-b'));
-    final bytes = await RecordZipService.export([active / 'uuid-a', active / 'uuid-b'], declaration: undeclaredInTest);
+    final bytes = await RecordZipService.export(
+      [active / 'uuid-a', active / 'uuid-b'],
+      ref: _refWithoutStores(),
+      declaration: undeclaredInTest,
+    );
     final archive = ZipDecoder().decodeBytes(bytes);
     expect(archive.files.map((entry) => entry.name).toSet(), {
       'chara_detail/active/uuid-a/record.json',
@@ -377,6 +391,23 @@ void main() {
         });
       });
 
+      test(
+        "a zip of another capture that carries images takes the device's other images and trainee.jpg off",
+        () async {
+          final pngs = bindingImagePngs();
+          await seedLocal(binding: expectedBinding(pngs), pngs: pngs);
+          final other = _otherPngs();
+
+          await importZip({
+            'record.json': _body(_record(2, binding: expectedBinding(other))),
+            'skill.png': other['skill']!,
+          });
+
+          expect(namesIn('active'), ['record.json', 'skill.png']);
+          expect(await (chara / 'active' / id).filePath('skill.png').readAsBytes(), other['skill']);
+        },
+      );
+
       test('a zip of the same capture keeps the images', () async {
         final pngs = bindingImagePngs();
         await seedLocal(binding: expectedBinding(pngs), pngs: pngs);
@@ -395,6 +426,39 @@ void main() {
 
         expect(namesIn('active'), ['campaign.png', 'factor.png', 'record.json', 'skill.png', 'trainee.jpg']);
         expect((await stored('active')).metadata.bodyWrittenAt, importedAt);
+      });
+
+      test('a zip without images takes the images its binding names from another record of the device', () async {
+        // The device's other record holds the images the zip's body was read from, under another body: a merge left
+        // them there, and a re-recognition by a newer module read them as something else since.
+        final pngs = bindingImagePngs();
+        final donor = chara / 'active' / 'record-0';
+        await donor.create(recursive: true);
+        final donorRecord = placeOnRecord(makeRecord(id: 'record-0', card: 3), binding: expectedBinding(pngs));
+        await donor.filePath('record.json').writeAsBytes(_body(donorRecord));
+        for (final MapEntry(:key, :value) in pngs.entries) {
+          await donor.filePath('$key.png').writeAsBytes(value);
+        }
+        await donor.filePath('trainee.jpg').writeAsBytes([7, 7, 7]);
+        List<String> donorNames() =>
+            Directory(donor.path).listSync().map((e) => e.uri.pathSegments.last).toList()..sort();
+        final donorBefore = donorNames();
+
+        await importZip({'record.json': _body(_record(2, binding: expectedBinding(pngs)))});
+
+        expect(namesIn('active'), [
+          'archive.json',
+          'campaign.png',
+          'factor.png',
+          'record.json',
+          'skill.png',
+          'trainee.jpg',
+        ]);
+        for (final MapEntry(:key, :value) in pngs.entries) {
+          expect(await (chara / 'active' / id).filePath('$key.png').readAsBytes(), value);
+        }
+        expect(await (chara / 'active' / id).filePath('trainee.jpg').readAsBytes(), [7, 7, 7]);
+        expect(donorNames(), donorBefore);
       });
     });
 
@@ -450,7 +514,7 @@ void main() {
           final dir = await seedLocal(store: 'archive');
           expect(await dir.filePath('archive.json').exists(), isFalse);
 
-          final zip = await RecordZipService.export([dir], declaration: undeclaredInTest);
+          final zip = await RecordZipService.export([dir], ref: _refWithoutStores(), declaration: undeclaredInTest);
           await dir.delete(recursive: true);
           await RecordZipService.import(zip, storageDir);
 

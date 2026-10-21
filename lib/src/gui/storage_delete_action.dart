@@ -834,6 +834,8 @@ String _failureClauseKey(StorageDeleteFailureReason reason) => switch (reason) {
 String? _retentionClauseKey(StorageDeleteRetentionReason reason) => switch (reason) {
   StorageDeleteRetentionReason.blockedBySurvivor => null,
   StorageDeleteRetentionReason.setAsideByThisDelete => 'pages.storage.delete.cause_set_aside',
+  StorageDeleteRetentionReason.holdsRemovalTimes => 'pages.storage.delete.cause_holds_removal_times',
+  StorageDeleteRetentionReason.identifiesShelfRecord => 'pages.storage.delete.cause_identifies_shelf_record',
 };
 
 /// What a retained row says about itself, under the path.
@@ -846,6 +848,9 @@ String? _retentionClauseKey(StorageDeleteRetentionReason reason) => switch (reas
 String? _retentionDetail(StorageDeleteRetentionReason reason) => switch (reason) {
   StorageDeleteRetentionReason.blockedBySurvivor => null,
   StorageDeleteRetentionReason.setAsideByThisDelete => 'pages.storage.delete.retention_reason.set_aside'.tr(),
+  StorageDeleteRetentionReason.holdsRemovalTimes => 'pages.storage.delete.retention_reason.holds_removal_times'.tr(),
+  StorageDeleteRetentionReason.identifiesShelfRecord =>
+    'pages.storage.delete.retention_reason.identifies_shelf_record'.tr(),
 };
 
 /// What a delete left behind, path by path.

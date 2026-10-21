@@ -1,3 +1,5 @@
+import '/src/core/path_entity.dart';
+
 import 'record_mutation_lock.dart';
 import 'record_recovery_gate_shared.dart';
 
@@ -17,9 +19,14 @@ import 'record_recovery_gate_shared.dart';
 RecordRecoveryGate createPlatformRecordRecoveryGate({RecordMutationLock? mutationLock}) {
   return RecordRecoveryGate(
     mutationLock: mutationLock ?? platformRecordMutationLock,
-    ensureReady: ensureWriteJournalRecordReadyUnlocked,
+    ensureReady: _ensureRecordReady,
     ensureRootReady: ensureRootReadyThroughPlatformMaintenance,
   );
+}
+
+/// The write journal's recovery for [recordId], from the data root resolved the same way the web leg resolves it.
+Future<void> _ensureRecordReady(DirectoryPath storageRoot, String recordId) async {
+  await ensureWriteJournalRecordReadyUnlocked(await openRecordDataRootOf(storageRoot), recordId);
 }
 
 final RecordRecoveryGate platformRecordRecoveryGate = createPlatformRecordRecoveryGate();

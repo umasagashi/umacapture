@@ -34,6 +34,7 @@ import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
 import 'package:umacapture/src/chara_detail/record_archive_state.dart';
 import 'package:umacapture/src/chara_detail/record_body.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/chara_detail/value_write_time.dart';
@@ -132,6 +133,12 @@ class _ListFailingBackend implements FsBackend {
   Future<Uint8List> readBytes(String path) => inner.readBytes(path);
 
   @override
+  Future<Uint8List?> readBytesIfPresent(String path) => inner.readBytesIfPresent(path);
+
+  @override
+  Future<FsDirectory> openDirectory(String path) async => PassThroughFsDirectory(this, path);
+
+  @override
   Future<Uint8List> readHead(String path, int maxBytes) => inner.readHead(path, maxBytes);
 
   @override
@@ -176,6 +183,9 @@ class _ListFailingBackend implements FsBackend {
 
   @override
   Uint8List readBytesSync(String path) => inner.readBytesSync(path);
+
+  @override
+  Uint8List? readBytesIfPresentSync(String path) => inner.readBytesIfPresentSync(path);
 
   @override
   void writeStringSync(String path, String contents) => inner.writeStringSync(path, contents);
@@ -275,7 +285,7 @@ class _AdoptFailingStorage extends CharaDetailRecordStorage {
   bool threw = false;
 
   @override
-  void adoptRecordInMemory(CharaDetailRecord record) {
+  void adoptRecordInMemory(CharaDetailRecord record, {RecordNotes? notes}) {
     threw = true;
     throw const _Crash('the republication into memory');
   }
@@ -506,12 +516,26 @@ void main() {
 
   // =========================================================================
   group('synthesizeSurvivor', () {
-    test('the survivor keeps the older id and captured date and the enhanced content', () {
+    /// The one record the merge entry leaves of [x] and [y] when they are the only records, keeping [keptContentId]'s
+    /// content where the pair is identical.
+    Future<CharaDetailRecord> survivorOf(CharaDetailRecord x, CharaDetailRecord y, {String? keptContentId}) async {
+      useFreshRoot();
+      writeRecord(info.charaDetailActiveDir, x);
+      writeRecord(info.charaDetailActiveDir, y);
+      final container = await loadedContainer();
+      addTearDown(container.dispose);
+      expect((await mergeOne(container, keptContentId: keptContentId)).outcome, EnhancementMergeOutcome.merged);
+      final left = Directory(info.charaDetailActiveDir.path).listSync().whereType<Directory>().toList();
+      expect(left, hasLength(1), reason: 'the merge leaves one record of the two');
+      return readRecord(info.charaDetailActiveDir, left.single.uri.pathSegments.lastWhere((s) => s.isNotEmpty));
+    }
+
+    test('the survivor keeps the older id and captured date and the enhanced content', () async {
       // Every field of the survivor, row by row.
       final older = preRecord('older');
       final retired = postRecord('retired');
 
-      final survivor = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: false);
+      final survivor = await survivorOf(older, retired);
 
       expect(survivor.id, 'older');
       expect(survivor.metadata.capturedDate, older.metadata.capturedDate);
@@ -519,30 +543,30 @@ void main() {
       expect(survivor.metadata.recognizerVersion, retired.metadata.recognizerVersion);
     });
 
-    test("the parents are the kept side's, and never name the pair", () {
+    test("the parents are the kept side's, and never name the pair", () async {
       // The parents travel with the body: whichever side's content is kept, its two slots are the survivor's, an empty
       // one included, and the other side's links are not consulted.
       final older = makeRecord(id: 'older', card: 7, self: whites(5), parent1Id: 'p-older');
       final retired = makeRecord(id: 'retired', card: 7, self: whites(5), parent1Id: 'p-retired', parent2Id: 'p-two');
 
-      final keptOlder = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: true);
+      final keptOlder = await survivorOf(older, retired, keptContentId: 'older');
       expect(keptOlder.metadata.recordId.parent1, 'p-older');
       expect(keptOlder.metadata.recordId.parent2, isNull, reason: 'an empty slot of the kept side stays empty');
 
-      final keptRetired = synthesizeSurvivor(older: older, retired: retired, contentFromOlder: false);
+      final keptRetired = await survivorOf(older, retired, keptContentId: 'retired');
       expect(keptRetired.metadata.recordId.parent1, 'p-retired', reason: "the older side's link is not the kept one");
       expect(keptRetired.metadata.recordId.parent2, 'p-two');
 
-      final dropped = synthesizeSurvivor(
-        older: makeRecord(id: 'older', card: 7, self: whites(5)),
-        retired: makeRecord(id: 'retired', card: 7, self: whites(5), parent1Id: 'older', parent2Id: 'retired'),
-        contentFromOlder: false,
+      final dropped = await survivorOf(
+        makeRecord(id: 'older', card: 7, self: whites(5)),
+        makeRecord(id: 'retired', card: 7, self: whites(5), parent1Id: 'older', parent2Id: 'retired'),
+        keptContentId: 'retired',
       );
       expect(dropped.metadata.recordId.parent1, isNull);
       expect(dropped.metadata.recordId.parent2, isNull);
     });
 
-    test('a chain of three converges to the same record in each of the three merge orders', () {
+    test('a chain of three converges to the same record in each of the three merge orders', () async {
       // The survivor carries both keys forward (the oldest id, the most enhanced
       // content), which is what makes the pairwise operation order-independent.
       // Every white the chain adds carries three stars, because that is the only
@@ -569,19 +593,15 @@ void main() {
         capturedDate: '2026-03-01T00:00:00+0900',
       );
 
-      /// One merge, deciding both sides the way the app decides them: the id by
-      /// age, the content by the enhancement relation.
-      CharaDetailRecord mergeTwo(CharaDetailRecord x, CharaDetailRecord y) {
-        final candidate = findEnhancementCandidates([x, y], testClassifier).single;
-        final byId = {x.id: x, y.id: y};
-        return synthesizeSurvivor(
-          older: byId[candidate.olderId]!,
-          retired: byId[candidate.newerId]!,
-          contentFromOlder: candidate.enhancedId == candidate.olderId,
-        );
-      }
+      /// One merge through the merge entry, which decides both sides the way the app decides them: the id by age,
+      /// the content by the enhancement relation.
+      Future<CharaDetailRecord> mergeTwo(CharaDetailRecord x, CharaDetailRecord y) => survivorOf(x, y);
 
-      for (final survivor in [mergeTwo(mergeTwo(a, b), c), mergeTwo(mergeTwo(b, c), a), mergeTwo(mergeTwo(a, c), b)]) {
+      for (final survivor in [
+        await mergeTwo(await mergeTwo(a, b), c),
+        await mergeTwo(await mergeTwo(b, c), a),
+        await mergeTwo(await mergeTwo(a, c), b),
+      ]) {
         expect(survivor.id, 'a');
         expect(survivor.metadata.capturedDate, a.metadata.capturedDate);
         expect(survivor.factors.self, c.factors.self);
@@ -632,6 +652,27 @@ void main() {
         expect(Directory((otherStore / 'older').path).existsSync(), isFalse, reason: '$layout');
         container.dispose();
       }
+    });
+
+    test('the survivor absorbs the ids both records had absorbed, and the retired one', () async {
+      // Each record carries an id another merge folded into it; the survivor is made of all of them ([R4-5]).
+      writeRecord(info.charaDetailActiveDir, preRecord('older'));
+      writeRecord(info.charaDetailActiveDir, postRecord('retired'));
+      for (final (id, absorbed) in [('older', 'gone-into-older'), ('retired', 'gone-into-retired')]) {
+        File(
+          (info.charaDetailActiveDir / id).filePath(mergedIdsFileName).path,
+        ).writeAsBytesSync(mergedIdsBytes([absorbed]));
+      }
+
+      final container = await loadedContainer();
+      expect((await mergeOne(container)).outcome, EnhancementMergeOutcome.merged);
+
+      expect(await readMergedIds(info.charaDetailActiveDir / 'older'), [
+        'gone-into-older',
+        'gone-into-retired',
+        'retired',
+      ]);
+      container.dispose();
     });
 
     test("the survivor's binding is the kept side's, worked out from the kept tree where it had none", () async {

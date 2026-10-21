@@ -82,14 +82,18 @@ typedef PathJoin = ({String file, String base, String segment, bool onDerivedBas
 /// the same segment through on any base in any file. Adding to it is a visible act
 /// with a reason attached, which is what an escape hatch is allowed to cost.
 ///
-/// All four are the *inside* of a transaction slot — `<journal>/v1/<slot>/…` —
+/// Four are the *inside* of a transaction slot — `<journal>/v1/<slot>/…` —
 /// reached from a local the same file derived from that journal's root, and the
-/// journal roots above them are two of the three `retired` resolves.
+/// journal roots above them are two of the three `retired` resolves. The fifth is
+/// the inside of a record directory: a zip export names a record's archive note by
+/// its path in the record directory it packs, a local bound by the loop over the
+/// notes it took, and nothing is built on disk under that name.
 const nestedSegmentExemptions = <({String file, String base, String segment})>{
   (file: 'record_directory_transaction.dart', base: 'slot', segment: 'payload'),
   (file: 'record_directory_transaction.dart', base: 'transactionDir', segment: 'payload'),
   (file: 'web_record_write_transaction.dart', base: 'slot', segment: 'desired'),
   (file: 'web_record_write_transaction.dart', base: 'slot', segment: 'superseded'),
+  (file: 'zip_export_io.dart', base: 'dir', segment: 'archive.json'),
 };
 
 /// Every directory name the app joins onto a path as a literal, with repeats —
@@ -125,8 +129,9 @@ const nestedSegmentExemptions = <({String file, String base, String segment})>{
 /// The base is the name the left side ends in for `/` (`info.storageDir / 'x'` is
 /// on `storageDir`) and the root of the property chain for `join`
 /// (`join(base.path, 'x')` is on `base`). Each result records whether its base is
-/// a variable the same file *declares* ([PathJoin.onDerivedBase]) or one it was
-/// handed (a parameter, a field of another object). That is a hint about where the directory sits,
+/// a variable the same file *declares* — by a declaration or by binding it in a
+/// pattern — ([PathJoin.onDerivedBase]) or one it was handed (a parameter, a field
+/// of another object). That is a hint about where the directory sits,
 /// **not** a licence to skip it: both kinds are checked, the derived ones against
 /// [nestedSegmentExemptions] as well.
 ///
@@ -162,7 +167,10 @@ List<PathJoin> literalPathSegments(List<ParsedSource> sources) {
       ...sharedConstants,
       for (final list in nodesOf<VariableDeclarationList>(source.unit)) ..._constantLiterals(list),
     };
-    final declared = {for (final variable in nodesOf<VariableDeclaration>(source.unit)) variable.name.lexeme};
+    final declared = {
+      for (final variable in nodesOf<VariableDeclaration>(source.unit)) variable.name.lexeme,
+      for (final pattern in nodesOf<DeclaredVariablePattern>(source.unit)) pattern.name.lexeme,
+    };
     String? segmentOf(Expression expression) => switch (expression) {
       StringLiteral(:final stringValue?) => stringValue,
       SimpleIdentifier(:final name) => constants[name],

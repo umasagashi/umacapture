@@ -129,10 +129,10 @@ enum FileMutation {
   /// result's word on it, and the round that ends reads the pair it had not taken in as one it took out.
   pairsWaitForTheRoundsEnd,
 
-  /// A round puts a record and the records whose ids it absorbed in place one by one: a round that stops after
-  /// it let a record merged away go, before the record that absorbed it, leaves the device holding no record of
-  /// that end, and the round that ends reads a pair the device took out as one it says nothing of.
-  absorbedRecordsLandApart,
+  /// A round lets the records the result removes go as their place in the order comes, not once every record is
+  /// placed: a round that stops after one went holds neither it nor its images, though a record still to be placed
+  /// takes its images from it.
+  removalsGoInTheirPlace,
 
   /// The device keeps the pairs it holds that name an id the result of a round holds no record of.
   dismissalsOfMissingRecordsStay,

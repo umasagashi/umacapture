@@ -99,7 +99,7 @@ void main() {
   // at all, so nothing is re-attempted on every later acquisition.
   Future<List<RecordTransactionResult>> unfinishedSlotsFor(String id) async {
     final recoveries = await recoverRecordDirectoryTransactionsUnlocked(
-      DirectoryPath(tempRoot.path),
+      await DirectoryPath(tempRoot.path).open(),
       id,
       beforeCommittedCleanup: (spec) => cleanupCommittedArchiveTransactionUnlocked(spec, failOnError: true),
     );
@@ -114,7 +114,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-jpeg', ArchiveImageOption.resizedJpeg));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     // Source gone, destination present.
     expect(Directory('${activeDir.path}/id-jpeg').existsSync(), isFalse);
     final dst = DirectoryPath('${archiveDir.path}/id-jpeg');
@@ -141,7 +141,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-none', ArchiveImageOption.none));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final dst = DirectoryPath('${archiveDir.path}/id-none');
     expect(File('${dst.path}/record.json').readAsStringSync(), '{"id":"id-none"}');
     // The icon is an image too, cut from the factor image.
@@ -176,7 +176,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-state', ArchiveImageOption.none));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     expect(await readRecordArchiveState(DirectoryPath('${archiveDir.path}/id-state'), archiveStore: true), (
       state: RecordArchiveState.none,
       writtenAt: 1767225600000,
@@ -184,7 +184,7 @@ void main() {
   });
 
   test('returns false when the source directory is missing', () async {
-    expect(await archiveRecordAsync(argsFor('does-not-exist', ArchiveImageOption.none)), isFalse);
+    expect(await archiveRecordAsync(argsFor('does-not-exist', ArchiveImageOption.none)), isNull);
   });
 
   test('returns false and leaves the source intact when the destination already exists', () async {
@@ -195,7 +195,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-dup', ArchiveImageOption.none));
 
-    expect(ok, isFalse);
+    expect(ok, isNull);
     // Source untouched: its PNGs are still present (not stripped) and not moved.
     expect(File('${activeDir.path}/id-dup/skill.png').existsSync(), isTrue);
     expect(File('${activeDir.path}/id-dup/record.json').existsSync(), isTrue);
@@ -214,7 +214,7 @@ void main() {
 
     final results = await archiveRecordsAsync(ArchiveBatchArgs(items));
 
-    expect(results, [true, false, true]);
+    expect([for (final note in results) note != null], [true, false, true]);
     expect(Directory('${archiveDir.path}/id-a').existsSync(), isTrue);
     expect(Directory('${archiveDir.path}/id-c').existsSync(), isTrue);
     expect(Directory('${activeDir.path}/id-a').existsSync(), isFalse);
@@ -238,7 +238,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-bad', ArchiveImageOption.resizedJpeg));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final dst = DirectoryPath('${archiveDir.path}/id-bad');
     // The undecodable original is retained; no JPEG was written.
     expect(File('${dst.path}/skill.png').existsSync(), isTrue);
@@ -300,7 +300,7 @@ void main() {
 
     final ok = await archiveRecordAsync(argsFor('id-badjson', ArchiveImageOption.resizedJpeg));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final dst = DirectoryPath('${archiveDir.path}/id-badjson');
     // The convertible image is still replaced; only its rescale was skipped.
     expect(File('${dst.path}/skill.jpg').existsSync(), isTrue);

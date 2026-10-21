@@ -4,7 +4,8 @@
 // under is not its id: a collision takes an `_<n>` suffix, and other routes put other things there. So the move writes
 // the record's id and the store it was in into the directory it moved ([quarantineOriginName]), and the shelf is read
 // back from those notes, never from the names. A note on the shelf means the record is kept as the server holds it
-// while it stays there ([N15-20]).
+// while it stays there ([N15-20]). A directory on the shelf with no note is a record too, one whose id the device
+// cannot tell: it is counted, and read as one the device cannot read ([R7-3]).
 //
 // The two ways off the shelf leave two different facts. A record whose `record.json` reads again as its own id is put
 // back into the store it came from by the next scan of that store, and the note goes with the move. A quarantined
@@ -26,8 +27,9 @@ const quarantineUserDeletedName = '.user_deleted.json';
 /// A record on the quarantine shelf: its id, the store it was moved out of, and where it is now.
 typedef QuarantinedRecord = ({String id, String store, DirectoryPath directory});
 
-/// What the shelf at a `quarantine/` directory holds of records.
-typedef QuarantineLedger = ({List<QuarantinedRecord> kept, Set<String> userDeleted});
+/// What the shelf at a `quarantine/` directory holds of records: those whose note names them ([kept]), the number of
+/// directories on it whose note does not ([unnamed]), and the ids of the records the user deleted from it.
+typedef QuarantineLedger = ({List<QuarantinedRecord> kept, int unnamed, Set<String> userDeleted});
 
 String _originJson(DirectoryPath source) => jsonEncode({'id': source.name, 'store': source.parent.name});
 
@@ -73,16 +75,24 @@ Future<Set<String>> _readUserDeleted(DirectoryPath shelf) async {
   return {for (final id in decoded as List) id as String};
 }
 
-/// What the quarantine shelf [shelf] holds: the records on it, each from its note, and the ids of those the user
-/// deleted. A shelf that is not there holds nothing. Throws when the list of deleted ids cannot be read.
+/// What the quarantine shelf [shelf] holds: the records on it, each from its note, the number of directories on it
+/// that carry no readable note, and the ids of those the user deleted. A directory with no note is still something
+/// set aside — a write's recovery moves what it gives up on here without one, and the user may delete the note alone
+/// from the storage view — and so a record the device holds and cannot name. A shelf that is not there holds nothing.
+/// Throws when the list of deleted ids cannot be read.
 Future<QuarantineLedger> readQuarantineLedger(DirectoryPath shelf) async {
-  if (!await shelf.exists()) return (kept: const <QuarantinedRecord>[], userDeleted: const <String>{});
+  if (!await shelf.exists()) return (kept: const <QuarantinedRecord>[], unnamed: 0, userDeleted: const <String>{});
   final kept = <QuarantinedRecord>[];
+  var unnamed = 0;
   await for (final entry in shelf.list()) {
     if (entry is! DirectoryPath) continue;
-    if (await _quarantinedRecordAt(entry) case final record?) kept.add(record);
+    if (await _quarantinedRecordAt(entry) case final record?) {
+      kept.add(record);
+    } else {
+      unnamed++;
+    }
   }
-  return (kept: kept, userDeleted: await _readUserDeleted(shelf));
+  return (kept: kept, unnamed: unnamed, userDeleted: await _readUserDeleted(shelf));
 }
 
 /// Adds [ids] to the shelf [shelf]'s list of the quarantined records the user deleted. The caller holds the root lock.

@@ -40,14 +40,14 @@ void main() {
     seed('retry');
     fsBackend = _FailSourceDeleteBackend(originalBackend, (path) => path.endsWith('${Platform.pathSeparator}retry'));
 
-    expect(await archiveRecordAsync(args('retry')), isFalse);
+    expect(await archiveRecordAsync(args('retry')), isNull);
     // The copy is kept for recovery, but the active source remains authoritative
     // until its deletion succeeds, so the controller must not remove it in memory.
     expect(Directory('${tempRoot.path}/active/retry').existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/archive/retry').existsSync(), isTrue);
 
     fsBackend = originalBackend;
-    expect(await archiveRecordAsync(args('retry')), isTrue);
+    expect(await archiveRecordAsync(args('retry')), isNotNull);
     expect(Directory('${tempRoot.path}/active/retry').existsSync(), isFalse);
     expect(Directory('${tempRoot.path}/archive/retry').existsSync(), isTrue);
   });
@@ -58,7 +58,7 @@ void main() {
     File('${source.path}/prediction.json').writeAsStringSync('{}');
     fsBackend = _FailManifestWriteAfterSourceDeleteBackend(originalBackend, source.path);
 
-    expect(await archiveRecordAsync(args(id)), isTrue);
+    expect(await archiveRecordAsync(args(id)), isNotNull);
     expect(source.existsSync(), isFalse);
     expect(Directory('${tempRoot.path}/archive/$id').existsSync(), isTrue);
     expect(File('${tempRoot.path}/archive/$id/prediction.json').existsSync(), isTrue);
@@ -78,7 +78,7 @@ void main() {
     // A plausible interrupted copy, but not a complete duplicate.
     File('${destination.path}/record.json').writeAsStringSync('{"id":"partial"}');
 
-    expect(await archiveRecordAsync(args('partial')), isFalse);
+    expect(await archiveRecordAsync(args('partial')), isNull);
     expect(source.existsSync(), isTrue);
     expect(File('${source.path}/skill.png').existsSync(), isTrue);
     expect(File('${destination.path}/record.json').readAsStringSync(), '{"id":"partial"}');
@@ -89,7 +89,7 @@ void main() {
     final source = seed('copy-fail');
     fsBackend = _FailCopyBackend(originalBackend, (path) => path.endsWith('skill.png'));
 
-    expect(await archiveRecordAsync(args('copy-fail')), isFalse);
+    expect(await archiveRecordAsync(args('copy-fail')), isNull);
     expect(source.existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/archive/copy-fail').existsSync(), isFalse);
   });
@@ -101,7 +101,7 @@ void main() {
 
     final results = await archiveRecordsAsync(ArchiveBatchArgs([args('a'), args('b'), args('c')]));
 
-    expect(results, [true, false, true]);
+    expect([for (final note in results) note != null], [true, false, true]);
     expect(Directory('${tempRoot.path}/active/a').existsSync(), isFalse);
     expect(Directory('${tempRoot.path}/active/b').existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/active/c').existsSync(), isFalse);

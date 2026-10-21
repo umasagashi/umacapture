@@ -40,11 +40,13 @@
 // tests stay indifferent to it. The image-cache eviction is a later stage's and is
 // absent entirely.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -61,6 +63,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/empty_record_stores.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
@@ -114,6 +117,27 @@ class _DelayingFsBackend extends WebLikeFsBackend {
   }
 }
 
+/// Delegates to the io backend, but a write to a path [tear] selects lands half its bytes and then throws, the way a
+/// write that runs out of disk leaves a file; and it replaces files by renaming, as the Windows backend does.
+class _TearingFsBackend extends WebLikeFsBackend {
+  _TearingFsBackend(super.inner, {required this.tear});
+
+  final bool Function(String path) tear;
+
+  @override
+  bool get renameReplacesFileAtomically => true;
+
+  @override
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) async {
+    if (!tear(path)) return super.writeBytes(path, bytes, flush: flush);
+    await super.writeBytes(path, bytes.sublist(0, bytes.length ~/ 2), flush: flush);
+    throw FileSystemException('There is not enough space on the disk', path);
+  }
+
+  @override
+  Future<void> writeString(String path, String contents) => writeBytes(path, utf8.encode(contents));
+}
+
 late Directory _tempRoot;
 late PathInfo _layout;
 late FsBackend _realBackend;
@@ -157,6 +181,7 @@ List<String>? _requestedPaths(StorageGroup group) => _pathsOf(storageGroupDelete
 ProviderContainer _container({StorageDeleteReport? storeOutcome, Future<void>? storeGate}) {
   final container = ProviderContainer(
     overrides: [
+      ...emptyRecordStoreOverrides,
       pathInfoProvider.overrideWithValue(_layout),
       // The delete path resolves its own directories from the layout rather than
       // from `pathInfoProvider`, so it keeps working while the record store is
@@ -339,6 +364,9 @@ void main() {
     testWidgets('an unrecoverable group deletes nothing until the box is ticked', (tester) async {
       final file = _seed('documents/storage/chara_detail/metadata/rating/default.json');
       final container = _container();
+      final toasts = <ToastData>[];
+      final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
+      addTearDown(subscription.close);
       await _pumpDialog(
         tester,
         container,
@@ -364,7 +392,9 @@ void main() {
       expect(_confirmEnabled(tester), isTrue);
 
       await tester.longPress(_confirmButton());
-      await settleUntil(tester, () => !_exists(file), describe: 'the acknowledged delete to remove the file');
+      // The delete's own announcement, and not the file's absence, is its end: the file goes while the delete still
+      // holds the store's root lock, and a case that ends there leaves the lock to a zone that no longer runs.
+      await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the acknowledged delete to finish');
       expect(_exists(file), isFalse, reason: 'the acknowledged delete did not run');
     });
 
@@ -549,6 +579,139 @@ void main() {
       expect(container.read(dialogBuilderProvider), isNotNull);
     });
 
+    testWidgets('a rating or memo deleted here has its values deleted and its file kept, and a file holding only an '
+        'earlier removal is kept and says why', (tester) async {
+      final ratings = _layout.charaDetailRatingDir;
+      final live = ratings.filePath('live.json');
+      final removedBefore = ratings.filePath('gone.json');
+      final memos = _layout.charaDetailMemoDir;
+      final memo = memos.filePath('note.json');
+      final unreadable = memos.filePath('broken.json');
+      File(live.path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(RatingData(title: 'Score', data: {'R1': 4.0}, writtenAt: {'R1': 1}).toJson());
+      final tombstone = RatingData(title: 'Old', data: {}, titleWrittenAt: 2, titleCleared: true).toJson();
+      File(removedBefore.path).writeAsStringSync(tombstone);
+      File(memo.path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(MemoData(title: 'Note', data: {'R1': 'x'}).toJson());
+      File(unreadable.path).writeAsStringSync('x');
+      final container = _container();
+      final group = _groupOf(StorageGroupId.metadata);
+      Future<StorageDeleteReport> delete(StorageDeleteRequest request) => tester
+          .runAsync(
+            () => runStorageDelete(
+              container.read(containerRefProvider),
+              effects: storageDeleteEffects(container),
+              group: group,
+              request: request,
+              silent: true,
+            ),
+          )
+          .then((report) => report!);
+      final kept = StorageDeleteRetention(
+        subject: StorageDeletePathSubject(removedBefore.path),
+        reason: StorageDeleteRetentionReason.holdsRemovalTimes,
+      );
+
+      // The group's delete. Its values went: counted as deleted, and not as a path that is gone.
+      final report = await delete(storageGroupDeleteRequest(_layout, group, onWeb: false)!);
+      expect(report.cleared.map((e) => e.path), unorderedEquals([live.path, memo.path, memos.path]));
+      expect(report.deletedPaths, contains(unreadable.path));
+      expect(report.deletedPaths, isNot(anyOf(contains(live.path), contains(memo.path), contains(memos.path))));
+      expect(report.retained, contains(kept));
+      expect(report.failed, isEmpty);
+      expect(_exists(unreadable), isFalse);
+      final removed = RatingDataMapper.fromJson(File(live.path).readAsStringSync());
+      expect(removed.titleCleared, isTrue);
+      expect(removed.data, isEmpty);
+      expect(File(removedBefore.path).readAsStringSync(), tombstone, reason: 'an older removal is left as it was');
+
+      // A value rated into the removed column afterwards, through its controller: deleting the file again deletes
+      // that value, although the title was none already.
+      await tester.runAsync(() async {
+        final controller = container.read(charaDetailRecordRatingProvider('live').notifier);
+        await container.read(charaDetailRecordRatingProvider('live').future);
+        controller.updateRating('R1', 5.0);
+        controller.save();
+        expect(await flushMetadataWrites(), isTrue);
+      });
+      expect(RatingDataMapper.fromJson(File(live.path).readAsStringSync()).data, {'R1': 5.0});
+      final rerated = await delete(storageRowDeleteRequest(group, live)!);
+      expect(rerated.cleared.map((e) => e.path), [live.path]);
+      expect(rerated.retained, isEmpty);
+      final cleared = RatingDataMapper.fromJson(File(live.path).readAsStringSync());
+      expect(cleared.titleCleared, isTrue);
+      expect(cleared.data, isEmpty);
+      expect(
+        storageDeleteOutcomeMessage(rerated).description,
+        _sentence('pages.storage.delete.completed', {'count': '1'}),
+      );
+      expect(
+        storageDeleteOutcomeMessage(report).description,
+        _sentence('pages.storage.delete.partial', {
+          'total': '${report.requestedCount}',
+          'deleted': '${report.deletedCount}',
+          'cause': appSentenceAt('pages.storage.delete.cause_holds_removal_times'),
+        }),
+      );
+
+      // One storage with values, on its own: the values went, which is a complete delete.
+      final again = ratings.filePath('again.json');
+      File(again.path).writeAsStringSync(RatingData(title: 'S', data: {'R1': 1.0}).toJson());
+      final single = await delete(storageRowDeleteRequest(group, again)!);
+      expect(single.cleared.map((e) => e.path), [again.path]);
+      expect(single.deleted, isEmpty);
+      expect(single.isComplete, isTrue);
+      expect(
+        storageDeleteOutcomeMessage(single).description,
+        _sentence('pages.storage.delete.completed', {'count': '1'}),
+      );
+
+      // The earlier removal, on its own: nothing to delete, so it is refused, and its row says why.
+      final row = await delete(storageRowDeleteRequest(group, removedBefore)!);
+      expect(row.deletedCount, 0);
+      expect(row.failed, isEmpty);
+      expect(row.retained, [kept]);
+      expect(File(removedBefore.path).readAsStringSync(), tombstone);
+      final headline = storageDeleteOutcomeMessage(row).description;
+      expect(
+        headline,
+        _sentence('pages.storage.delete.none', {
+          'cause': appSentenceAt('pages.storage.delete.cause_holds_removal_times'),
+        }),
+      );
+      await _pumpDialog(tester, container, StorageDeleteResultDialog(report: row, headline: headline));
+      expect(find.text(removedBefore.path), findsOneWidget);
+      expect(find.text(appSentenceAt('pages.storage.delete.retention_reason.holds_removal_times')), findsOneWidget);
+    });
+
+    testWidgets('a rating whose removal fails to write keeps the file it had', (tester) async {
+      final file = _layout.charaDetailRatingDir.filePath('live.json');
+      File(file.path)
+        ..createSync(recursive: true)
+        ..writeAsStringSync(RatingData(title: 'Score', data: {'R1': 4.0}, writtenAt: {'R1': 1}).toJson());
+      final before = File(file.path).readAsBytesSync();
+      fsBackend = _TearingFsBackend(_realBackend, tear: (path) => path.startsWith(file.path));
+      final container = _container();
+      final group = _groupOf(StorageGroupId.metadata);
+
+      final report = (await tester.runAsync(
+        () => runStorageDelete(
+          container.read(containerRefProvider),
+          effects: storageDeleteEffects(container),
+          group: group,
+          request: storageRowDeleteRequest(group, file)!,
+          silent: true,
+        ),
+      ))!;
+
+      expect(report.failed.single.subject, StorageDeletePathSubject(file.path));
+      expect(report.failed.single.reason, StorageDeleteFailureReason.refused);
+      expect(report.cleared, isEmpty);
+      expect(File(file.path).readAsBytesSync(), before);
+    });
+
     test('a complete delete opens no panel', () async {
       final file = _seed('documents/temp/session/free.bin');
       final container = _container();
@@ -621,6 +784,25 @@ void main() {
 
       expect(find.text('documents/chara_detail/quarantine'), findsOneWidget);
       expect(find.text(appSentenceAt('pages.storage.delete.retention_reason.set_aside')), findsOneWidget);
+    });
+
+    testWidgets('the note a delete keeps for a record on the quarantine shelf says why, in the headline and on its '
+        'row', (tester) async {
+      const note = 'documents/chara_detail/quarantine/R1/quarantine_origin.json';
+      const report = StorageDeleteReport(
+        retained: [
+          StorageDeleteRetention(
+            subject: StorageDeletePathSubject(note),
+            reason: StorageDeleteRetentionReason.identifiesShelfRecord,
+          ),
+        ],
+      );
+      final headline = storageDeleteOutcomeMessage(report).description;
+      await _pumpDialog(tester, _container(), StorageDeleteResultDialog(report: report, headline: headline));
+
+      expect(headline, contains(appSentenceAt('pages.storage.delete.cause_identifies_shelf_record')));
+      expect(find.text(note), findsOneWidget);
+      expect(find.text(appSentenceAt('pages.storage.delete.retention_reason.identifies_shelf_record')), findsOneWidget);
     });
   });
 
@@ -863,12 +1045,13 @@ void main() {
 
   group('the tree offers the button exactly where the group allows one', () {
     test('a group row removes its own roots, and two shapes have no root to name', () {
-      // Three roots, one group: metadata is `rating/`, `memo/` and the dismissal file, which is
-      // why the runner takes a list rather than one entity.
+      // Four roots, one group: metadata is `rating/`, `memo/`, the dismissal file and sync's
+      // `sync/`, which is why the runner takes a list rather than one entity.
       expect(_requestedPaths(_groupOf(StorageGroupId.metadata)), [
         _layout.charaDetailRatingDir.path,
         _layout.charaDetailMemoDir.path,
         _layout.charaDetailEnhancementDismissedFile.path,
+        _layout.charaDetailSyncDir.path,
       ]);
       expect(_requestedPaths(_groupOf(StorageGroupId.activeRecords)), [_layout.charaDetailActiveDir.path]);
       for (final id in [

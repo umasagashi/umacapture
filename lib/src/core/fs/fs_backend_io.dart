@@ -59,6 +59,18 @@ class IoFsBackend implements FsBackend {
   Future<Uint8List> readBytes(String path) => File(path).readAsBytes();
 
   @override
+  Future<Uint8List?> readBytesIfPresent(String path) async {
+    try {
+      return await File(path).readAsBytes();
+    } on PathNotFoundException {
+      return null;
+    }
+  }
+
+  @override
+  Future<FsDirectory> openDirectory(String path) async => PassThroughFsDirectory(this, path);
+
+  @override
   Future<Uint8List> readHead(String path, int maxBytes) async {
     if (maxBytes <= 0) {
       return Uint8List(0);
@@ -194,6 +206,15 @@ class IoFsBackend implements FsBackend {
 
   @override
   Uint8List readBytesSync(String path) => File(path).readAsBytesSync();
+
+  @override
+  Uint8List? readBytesIfPresentSync(String path) {
+    try {
+      return File(path).readAsBytesSync();
+    } on PathNotFoundException {
+      return null;
+    }
+  }
 
   @override
   void writeStringSync(String path, String contents) => File(path).writeAsStringSync(contents);

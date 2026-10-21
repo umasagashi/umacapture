@@ -568,6 +568,16 @@ final class RecordDirectoryTransaction {
     String recordId, {
     RecordTransactionCommittedCleanup? beforeCommittedCleanup,
   }) async {
+    return recoverRecordIn(await dataRoot.open(), recordId, beforeCommittedCleanup: beforeCommittedCleanup);
+  }
+
+  /// [recoverRecord] for a caller that has resolved the data root already, so that the slot is looked for from it:
+  /// the recovery gate resolves it once for this journal and the write journal both.
+  Future<List<RecordTransactionRecovery>> recoverRecordIn(
+    OpenedDirectory dataRoot,
+    String recordId, {
+    RecordTransactionCommittedCleanup? beforeCommittedCleanup,
+  }) async {
     if (!isSafeRecordId(recordId)) {
       // No slot name is derivable from an id this version would not write, so
       // there is nothing here to carry and nothing was committed.
@@ -586,12 +596,13 @@ final class RecordDirectoryTransaction {
 
   /// Recovers one deterministic slot, or null when there is no such slot.
   Future<RecordTransactionRecovery?> _recoverSlot(
-    DirectoryPath dataRoot,
+    OpenedDirectory openedDataRoot,
     String recordId, {
     RecordTransactionCommittedCleanup? beforeCommittedCleanup,
   }) async {
+    final dataRoot = openedDataRoot.directory;
     final slot = _transactionDirFor(dataRoot, recordId);
-    if (!await slot.exists()) return null;
+    if (!await openedDataRoot.hasDirectory(slot)) return null;
     final manifestFile = slot.filePath(_manifestName);
     final manifest = await _readManifest(manifestFile);
     if (manifest == null) {
@@ -875,11 +886,15 @@ final class RecordDirectoryTransaction {
 }
 
 Future<List<RecordTransactionRecovery>> recoverRecordDirectoryTransactionsUnlocked(
-  DirectoryPath dataRoot,
+  OpenedDirectory dataRoot,
   String recordId, {
   RecordTransactionCommittedCleanup? beforeCommittedCleanup,
 }) {
-  return RecordDirectoryTransaction().recoverRecord(dataRoot, recordId, beforeCommittedCleanup: beforeCommittedCleanup);
+  return RecordDirectoryTransaction().recoverRecordIn(
+    dataRoot,
+    recordId,
+    beforeCommittedCleanup: beforeCommittedCleanup,
+  );
 }
 
 /// Carries the archive journal's foreign slots out while the caller holds the

@@ -1820,6 +1820,7 @@ class OplogWorld extends SyncWorld {
   bool supports(Op op) =>
       op is! DeleteDismissalFile &&
       op is! DeleteColumnStore &&
+      op is! ShelfOp &&
       !(op is EditMemo && op.fromBeforeTheLimit) &&
       !(op is Capture && op.beforeTheUpgrade) &&
       !(op is ExportZip && op.beforeTheUpgrade);
@@ -1890,7 +1891,7 @@ class OplogWorld extends SyncWorld {
         d.title(column.key, name);
       case Dismiss(:final a, :final b, :final dismissed):
         d.dismiss(a, b, dismissed: dismissed);
-      case DeleteDismissalFile() || DeleteColumnStore():
+      case DeleteDismissalFile() || DeleteColumnStore() || ShelfOp():
         throw UnsupportedError('these rules have no path for $op');
       case Link(:final id, :final slot, :final parent, :final bonus):
         d.link(id, slot, parent, bonus);

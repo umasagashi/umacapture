@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
@@ -9,9 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/item_cell.dart';
 import '/src/chara_detail/spec/item_display.dart';
+import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/chara_detail/value_write_time.dart';
@@ -22,6 +26,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';
+import '/src/preference/storage_box.dart';
 
 part 'loader.mapper.dart';
 
@@ -354,20 +359,34 @@ T? _dataForMutation<T>(AsyncValue<T> state, {required String storage, required S
 // existed, and reads as older than every timed write. A storage whose title is none is a removed column storage: it is
 // not listed, and its file stays to hold the times of what the removal wrote.
 
-/// Each record field's time, kept for every field written to none as well, from [current] written over to none.
+/// The times a column storage holds once it is removed ([syncRemoveColumn]): each record field's — kept for every field
+/// written to none as well — from the fields [current] holds a value in and their [writtenAt], and its title's, from
+/// [title] (null where it is none) written at [titleWrittenAt].
 ///
-/// What removing a column storage leaves: a field a listed record holds a value in becomes none, written
-/// now; a field already none keeps its time, since nothing changes there; and nothing at all is kept for a record
-/// that is not listed, whose old value goes with the file's former contents. A null [listed] is a listing that could
-/// not be read, and counts every record as listed.
-Map<String, int> _writtenAtAfterRemoval(Map<String, Object> current, Map<String, int> writtenAt, Set<String>? listed) {
-  bool isListed(String id) => listed?.contains(id) ?? true;
-  return {
-    for (final MapEntry(:key, :value) in writtenAt.entries)
-      if (isListed(key) && !current.containsKey(key)) key: value,
-    for (final key in current.keys)
-      if (isListed(key)) key: valueWriteTime(writtenAt[key]),
-  };
+/// A field a [listed] record holds a value in becomes none, written now; a field already none keeps its time, since
+/// nothing changes there; and nothing at all is kept for a record that is not listed, whose old value goes with the
+/// file's former contents. The title is none from now, unless it already was.
+({Map<String, int> writtenAt, int? titleWrittenAt}) _timesAfterRemoval(
+  Map<String, Object> current,
+  Map<String, int> writtenAt, {
+  required String? title,
+  required int? titleWrittenAt,
+  required Set<String>? listed,
+}) {
+  final removal = syncRemoveColumn<Object>(
+    cells: {
+      for (final MapEntry(:key, :value) in writtenAt.entries)
+        if (!current.containsKey(key)) key: (value: null, time: value),
+      for (final MapEntry(:key, :value) in current.entries) key: (value: value, time: writtenAt[key]),
+    },
+    title: (value: title, time: titleWrittenAt),
+    listed: listed,
+    writeAt: valueWriteTime,
+  );
+  return (
+    writtenAt: {for (final MapEntry(key: id, value: none) in removal.cells.entries) id: ?(none?.time ?? writtenAt[id])},
+    titleWrittenAt: removal.title?.time ?? titleWrittenAt,
+  );
 }
 
 @MappableClass(ignoreNull: true)
@@ -409,21 +428,29 @@ class RatingData with RatingDataMappable {
     );
   }
 
-  /// This storage with its title set to [next], or null where it already holds it.
+  /// This storage with its title set to [next] ([syncEdit]), or null where it already holds it.
   RatingData? withTitle(String next) {
-    if (!titleCleared && title == next) {
+    final edit = syncEdit((value: titleCleared ? null : title, time: titleWrittenAt), next, writeAt: valueWriteTime);
+    if (edit == null) {
       return null;
     }
-    return copyWith(title: next, titleCleared: false, titleWrittenAt: valueWriteTime(titleWrittenAt));
+    return copyWith(title: next, titleCleared: false, titleWrittenAt: edit.time);
   }
 
-  /// This storage removed ([_writtenAtAfterRemoval]), its title none from now unless it already was.
+  /// This storage removed ([_timesAfterRemoval]).
   RatingData removed(Set<String>? listed) {
+    final times = _timesAfterRemoval(
+      data,
+      writtenAt,
+      title: titleCleared ? null : title,
+      titleWrittenAt: titleWrittenAt,
+      listed: listed,
+    );
     return RatingData(
       title: title,
       data: {},
-      writtenAt: _writtenAtAfterRemoval(data, writtenAt, listed),
-      titleWrittenAt: titleCleared ? titleWrittenAt : valueWriteTime(titleWrittenAt),
+      writtenAt: times.writtenAt,
+      titleWrittenAt: times.titleWrittenAt,
       titleCleared: true,
     );
   }
@@ -451,6 +478,71 @@ Future<void> _writeMetadataFile(FilePath path, String contents) {
 }
 
 final metadataFileWriterProvider = Provider<MetadataFileWriter>((ref) => _writeMetadataFile);
+
+/// The ids of every listed record, active and archived, or null where a set of them cannot be read.
+///
+/// Removing a column storage writes none into the fields of listed records only (see `RatingData.removed`).
+Future<Set<String>?> listedRecordIds(RefBase ref) async {
+  try {
+    final active = await ref.read(charaDetailRecordStorageLoaderProvider.future);
+    final archive = await ref.read(charaDetailArchiveStorageLoaderProvider.future);
+    return {
+      for (final record in [...active, ...archive]) record.id,
+    };
+  } catch (error, stackTrace) {
+    logger.w("Could not list the records a column storage removal writes into.", error, stackTrace);
+    return null;
+  }
+}
+
+/// What [writeColumnStorageRemoval] did to a column storage file.
+enum ColumnStorageRemoval {
+  /// The file could not be read as a storage: what it held cannot be told, so no none was written for it.
+  unreadable,
+
+  /// Its values and title were written to none now; the file stays to hold those times.
+  written,
+
+  /// Its title and every value were already none, so there was nothing to remove and nothing was written.
+  alreadyRemoved,
+}
+
+/// Removes the column storage in [file] the way its controller's `remove` does — the title and every value a [listed]
+/// record holds become none, written now — and answers what that did ([ColumnStorageRemoval]).
+///
+/// A storage whose title and values are all none already is left byte for byte, since nothing in it changes; one whose
+/// title is none but which holds values written since has those values removed. The removal replaces the file whole
+/// ([FilePath.replaceWhole]), so a failed write throws and the file holds what it held before.
+Future<ColumnStorageRemoval> writeColumnStorageRemoval(
+  FilePath file, {
+  required MetadataStorageKind kind,
+  required Set<String>? listed,
+}) async {
+  initializeMappers();
+  final String removed;
+  try {
+    final json = await file.readAsString();
+    switch (kind) {
+      case MetadataStorageKind.rating:
+        final stored = RatingDataMapper.fromJson(json);
+        if (stored.titleCleared && stored.data.isEmpty) return ColumnStorageRemoval.alreadyRemoved;
+        removed = stored.removed(listed).toJson();
+      case MetadataStorageKind.memo:
+        final stored = MemoDataMapper.fromJson(json);
+        if (stored.titleCleared && stored.data.isEmpty) return ColumnStorageRemoval.alreadyRemoved;
+        removed = stored.removed(listed).toJson();
+    }
+  } catch (error, stackTrace) {
+    logger.w(
+      "Column storage could not be read, so its removal cannot be written: path=${file.path}",
+      error,
+      stackTrace,
+    );
+    return ColumnStorageRemoval.unreadable;
+  }
+  await file.replaceWhole(utf8.encode(removed));
+  return ColumnStorageRemoval.written;
+}
 
 /// Which of the two metadata storages a write belongs to.
 enum MetadataStorageKind { rating, memo }
@@ -665,10 +757,14 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
   // already holds is not a write, so it neither advances the time nor needs a save.
   bool updateWithoutNotify(String recordId, double rating) {
     final data = _dataFor("a rating for $recordId");
-    if (data == null || data.data[recordId] == rating) {
+    if (data == null) {
       return false;
     }
-    data.writtenAt[recordId] = valueWriteTime(data.writtenAt[recordId]);
+    final edit = _ratingEdit(data, recordId, rating);
+    if (edit == null) {
+      return false;
+    }
+    data.writtenAt[recordId] = edit.time;
     data.data[recordId] = rating;
     return true;
   }
@@ -677,17 +773,22 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
   // `AsyncNotifier.update` modifier, which has an incompatible signature.
   bool updateRating(String recordId, double rating) {
     final data = _dataFor("a rating for $recordId");
-    if (data == null || data.data[recordId] == rating) {
+    if (data == null) {
+      return false;
+    }
+    final edit = _ratingEdit(data, recordId, rating);
+    if (edit == null) {
       return false;
     }
     state = AsyncData(
-      data.copyWith(
-        data: {...data.data, recordId: rating},
-        writtenAt: {...data.writtenAt, recordId: valueWriteTime(data.writtenAt[recordId])},
-      ),
+      data.copyWith(data: {...data.data, recordId: rating}, writtenAt: {...data.writtenAt, recordId: edit.time}),
     );
     return true;
   }
+
+  /// The write of [rating] into [recordId]'s field of [data] ([syncEdit]), or null where it holds it already.
+  static SyncValue<double?>? _ratingEdit(RatingData data, String recordId, double rating) =>
+      syncEdit((value: data.data[recordId], time: data.writtenAt[recordId]), rating, writeAt: valueWriteTime);
 
   bool updateTitle(String title) {
     final data = _dataFor("a title change");
@@ -716,6 +817,19 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
     }
     final contents = data.copyWith(data: {...data.data}, writtenAt: {...data.writtenAt}).toJson();
     enqueueWrite(() => _writeFile(path, contents));
+  }
+
+  /// Puts in place what a sync round took in for this storage: [apply] over what this controller holds now, written
+  /// behind every write already issued, through the chain an edit writes through — so neither can land over the other.
+  /// Answers false, changing nothing, while the storage is still loading.
+  bool takeSynced(RatingData Function(RatingData held) apply) {
+    final data = _dataFor("values a sync round took in");
+    if (data == null) {
+      return false;
+    }
+    state = AsyncData(apply(data));
+    save();
+    return true;
   }
 }
 
@@ -817,19 +931,27 @@ class MemoData with MemoDataMappable {
 
   /// As [RatingData.withTitle].
   MemoData? withTitle(String next) {
-    if (!titleCleared && title == next) {
+    final edit = syncEdit((value: titleCleared ? null : title, time: titleWrittenAt), next, writeAt: valueWriteTime);
+    if (edit == null) {
       return null;
     }
-    return copyWith(title: next, titleCleared: false, titleWrittenAt: valueWriteTime(titleWrittenAt));
+    return copyWith(title: next, titleCleared: false, titleWrittenAt: edit.time);
   }
 
   /// As [RatingData.removed].
   MemoData removed(Set<String>? listed) {
+    final times = _timesAfterRemoval(
+      data,
+      writtenAt,
+      title: titleCleared ? null : title,
+      titleWrittenAt: titleWrittenAt,
+      listed: listed,
+    );
     return MemoData(
       title: title,
       data: {},
-      writtenAt: _writtenAtAfterRemoval(data, writtenAt, listed),
-      titleWrittenAt: titleCleared ? titleWrittenAt : valueWriteTime(titleWrittenAt),
+      writtenAt: times.writtenAt,
+      titleWrittenAt: times.titleWrittenAt,
       titleCleared: true,
     );
   }
@@ -915,6 +1037,17 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
     enqueueWrite(() => _writeFile(path, contents));
   }
 
+  /// As [CharaDetailRecordRatingController.takeSynced].
+  bool takeSynced(MemoData Function(MemoData held) apply) {
+    final data = _dataFor("values a sync round took in");
+    if (data == null) {
+      return false;
+    }
+    state = AsyncData(apply(data));
+    _save();
+    return true;
+  }
+
   // Named `updateMemo` (not `update`) to avoid colliding with the inherited
   // `AsyncNotifier.update` modifier, which has an incompatible signature.
   //
@@ -923,13 +1056,17 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
   void updateMemo({required String recordId, required String? memo}) {
     final data = _dataFor("a memo for $recordId");
     final next = memo == null || memo.isEmpty ? null : memo;
-    if (data == null || data.data[recordId] == next) {
+    if (data == null) {
+      return;
+    }
+    final edit = syncEdit((value: data.data[recordId], time: data.writtenAt[recordId]), next, writeAt: valueWriteTime);
+    if (edit == null) {
       return;
     }
     state = AsyncData(
       data.copyWith(
         data: next == null ? ({...data.data}..remove(recordId)) : {...data.data, recordId: next},
-        writtenAt: {...data.writtenAt, recordId: valueWriteTime(data.writtenAt[recordId])},
+        writtenAt: {...data.writtenAt, recordId: edit.time},
       ),
     );
     _save();
@@ -989,6 +1126,40 @@ final charaDetailRecordMemoProvider = AsyncNotifierProvider.family<CharaDetailRe
 final currentColumnSpecsLoaderProvider = AsyncNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>(
   ColumnSpecSelection.new,
 );
+
+/// Gives the title [title] to every column of every preset whose stored map [heads] picks: the copies of a column
+/// storage's title that the table heads its columns with and that a column's settings start from ([N15-23]). Without
+/// it, a title a sync round gave the storage would be written back over by the next confirm of a column's settings
+/// that still held the old one. The selected preset goes through its [ColumnSpecSelection] where one is alive, which
+/// shows and keeps it; every other preset is rewritten in its stored entry.
+void retitleColumnsInPresets(RefBase ref, bool Function(Map<String, dynamic> stored) heads, String title) {
+  final selected = ref.read(selectedColumnSpecEntryKeyProvider);
+  final box = StorageBox(StorageBoxKey.columnSpec);
+  for (final preset in ref.read(columnPresetIndexProvider).presets) {
+    final entryKey = ColumnPresetIndex.specEntryKey(preset.key);
+    if (entryKey == selected && ref.exists(currentColumnSpecsLoaderProvider)) {
+      ref.read(currentColumnSpecsLoaderProvider.notifier).retitleColumns(heads, title);
+      continue;
+    }
+    final entry = box.entry<String>(entryKey);
+    final raw = entry.pull();
+    if (raw == null) continue;
+    final stored = jsonDecode(raw) as List<dynamic>;
+    if (_retitleStored(stored, heads, title)) entry.push(jsonEncode(stored));
+  }
+}
+
+bool _retitleStored(List<dynamic> stored, bool Function(Map<String, dynamic> stored) heads, String title) {
+  var changed = false;
+  for (final map in stored.whereType<Map<String, dynamic>>()) {
+    if (heads(map) && map['title'] != title) {
+      map['title'] = title;
+      changed = true;
+    }
+    if (map['children'] case final List<dynamic> children) changed = _retitleStored(children, heads, title) || changed;
+  }
+  return changed;
+}
 
 // Thin synchronous view over the loaded column specs. Mutating callers use
 // currentColumnSpecsLoaderProvider.notifier instead.

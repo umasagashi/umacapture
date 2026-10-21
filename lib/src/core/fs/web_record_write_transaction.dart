@@ -534,10 +534,16 @@ final class WebRecordWriteTransaction {
   /// Recovers only this record's deterministic slot. Callers holding the
   /// record lock may use this as a read/mutation gate before touching final.
   Future<WebRecordWriteResult> recoverRecord(DirectoryPath dataRoot, String recordId) async {
+    return recoverRecordIn(await dataRoot.open(), recordId);
+  }
+
+  /// [recoverRecord] for a caller that has resolved the data root already, so that the slot is looked for from it:
+  /// the recovery gate resolves it once for this journal and the archive journal both.
+  Future<WebRecordWriteResult> recoverRecordIn(OpenedDirectory dataRoot, String recordId) async {
     if (!isSafeRecordId(recordId)) return WebRecordWriteResult.invalidInput;
-    final slot = _transactionDir(dataRoot, recordId);
-    if (!await slot.exists()) return WebRecordWriteResult.completed;
-    return (await _recoverSlot(dataRoot, slot)).result;
+    final slot = _transactionDir(dataRoot.directory, recordId);
+    if (!await dataRoot.hasDirectory(slot)) return WebRecordWriteResult.completed;
+    return (await _recoverSlot(dataRoot.directory, slot)).result;
   }
 
   /// Carries one slot as far as it goes, and sets aside what it cannot carry.
@@ -1263,8 +1269,8 @@ Future<List<WebRecordWriteRecovery>> recoverWebRecordWriteTransactionsUnlocked(D
   return WebRecordWriteTransaction().recoverAll(dataRoot);
 }
 
-Future<WebRecordWriteResult> recoverWebRecordWriteTransactionUnlocked(DirectoryPath dataRoot, String recordId) {
-  return WebRecordWriteTransaction().recoverRecord(dataRoot, recordId);
+Future<WebRecordWriteResult> recoverWebRecordWriteTransactionUnlocked(OpenedDirectory dataRoot, String recordId) {
+  return WebRecordWriteTransaction().recoverRecordIn(dataRoot, recordId);
 }
 
 /// One entry of [_WriteManifest.overlays]: a path relative to `desired/`, and

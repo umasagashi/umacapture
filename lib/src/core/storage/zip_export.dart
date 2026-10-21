@@ -27,6 +27,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/record_archive_state.dart';
 import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
@@ -609,15 +610,14 @@ typedef StorageZipRecords = ({
 /// with the binding.
 Future<StorageZipRecords> placeStorageZipRecordBindings(RefBase ref, DirectoryPath directory) async {
   final info = await ref.read(pathLayoutLoader.future);
-  final recordDirs = <String>[];
-  final recordJsons = <String, Uint8List>{};
+  final directories = await recordDirectoriesAt(info, directory);
+  final recordDirs = [for (final recordDir in directories) recordDir.path];
+  final placed = await placeRecordBindingsUnlocked(ref, directories);
+  final recordJsons = <String, Uint8List>{
+    for (final recordDir in directories) recordDir.filePath('record.json').path: ?placed[recordDir.path],
+  };
   final archiveNotes = <String, Uint8List>{};
-  for (final recordDir in await recordDirectoriesAt(info, directory)) {
-    recordDirs.add(recordDir.path);
-    final bytes = await placeRecordBindingUnlocked(recordDir);
-    if (bytes != null) {
-      recordJsons[recordDir.filePath('record.json').path] = bytes;
-    }
+  for (final recordDir in directories) {
     if (await exportedArchiveNoteOf(recordDir) case final note?) {
       archiveNotes[recordDir.path] = note;
     }

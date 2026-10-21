@@ -545,6 +545,7 @@ class JudgeReadings {
     this.splitNeedsARival = false,
     this.annotationsStayWithTheirRecord = false,
     this.mergeEditsWhatItChanges = false,
+    this.mergeScreenKeepsAValue = false,
     this.archivesStay = false,
     this.importOverArchive = false,
     this.mergedArchiveIsOne = false,
@@ -576,6 +577,7 @@ class JudgeReadings {
     splitNeedsARival: splitNeedsARival,
     annotationsStayWithTheirRecord: annotationsStayWithTheirRecord,
     mergeEditsWhatItChanges: mergeEditsWhatItChanges,
+    mergeScreenKeepsAValue: mergeScreenKeepsAValue,
     archivesStay: archivesStay,
     importOverArchive: importOverArchive,
     mergedArchiveIsOne: mergedArchiveIsOne ?? this.mergedArchiveIsOne,
@@ -718,6 +720,12 @@ class JudgeReadings {
   /// it, also one made before the merge. Without this reading every annotation the survivor shows
   /// after a merge is an edit as late as the device shows it.
   final bool mergeEditsWhatItChanges;
+
+  /// The merge screen settles, per column, the value of the record whose content the merge kept where that record
+  /// holds one, and the other record's where it holds none — no cell, or a cell whose value was removed — as the app's
+  /// screen does by default for two records it takes as the same ([R4-3] leaves the choice to the screen). Without this
+  /// reading the kept content's record's cell is settled whenever it holds one, a cell without a value included.
+  final bool mergeScreenKeepsAValue;
 
   /// Choices are followed by the versions the user's operations made and saw, read from the log
   /// ([Judge.log]), instead of by record ids: a user who discards a record discards the version it
@@ -2565,7 +2573,7 @@ class Judge {
       Iterable<SyncSideRecord> records, {
       required Set<String> said,
       required Set<String> lists,
-      Map<String, String> self = const {},
+      Map<String, String> splitTo = const {},
     }) => syncSideSays(
       _pairsAgreed[device] ?? const <String>{},
       records,
@@ -2573,10 +2581,7 @@ class Judge {
       absorbers: absorbers,
       said: said,
       lists: lists,
-      self: (id) => switch (self[id]) {
-        final to? => {to},
-        null => ends(id),
-      },
+      splitTo: splitTo,
     );
 
     final brought = read(had.where(ofSplit), own: true);
@@ -2591,7 +2596,7 @@ class Judge {
       [for (final r in pre.records.values) (id: r.id, absorbed: r.absorbed)],
       said: {...listedMine, ...brought},
       lists: had,
-      self: split,
+      splitTo: split,
     );
     final agreed = {...read(_pairsAgreed[device] ?? const <String>{}), ...server0.none, ...mine0.none};
     final there = {...listedServer, ...server0.asBase};
@@ -3738,16 +3743,16 @@ class Judge {
           if (_shownBefore[retired] case final v?) _removedVersions.putIfAbsent(v, () => {}).add(op.device);
         }
         // The merge screen: per column, the survivor shows the value of the record whose content the
-        // merge kept, else the other record's.
+        // merge kept, else the other record's ([JudgeReadings.mergeScreenKeepsAValue]: the kept one's
+        // where it holds a value).
         if (untracked == Untracked.none && !post.records.containsKey(retired)) {
           for (final column in {
             for (final c in pre.annotations.keys)
               if (c.id == a || c.id == b) c.column,
           }) {
-            final want =
-                (pre.annotations[(column: column, id: contentFrom)] ??
-                        pre.annotations[(column: column, id: contentFrom == a ? b : a)])
-                    ?.value;
+            final kept = pre.annotations[(column: column, id: contentFrom)];
+            final other = pre.annotations[(column: column, id: contentFrom == a ? b : a)];
+            final want = readings.mergeScreenKeepsAValue ? kept?.value ?? other?.value : (kept ?? other)?.value;
             final got = post.annotations[(column: column, id: survivor)]?.value;
             if (got != want) {
               _report(
@@ -4921,7 +4926,7 @@ class Judge {
   static bool _imagePresent(Observation obs, String token) =>
       obs.serverImages.contains(token) ||
       obs.liveRows.any((r) => r.imageSet == token) ||
-      obs.devices.values.any((d) => d.imagesKept.contains(token) || d.records.values.any((r) => r.imageSet == token));
+      obs.devices.values.any((d) => d.records.values.any((r) => r.imageSet == token));
 
   /// Notes each time the image [o] needs is on no record ([_imagesLost]). Whether a loss is the
   /// user's own removal or accepted depends on how the merges that caused it were later taken, so it

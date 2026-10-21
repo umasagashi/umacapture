@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
@@ -13,6 +14,9 @@ import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/factor_enhancement.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
+import '/src/chara_detail/record_archive_state.dart';
+import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/record_notes.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/fs/record_mutation_lock.dart';
@@ -671,6 +675,41 @@ DirectoryPath recordDirOfId(PathInfo pathInfo, RecordSource source, String id) {
   return root / id;
 }
 
+/// Everything that has to be re-read once records were published into the tree past the stores: by a zip import, or
+/// by a sync round putting its result in place.
+///
+/// **One function rather than the three calls it makes, and one for both writers**, so the whole of what such a
+/// publication changes is stated once and not spread across each writer's completion: both write records into the
+/// tree exactly as a capture does, and the two consequences of that — the stores no longer hold the right list, and
+/// the storage view no longer holds the right size — belong to the same fact.
+///
+/// The stores are rescanned rather than patched: a publication writes into the store of each record's archive state
+/// and takes the record out of the other, so both are re-listed. [effects] is handed the record root for the totals,
+/// which is what makes a size shown on an open storage tab follow a publication that finishes behind it, and the
+/// directories of [writtenIds] for the pictures: a publication goes over a record id that is already stored, under the
+/// same path, so a picture of that record decoded before it would otherwise go on being shown. [writtenIds] are the ids
+/// the publications committed and nothing else -- a record the store refused left its directory as it was.
+void applyRecordsPublished(
+  RefBase ref,
+  PathInfo pathInfo, {
+  required Iterable<String> writtenIds,
+  required RecordWriteEffects effects,
+}) {
+  ref.invalidate(charaDetailRecordStorageLoaderProvider);
+  ref.invalidate(charaDetailArchiveStorageLoaderProvider);
+  effects.images.apply(
+    RecordImageScope(
+      info: pathInfo,
+      // Both stores: a publication lands a record in the store of its archive state, and takes it out of the other.
+      changed: [
+        for (final id in writtenIds)
+          for (final source in [RecordSource.active, RecordSource.archive]) recordDirOfId(pathInfo, source, id).path,
+      ],
+    ),
+  );
+  effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+}
+
 /// What a delete of [recordIds] from [source] holds in the long-read registry:
 /// each record's own directory.
 ///
@@ -874,10 +913,14 @@ String? discardableArrivalIdIn(Iterable<CharaDetailRecord> existing, CharaDetail
     _holdsRecordId(existing, record.id) ? null : record.id;
 
 final class RecordDeleteResult {
-  const RecordDeleteResult({required this.succeeded, required this.failed});
+  const RecordDeleteResult({required this.succeeded, required this.failed, this.left = const {}});
 
   final Set<String> succeeded;
   final Set<String> failed;
+
+  /// The ids the delete's condition left in place: neither erased nor failed (see
+  /// [CharaDetailRecordMutator.deleteAllAsync]).
+  final Set<String> left;
 
   bool get isSuccess => failed.isEmpty;
 }
@@ -936,7 +979,14 @@ abstract interface class CharaDetailRecordMutator {
   /// record root.
   ///
   /// Claimed as one delete over every id in [ids], and refused and released as [deleteAsync] is.
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects});
+  ///
+  /// Where [onlyIf] is given, it is asked of each id under that record's lock, before its directory is erased; an id
+  /// it answers false for is left as it is, in [RecordDeleteResult.left], and raises no error.
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  });
 }
 
 /// Hands [effects] what a finished delete in the store rooted at [store] erased, removes what the erased records
@@ -1004,7 +1054,14 @@ abstract interface class CharaDetailRecordMergeSurface {
   /// knowing which store the survivor came from — which is the question the
   /// merge is answering, not one it can ask. A store that has never loaded
   /// ignores it: its next build reads the record.json the merge already wrote.
-  void adoptRecordInMemory(CharaDetailRecord record);
+  ///
+  /// [notes] replaces what the store holds beside the record ([notesOf]); without it the store keeps what it holds
+  /// for an id it already serves, and a record new to it holds [RecordNotes.none].
+  void adoptRecordInMemory(CharaDetailRecord record, {RecordNotes? notes});
+
+  /// What this store holds beside the record [id]'s `record.json` — read with the record, and replaced by every
+  /// write of this app to those files — or null where it serves no record [id].
+  RecordNotes? notesOf(String id);
 
   /// Drops [id] from this store's published list, and changes nothing on disk.
   ///
@@ -1194,6 +1251,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       // store that could not be listed must not publish an empty list.
       final (:results, :unavailable) = await _scanOrReportOutage(ref, () => scanRecords(rootDirectory));
       records.addAll(results.whereType<RecordLoaded>().map((e) => e.record));
+      _notes = {for (final loaded in results.whereType<RecordLoaded>()) loaded.record.id: loaded.notes};
       _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
       _unavailableRecordIds = Set.unmodifiable(unavailable.keys);
       _surfaceUnavailableRecords(ref, unavailable);
@@ -1281,6 +1339,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   // publishes it. Kept separate so we never mutate the list held by the live
   // AsyncData (which would defeat riverpod's identity-based change detection).
   List<CharaDetailRecord>? _pendingRecords;
+
+  /// What each record this store serves holds beside its `record.json`, by id ([notesOf]).
+  Map<String, RecordNotes> _notes = {};
+
+  @override
+  RecordNotes? notesOf(String id) => getBy(id: id) == null ? null : _notes[id];
 
   /// Ids the last scan could not open at all (see [RecordScanResult]).
   ///
@@ -1504,7 +1568,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// attempt the record belongs to; see [_reportRejectedDuplicate]).
   ///
   /// Defaulted to true, so every caller that does not know about imports keeps a live capture's cue.
-  void add(CharaDetailRecord record, {bool notifyDuplicate = true}) {
+  ///
+  /// [notes] is what the record's directory holds beside its `record.json`, read with it.
+  void add(CharaDetailRecord record, {required RecordNotes notes, bool notifyDuplicate = true}) {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
       // A directory named by an id the store already holds is that stored
@@ -1526,6 +1592,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     // Publishing the new list and clearing the buffer keeps the next replaceBy
     // re-snapshotting cleanly.
     _pendingRecords = null;
+    _notes[record.id] = notes;
     state = AsyncData(plan.newState);
 
     _surfaceInheritance(plan.resolution!);
@@ -1573,7 +1640,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       switch (result) {
         case RecordQuarantined():
           _surfaceQuarantines(ref, [result]);
-        case RecordLoaded(:final record):
+        case RecordLoaded(:final record, :final notes):
           await _runForStableRecordSet<void>(
             recoveryGate: recordRecoveryGate,
             storageRoot: storageRoot,
@@ -1593,7 +1660,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
                 logger.w("Imported record $id disappeared before it could be merged.");
                 return;
               }
-              await _addAsync(record, notifyDuplicate: notifyDuplicate);
+              await _addAsync(record, notes: notes, notifyDuplicate: notifyDuplicate);
             },
           );
       }
@@ -1717,7 +1784,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// Executes a resolved web import while [_additionMutationIds]' locks are held.
   /// Do not call a public archive mutation from here: it would try to acquire a
   /// nested lock for records already held by this scope.
-  Future<void> _addAsync(CharaDetailRecord record, {bool notifyDuplicate = true}) async {
+  Future<void> _addAsync(CharaDetailRecord record, {required RecordNotes notes, bool notifyDuplicate = true}) async {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
       // See [add]: a stored id's directory is never this arrival's to discard.
@@ -1740,6 +1807,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     _updateRecordInfo(plan.resolvedRecord!);
 
     _pendingRecords = null;
+    _notes[record.id] = notes;
     state = AsyncData(plan.newState);
 
     _surfaceInheritance(plan.resolution!);
@@ -2036,8 +2104,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     }
     final result = CharaDetailRecord.load(rootDirectory / id);
     switch (result) {
-      case RecordLoaded(:final record):
-        add(record, notifyDuplicate: notifyDuplicate);
+      case RecordLoaded(:final record, :final notes):
+        add(record, notes: notes, notifyDuplicate: notifyDuplicate);
       case RecordQuarantined():
         _surfaceQuarantines(ref, [result]);
     }
@@ -2076,7 +2144,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   }
 
   @override
-  void adoptRecordInMemory(CharaDetailRecord record) {
+  void adoptRecordInMemory(CharaDetailRecord record, {RecordNotes? notes}) {
     final current = state.asData?.value;
     if (current == null) {
       return;
@@ -2085,8 +2153,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     final index = records.indexWhere((e) => e.id == record.id);
     if (index == -1) {
       records.add(record);
+      _notes[record.id] = notes ?? RecordNotes.none;
     } else {
       records[index] = record;
+      if (notes != null) _notes[record.id] = notes;
     }
     forceRebuild();
   }
@@ -2170,8 +2240,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       return;
     }
     switch (result) {
-      case RecordLoaded(:final record):
+      case RecordLoaded(:final record, :final notes):
         replaceBy(record, id: id);
+        if (getBy(id: id) != null) _notes[id] = notes;
       case RecordQuarantined(:final destination):
         if (destination != null) {
           removeRecords([id]);
@@ -2212,17 +2283,28 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   ///
   /// The map's values are unused: a delete's whole per-record payload is the id.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) async {
     return holdForDelete(
       ref.read(longReadRegistryProvider.notifier),
       paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.active, recordIds: ids),
       action: (_) async {
         final succeeded = <String>{};
         final failed = <String>{};
+        final left = <String>{};
         await recordRecoveryGate.runPerRecord(
           rootDirectory.parent.parent,
           {for (final id in ids) id: null},
-          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          (id, _) async {
+            if (onlyIf != null && !await onlyIf(id)) {
+              left.add(id);
+            } else {
+              (await _deleteOneUnlocked(id) ? succeeded : failed).add(id);
+            }
+          },
           declaration: _declaredByTheDeleteClaim,
           onNotReady: (id, error, stackTrace) {
             failed.add(id);
@@ -2230,7 +2312,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
           },
         );
         return _declareDeleted(
-          _reportDeleted(succeeded: succeeded, failed: failed),
+          _reportDeleted(succeeded: succeeded, failed: failed, left: left),
           ref: ref.base,
           info: _pathInfo,
           store: rootDirectory,
@@ -2288,12 +2370,20 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   /// Publishes the surviving list once, raises the error toast if anything was
   /// left behind, and turns the two sets into the caller's result.
-  RecordDeleteResult _reportDeleted({required Set<String> succeeded, required Set<String> failed}) {
+  RecordDeleteResult _reportDeleted({
+    required Set<String> succeeded,
+    required Set<String> failed,
+    Set<String> left = const {},
+  }) {
     if (succeeded.isNotEmpty) removeRecords(succeeded);
     if (failed.isNotEmpty) {
       Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
     }
-    return RecordDeleteResult(succeeded: Set.unmodifiable(succeeded), failed: Set.unmodifiable(failed));
+    return RecordDeleteResult(
+      succeeded: Set.unmodifiable(succeeded),
+      failed: Set.unmodifiable(failed),
+      left: Set.unmodifiable(left),
+    );
   }
 
   /// Drops [ids] from the in-memory record set and republishes once.
@@ -2302,9 +2392,26 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// (after moving directories out of `active/`). It stages the filtered list in
   /// the buffer and lets [forceRebuild] publish it a single time (rebuilding the
   /// card map), instead of emitting state per id.
+  /// Takes each of [records] as its `record.json` now stands, for a record this store serves whose binding it does
+  /// not hold yet ([placeRecordBindingsUnlocked]), and publishes once. A store that has not loaded holds nothing to
+  /// update: its build reads the files.
+  void _takePlacedBindings(List<CharaDetailRecord> records) {
+    if (state.asData == null) return;
+    final changed = [
+      for (final record in records)
+        if (getBy(id: record.id) case final held? when held.metadata.binding != record.metadata.binding) record,
+    ];
+    if (changed.isEmpty) return;
+    for (final record in changed) {
+      replaceBy(record, id: record.id);
+    }
+    forceRebuild();
+  }
+
   void removeRecords(Iterable<String> ids) {
     final idSet = ids.toSet();
     _pendingRecords = _records.where((e) => !idSet.contains(e.id)).toList();
+    _notes.removeWhere((id, _) => idSet.contains(id));
     forceRebuild();
   }
 
@@ -2489,6 +2596,37 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
   return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
 });
 
+/// Places the binding on the record in each of [directories] whose `record.json` carries none
+/// ([placeRecordBindingUnlocked]), and puts each record that placing changed into the store that serves it, so the
+/// stores hold what the `record.json` files now hold. Answers each record's `record.json` bytes, with its binding, by
+/// the path of its directory; a directory holding no record that can be read is left out.
+///
+/// The one way a caller on the main isolate places a binding: the zip exports and the storage view's image delete. The
+/// archive is the exception, for a platform reason: on desktop it places in the worker isolate the batch runs in
+/// (`archive_executor_io.dart`), which has no stores, so both of its legs place with the primitive and hand the bytes
+/// back to [CharaArchiveController], which puts the moved record into the archive store. A store that has not been
+/// built is left alone: its build reads the files written here.
+///
+/// The caller holds each directory's record lock or the store's root scope.
+Future<Map<String, Uint8List>> placeRecordBindingsUnlocked(RefBase ref, Iterable<DirectoryPath> directories) async {
+  final placed = <String, Uint8List>{};
+  final active = <CharaDetailRecord>[];
+  final archived = <CharaDetailRecord>[];
+  for (final directory in directories) {
+    final bytes = await placeRecordBindingUnlocked(directory);
+    if (bytes == null) continue;
+    placed[directory.path] = bytes;
+    (isInArchiveStore(directory) ? archived : active).add(CharaDetailRecord.fromRecordJson(utf8.decode(bytes)));
+  }
+  if (ref.exists(charaDetailRecordStorageLoaderProvider)) {
+    ref.read(charaDetailRecordStorageLoaderProvider.notifier)._takePlacedBindings(active);
+  }
+  if (ref.exists(charaDetailArchiveStorageLoaderProvider)) {
+    ref.read(charaDetailArchiveStorageLoaderProvider.notifier)._takePlacedBindings(archived);
+  }
+  return placed;
+}
+
 /// Storage for the archived records under `chara_detail/archive/`.
 ///
 /// Deliberately minimal: unlike [CharaDetailRecordStorage] it registers no
@@ -2538,8 +2676,15 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
     // remembered the same way.
     _unavailableRecordIds = Set.unmodifiable(unavailable.keys);
     _surfaceUnavailableRecords(ref, unavailable);
+    _notes = {for (final loaded in results.whereType<RecordLoaded>()) loaded.record.id: loaded.notes};
     return results.whereType<RecordLoaded>().map((e) => e.record).toList();
   }
+
+  /// What each archived record this store serves holds beside its `record.json`, by id ([notesOf]).
+  Map<String, RecordNotes> _notes = {};
+
+  @override
+  RecordNotes? notesOf(String id) => getBy(id: id) == null ? null : _notes[id];
 
   /// Ids the last archive scan could not open. See
   /// [CharaDetailRecordStorage._unavailableRecordIds].
@@ -2610,15 +2755,16 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   }
 
   @override
-  void adoptRecordInMemory(CharaDetailRecord record) {
+  void adoptRecordInMemory(CharaDetailRecord record, {RecordNotes? notes}) {
     final current = state.asData?.value;
     if (current == null) {
       return;
     }
     if (current.any((e) => e.id == record.id)) {
+      if (notes != null) _notes[record.id] = notes;
       _swapInMemory([record]);
     } else {
-      insert([record]);
+      insert([(record: record, notes: notes ?? RecordNotes.none)]);
     }
   }
 
@@ -2628,10 +2774,20 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
     if (current == null) {
       return;
     }
+    _notes.remove(id);
     state = AsyncData([
       for (final e in current)
         if (e.id != id) e,
     ]);
+  }
+
+  /// See [CharaDetailRecordStorage._takePlacedBindings].
+  void _takePlacedBindings(List<CharaDetailRecord> records) {
+    final changed = [
+      for (final record in records)
+        if (getBy(id: record.id) case final held? when held.metadata.binding != record.metadata.binding) record,
+    ];
+    if (changed.isNotEmpty) _swapInMemory(changed);
   }
 
   /// Swaps [records] into the in-memory list by id, a no-op if the archive view
@@ -2645,18 +2801,21 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
     state = AsyncData([for (final e in current) byId[e.id] ?? e]);
   }
 
-  /// Appends just-archived [records] to the in-memory list, mirroring the active
-  /// store's [CharaDetailRecordStorage.removeRecords].
+  /// Appends just-archived [records] to the in-memory list, each with what its directory holds beside its
+  /// `record.json` ([notesOf]), mirroring the active store's [CharaDetailRecordStorage.removeRecords].
   ///
   /// Used by the archive flow instead of invalidating (and re-scanning every
   /// archived directory from disk). No-op when the archive view has never been
   /// loaded — the next build reads the moved directories straight from disk.
-  void insert(List<CharaDetailRecord> records) {
+  void insert(List<({CharaDetailRecord record, RecordNotes notes})> records) {
     final current = state.asData?.value;
     if (current == null) {
       return;
     }
-    state = AsyncData([...current, ...records]);
+    for (final (:record, :notes) in records) {
+      _notes[record.id] = notes;
+    }
+    state = AsyncData([...current, for (final entry in records) entry.record]);
   }
 
   /// Permanently deletes an archived record's directory and republishes.
@@ -2681,17 +2840,28 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// per-record for the same reason: see that method for why one record's
   /// recovery failure must not be a precondition of the whole batch.
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) async {
     return holdForDelete(
       ref.read(longReadRegistryProvider.notifier),
       paths: recordDeleteLongReadPaths(pathInfo: _pathInfo, source: RecordSource.archive, recordIds: ids),
       action: (_) async {
         final succeeded = <String>{};
         final failed = <String>{};
+        final left = <String>{};
         await recordRecoveryGate.runPerRecord(
           rootDirectory.parent.parent,
           {for (final id in ids) id: null},
-          (id, _) async => (await _deleteOneUnlocked(id) ? succeeded : failed).add(id),
+          (id, _) async {
+            if (onlyIf != null && !await onlyIf(id)) {
+              left.add(id);
+            } else {
+              (await _deleteOneUnlocked(id) ? succeeded : failed).add(id);
+            }
+          },
           declaration: _declaredByTheDeleteClaim,
           onNotReady: (id, error, stackTrace) {
             failed.add(id);
@@ -2699,7 +2869,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
           },
         );
         return _declareDeleted(
-          _reportDeleted(succeeded: succeeded, failed: failed),
+          _reportDeleted(succeeded: succeeded, failed: failed, left: left),
           ref: ref.base,
           info: _pathInfo,
           store: rootDirectory,
@@ -2751,15 +2921,24 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// Reads the list back here rather than filtering the snapshot the delete
   /// started from: the erasures are awaited, so a record archived in between
   /// would otherwise be dropped by a republish that never saw it.
-  RecordDeleteResult _reportDeleted({required Set<String> succeeded, required Set<String> failed}) {
+  RecordDeleteResult _reportDeleted({
+    required Set<String> succeeded,
+    required Set<String> failed,
+    Set<String> left = const {},
+  }) {
     final records = state.asData?.value;
     if (records != null && succeeded.isNotEmpty) {
+      _notes.removeWhere((id, _) => succeeded.contains(id));
       state = AsyncData(records.where((record) => !succeeded.contains(record.id)).toList());
     }
     if (failed.isNotEmpty) {
       Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
     }
-    return RecordDeleteResult(succeeded: Set.unmodifiable(succeeded), failed: Set.unmodifiable(failed));
+    return RecordDeleteResult(
+      succeeded: Set.unmodifiable(succeeded),
+      failed: Set.unmodifiable(failed),
+      left: Set.unmodifiable(left),
+    );
   }
 }
 
@@ -3012,9 +3191,21 @@ class CharaArchiveController extends Notifier<Progress> {
                   archive_executor.ArchiveBatchArgs(items),
                   recoveryGate: debugRecoveryGate,
                 );
+                // Each moved record as the executor left it: its record.json with the binding placed before the
+                // move, its note, and the ids it absorbed, which move with its directory unchanged.
+                final movedRecords = <String, ({CharaDetailRecord record, RecordNotes notes})>{};
                 for (var i = 0; i < ids.length; i++) {
-                  if (results[i]) {
+                  if (results[i] case (:final recordJson, :final note)) {
                     archived.add(ids[i]);
+                    final record = recordJson == null
+                        ? archivedRecordsById[ids[i]]
+                        : CharaDetailRecord.fromRecordJson(utf8.decode(recordJson));
+                    if (record != null) {
+                      movedRecords[ids[i]] = (
+                        record: record,
+                        notes: RecordNotes(archive: note, absorbed: activeStore.notesOf(ids[i])?.absorbed),
+                      );
+                    }
                   } else {
                     failed++;
                   }
@@ -3024,8 +3215,9 @@ class CharaArchiveController extends Notifier<Progress> {
                   // Move the records into the archive store in memory, mirroring the active
                   // store's surgical removal, instead of invalidating and re-scanning every
                   // archived directory from disk. A no-op if the archive view never loaded.
-                  final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
-                  ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
+                  ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert([
+                    for (final id in archived) ?movedRecords[id],
+                  ]);
                 }
               } catch (error, stackTrace) {
                 // Catches everything on purpose, rather than listing the types that reach

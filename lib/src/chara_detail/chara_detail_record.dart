@@ -6,6 +6,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:version/version.dart';
 
 import '/src/chara_detail/record_body.dart';
+import '/src/chara_detail/record_notes.dart';
 import '/src/chara_detail/record_quarantine_ledger.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/fs/fs_backend.dart';
@@ -370,6 +371,16 @@ class RecordBinding extends JsonEquatable with RecordBindingMappable {
     return true;
   }
 
+  /// Whether this and [other] name one image file alike: a field both know holds one value.
+  bool namesAnImageOf(RecordBinding other) {
+    final mine = _fields;
+    final theirs = other._fields;
+    for (var i = 0; i < mine.length; i++) {
+      if (mine[i] != null && mine[i] == theirs[i]) return true;
+    }
+    return false;
+  }
+
   /// Each field as this knows it, else as [other] does. Of two that disagree, this one's value stands.
   RecordBinding mergedWith(RecordBinding other) => RecordBinding(
     skillPng: skillPng ?? other.skillPng,
@@ -397,7 +408,10 @@ sealed class RecordLoadResult {
 class RecordLoaded extends RecordLoadResult {
   final CharaDetailRecord record;
 
-  const RecordLoaded(this.record);
+  /// What the record's directory holds beside its `record.json`, read with it.
+  final RecordNotes notes;
+
+  const RecordLoaded(this.record, {required this.notes});
 }
 
 /// The record could not be decoded and its directory was quarantined.
@@ -571,8 +585,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// ([loadUpgradingSyncReadUnlocked] / [loadAsyncUnlocked]) persists the upgrade.
   static RecordLoadResult load(DirectoryPath directory) {
     try {
-      final content = directory.filePath("record.json").readAsStringSync();
-      return RecordLoaded(_decodeStored(directory, content).upgraded);
+      final (:content, :notes) = _readFilesSync(directory);
+      return RecordLoaded(_decodeStored(directory, content).upgraded, notes: notes);
     } catch (exception, stackTrace) {
       return _quarantineOnFailure(directory, exception, stackTrace);
     }
@@ -596,12 +610,15 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
       logger.e("Failed to compose the recognizer's result for ${directory.name}.", exception, stackTrace);
     }
     final ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded;
+    final RecordNotes notes;
     try {
-      decoded = _decodeStored(directory, directory.filePath("record.json").readAsStringSync());
+      final files = _readFilesSync(directory);
+      decoded = _decodeStored(directory, files.content);
+      notes = files.notes;
     } catch (exception, stackTrace) {
       return _quarantineOnFailure(directory, exception, stackTrace);
     }
-    return _persistUpgradeUnlocked(directory, decoded);
+    return _persistUpgradeUnlocked(directory, decoded, notes);
   }
 
   /// Asynchronous counterpart of [load] for the web/main-isolate loader.
@@ -636,13 +653,35 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// is published over itself upgraded before it is returned ([_persistUpgradeUnlocked]).
   static Future<RecordLoadResult> loadAsyncUnlocked(DirectoryPath directory) async {
     final ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded;
+    final RecordNotes notes;
     try {
-      decoded = _decodeStored(directory, await directory.filePath("record.json").readAsString());
+      final files = await _readFiles(directory);
+      decoded = _decodeStored(directory, files.content);
+      notes = files.notes;
     } catch (exception, stackTrace) {
       return _quarantineOnFailureAsyncUnlocked(directory, exception, stackTrace);
     }
-    return _persistUpgradeUnlocked(directory, decoded);
+    return _persistUpgradeUnlocked(directory, decoded, notes);
   }
+
+  /// The files of the record in [directory] a load reads, all of them here: its `record.json`, and what the
+  /// directory holds beside it ([readRecordNotesIn]). Throws where `record.json` cannot be read.
+  ///
+  /// The directory is resolved once and the three files are read from it ([DirectoryPath.open]): on web each read by
+  /// path walks OPFS from the root, and a scan reads every record. Nothing between the three reads can replace the
+  /// directory, because every caller holds the record's lock, which every writer of the record takes.
+  static Future<({String content, RecordNotes notes})> _readFiles(DirectoryPath directory) async {
+    final opened = await directory.open();
+    return (
+      content: await opened.readAsString(directory.filePath("record.json")),
+      notes: await readRecordNotesIn(opened),
+    );
+  }
+
+  /// [_readFiles] on the synchronous file API (io only), where a read by path is one call into the operating system
+  /// and there is no walk to save, so each file is read by its path.
+  static ({String content, RecordNotes notes}) _readFilesSync(DirectoryPath directory) =>
+      (content: directory.filePath("record.json").readAsStringSync(), notes: readRecordNotesSync(directory));
 
   /// Whether the `record.json` [content] reads as the record [id] — what a loader would load rather than quarantine.
   static bool readsAs(String content, String id) {
@@ -679,10 +718,11 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   static Future<RecordLoadResult> _persistUpgradeUnlocked(
     DirectoryPath directory,
     ({CharaDetailRecord stored, CharaDetailRecord upgraded}) decoded,
+    RecordNotes notes,
   ) async {
     final upgraded = decoded.upgraded;
     if (identical(upgraded, decoded.stored)) {
-      return RecordLoaded(upgraded);
+      return RecordLoaded(upgraded, notes: notes);
     }
     try {
       await replaceRecordJsonUnlocked(directory, upgraded.toRecordJsonBytes());
@@ -690,7 +730,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     } catch (error, stackTrace) {
       logger.e("Record ${directory.name} could not be upgraded on disk.", error, stackTrace);
     }
-    return RecordLoaded(upgraded);
+    return RecordLoaded(upgraded, notes: notes);
   }
 
   /// The file [replaceRecordJsonUnlocked] writes before renaming it over `record.json`.

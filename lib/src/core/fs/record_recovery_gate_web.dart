@@ -33,10 +33,15 @@ final RecordRecoveryGate platformRecordRecoveryGate = createPlatformRecordRecove
 /// The write journal's recovery is the shared one — desktop installs the very
 /// same function — and the archive journal's is web's alone, because only web
 /// stages an archive move through a manifest (`archive_executor.dart`).
+///
+/// The data root is resolved once and both journals look for the record's slot from it: a store scan runs this for
+/// every record, and on web a lookup by path walks OPFS from the root. Nothing can replace the data root while this
+/// runs, because the caller holds the root scope shared and only a holder of it exclusively relocates the store.
 Future<void> _ensureRecordReady(DirectoryPath storageRoot, String recordId) async {
-  await ensureWriteJournalRecordReadyUnlocked(storageRoot, recordId);
+  final dataRoot = await openRecordDataRootOf(storageRoot);
+  await ensureWriteJournalRecordReadyUnlocked(dataRoot, recordId);
   await recoverRecordDirectoryTransactionsUnlocked(
-    storageRoot / 'chara_detail',
+    dataRoot,
     recordId,
     beforeCommittedCleanup: (spec) => cleanupCommittedArchiveTransactionUnlocked(spec, failOnError: true),
   );

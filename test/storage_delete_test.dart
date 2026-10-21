@@ -38,6 +38,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/storage_delete.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 
+import 'support/empty_record_stores.dart';
 import 'support/long_read_declarations.dart';
 import 'support/record_binding_seed.dart';
 import 'support/records.dart';
@@ -140,6 +141,7 @@ void main() {
         // unavailable.
         pathLayoutLoader.overrideWith((ref) async => layout),
         storageLockGateProvider.overrideWithValue(gate),
+        ...emptyRecordStoreOverrides,
         if (serializer != null) storageDeleteSerializerProvider.overrideWithValue(serializer),
       ],
     );

@@ -65,7 +65,8 @@ const double defaultExecutionSeconds = 0.5;
 /// suite was split into them.
 const Map<String, double> measuredExecutionSeconds = {
   "test/storage_tree_context_menu_test.dart": 55.4,
-  "test/sync_model_test.dart": 140.4, // measured the same way, one file at a time, on 2026-10-21
+  "test/sync_model_test.dart": 161.4, // measured the same way, one file at a time, on 2026-10-23
+  "test/sync_properties_test.dart": 82.4, // measured the same way, one file at a time, on 2026-10-23
   "test/enhancement_merge_test.dart": 31.8,
   "test/storage_row_menu_gate_test.dart": 27.9,
   "test/web_record_write_protocol_v2_update_test.dart": 24.9,
@@ -76,6 +77,7 @@ const Map<String, double> measuredExecutionSeconds = {
   "test/web_record_write_protocol_v2_active_to_archive_test.dart": 21.6,
   "test/web_record_write_protocol_v2_test.dart": 16.4,
   "test/enhancement_merge_ui_test.dart": 16.5,
+  "test/record_sync_test.dart": 76.8, // measured the same way, one file at a time, on 2026-10-22
   "test/storage_file_preview_view_test.dart": 14.6,
   "test/storage_settings_store_menu_test.dart": 13.1,
   "test/storage_delete_action_test.dart": 10.5,

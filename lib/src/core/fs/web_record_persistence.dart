@@ -170,6 +170,18 @@ final class WebRecordPersistence {
     return _recoveryGate.ensureReadyUnlocked(storageDir, recordId);
   }
 
+  /// Runs [read] under the lock of the record [recordId], after its recovery ([ensureRecordRecovered]): for a caller
+  /// that reads a record other than the ones it publishes, before its [persistFiles] — whose acquisition takes the
+  /// locks of the records it publishes, and no other — so that no lock is taken inside another.
+  Future<T> readRecord<T>(
+    DirectoryPath storageDir,
+    String recordId,
+    Future<T> Function() read, {
+    required LongReadDeclaration declaration,
+  }) {
+    return _recoveryGate.runForRecord(storageDir, recordId, read, declaration: declaration);
+  }
+
   /// Publishes every record [files] describes, and answers one verdict per
   /// record.
   ///

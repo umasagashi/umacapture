@@ -467,6 +467,7 @@ Map<String, DirectoryPath> pathInfoDirectories(PathInfo info) => {
   'charaDetailMetadataDir': info.charaDetailMetadataDir,
   'charaDetailRatingDir': info.charaDetailRatingDir,
   'charaDetailMemoDir': info.charaDetailMemoDir,
+  'charaDetailSyncDir': info.charaDetailSyncDir,
 };
 
 /// The [pathInfoDirectories] entries that are intermediate containers: they hold
@@ -574,11 +575,17 @@ final List<StorageGroup> storageGroups = [
     // the exclusive root lock while they write these files; the memo and rating
     // controllers take no lock and are dropped instead.
     lockScope: StorageLockScope.exclusiveRootProviderSerialized,
-    // Two directories and a file, one group: rating, memo and the dismissed
-    // merge candidates are the same kind of thing to the user — what they
-    // attached to their records — and are described by one hint. Deleting the
-    // file offers every dismissed pair again.
-    resolve: (info) => [info.charaDetailRatingDir, info.charaDetailMemoDir, info.charaDetailEnhancementDismissedFile],
+    // Three directories and a file, one group: rating, memo and the dismissed
+    // merge candidates are what the user attached to their records, and sync's
+    // record of the list it last agreed on travels with them; one hint describes
+    // all four. Deleting the dismissal file offers every dismissed pair again, and
+    // deleting the sync directory makes the next round one without a base.
+    resolve: (info) => [
+      info.charaDetailRatingDir,
+      info.charaDetailMemoDir,
+      info.charaDetailEnhancementDismissedFile,
+      info.charaDetailSyncDir,
+    ],
   ),
   StorageGroup(
     id: StorageGroupId.quarantine,

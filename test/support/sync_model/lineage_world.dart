@@ -69,6 +69,7 @@ class LineageWorld extends SyncWorld {
     EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
+    ShelfOp() => false,
     _ => true,
   };
 
@@ -100,6 +101,7 @@ class LineageWorld extends SyncWorld {
       case EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link():
       case DeleteAccount() || Elapse() || OldApp() || Upgrade():
       case SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume():
+      case ShelfOp():
         throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):
         zips[slot] = d.exportZip(id);

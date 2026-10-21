@@ -144,8 +144,8 @@ final class StorageDeleteStoreSubject extends StorageDeleteSubject {
 /// Why one entry the delete never attempted is still there.
 ///
 /// **The counterpart of [StorageDeleteFailureReason], and it exists for the same
-/// reason that one does.** A retained entry is a directory the delete walked past
-/// because something under it survived, and *which* something decides what the
+/// reason that one does.** A retained entry is mostly a directory the delete walked
+/// past because something under it survived, and *which* something decides what the
 /// user is owed: when the survivor is an entry this report already names, the
 /// panel has said it a line higher up and the retained row has nothing to add;
 /// when the survivor is an entry this report does not name at all, the retained
@@ -184,9 +184,28 @@ enum StorageDeleteRetentionReason {
   /// (`StorageGroup.writtenByCapture`), so the app knows of no writer that
   /// reaches it. That residue is recorded here rather than left implicit.
   setAsideByThisDelete,
+
+  /// A rating or memo column storage that already held the record of a removal —
+  /// its values and title none, each with the time it was removed — so there was
+  /// nothing left to delete. A sync round carries that removal to the other device,
+  /// so deleting the file would leave nothing to say the values were removed, and
+  /// the next round would bring them back.
+  ///
+  /// Unlike the two above it is a file, and the delete chose to keep it. A storage
+  /// this delete empties of its values is not this: it is [StorageDeleteReport.cleared].
+  holdsRemovalTimes,
+
+  /// The note on the quarantine shelf that names the record its directory holds and the store it came from
+  /// (`quarantine_origin.json`), asked for without its directory, or with a directory something else of which survived.
+  ///
+  /// The note is the only place the record's id is kept: without it the directory is still on the shelf, but nothing
+  /// can say whose record it is, so a later delete of the directory could not take that record's ratings, memos and
+  /// dismissed pairs with it. The delete keeps it, and a delete of the whole directory removes it last.
+  identifiesShelfRecord,
 }
 
-/// One entry that is still there because the delete never attempted it.
+/// One entry that is still there because the delete did not remove it, without a
+/// platform having refused it.
 ///
 /// A subject and its [reason], the same pairing [StorageDeleteFailure] makes, so
 /// the two surviving lists can be read the same way and neither has to be
@@ -271,14 +290,20 @@ class StorageDeleteFailure {
 
 /// The outcome of one delete request, over every entry it covered.
 ///
-/// The three lists partition the entries the request touched, so
+/// The four lists partition the entries the request touched, so
 /// [requestedCount] is their total and "how many were asked for" never has to be
 /// counted a second way:
 ///
 ///  * [deleted] — gone.
+///  * [cleared] — **its values deleted, the entry kept**: a rating or memo column
+///    storage whose values and title this delete wrote to none, which stays to hold
+///    the times of that removal, and a directory that holds only such files. Counted
+///    as deleted for the user, who asked for the values to go and they went; kept out
+///    of [deleted] and [deletedPaths], whose consumers act on what is no longer on disk.
 ///  * [failed] — attempted, and still there. Each carries its own reason.
-///  * [retained] — **not attempted**, because something below it survived. A
-///    directory cannot be removed while a file inside it is held, and attempting
+///  * [retained] — **not removed, and not refused**: something below it survived,
+///    or the delete kept it on purpose ([StorageDeleteRetentionReason.holdsRemovalTimes]).
+///    A directory cannot be removed while a file inside it is held, and attempting
 ///    it anyway would produce a second, derived failure for every ancestor of
 ///    every held file — a report whose length grows with the depth of the tree
 ///    and whose extra entries all say the same thing. They are named rather than
@@ -287,7 +312,12 @@ class StorageDeleteFailure {
 ///    failure carries one: which survivor held it decides what the reader can
 ///    say about it.
 class StorageDeleteReport {
-  const StorageDeleteReport({this.deleted = const [], this.failed = const [], this.retained = const []});
+  const StorageDeleteReport({
+    this.deleted = const [],
+    this.cleared = const [],
+    this.failed = const [],
+    this.retained = const [],
+  });
 
   /// The whole request failed before any entry was touched.
   ///
@@ -302,6 +332,7 @@ class StorageDeleteReport {
        );
 
   final List<StorageDeleteSubject> deleted;
+  final List<StorageDeleteSubject> cleared;
   final List<StorageDeleteFailure> failed;
   final List<StorageDeleteRetention> retained;
 
@@ -314,14 +345,15 @@ class StorageDeleteReport {
   /// handed over unremarked.
   List<String> get deletedPaths => [for (final subject in deleted) ?subject.path];
 
-  int get deletedCount => deleted.length;
+  /// What the user is told was deleted: the entries that went and the ones whose values went.
+  int get deletedCount => deleted.length + cleared.length;
 
   int get failedCount => failed.length;
 
   int get retainedCount => retained.length;
 
   /// Everything the request covered, deleted or not.
-  int get requestedCount => deleted.length + failed.length + retained.length;
+  int get requestedCount => deletedCount + failed.length + retained.length;
 
   /// Whether every entry the request covered is gone.
   ///
@@ -333,7 +365,7 @@ class StorageDeleteReport {
   ///
   /// This is the state this whole report exists for — the one a plain success/failure return
   /// cannot express.
-  bool get isPartial => deleted.isNotEmpty && !isComplete;
+  bool get isPartial => deletedCount > 0 && !isComplete;
 
   /// The distinct reasons the surviving entries give, for a caller that wants to
   /// say *why* once instead of per path.
@@ -357,17 +389,20 @@ class StorageDeleteReport {
   /// adds them up the same way.
   static StorageDeleteReport merge(Iterable<StorageDeleteReport> reports) {
     final deleted = <StorageDeleteSubject>[];
+    final cleared = <StorageDeleteSubject>[];
     final failed = <StorageDeleteFailure>[];
     final retained = <StorageDeleteRetention>[];
     for (final report in reports) {
       deleted.addAll(report.deleted);
+      cleared.addAll(report.cleared);
       failed.addAll(report.failed);
       retained.addAll(report.retained);
     }
-    return StorageDeleteReport(deleted: deleted, failed: failed, retained: retained);
+    return StorageDeleteReport(deleted: deleted, cleared: cleared, failed: failed, retained: retained);
   }
 
   @override
   String toString() =>
-      'StorageDeleteReport(deleted: ${deleted.length}, failed: ${failed.length}, retained: ${retained.length})';
+      'StorageDeleteReport(deleted: ${deleted.length}, cleared: ${cleared.length}, failed: ${failed.length}, '
+      'retained: ${retained.length})';
 }
