@@ -277,6 +277,9 @@ RecordSyncOutcome mergeRecordSync(SyncSide? base, SyncSide local, SyncSide serve
   // device's is split off that id in turn, until it comes to an id that holds its like, or none.
   final moved = <String, String>{};
   final nowhere = <String>{};
+  // The ids a record split off is placed at that hold no record of their own: whatever cells either side holds of
+  // that id belong to a record that is gone, and a record that comes to the id later does not bring them back.
+  final emptied = <String>{};
   bool agreed(String split, SyncRecord l) =>
       content(base?.records[split]) == content(l) && content(server.records[split]) != content(base?.records[split]);
   for (final MapEntry(key: id, value: l) in splitOff.entries) {
@@ -295,6 +298,7 @@ RecordSyncOutcome mergeRecordSync(SyncSide? base, SyncSide local, SyncSide serve
     // server's record there, made of the same, is the record split off: the two meet as one.
     final like = server.records[split];
     final there = own ?? (content(like) == content(l) ? like : null);
+    if (there == null) emptied.add(split);
     out[split] = there == null ? brought : _fields(there, brought, oStandsOnATie: false);
   }
 
@@ -321,11 +325,17 @@ RecordSyncOutcome mergeRecordSync(SyncSide? base, SyncSide local, SyncSide serve
   SyncValue<String?>? cell(SyncValue<String?>? b, SyncValue<String?>? l, SyncValue<String?>? s) =>
       l != null && s != null ? (later(l, s) ? l : s) : (l == b ? s : (s == b ? l : (later(l, s) ? l : s)));
   // What the device wrote goes with the record split off, to the id it is split off under, and where that record
-  // is placed nowhere, with it; the id it is split off keeps the server's.
-  final carried = {
-    for (final MapEntry(key: (column, id), value: c) in local.cells.entries)
-      if (moved[id] case final split? when !nowhere.contains(id)) (column, split): c,
-  };
+  // is placed nowhere, with it; the id it is split off keeps the server's. Two records split off to one id bring
+  // one cell each: the later written stands, and of one time the one split off the id first in id order.
+  final carried = <(String, String), SyncValue<String?>>{};
+  for (final id in moved.keys.toList()..sort()) {
+    final split = moved[id];
+    if (split == null || nowhere.contains(id)) continue;
+    for (final MapEntry(key: (column, of), value: c) in local.cells.entries) {
+      final key = (column, split);
+      if (of == id && (!carried.containsKey(key) || later(c, carried[key]))) carried[key] = c;
+    }
+  }
   final cells = <(String, String), SyncValue<String?>>{};
   for (final key in {...?base?.cells.keys, ...local.cells.keys, ...server.cells.keys, ...carried.keys}) {
     final (_, id) = key;
@@ -333,7 +343,7 @@ RecordSyncOutcome mergeRecordSync(SyncSide? base, SyncSide local, SyncSide serve
     // nothing of its cells.
     final own = moved.containsKey(id)
         ? server.cells[key]
-        : !alive.contains(id)
+        : !alive.contains(id) || emptied.contains(id)
         ? null
         : !local.records.containsKey(id)
         ? server.cells[key]
@@ -367,19 +377,16 @@ RecordSyncOutcome mergeRecordSync(SyncSide? base, SyncSide local, SyncSide serve
   // record of its own, and lists the pair in no form its own records give it — its user took the pair out; else
   // what the base does. The device's record of an id it splits off is the record split off, and the pairs it
   // carries are among what the device lists.
-  SyncSideSays says(SyncSide side, {required Set<String> said, Map<String, String> self = const {}}) => syncSideSays(
+  SyncSideSays says(SyncSide side, {required Set<String> said, Map<String, String> splitTo = const {}}) => syncSideSays(
     agreedPairs,
     [for (final r in side.records.values) (id: r.id, absorbed: r.absorbed)],
     ends: reading.ends,
     absorbers: reading.absorbers,
     said: said,
     lists: side.dismissed,
-    self: (id) => switch (self[id]) {
-      final to? => {to},
-      null => reading.ends(id),
-    },
+    splitTo: splitTo,
   );
-  final local0 = says(local, said: {...ofLocal, ...brought}, self: moved);
+  final local0 = says(local, said: {...ofLocal, ...brought}, splitTo: moved);
   final server0 = says(server, said: ofServer);
   final saysLocal = {...ofLocal, ...local0.asBase};
   final saysServer = {...ofServer, ...server0.asBase};
@@ -448,8 +455,16 @@ typedef SyncSideSays = ({Set<String> none, Set<String> asBase});
 ///
 /// An end names a record. The side's records of an id are its record of that id and each of its own that absorbed
 /// it; in the result, an id is the record of that id, else each that absorbed it ([ends]), and so is a record of the
-/// side, but where [self] says where else it goes (the device's record split off). A pair a+b of the base is gone
-/// from the side where the side holds a and b in records of its own apart, and lists no pair those records make —
+/// side, but where [splitTo] names the id it is split off to (the device's record of an id the round splits off):
+/// there it is the record of that id. Each of the side's records is the record of an id: its own, but the device's
+/// record of an id the round splits off is the record of the id it is split off to ([R4-4] (a), and so where the
+/// device lists it as it holds it, [R4-7] 4). Two of the side's records are one where they are the records of one id:
+/// the device's record split off, and the record of the id it is split off to that the device holds already and does
+/// not split off — a round that stopped once it placed the record split off, before it placed the server's record of
+/// the id it split it off, leaves the device holding both. Where the round splits off that record too, it is the
+/// record of the id that one is split off to, and the two stay two: each comes to an id of its own. A pair a+b of the
+/// base is gone from the side where the side holds a and b in two records of its own, and lists no pair those
+/// records make —
 /// none of them by their own ids ([lists]), none of them read as pairs of the result's records ([said]) — no form
 /// its own records give the pair. Nothing but its user's hand on its list (the file deleted, a record deleted and
 /// not back with its pairs) leaves it so: a merge of its own re-keys a pair to the survivor, which its records still
@@ -471,14 +486,21 @@ SyncSideSays syncSideSays(
   required Set<String> Function(String id) absorbers,
   required Set<String> said,
   required Set<String> lists,
-  Set<String> Function(String id)? self,
+  Map<String, String> splitTo = const {},
 }) {
   final list = records.toList();
   Set<String> holders(String id) => {
     for (final r in list)
       if (r.id == id || r.absorbed.contains(id)) r.id,
   };
-  final isIn = self ?? ends;
+  Set<String> isIn(String id) => switch (splitTo[id]) {
+    final to? => {to},
+    null => ends(id),
+  };
+  // The id the side's record [i] is the record of: its own, else the id the round splits it off to.
+  String recordOf(String i) => splitTo[i] ?? i;
+  // Whether the side's records [i] and [j] are two records, not one.
+  bool two(String i, String j) => recordOf(i) != recordOf(j);
   // The records of the result that hold [id] as the side holds it.
   Set<String> holding(String id) => {for (final i in holders(id)) ...isIn(i), ...absorbers(id)};
   final read = <String>{}, spoken = <String>{};
@@ -489,7 +511,7 @@ SyncSideSays syncSideSays(
       final forms = <String>{
         for (final i in ha)
           for (final j in hb)
-            if (i != j)
+            if (two(i, j))
               for (final x in isIn(i))
                 for (final y in isIn(j))
                   if (x != y) syncPairOf(x, y),
@@ -498,9 +520,9 @@ SyncSideSays syncSideSays(
       final own = <String>{
         for (final i in ha)
           for (final j in hb)
-            if (i != j) syncPairOf(i, j),
+            if (two(i, j)) syncPairOf(i, j),
       };
-      final apart = ha.any((i) => hb.any((j) => j != i));
+      final apart = ha.any((i) => hb.any((j) => two(i, j)));
       final gone = apart && !(forms.any(said.contains) || own.any(lists.contains));
       for (final x in ends(a)) {
         for (final y in ends(b)) {

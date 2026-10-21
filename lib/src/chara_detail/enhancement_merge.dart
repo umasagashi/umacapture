@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -10,6 +11,10 @@ import '/src/chara_detail/inheritance.dart';
 import '/src/chara_detail/record_archive_state.dart';
 import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_body.dart';
+import '/src/chara_detail/record_notes.dart';
+import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_list.dart';
+import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/chara_detail/value_write_time.dart';
@@ -262,48 +267,6 @@ final class EnhancementMergeFrame {
 /// The merge frame, over the container's own providers.
 final enhancementMergeFrameProvider = Provider<EnhancementMergeFrame>((ref) => EnhancementMergeFrame(ref));
 
-/// File name of the absorbed ids beside a record's `record.json`: every id the record has absorbed, by a merge on this
-/// device or by one that reached it with the record (a zip, a sync).
-///
-/// A fact about the record that travels with it, and nothing more: it does not say whether a merge on this device has
-/// finished, so a record that carries another's id beside that other record is an ordinary pair of records. Whether a
-/// merge this device started is still unfinished is [mergesInProgressFileName], a separate file. Published by the
-/// journal transaction that makes the record the survivor of a merge, so it exists exactly when that survivor does.
-/// Nothing that reads a record reads it — the loader opens `record.json` and nothing else, and the native
-/// re-recognizer rewrites named files — so it is a fact about the record without being part of the record.
-const mergedIdsFileName = 'merged_ids.json';
-
-/// The ids [recordDir]'s record has absorbed, `null` when the file is there and cannot be used.
-///
-/// Absent is the empty list, because a record that has absorbed nothing and a record that has never been part of a
-/// merge are the same record. "There and unusable" is a third answer and not an empty list: the merge publishes the
-/// union of both sides' ids, and a union over a list it could not read would drop ids.
-Future<List<String>?> readMergedIds(DirectoryPath recordDir) async {
-  final file = recordDir.filePath(mergedIdsFileName);
-  try {
-    if (!await file.exists()) {
-      return const <String>[];
-    }
-    final decoded = jsonDecode(await file.readAsString());
-    final ids = decoded is Map ? decoded['ids'] : decoded;
-    if (ids is! List || ids.any((entry) => entry is! String)) {
-      logger.w('The absorbed ids at ${file.path} are not a list of ids.');
-      return null;
-    }
-    return ids.cast<String>();
-  } catch (error, stackTrace) {
-    logger.w('Could not read the absorbed ids at ${file.path}.', error, stackTrace);
-    return null;
-  }
-}
-
-/// [ids] as the bytes of a `merged_ids.json`: sorted and de-duplicated, in the same 4-space-indent encoding every
-/// other file of a record directory carries.
-Uint8List mergedIdsBytes(List<String> ids) {
-  final sorted = ids.toSet().toList()..sort();
-  return Uint8List.fromList(utf8.encode(const JsonEncoder.withIndent('    ').convert({'ids': sorted})));
-}
-
 /// File name of the merges this device started into a record and has not finished, beside the survivor's
 /// `record.json`.
 ///
@@ -387,9 +350,16 @@ Uint8List mergesInProgressBytes(Map<String, MergeDefaults> merges) {
 /// Whether no merge this device started into [recordDir]'s record is unfinished: none of its merges in progress names
 /// a retired id that is still a record ([isRecord]). A file that cannot be read is not settled: what it would say is
 /// unknown.
-Future<bool> isRecordMergeSettled(DirectoryPath recordDir, {required bool Function(String id) isRecord}) async {
+Future<bool> isRecordMergeSettled(
+  DirectoryPath recordDir, {
+  required FutureOr<bool> Function(String id) isRecord,
+}) async {
   final merges = await readMergesInProgress(recordDir);
-  return merges != null && !merges.keys.any(isRecord);
+  if (merges == null) return false;
+  for (final retired in merges.keys) {
+    if (await isRecord(retired)) return false;
+  }
+  return true;
 }
 
 // ===========================================================================
@@ -623,8 +593,9 @@ final enhancementDismissalStoreProvider = Provider<EnhancementDismissalStore>((r
 /// they are, logged: the records are gone either way, and rewriting a map not known whole would lose the entries of
 /// records that are not.
 ///
-/// Called by every delete of a whole record — the list's, and the storage view's of a record directory or a store —
-/// after the directory is gone, never before: a record whose directory survives keeps what it carries.
+/// Called by every delete of a whole record — the list's, and the storage view's of a record directory, a store or a
+/// record on the quarantine shelf — after the directory is gone, never before: a record whose directory survives keeps
+/// what it carries.
 ///
 /// [info] is the layout the delete ran in, which its caller already holds.
 Future<void> forgetDeletedRecords(RefBase ref, PathInfo info, Set<String> ids) async {
@@ -677,19 +648,33 @@ Future<void> _forgetDeletedRecordsLocked(RefBase ref, PathInfo info, Set<String>
     logger.e('The ratings, memos and dismissals of deleted records ${ids.join(', ')} stayed: a file cannot be read.');
     return;
   }
+  final columns = [
+    for (final file in ratingFiles) (column: syncColumnOf('rating', file.key), file: file),
+    for (final file in memoFiles) (column: syncColumnOf('memo', file.key), file: file),
+  ];
+  // An entry of either map is a cell: a value with no time, or a time with no value, goes with the record all the same.
+  final kept = syncForget(
+    cells: {
+      for (final (:column, :file) in columns)
+        for (final id in {...file.data.keys, ...file.writtenAt.keys}) (column, id): null,
+    },
+    pairs: {for (final pair in dismissed) syncPairOf(pair.first, pair.second)},
+    ids: ids,
+  );
   try {
-    for (final file in [...ratingFiles, ...memoFiles]) {
-      if (!ids.any((id) => file.data.containsKey(id) || file.writtenAt.containsKey(id))) continue;
-      final next = {...file.data}..removeWhere((id, _) => ids.contains(id));
-      final nextWrittenAt = {...file.writtenAt}..removeWhere((id, _) => ids.contains(id));
+    for (final (:column, :file) in columns) {
+      bool keeps(String id, _) => kept.cells.containsKey((column, id));
+      final next = Map.of(file.data)..removeWhere((id, value) => !keeps(id, value));
+      final nextWrittenAt = Map.of(file.writtenAt)..removeWhere((id, value) => !keeps(id, value));
+      if (next.length == file.data.length && nextWrittenAt.length == file.writtenAt.length) continue;
       await file.file.writeAsString(file.withData(next, nextWrittenAt));
     }
-    final kept = {
+    final keptPairs = [
       for (final pair in dismissed)
-        if (!ids.contains(pair.first) && !ids.contains(pair.second)) pair,
-    };
-    if (kept.length != dismissed.length) {
-      await info.charaDetailEnhancementDismissedFile.writeAsString(dismissedPairsJson(kept));
+        if (kept.pairs.contains(syncPairOf(pair.first, pair.second))) pair,
+    ];
+    if (keptPairs.length != dismissed.length) {
+      await info.charaDetailEnhancementDismissedFile.writeAsString(dismissedPairsJson(keptPairs));
     }
   } finally {
     for (final file in ratingFiles) {
@@ -872,22 +857,21 @@ Future<List<_MetadataKeyFile>?> _readMetadataKeyFiles(DirectoryPath directory, v
   return files;
 }
 
-/// The record a merge of [older] and [retired] leaves behind.
+/// The `record.json` of the survivor under [older]'s id that keeps [content]'s record — [older]'s own, or the one merged
+/// into it —, showing [body], the merge's decision ([syncMergeBody]), written where [writesBody].
 ///
-/// Pure, and the whole of the survivor's table:
+/// The whole of the survivor's table:
 /// * the **content** — factors, skills, races, everything outside the metadata,
 ///   plus the metadata fields that describe how that content was produced — is
-///   the side the user approved to keep ([contentFromOlder]);
+///   the side the user approved to keep;
 /// * the **identity** — the record id and the captured date — is the older
 ///   record's. The date travels with the id because it is what decides which id
 ///   is older, so a survivor that took the newer date would be re-ordered
 ///   against a third copy at the next merge and the chain would stop converging;
-/// * the **parents** travel with the body, so they are the content side's,
-///   except that a link naming either side of this merge is dropped: a record is
-///   never its own parent. A slot the content side leaves empty stays empty here,
-///   and the resolution that follows the merge fills it.
+/// * the **parents** and the time of the body are [body]'s: the parents travel with the body, but a link naming either
+///   side of the merge; the time is [older]'s where [body] is not written.
 ///
-/// [Metadata.relationBonus] is carried from the content side as it stands. It is
+/// [Metadata.relationBonus] is [relationBonus], the content side's as it stands ([SyncMergePlan.bonusFrom]). It is
 /// derived from the resolved lineage, so the resolution that follows a merge is
 /// what makes it right; copying it keeps the survivor readable until then
 /// instead of blanking a number the merge did not change.
@@ -896,29 +880,26 @@ Future<List<_MetadataKeyFile>?> _readMetadataKeyFiles(DirectoryPath directory, v
 /// [CharaDetailRecord] or [Metadata] stops this function compiling, which is the
 /// review this table needs. A `copyWith` would carry it silently from whichever
 /// side happened to be the receiver.
-CharaDetailRecord synthesizeSurvivor({
+CharaDetailRecord _survivorRecord({
   required CharaDetailRecord older,
-  required CharaDetailRecord retired,
-  required bool contentFromOlder,
+  required CharaDetailRecord content,
+  required SyncBody body,
+  required bool writesBody,
+  required int? relationBonus,
 }) {
-  final content = contentFromOlder ? older : retired;
-  final merging = {older.id, retired.id};
-  String? link(String? parent) => merging.contains(parent) ? null : parent;
-
-  final parents = content.metadata.recordId;
   final metadata = Metadata(
     content.metadata.formatVersion,
     content.metadata.region,
-    RecordId(older.id, link(parents.parent1), link(parents.parent2)),
+    RecordId(older.id, body.parents['parent1'], body.parents['parent2']),
     content.metadata.trainerId,
     older.metadata.capturedDate,
     content.metadata.recognizerVersion,
     content.metadata.stage,
     content.metadata.strategy,
-    content.metadata.relationBonus,
+    relationBonus,
     content.metadata.recordType,
-    content.metadata.binding,
-    _survivorBodyWrittenAt(older, content),
+    body.binding,
+    writesBody ? body.time : older.metadata.bodyWrittenAt,
   );
   return CharaDetailRecord(
     metadata,
@@ -935,21 +916,6 @@ CharaDetailRecord synthesizeSurvivor({
     content.trainedDate,
     content.races,
   );
-}
-
-/// The time of the survivor's body: the older record's where the kept body is the one the older record shows — the
-/// same recognised content ([recognizedContentKey]) under bindings that agree — and the time of the merge, written
-/// over the older record's ([valueWriteTime]), where it is another. The retired record's time is never carried.
-int? _survivorBodyWrittenAt(CharaDetailRecord older, CharaDetailRecord content) {
-  final o = older.metadata;
-  final sameBinding = switch ((o.binding, content.metadata.binding)) {
-    (final RecordBinding a, final RecordBinding b) => a.agreesWith(b),
-    _ => true,
-  };
-  if (sameBinding && recognizedContentKey(older) == recognizedContentKey(content)) {
-    return o.bodyWrittenAt;
-  }
-  return valueWriteTime(o.bodyWrittenAt);
 }
 
 /// The fallible calls a merge makes that a test has to be able to fail, park or
@@ -1136,28 +1102,67 @@ final class EnhancementMerge {
         needsReload: false,
       );
     }
+    // The archive states the merge decides on. Keeping the older content keeps its tree and its note as they are: the
+    // note is read as the store reads it — none, where it cannot be read — and the decision, an edit of the older
+    // record's state into that same state, writes nothing whatever it reads; the retired record's state is not read.
+    // Keeping the retired content reads both notes, and one that cannot be read refuses the merge.
+    final RecordArchiveNote? olderArchive;
+    final MergedArchiveStates states;
+    if (contentFromOlder) {
+      olderArchive = (await readRecordNotes(older.directory)).archive;
+      final shown = (olderArchive ?? RecordArchiveNote.empty).valueIn(archiveStore: _inArchive(older));
+      states = (shown: shown, kept: shown, keptHasNote: false);
+    } else {
+      olderArchive = null;
+      try {
+        states = await readMergedArchiveStates(
+          olderDir: older.directory,
+          olderInArchive: _inArchive(older),
+          keptDir: retired.directory,
+          keptInArchive: _inArchive(retired),
+        );
+      } catch (error, stackTrace) {
+        logger.w('Refusing a merge of $olderId and $retiredId: an archive note cannot be read.', error, stackTrace);
+        return const EnhancementMergeResult(
+          outcome: EnhancementMergeOutcome.refusedStorageUnreadable,
+          needsReload: false,
+        );
+      }
+    }
+    // The two records the merge decides on ([syncMerge]). A re-run's older record is the survivor it read back, the
+    // content it keeps; the first run's content side carries its binding ([_bound]).
+    final olderRecord = applied?.record ?? (contentFromOlder ? await _bound(older) : older.record);
+    final contentRecord = contentFromOlder ? olderRecord : await _bound(retired);
+    SyncMergeSide sideOf(CharaDetailRecord record, RecordArchiveValue stage, List<String> absorbed) => (
+      id: record.id,
+      body: syncBodyOf(record),
+      bodyTime: record.metadata.bodyWrittenAt,
+      stage: (value: stage.state.option, time: stage.writtenAt),
+      absorbed: absorbed.toSet(),
+    );
+    final plan = syncMerge(
+      older: sideOf(olderRecord, states.shown, mergedByOlder),
+      retired: sideOf(contentFromOlder ? retired.record : contentRecord, states.kept, mergedByRetired),
+      contentFromOlder: contentFromOlder,
+      writeAt: valueWriteTime,
+    );
+    // A survivor a re-run read back is published again as the bytes it read: the decision it holds was made by the run
+    // that published it.
     final survivor =
-        applied?.record ?? await _boundSurvivor(older: older, retired: retired, contentFromOlder: contentFromOlder);
+        applied?.record ??
+        _survivorRecord(
+          older: olderRecord,
+          content: contentRecord,
+          body: plan.body,
+          writesBody: plan.writesBody,
+          relationBonus: (plan.bonusFrom == olderId ? olderRecord : contentRecord).metadata.relationBonus,
+        );
     // The archive state is the kept side's, written with the publication that makes it the survivor's. Keeping the
     // older content keeps its tree and its note as they are; keeping the retired content would otherwise carry the
     // retired record's note, and with it a time the survivor never showed.
-    final Uint8List? archiveNote;
-    try {
-      archiveNote = contentFromOlder
-          ? null
-          : await survivorArchiveNote(
-              olderDir: older.directory,
-              olderInArchive: _inArchive(older),
-              keptDir: retired.directory,
-              keptInArchive: _inArchive(retired),
-            );
-    } catch (error, stackTrace) {
-      logger.w('Refusing a merge of $olderId and $retiredId: an archive note cannot be read.', error, stackTrace);
-      return const EnhancementMergeResult(
-        outcome: EnhancementMergeOutcome.refusedStorageUnreadable,
-        needsReload: false,
-      );
-    }
+    final archiveNote = contentFromOlder
+        ? null
+        : survivorArchiveNote(plan.stage, states: states, keptInArchive: _inArchive(retired));
     // Both sides' unfinished merges stay protected under the survivor; an entry whose retired record is gone is
     // dropped here, as it protects nothing.
     final inProgress = {
@@ -1172,13 +1177,21 @@ final class EnhancementMerge {
             applied?.bytes ??
             Uint8List.fromList(utf8.encode(const JsonEncoder.withIndent('    ').convert(survivor.toMap()))),
       ),
-      (
-        relativeSegments: const [mergedIdsFileName],
-        bytes: mergedIdsBytes([...mergedByOlder, ...mergedByRetired, retiredId]),
-      ),
+      (relativeSegments: const [mergedIdsFileName], bytes: mergedIdsBytes(plan.absorbed.toList())),
       (relativeSegments: const [mergesInProgressFileName], bytes: mergesInProgressBytes(inProgress)),
       if (archiveNote != null) (relativeSegments: const [recordArchiveNoteName], bytes: archiveNote),
     ];
+    // What the survivor holds beside its record.json once published, which its store holds with it: the note the
+    // publication writes, else the note of the tree it is made of — the older record's own, or none for the retired
+    // tree, whose note [survivorArchiveNote] found empty.
+    final survivorNotes = RecordNotes(
+      archive: archiveNote != null
+          ? RecordArchiveNote.decode(utf8.decode(archiveNote))
+          : contentFromOlder
+          ? olderArchive
+          : RecordArchiveNote.empty,
+      absorbed: plan.absorbed,
+    );
     final storeName = content.store.rootDirectory.name;
     // The base is the tree the survivor is made of. When the content side is the
     // older record that is the target's own tree, which `publish` takes as the
@@ -1250,6 +1263,9 @@ final class EnhancementMerge {
     }
 
     // ---- Step 4: re-key every metadata file ---------------------------------
+    // Each file is settled from what it holds now ([syncMergeCell]), with the value the screen keeps for it
+    // ([EnhancementMergeChoices.valueFor]) — on a re-run as on the first run: the survivor a re-run reuses decides
+    // nothing of the files, and the ones an earlier run settled hold nothing the decision writes again.
     try {
       for (final target in [
         (files: ratingFiles, overrides: Map<String, Object?>.from(choices.rating)),
@@ -1318,7 +1334,7 @@ final class EnhancementMerge {
         // so the older store's row is not replaced but removed.
         older.store.forgetRecordInMemory(olderId);
       }
-      survivorStore.adoptRecordInMemory(survivor);
+      survivorStore.adoptRecordInMemory(survivor, notes: survivorNotes);
       // Step 3 wrote these and deliberately left memory alone, so that no store
       // ever published a half-rewritten set. This is where the set becomes
       // whole. Without it the session goes on serving descendants whose parent
@@ -1373,9 +1389,11 @@ final class EnhancementMerge {
   /// re-run reads both entries again to settle [chosen]; after the write the file
   /// is finished.
   ///
-  /// The older entry's time stays where [chosen] is the value it already shows, none included, and is the time of this
-  /// write over it ([valueWriteTime]) where [chosen] is another; the retired entry's time goes with its value. A file
-  /// whose older entry already equals [chosen] and that holds nothing under the retired id is not written.
+  /// What the file's two entries become is the merge's decision for the column ([syncMergeCell], by
+  /// [valueWriteTime]), made from what the file holds now — on a re-run as on the first run: the older entry's time
+  /// stays where [chosen] is the value it already shows, none included, and is the time of this write over it where
+  /// [chosen] is another; the retired entry's time goes with its value. A file whose older entry stays and that holds
+  /// nothing under the retired id is not written.
   Future<void> _rekeyKeyFile(
     _MetadataKeyFile file, {
     required EnhancementMergeSeams seams,
@@ -1385,8 +1403,15 @@ final class EnhancementMerge {
   }) async {
     final data = file.data;
     final writtenAt = file.writtenAt;
-    final settled = chosen == null ? !data.containsKey(olderId) : data[olderId] == chosen;
-    if (settled && !data.containsKey(retiredId) && !writtenAt.containsKey(retiredId)) {
+    SyncHeldValue<Object> held(String id) => (value: data[id], time: writtenAt[id] as int?);
+    final cell = syncMergeCell<Object>(
+      older: held(olderId),
+      retired: held(retiredId),
+      chosen: chosen,
+      writeAt: valueWriteTime,
+    );
+    final written = cell.older;
+    if (written == null && !cell.dropsRetired) {
       return;
     }
     final next = {...data}..remove(retiredId);
@@ -1396,8 +1421,8 @@ final class EnhancementMerge {
     } else {
       next[olderId] = chosen;
     }
-    if (!settled) {
-      nextWrittenAt[olderId] = valueWriteTime(writtenAt[olderId] as int?);
+    if (written != null) {
+      nextWrittenAt[olderId] = written.time;
     }
     await seams.writeMetadata(file.file, file.withData(next, nextWrittenAt));
   }
@@ -1431,7 +1456,7 @@ final class EnhancementMerge {
   /// `parent1` is: left alone, a pair the user refused would be offered again
   /// the moment the survivor took the retired record's place in it. A pair that
   /// collapses to one id is dropped — a record is never a candidate against
-  /// itself.
+  /// itself. The pairs it leaves are the merge's decision ([syncRekeyPairs]).
   Future<void> _rekeyDismissals(
     FilePath file,
     Set<RecordIdPair> dismissed,
@@ -1439,19 +1464,21 @@ final class EnhancementMerge {
     String olderId,
     String retiredId,
   ) async {
-    if (!dismissed.any((pair) => pair.first == retiredId || pair.second == retiredId)) {
+    final rekeyed = syncRekeyPairs(
+      {for (final pair in dismissed) syncPairOf(pair.first, pair.second)},
+      retired: retiredId,
+      older: olderId,
+    );
+    if (rekeyed == null) {
       return;
     }
-    String rename(String id) => id == retiredId ? olderId : id;
-    final rekeyed = <RecordIdPair>{};
-    for (final pair in dismissed) {
-      final first = rename(pair.first);
-      final second = rename(pair.second);
-      if (first != second) {
-        rekeyed.add(RecordIdPair(first, second));
-      }
-    }
-    await seams.writeMetadata(file, dismissedPairsJson(rekeyed));
+    await seams.writeMetadata(
+      file,
+      dismissedPairsJson([
+        for (final pair in rekeyed)
+          if (pair.split('+') case [final a, final b]) RecordIdPair(a, b),
+      ]),
+    );
   }
 
   /// Every in-memory holder of a record id that can still name the retired one.
@@ -1605,28 +1632,17 @@ final class EnhancementMerge {
     }
   }
 
-  /// The survivor [synthesizeSurvivor] builds, with the binding of its body.
+  /// The record of the content side, [held], with the binding of its body.
   ///
   /// The content side's tree becomes the survivor's, and the merge lets go of the other side's images, so where the
   /// content side carries no binding yet it is worked out here from that tree, before the publication that replaces
-  /// it, and placed on the survivor the publication writes. The retired side's binding is never worked out: when its
-  /// content is not kept, its body goes with its images and nothing reads either.
-  Future<CharaDetailRecord> _boundSurvivor({
-    required _HeldRecord older,
-    required _HeldRecord retired,
-    required bool contentFromOlder,
-  }) async {
-    final survivor = synthesizeSurvivor(
-      older: older.record,
-      retired: retired.record,
-      contentFromOlder: contentFromOlder,
-    );
-    if (survivor.metadata.binding != null) {
-      return survivor;
-    }
-    final content = contentFromOlder ? older : retired;
-    return placeOnRecord(survivor, binding: await computeRecordBinding(content.directory));
-  }
+  /// it: the binding is one of the facts that decide whether the kept body is the one the older record shows
+  /// ([syncMergeBody]), and a binding not worked out yet may name another capture. The other side's binding is never
+  /// worked out: when its content is not kept, its body goes with its images and nothing reads either — the older
+  /// record kept for its id alone is read with the binding it carries, and one not worked out disagrees with none.
+  Future<CharaDetailRecord> _bound(_HeldRecord held) async => held.record.metadata.binding != null
+      ? held.record
+      : placeOnRecord(held.record, binding: await computeRecordBinding(held.directory));
 
   /// Every record of [store] that names [retiredId] as a parent, with that slot
   /// pointing at [olderId] instead.
@@ -1635,6 +1651,8 @@ final class EnhancementMerge {
   /// as step 2 published it, and the retired one is about to go, so writing
   /// either from the memory this reads would put back the content the merge
   /// replaced.
+  ///
+  /// Which slots change is the merge's decision ([syncReparented]).
   List<CharaDetailRecord> _reparented(CharaDetailRecordMergeSurface store, String olderId, String retiredId) {
     final updated = <CharaDetailRecord>[];
     for (final record in store.recordsInMemory) {
@@ -1642,18 +1660,15 @@ final class EnhancementMerge {
         continue;
       }
       final id = record.metadata.recordId;
-      if (id.parent1 != retiredId && id.parent2 != retiredId) {
+      final parents = syncReparented(
+        {'parent1': ?id.parent1, 'parent2': ?id.parent2},
+        retired: retiredId,
+        older: olderId,
+      );
+      if (parents == null) {
         continue;
       }
-      updated.add(
-        placeOnRecord(
-          record,
-          parents: (
-            parent1: id.parent1 == retiredId ? olderId : id.parent1,
-            parent2: id.parent2 == retiredId ? olderId : id.parent2,
-          ),
-        ),
-      );
+      updated.add(placeOnRecord(record, parents: (parent1: parents['parent1'], parent2: parents['parent2'])));
     }
     return updated;
   }

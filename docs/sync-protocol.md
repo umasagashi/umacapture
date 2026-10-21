@@ -166,6 +166,51 @@ Exactly `format`, `part` and `content`; the server never reads `content` (the co
 dismissed pairs, defined by the app). They live in parts rather than the root so the root stays
 small, and they count toward the replacement limit like any part.
 
+### What the app puts in the list
+
+The app writes the list from what a device holds (`syncListParts`,
+`lib/src/chara_detail/record_sync_list.dart`) and reads it back to the same values
+(`syncListOfParts`). Every value travels with the time it was written, in milliseconds since the
+epoch, by the clock of the device that wrote it; sync carries the time as written, never the time the
+value arrived. A value from before the app timed its values has time `0`. A value written to none
+keeps its time and has no value key.
+
+A record row:
+
+```json
+{"id": "R1",
+ "body": {"name": "<body name>", "written_at": 1767225600123, "content": "<content name>", "parents": {"parent1": "P1"}},
+ "archive": {"state": "jpeg", "written_at": 1767225600400},
+ "image": {"skill_png": "…", "skill_jpeg": "…"},
+ "absorbed": ["R9"],
+ "cells": {"rating/<key>": {"value": 4.5, "written_at": 1767225600600}, "memo/<key>": {"written_at": 1767225600800}}}
+```
+
+| Field | Holds |
+|---|---|
+| `body.name` | The record's body object: its `record.json` without `metadata.body_written_at` and `metadata.relation_bonus` (see [Bodies](#bodies)) |
+| `body.written_at` | The body's time, `metadata.body_written_at` of the device's `record.json` |
+| `body.content` | The SHA-256 of the recognised content alone (`recognizedContentKey`): two bodies with the same content and bindings that agree are the same body, whatever else differs |
+| `body.parents` | The inheritance parents, `parent1` and `parent2`, each left out when empty; the whole key left out when both are |
+| `archive.state`, `archive.written_at` | The archive state and its time, from the record's `archive.json` and the store it is in |
+| `image` | The body's `metadata.binding`, `{}` where it is not worked out |
+| `absorbed` | The ids the record absorbed in merges (`merged_ids.json`), sorted; left out when none |
+| `split_from` | The id a round split the record off, where it did |
+| `cells` | The record's rating and memo cells, by column: `<storage>/<key>`, `storage` `rating` or `memo` and `key` the column storage's. `value` is the rating (a number) or the memo (a string); left out when none |
+
+The body's content and parents are in the row as well as in the body object, so a round merges the
+list without fetching a body it does not apply. A cell of a record the list does not hold is not
+carried.
+
+The opaque parts:
+
+- `columns`: `content` maps each column to `{"title": "…", "written_at": …}`; a removed column
+  storage has no `title`.
+- `dismissed`: `content` is the dismissed pairs, `[["R1", "R2"], …]`, each pair and the list sorted.
+
+The same values make the same text: keys come in one order, rows by id, columns and pairs sorted. An
+unchanged part therefore keeps its name, and a put of it answers `"exists"`.
+
 ### Endpoints
 
 - `POST /api/sync/parts` `{name, part}`: `part` is the part's text, at most 512 KiB of UTF-8, and

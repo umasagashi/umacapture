@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
@@ -211,7 +212,7 @@ void main() {
     // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
     container.read(charaDetailCaptureStateProvider.notifier).started(incoming.id);
 
-    active.add(incoming);
+    active.add(incoming, notes: RecordNotes.none);
     await Future<void>.delayed(Duration.zero);
 
     // The rejected record is still not admitted to the store...

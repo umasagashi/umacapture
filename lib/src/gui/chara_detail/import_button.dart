@@ -48,53 +48,8 @@ final _importingProvider = settableNotifierProvider<bool>(false);
 /// question asked about `storage/`.
 List<PathEntity> recordImportLongReadPaths(PathInfo pathInfo) => [pathInfo.charaDetailDir];
 
-/// Everything that has to be re-read once an import has written records.
-///
-/// **One function rather than the three calls it makes**, so the whole of what
-/// an import changes is stated where the import is and not spread across its
-/// completion block: an import writes records into the tree exactly as a capture
-/// does, and the two consequences of that — the stores no longer hold the right
-/// list, and the storage view no longer holds the right size — belong to the same
-/// fact.
-///
-/// The stores are rescanned rather than patched: an import writes into the
-/// store of each record's archive state and takes the record out of the other,
-/// so both are re-listed. [effects] is handed the record
-/// root for the totals, which is what makes a size shown on an open storage tab
-/// follow an import that finishes behind it, and the directories of
-/// [writtenIds] for the pictures: an import publishes over a record id that is
-/// already stored, under the same path, so a picture of that record decoded
-/// before the import would otherwise go on being shown. [writtenIds] are the ids
-/// the imports committed and nothing else -- a record the store refused left its
-/// directory as it was.
-///
-/// Taken over the container's [containerRefProvider] rather than the toolbar's own
-/// `ref`: the import outlives the widget that started it, which is the same
-/// reason the caller reads the container before opening the picker.
-@visibleForTesting
-void applyRecordImportCompletion(
-  RefBase ref,
-  PathInfo pathInfo, {
-  required Iterable<String> writtenIds,
-  required RecordWriteEffects effects,
-}) {
-  ref.invalidate(charaDetailRecordStorageLoaderProvider);
-  ref.invalidate(charaDetailArchiveStorageLoaderProvider);
-  effects.images.apply(
-    RecordImageScope(
-      info: pathInfo,
-      // Both stores: an import lands a record in the store of its archive state, and takes it out of the other.
-      changed: [
-        for (final id in writtenIds)
-          for (final source in [RecordSource.active, RecordSource.archive]) recordDirOfId(pathInfo, source, id).path,
-      ],
-    ),
-  );
-  effects.totals.apply(TotalsScope.recordRoot(pathInfo));
-}
-
 /// Runs the resolution a capture runs over the records an import wrote ([writtenIds]), once both
-/// stores have been re-listed after [applyRecordImportCompletion].
+/// stores have been re-listed after [applyRecordsPublished].
 ///
 /// A failure here leaves every record on disk and in the table; only the links and relation bonuses
 /// the resolution would have written are missing, and the manual whole-store resolution fills them.
@@ -364,7 +319,9 @@ class CharaDetailImportButton extends ConsumerWidget {
       // record set to resolve against, the same silence the duplicate check above takes.
       final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
       if (committed) {
-        applyRecordImportCompletion(
+        // Over the container's ref rather than the toolbar's own: the import outlives the widget that started it,
+        // which is the same reason this reads the container before opening the picker.
+        applyRecordsPublished(
           container.read(containerRefProvider),
           pathInfo,
           writtenIds: importedIds,

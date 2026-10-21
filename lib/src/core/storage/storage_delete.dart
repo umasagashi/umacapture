@@ -5,8 +5,10 @@
 /// and shows no dialog. What it does is take the right
 /// exclusion, delete depth-first, and hand back a
 /// [StorageDeleteReport] naming every entry that went and every entry that
-/// stayed. The confirmation friction, the invalidate table, the
-/// image-cache eviction, the settings-box path and the sentences
+/// stayed. A rating or memo column storage is the one entry it removes by writing
+/// rather than deleting: its values become none and the file stays, holding the
+/// removal for a sync round to carry ([StorageDeleteReport.cleared]).
+/// The confirmation friction, the invalidate table, the image-cache eviction, the settings-box path and the sentences
 /// the user reads are applied from `storage_delete_action.dart`, and
 /// each of them needs this report rather than replacing it — the eviction most
 /// literally, since [StorageDeleteReport.deleted] is the only enumeration of the
@@ -44,7 +46,10 @@ import 'package:easy_localization/easy_localization.dart';
 
 import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/record_binding.dart';
+import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/record_quarantine_ledger.dart';
+import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_reason.dart';
@@ -53,6 +58,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
 import 'long_read_registry.dart';
+import 'storage_delete_invalidation.dart';
 import 'storage_delete_report.dart';
 import 'storage_exclusion.dart';
 import 'storage_group.dart';
@@ -94,20 +100,23 @@ Future<T> holdForDelete<T>(
   );
 }
 
-/// Deletes [target], which must belong to [group], under that group's exclusion.
+/// Deletes [target], which must belong to [group], under that group's exclusion. Answers the report, and the ids of
+/// the records on the quarantine shelf whose directories it removed ([N15-22] (d)).
 ///
 /// Never throws for a filesystem or lock failure: every one of those is a state
 /// the user has to be told about, so it comes back in the report. An
 /// [ArgumentError] from the plan does propagate — that is a caller pairing a path
 /// with the wrong group, which is a defect and not a delete outcome.
-Future<StorageDeleteReport> _deleteStorageEntry(
+Future<({StorageDeleteReport report, Set<String> shelfDeleted})> _deleteStorageEntry(
   RefBase ref, {
   required StorageGroup group,
   required PathEntity target,
+  required _KeepAsRemoval? keepAsRemoval,
 }) async {
   StorageDeletePlan? surveyed;
+  var shelfDeleted = const <String>{};
   try {
-    return await runUnderStorageExclusion(
+    final report = await runUnderStorageExclusion(
       ref,
       group: group,
       target: target,
@@ -136,26 +145,40 @@ Future<StorageDeleteReport> _deleteStorageEntry(
         // A scope that runs no whole-store maintenance leaves [surveyed] null,
         // and surveying here is the same set: the exclusion was taken before
         // either point and no drain ran between them.
-        final report = await _deleteSurveyed(surveyed ?? await _surveyTree(target), outcome);
-        await _noteQuarantinedRecordsDeleted(ref, quarantined, report);
+        final report = await _deleteSurveyed(
+          surveyed ?? await _surveyTree(target),
+          outcome,
+          keepAsRemoval: keepAsRemoval,
+          shelf: group.id == StorageGroupId.quarantine
+              ? (await ref.read(pathLayoutLoader.future)).charaDetailQuarantineDir
+              : null,
+        );
+        shelfDeleted = await _noteQuarantinedRecordsDeleted(ref, quarantined, report);
         return report;
       },
     );
+    return (report: report, shelfDeleted: shelfDeleted);
   } on RecordMutationLockBusy catch (error, stackTrace) {
     // Nothing was touched: the body never ran. Reported against the target the
     // user asked for, because that is the only path this failure is about.
     logger.w('Storage delete could not take its lock in time: ${target.path}', error, stackTrace);
-    return StorageDeleteReport.wholeRequest(
-      subject: StorageDeletePathSubject(target.path),
-      reason: StorageDeleteFailureReason.lockBusy,
-      detail: StorageDeletePlatformDetail(error),
+    return (
+      report: StorageDeleteReport.wholeRequest(
+        subject: StorageDeletePathSubject(target.path),
+        reason: StorageDeleteFailureReason.lockBusy,
+        detail: StorageDeletePlatformDetail(error),
+      ),
+      shelfDeleted: const <String>{},
     );
   } on RecordMutationLockUnavailable catch (error, stackTrace) {
     logger.w('Storage delete has no exclusion primitive: ${target.path}', error, stackTrace);
-    return StorageDeleteReport.wholeRequest(
-      subject: StorageDeletePathSubject(target.path),
-      reason: StorageDeleteFailureReason.lockUnavailable,
-      detail: StorageDeletePlatformDetail(error),
+    return (
+      report: StorageDeleteReport.wholeRequest(
+        subject: StorageDeletePathSubject(target.path),
+        reason: StorageDeleteFailureReason.lockUnavailable,
+        detail: StorageDeletePlatformDetail(error),
+      ),
+      shelfDeleted: const <String>{},
     );
   }
 }
@@ -167,7 +190,7 @@ Future<StorageDeleteReport> _deleteStorageEntry(
 Future<void> _placeBindingBeforeImageDelete(RefBase ref, PathEntity target) async {
   final info = await ref.read(pathLayoutLoader.future);
   if (isRecordBindingImage(info, target)) {
-    await placeRecordBindingUnlocked(target.parent);
+    await placeRecordBindingsUnlocked(ref, [target.parent]);
   }
 }
 
@@ -194,25 +217,43 @@ Future<Map<String, String>> _quarantinedRecordsUnder(RefBase ref, StorageGroup g
 
 /// Notes as deleted by the user the ids of the [quarantined] records whose directories [report] removed ([N15-22] (d)):
 /// a record taken off the shelf this way is a delete, where one put back is not. Still inside the delete's exclusive
-/// root, which is the lock the shelf's list is written under.
-Future<void> _noteQuarantinedRecordsDeleted(
+/// root, which is the lock the shelf's list is written under. Answers, of those ids, noted or not, the ones whose values
+/// carried outside the directory go with the record ([syncShelfDeletesForgotten]).
+Future<Set<String>> _noteQuarantinedRecordsDeleted(
   RefBase ref,
   Map<String, String> quarantined,
   StorageDeleteReport report,
 ) async {
-  if (quarantined.isEmpty) return;
+  if (quarantined.isEmpty) return const {};
   final deleted = report.deletedPaths.toSet();
   final ids = {
     for (final MapEntry(key: path, value: id) in quarantined.entries)
       if (deleted.contains(path)) id,
   };
-  if (ids.isEmpty) return;
+  if (ids.isEmpty) return ids;
   final info = await ref.read(pathLayoutLoader.future);
   try {
     await noteQuarantineUserDeletedUnlocked(info.charaDetailQuarantineDir, ids);
   } catch (error, stackTrace) {
     logger.e('Could not note the deleted quarantined records ${ids.join(', ')}.', error, stackTrace);
   }
+  final stored = <String>{};
+  for (final id in ids) {
+    try {
+      if (await (info.charaDetailActiveDir / id).exists() || await (info.charaDetailArchiveDir / id).exists()) {
+        stored.add(id);
+      }
+    } catch (error, stackTrace) {
+      // Not known to be gone: what it carries stays.
+      logger.w(
+        'Could not tell whether a store holds the record $id deleted from the quarantine shelf.',
+        error,
+        stackTrace,
+      );
+      stored.add(id);
+    }
+  }
+  return syncShelfDeletesForgotten(ids, stored: stored);
 }
 
 /// The ids of the records whose whole directories [report] removed from a record store: the directories directly
@@ -247,16 +288,49 @@ Future<StorageDeleteReport> deleteStorageEntries(
   required StorageGroup group,
   required List<PathEntity> targets,
 }) async {
+  final keepAsRemoval = await _keepAsRemovalFor(ref, group);
   final reports = <StorageDeleteReport>[];
   for (final target in targets) {
-    final report = await _deleteStorageEntry(ref, group: group, target: target);
-    // A whole record directory is the record's delete ([N15-22] (a)), so what it carried outside the directory goes
-    // as it does from the list. After the delete's own exclusion: that is a record lock, and this takes the root.
+    final (:report, :shelfDeleted) = await _deleteStorageEntry(
+      ref,
+      group: group,
+      target: target,
+      keepAsRemoval: keepAsRemoval,
+    );
+    // A whole record directory is the record's delete ([N15-22] (a)), and so is a record deleted from the quarantine
+    // shelf ((d)), so what it carried outside the directory goes as it does from the list. After the delete's own
+    // exclusion: that is a record lock, and this takes the root.
     final info = await ref.read(pathLayoutLoader.future);
-    await forgetDeletedRecords(ref, info, _recordsDeletedBy(info, group, report));
+    await forgetDeletedRecords(ref, info, {..._recordsDeletedBy(info, group, report), ...shelfDeleted});
     reports.add(report);
   }
   return StorageDeleteReport.merge(reports);
+}
+
+/// Writes the removal into a file the delete would otherwise remove, and answers what that did, or null for a file that
+/// is no column storage.
+typedef _KeepAsRemoval = Future<ColumnStorageRemoval?> Function(FilePath file);
+
+/// How a delete in [group] keeps a rating or memo column storage, or null for a group that holds none.
+///
+/// Deleting a column storage here is the same removal the column settings make ([R2-6] (a)): its title and the values
+/// listed records hold become none, written now, and the file stays to hold those times, so a sync round carries the
+/// removal and the other device's older values do not come back. A file that cannot be read is deleted as it is
+/// ([writeColumnStorageRemoval]).
+///
+/// The listed records are read **once, before any exclusion is taken**: reading the record stores builds them, and that
+/// must not happen under the root lock the metadata delete holds, since the locks are not re-entrant. A store that
+/// cannot be read answers null, which counts every record as listed, so the delete still works while the record store
+/// is unopenable — repairing exactly that state is what the storage view is for.
+Future<_KeepAsRemoval?> _keepAsRemovalFor(RefBase ref, StorageGroup group) async {
+  if (group.id != StorageGroupId.metadata) return null;
+  final info = await ref.read(pathLayoutLoader.future);
+  final listed = await listedRecordIds(ref);
+  return (file) async {
+    final kind = metadataColumnStorageKindOf(info, file);
+    if (kind == null) return null;
+    return writeColumnStorageRemoval(file, kind: kind, listed: listed);
+  };
 }
 
 /// What was under one delete target at the moment the gesture took its
@@ -368,7 +442,12 @@ Future<StorageDeletePlan> _surveyTree(PathEntity target) async {
 /// this entry go. It went. Asking first is also what lets that reason keep the
 /// meaning it claims: both places below that report it are downstream of this,
 /// so a refusal in this report is always about an entry that is still there.
-Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintenanceOutcome outcome) async {
+Future<StorageDeleteReport> _deleteSurveyed(
+  StorageDeletePlan plan,
+  RootMaintenanceOutcome outcome, {
+  required _KeepAsRemoval? keepAsRemoval,
+  required DirectoryPath? shelf,
+}) async {
   final root = plan.root;
   // Asked once, here, and answered from the filesystem rather than inferred from
   // how a later delete happens to fail: both branches below turn on it, and the
@@ -438,7 +517,9 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
   try {
     // No `exists()` of its own: the branch above has just established that the
     // root is there, and asking twice would let the two answers disagree.
-    extant = await root.isFile() ? const [] : _deepestFirst(await fsBackend.list(root.path, recursive: true));
+    extant = await root.isFile()
+        ? const []
+        : _shelfNotesLast(_deepestFirst(await fsBackend.list(root.path, recursive: true)), shelf);
   } catch (error, stackTrace) {
     logger.w('Storage delete could not enumerate ${root.path}', error, stackTrace);
     return StorageDeleteReport.wholeRequest(
@@ -447,24 +528,68 @@ Future<StorageDeleteReport> _deleteSurveyed(StorageDeletePlan plan, RootMaintena
       detail: StorageDeletePlatformDetail(error),
     );
   }
-  return _deleteOne(root, deepestFirst: extant, plan: plan, outcome: outcome);
+  return _deleteOne(
+    root,
+    deepestFirst: extant,
+    plan: plan,
+    outcome: outcome,
+    keepAsRemoval: keepAsRemoval,
+    shelf: shelf,
+  );
 }
 
 List<PathEntity> _deepestFirst(List<FsEntry> entries) =>
     entries.map(_typed).toList()..sort((a, b) => b.segments.length.compareTo(a.segments.length));
 
+/// Whether [entity] is the note naming a record directly on [shelf] ([quarantineOriginName]).
+bool _isShelfNote(PathEntity entity, DirectoryPath? shelf) =>
+    shelf != null &&
+    entity is FilePath &&
+    entity.name == quarantineOriginName &&
+    entity.parent.parent.path == shelf.path;
+
+/// [deepestFirst] with each shelf note moved to just before its directory, after everything else in it.
+///
+/// The note is the only thing that says whose record the directory holds ([StorageDeleteRetentionReason
+/// .identifiesShelfRecord]), so it goes last, the way a record's own delete removes `record.json` last: a delete stopped
+/// by any other entry of the directory leaves the note, and with it a directory that can still be cleaned up as that
+/// record.
+List<PathEntity> _shelfNotesLast(List<PathEntity> deepestFirst, DirectoryPath? shelf) {
+  if (shelf == null) return deepestFirst;
+  final notes = {
+    for (final entity in deepestFirst)
+      if (_isShelfNote(entity, shelf)) entity.parent.path: entity,
+  };
+  if (notes.isEmpty) return deepestFirst;
+  final ordered = <PathEntity>[];
+  for (final entity in deepestFirst) {
+    if (_isShelfNote(entity, shelf)) continue;
+    if (notes.remove(entity.path) case final note?) ordered.add(note);
+    ordered.add(entity);
+  }
+  // The rest are notes whose directory is the root of the delete, which comes after every listed entry.
+  return ordered..addAll(notes.values);
+}
+
 /// Deletes [deepestFirst] and then [root], skipping any directory that still has
 /// a survivor under it, anything [plan] did not approve, and any slot [outcome]
-/// says recovery could not empty.
+/// says recovery could not empty. A column storage [keepAsRemoval] writes the removal into is cleared instead, and one
+/// that already held a removal is retained.
 Future<StorageDeleteReport> _deleteOne(
   PathEntity root, {
   required List<PathEntity> deepestFirst,
   required StorageDeletePlan plan,
   required RootMaintenanceOutcome outcome,
+  required _KeepAsRemoval? keepAsRemoval,
+  required DirectoryPath? shelf,
 }) async {
   final deleted = <StorageDeleteSubject>[];
+  final cleared = <StorageDeleteSubject>[];
   final failed = <StorageDeleteFailure>[];
   final retained = <StorageDeleteRetention>[];
+  // Every directory that holds a file this delete cleared ([StorageDeleteReport.cleared]). Such a directory is cleared
+  // too, unless something else survived in it, which [occupied] already says and which is looked up first.
+  final holdsCleared = <String>{};
   // Every ancestor of a surviving entry, so "is this directory still occupied?"
   // is one lookup instead of a scan over the survivors. Filled as survivors are
   // found, which is sound because the sort guarantees a directory is visited
@@ -557,6 +682,65 @@ Future<StorageDeleteReport> _deleteOne(
       survive(entity, reason);
       continue;
     }
+    if (_isShelfNote(entity, shelf) && (entity.path == root.path || occupied.containsKey(entity.parent.path))) {
+      // Asked for without its directory, or with a directory that is staying: either way the directory stays on the
+      // shelf, and the note is the only thing left to say whose record it is. Its directory is held by it and says
+      // nothing of its own, as for any survivor this report names.
+      retained.add(
+        StorageDeleteRetention(
+          subject: StorageDeletePathSubject(entity.path),
+          reason: StorageDeleteRetentionReason.identifiesShelfRecord,
+        ),
+      );
+      survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
+      continue;
+    }
+    if (holdsCleared.contains(entity.path)) {
+      cleared.add(StorageDeletePathSubject(entity.path));
+      holdsCleared.add(entity.parent.path);
+      continue;
+    }
+    if (keepAsRemoval != null && entity is FilePath) {
+      final ColumnStorageRemoval? removal;
+      try {
+        removal = await keepAsRemoval(entity);
+      } catch (error, stackTrace) {
+        // The removal could not be written, so the file still holds its values. Deleting it instead would lose the
+        // removal this delete exists to record, so it is refused and stays as it was.
+        logger.w('Storage delete could not write the removal into ${entity.path}', error, stackTrace);
+        failed.add(
+          StorageDeleteFailure(
+            subject: StorageDeletePathSubject(entity.path),
+            reason: StorageDeleteFailureReason.refused,
+            detail: StorageDeletePlatformDetail(error),
+          ),
+        );
+        survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
+        continue;
+      }
+      switch (removal) {
+        case ColumnStorageRemoval.written:
+          // Its values went, which is what the user asked for, and the file stays to hold the times they went at.
+          cleared.add(StorageDeletePathSubject(entity.path));
+          holdsCleared.add(entity.parent.path);
+          continue;
+        case ColumnStorageRemoval.alreadyRemoved:
+          // Nothing left to delete, and the file is the only record of the removal, so it is kept and says why. Its
+          // directory is held by it and says nothing of its own, as for any survivor this report names.
+          retained.add(
+            StorageDeleteRetention(
+              subject: StorageDeletePathSubject(entity.path),
+              reason: StorageDeleteRetentionReason.holdsRemovalTimes,
+            ),
+          );
+          survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
+          continue;
+        case ColumnStorageRemoval.unreadable:
+        case null:
+          // Deleted as it is, below.
+          break;
+      }
+    }
     try {
       // Non-recursive on purpose: everything below has already been dealt with,
       // and a recursive call here would delete entries this report never named
@@ -582,7 +766,7 @@ Future<StorageDeleteReport> _deleteOne(
       survive(entity, StorageDeleteRetentionReason.blockedBySurvivor);
     }
   }
-  return StorageDeleteReport(deleted: deleted, failed: failed, retained: retained);
+  return StorageDeleteReport(deleted: deleted, cleared: cleared, failed: failed, retained: retained);
 }
 
 /// Windows' `ERROR_ACCESS_DENIED`, the code a read-only entry's delete is

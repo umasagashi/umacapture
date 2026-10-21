@@ -90,22 +90,6 @@ bool saveRating(
   });
 }
 
-/// The ids of every listed record, active and archived, or null where a set of them cannot be read.
-///
-/// Removing a column storage writes none into the fields of listed records only (see `RatingData.removed`).
-Future<Set<String>?> listedRecordIds(RefBase ref) async {
-  try {
-    final active = await ref.read(charaDetailRecordStorageLoaderProvider.future);
-    final archive = await ref.read(charaDetailArchiveStorageLoaderProvider.future);
-    return {
-      for (final record in [...active, ...archive]) record.id,
-    };
-  } catch (error, stackTrace) {
-    logger.w("Could not list the records a column storage removal writes into.", error, stackTrace);
-    return null;
-  }
-}
-
 /// Waits for a storage's [load] to finish, so a removal is applied to what it holds.
 ///
 /// A failed load is left for the mutator to refuse ([commitStorageChange]).
@@ -576,19 +560,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
 }
 
-class _NotationSelectorState extends ConsumerState<_NotationSelector> {
-  late String title;
+class _NotationSelectorState extends ConsumerState<_NotationSelector> with StorageColumnTitle<_NotationSelector> {
   late final VoidCallback _commitTitle;
+
+  @override
+  String get titleSpecId => widget.specId;
 
   @override
   void initState() {
     super.initState();
-    final spec = _clonedSpecProvider.read(ref, widget.specId);
-    title = spec.title;
+    initShownTitle();
     _commitTitle = () {
+      final title = titleText;
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
+      if (!titleEdited) {
+        return;
+      }
 
       final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
       commitStorageChange(() {
@@ -615,6 +604,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   @override
   Widget build(BuildContext context) {
+    followShownTitle();
     return FormGroup(
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
@@ -623,10 +613,11 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           title: Text("$tr_common.notation.title.label".tr()),
           description: Text("$tr_common.notation.title.description".tr()),
           trailing: DenseTextField(
-            initialText: title,
+            key: ValueKey(shownTitle),
+            initialText: titleText,
             minWidth: 140,
             onChanged: (value) {
-              title = value;
+              titleText = value;
             },
           ),
         ),

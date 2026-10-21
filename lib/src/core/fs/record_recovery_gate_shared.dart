@@ -209,9 +209,15 @@ final class RecordRecoveryGate {
 /// interrupted publication exists on both platforms and has to be finished on
 /// both. Living here rather than being written twice is what keeps the two legs
 /// from answering the same question differently.
-Future<void> ensureWriteJournalRecordReadyUnlocked(DirectoryPath storageRoot, String recordId) async {
-  await recoverWebRecordWriteTransactionUnlocked(storageRoot / 'chara_detail', recordId);
+///
+/// [dataRoot] is the record data root (`chara_detail`) the leg resolved once ([openRecordDataRootOf]), so that each
+/// journal looks for the record's slot from it rather than from the storage root.
+Future<void> ensureWriteJournalRecordReadyUnlocked(OpenedDirectory dataRoot, String recordId) async {
+  await recoverWebRecordWriteTransactionUnlocked(dataRoot, recordId);
 }
+
+/// The record data root under [storageRoot], resolved once for every journal a per-record recovery looks in.
+Future<OpenedDirectory> openRecordDataRootOf(DirectoryPath storageRoot) => (storageRoot / 'chara_detail').open();
 
 /// The root hook both legs install: whatever whole-store maintenance this
 /// platform has, run without acquiring anything.

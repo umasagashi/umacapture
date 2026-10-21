@@ -91,6 +91,13 @@ class WebLikeFsBackend implements FsBackend {
   }
 
   @override
+  Future<Uint8List?> readBytesIfPresent(String path) => inner.readBytesIfPresent(path);
+
+  /// Asks this backend by path, so a read from the opened directory is counted and refused here as any other is.
+  @override
+  Future<FsDirectory> openDirectory(String path) async => PassThroughFsDirectory(this, path);
+
+  @override
   Future<Uint8List> readHead(String path, int maxBytes) {
     readHeadBounds.add(maxBytes);
     return inner.readHead(path, maxBytes);
@@ -177,6 +184,9 @@ class WebLikeFsBackend implements FsBackend {
 
   @override
   Uint8List readBytesSync(String path) => throw _sync('readBytesSync');
+
+  @override
+  Uint8List? readBytesIfPresentSync(String path) => throw _sync('readBytesIfPresentSync');
 
   @override
   void writeStringSync(String path, String contents) => throw _sync('writeStringSync');

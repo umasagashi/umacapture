@@ -61,6 +61,12 @@ class FileCase {
 
   /// Device → how far its clock runs ahead of the world's ([FileWorld.new]).
   final Map<String, int> clockAhead;
+
+  /// What of the model's own round [ops] need ([ofTheModelsRound]).
+  Set<OfTheModelsRound> get ofTheModels => ofTheModelsRound(ops);
+
+  /// Whose round the case runs: the app's, where it needs nothing of the model's own ([ofTheModels]).
+  FileRound get round => ofTheModels.isEmpty ? FileRound.app : FileRound.model;
 }
 
 const _png = SetImageForm('A', 'png');
@@ -211,22 +217,41 @@ Op _named(FileWorld w, Op op) {
       rating,
     ),
     Rerecognize(:final device, :final id, :final version) => Rerecognize(device, named(device, id), version),
+    Link(:final device, :final id, :final slot, :final parent, :final bonus) => Link(
+      device,
+      named(device, id),
+      slot,
+      named(device, parent),
+      bonus,
+    ),
     Archive(:final device, :final id, :final option, :final untracked) => Archive(
       device,
       named(device, id),
       option,
       untracked: untracked,
     ),
+    ExportZip(:final device, :final id, :final slot, :final beforeTheUpgrade) => ExportZip(
+      device,
+      named(device, id),
+      slot,
+      beforeTheUpgrade: beforeTheUpgrade,
+    ),
     _ => op,
   };
 }
 
-/// Runs [c] and drives the world to rest. The inheritance links go past the judge (see the head of
-/// `file_world.dart`).
-FileCaseResult runFileCase(FileCase c, {FileMutation? mutation}) {
-  final w = FileWorld(['A', 'B'], judgeReadings: fileReadings, mutation: mutation, clockAhead: c.clockAhead);
+/// Runs [c] on its round, or on [round], and drives the world to rest. The inheritance links go past the judge (see
+/// the head of `file_world.dart`).
+FileCaseResult runFileCase(FileCase c, {FileMutation? mutation, FileRound? round}) {
+  final w = FileWorld(
+    ['A', 'B'],
+    judgeReadings: fileReadings,
+    mutation: mutation,
+    clockAhead: c.clockAhead,
+    round: round ?? c.round,
+  );
   for (final op in c.ops) {
-    op is Link ? w.execute(op) : w.apply(_named(w, op));
+    op is Link ? w.execute(_named(w, op)) : w.apply(_named(w, op));
   }
   String plain(String s) => plainSplitIds(s);
   Set<String> shown(FState store, FDevice? d) => {
@@ -319,6 +344,24 @@ const _legacyMemoOfAZip = [
 
 const _bothSync = [SyncRound('B'), SyncRound('A')];
 
+/// R1 to R4 captured on A, R1 and R4 dismissed, and both synced; A merges R3 into R1 keeping R3's content and B R2
+/// keeping R2's, B syncs, and A's round stops as [cut] stops it, once it applied R1; then both sync.
+List<Op> _splitOffByARoundThatStops(ReceiveCut cut) => [
+  const Capture('A', 'R1', 1),
+  const Capture('A', 'R2', 2),
+  const Capture('A', 'R3', 3),
+  const Capture('A', 'R4', 4),
+  const Dismiss('A', 'R1', 'R4', dismissed: true),
+  const SyncRound('A'),
+  const SyncRound('B'),
+  const Merge('A', 'R1', 'R3', contentFrom: 'R3'),
+  const Merge('B', 'R1', 'R2', contentFrom: 'R2'),
+  const SyncRound('B'),
+  cut,
+  const SyncRound('A'),
+  const SyncRound('B'),
+];
+
 final fileCases = <FileCase>[
   FileCase(
     'capture reaches the other device',
@@ -348,6 +391,143 @@ final fileCases = <FileCase>[
       SyncRound('B'),
     ],
     {'R1=R2', 'R1~=R1'},
+  ),
+  // B's round splits its R1 off, and the server's R1 takes the id: the relation bonus B's resolver derived of its R1
+  // goes with the record split off, and the server's R1, which shows no parent, holds none.
+  FileCase(
+    'a record split off carries its relation bonus away from the id',
+    'the bonus is on the record split off alone; the record placed in the id holds none until its own is derived',
+    [
+      const Capture('A', 'R1', 2),
+      const Capture('A', 'R2', 3),
+      const Capture('A', 'R3', 4, parents: {1: 'P'}),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Merge('A', 'R1', 'R2', contentFrom: 'R2'),
+      const Merge('B', 'R1', 'R3', contentFrom: 'R3'),
+      const Capture('B', 'P', 5),
+      const Link('B', 'R1', 1, 'P', 7),
+      const SyncRound('A'),
+      const SyncRound('B'),
+    ],
+    {'P=P', 'R1=R2', 'R1~=R3 parent1=P'},
+    shows: {
+      'B': {'R1.bonus=null', 'R1~.bonus=7'},
+    },
+  ),
+  // B splits its merge off R1 as R1~, made of R2, whose inheritance names P; A captures P, and its resolver fills R1~'s
+  // slot and derives a bonus of it. A's merge then makes its R1 of what R1~ is made of, and its round splits that off
+  // onto R1~: the record split off holds no relation bonus of its own, so the one R1~ holds stays.
+  FileCase(
+    'a record split off that holds no relation bonus leaves the one the id it lands on holds',
+    'the bonus of the id a record split off lands on is replaced only by a value the record split off holds',
+    [
+      const Capture('A', 'R1', 1),
+      const Capture('A', 'R2', 2, parents: {1: 'P'}),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Merge('B', 'R1', 'R2', contentFrom: 'R2'),
+      const LoseStateFile('B'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+      const Capture('A', 'P', 5),
+      const Link('A', 'R1~', 1, 'P', 7),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Capture('B', 'R3', 3),
+      const Capture('B', 'R4', 4),
+      const Merge('B', 'R1', 'R3', contentFrom: 'R3'),
+      const Merge('B', 'R1~', 'R4', contentFrom: 'R4'),
+      const Merge('A', 'R1', 'R2', contentFrom: 'R1'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+    ],
+    {'P=P', 'R1=R3', 'R1~=R4'},
+    shows: {
+      'A': {'R1.bonus=null', 'R1~.bonus=7'},
+    },
+  ),
+  // A's round splits its R1 off onto R1~ while it splits the record R1~ held off onto R1~~: the bonus A's resolver
+  // derived of its R1 goes to R1~, and what leaves R1~ takes only R1~'s own.
+  FileCase(
+    'a record split off carries its relation bonus onto an id that splits its own record off in the same round',
+    'the bonus of the record split off is on the id it lands on, though that id splits away the record it held',
+    [
+      const Capture('A', 'R1', 1),
+      const Capture('A', 'R2', 2),
+      const Capture('A', 'R3', 3, parents: {1: 'P'}),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Merge('B', 'R1', 'R3', contentFrom: 'R3'),
+      const ExportZip('B', 'R1', 'zx'),
+      const Merge('A', 'R1', 'R2', contentFrom: 'R2'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+      const ExportZip('A', 'R1~', 'zs'),
+      const Capture('A', 'R4', 4),
+      const Merge('A', 'R1~', 'R4', contentFrom: 'R4'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Capture('A', 'R5', 5),
+      const Merge('A', 'R1~', 'R5', contentFrom: 'R5'),
+      const ImportZip('A', 'zx'),
+      const Capture('A', 'P', 0),
+      const Link('A', 'R1', 1, 'P', 7),
+      const Capture('B', 'R6', 6),
+      const Merge('B', 'R1', 'R6', contentFrom: 'R6'),
+      const ImportZip('B', 'zs'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+    ],
+    {'P=P', 'R1=R6', 'R1~=R3', 'R1~~=R5'},
+    shownAfterOps: {
+      'A': {'R1.bonus=null', 'R1~.bonus=7', 'R1~~.bonus=null'},
+    },
+  ),
+  // The same, A having taken R3 in again from a zip and dismissed R1~+R3, which both devices then delete R3 under. A's
+  // round splits its R1 off onto R1~ and its R1~ onto R1~~: two records of A's, each of which holds R3, and of which A
+  // lists no pair. A took R1~+R3 out in every reading, R1~+R1~~ among them.
+  FileCase(
+    'a pair both devices took out, deleting one of its records, stays out through a chain of splits',
+    'R3 was deleted on both devices, and the pair dismissed of it goes with it, though the records that hold R3 split on',
+    [
+      const Capture('A', 'R1', 1),
+      const Capture('A', 'R2', 2),
+      const Capture('A', 'R3', 3, parents: {1: 'P'}),
+      const ExportZip('A', 'R3', 'z3'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Merge('B', 'R1', 'R3', contentFrom: 'R3'),
+      const ExportZip('B', 'R1', 'zx'),
+      const Merge('A', 'R1', 'R2', contentFrom: 'R2'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+      const ExportZip('A', 'R1~', 'zs'),
+      const Capture('A', 'R4', 4),
+      const Merge('A', 'R1~', 'R4', contentFrom: 'R4'),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const ImportZip('A', 'z3'),
+      const Dismiss('A', 'R1~', 'R3', dismissed: true),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const Capture('A', 'R5', 5),
+      const Merge('A', 'R1~', 'R5', contentFrom: 'R5'),
+      const ImportZip('A', 'zx'),
+      const Capture('A', 'P', 0),
+      const Link('A', 'R1', 1, 'P', 7),
+      const Capture('B', 'R6', 6),
+      const Merge('B', 'R1', 'R6', contentFrom: 'R6'),
+      const ImportZip('B', 'zs'),
+      const Delete('A', 'R3'),
+      const Delete('B', 'R3'),
+      const SyncRound('B'),
+      const SyncRound('A'),
+    ],
+    {'P=P', 'R1=R6', 'R1~=R3', 'R1~~=R5'},
   ),
   FileCase(
     'CE-2 the same ids absorbed, other content kept',
@@ -1209,6 +1389,24 @@ final fileCases = <FileCase>[
     {'R1=R1', 'R2=R2', 'R3=R3'},
   ),
   FileCase(
+    'a memo lost to a retake on the other device, in a column no one titled',
+    'the memo the retake lost goes on both devices: the device that took the record back from a zip lost it with the '
+        'record, a change the other device left as it was ([R1-4] check 2, [R4-1]); the column both devices hold is '
+        'the storage the first memo made, titled as the app titles it',
+    [
+      Capture('A', 'R1', 1),
+      EditMemo('A', 'R1', 'kept'),
+      SyncRound('A'),
+      SyncRound('B'),
+      ExportZip('B', 'R1', 'z1'),
+      Delete('B', 'R1'),
+      ImportZip('B', 'z1'),
+      SyncRound('B'),
+      SyncRound('A'),
+    ],
+    {'R1=R1'},
+  ),
+  FileCase(
     'FR-1 a merge held back by a full storage, then deleted',
     'what the device merged and then deleted is gone, whatever waited for room',
     [
@@ -1374,6 +1572,25 @@ final fileCases = <FileCase>[
       SyncRound('B'),
     ],
     {'R1=R2', 'R3=R3'},
+  ),
+  // The record a round removes goes once every record is placed ([R4-8] 5): a round that stops between them leaves
+  // the device holding it, its images with it, and no image of it anywhere else.
+  FileCase(
+    'a record that takes the images of the one it absorbed, the round stopped before the one absorbed goes',
+    'the record holds the images of the content it shows, and the one absorbed is held whole until the next round',
+    [..._shared, Merge('B', 'R1', 'R2', contentFrom: 'R2'), SyncRound('B'), ReceiveCut('A', 1)],
+    {'R1=R2', 'R3=R3'},
+    shownAfterOps: {
+      'A': {'R1.image=R2', 'R2.image=R2', 'R3.image=R3'},
+    },
+    images: {
+      'A': {'R1', 'R3'},
+      'B': {'R1', 'R3'},
+    },
+    shows: {
+      'A': {'R1.image=R2'},
+      'B': {'R1.image=R2'},
+    },
   ),
   FileCase(
     'edits of two cells of one record',
@@ -1942,7 +2159,7 @@ final fileCases = <FileCase>[
       ExportZip('B', 'R3', 'z2'),
       Merge('B', 'R3', 'R2', contentFrom: 'R2'),
       ImportZip('B', 'z2'),
-      Push('B'),
+      SyncRound('B'),
       Merge('B', 'R3', 'R2', contentFrom: 'R3'),
       SyncRound('A'),
       Merge('A', 'R3', 'R2', contentFrom: 'R2'),
@@ -1958,7 +2175,7 @@ final fileCases = <FileCase>[
       ExportZip('A', 'R3', 'z1'),
       SyncRound('A'),
       ImportZip('B', 'z1'),
-      Push('B'),
+      SyncRound('B'),
       Delete('B', 'R3'),
       Delete('A', 'R3'),
       ImportZip('A', 'z1'),
@@ -2195,6 +2412,26 @@ final fileCases = <FileCase>[
     [..._otherCapturesDirectory, const ExportZip('B', 'P1', 'zb'), const ImportZip('A', 'zb')],
     {'P1=P2'},
     images: {'A': {}, 'B': {}},
+  ),
+  // The account sends no images: B holds R1 without them, and its zip carries none. A merged R1 into R0 since, keeping
+  // R1's content, so R0's directory holds R1's images ([R4-8] 4) and A holds no record R1. The zip's binding names
+  // those images, and another record of the device holds them ([R4-8] 5).
+  FileCase(
+    'a zip without images taken in where another record holds the images its binding names',
+    'the record taken in holds the images its content was read from, taken from the record that holds them',
+    [
+      const Capture('A', 'R0', 1),
+      const Capture('A', 'R1', 2),
+      const SyncRound('A'),
+      const SyncRound('B'),
+      const ExportZip('B', 'R1', 'z1'),
+      const Merge('A', 'R0', 'R1', contentFrom: 'R1'),
+      const ImportZip('A', 'z1'),
+    ],
+    {'R0=R1', 'R1=R1'},
+    shownAfterOps: {
+      'A': {'R0.image=R1', 'R1.image=R1'},
+    },
   ),
   // v6 §4: the binding each device works out of its directory takes what it holds for Q1's images. The two
   // bindings of one recognition disagree and carry no time: the server's — the first to sync — stands, and
@@ -2435,26 +2672,13 @@ final fileCases = <FileCase>[
   ),
   // As the first of the two above, the pair dismissed and sent before the two merges, and A's round stopping
   // once it applied R1: the pair went with A's record, and of R1, which the server's record holds, A says what
-  // the base does.
+  // the base does. The app's place lands the record split off, its pairs and the server's R1, and fails the removal
+  // of R2.
   FileCase(
     'a pair dismissed on a record split off by a round that stops while it applies',
     'a round that stops after it split a record off leaves its pairs where a whole round does: the pair goes '
         'with the device\'s record, and the pair of the record the server lists under the old id stays',
-    [
-      Capture('A', 'R1', 1),
-      Capture('A', 'R2', 2),
-      Capture('A', 'R3', 3),
-      Capture('A', 'R4', 4),
-      Dismiss('A', 'R1', 'R4', dismissed: true),
-      SyncRound('A'),
-      SyncRound('B'),
-      Merge('A', 'R1', 'R3', contentFrom: 'R3'),
-      Merge('B', 'R1', 'R2', contentFrom: 'R2'),
-      SyncRound('B'),
-      ReceiveCut('A', 1),
-      SyncRound('A'),
-      SyncRound('B'),
-    ],
+    _splitOffByARoundThatStops(const PlaceCut('A', 3)),
     {'R1=R2', 'R1~=R3', 'R4=R4', 'R1+R4 dismissed', 'R1~+R4 dismissed'},
   ),
   // B's merge is split off R1 once the account is made again; B dismisses it against R3, and later
@@ -4103,19 +4327,24 @@ final fileJudgeCases = <FileJudgeCase>[
     accepted: Accepted.oneRecordShowsOneContent,
     without: {ViolationKind.recordLost, ViolationKind.imageLost},
   ),
-  // B holds the image of R10 through the round that ends after it took R10 off its list and before
-  // it lists the record R10 was merged into.
-  FileJudgeCase('an image kept through a round that ends between a record and the one it was merged into', [
-    Capture('A', 'R4', 4),
-    Capture('A', 'R7', 7),
-    Capture('B', 'R10', 10),
-    Capture('A', 'R11', 11),
-    SyncRound('B'),
-    Pull('A'),
-    Merge('A', 'R10', 'R7', contentFrom: 'R10'),
-    SyncRound('A'),
-    ReceiveCut('B', 3),
-  ]),
+  // The round B cuts places R7, R11 and R4 and stops before it lets R10 go, as a round lets the records it removes
+  // go once every record is placed: B holds R10 with its image, and R7, made of R10, took that image from it.
+  FileJudgeCase(
+    'an image kept through a round that ends between a record and the one it was merged into',
+    [
+      Capture('A', 'R4', 4),
+      Capture('A', 'R7', 7),
+      Capture('B', 'R10', 10),
+      Capture('A', 'R11', 11),
+      SyncRound('B'),
+      Pull('A'),
+      Merge('A', 'R10', 'R7', contentFrom: 'R10'),
+      SyncRound('A'),
+      ReceiveCut('B', 3),
+    ],
+    broken: FileMutation.removalsGoInTheirPlace,
+    whenBroken: {ViolationKind.imageLost},
+  ),
   // The list A sent before the cut already shows R3, so the image A places in the cut round is not in
   // retention (S-09): B's R1, made of R3, is shown with it after A deletes its own R3.
   FileJudgeCase('an image placed in a round cut before its list was sent, its record then deleted where it was held', [
@@ -5039,7 +5268,7 @@ final fileJudgeCases = <FileJudgeCase>[
   // of the id it left the device says what the base does.
   FileJudgeCase(
     'a pair of a record a round that stops split off is dismissed under the id the record has since',
-    _caseOps('a pair dismissed on a record split off by a round that stops while it applies'),
+    _splitOffByARoundThatStops(const ReceiveCut('A', 1)),
     broken: FileMutation.splitOffDismissalsStay,
     whenBroken: {ViolationKind.dismissalLost},
   ),

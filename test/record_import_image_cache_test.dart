@@ -5,7 +5,7 @@
 // An import publishes over a record id that is already stored, under the same path, so a picture
 // of that record decoded before the import goes on being shown unless the import drops it. Which
 // ids it drops is decided by the button's own loop: it gathers the ids each zip committed and
-// hands them to `applyRecordImportCompletion`. That gathering is what this suite drives. Calling
+// hands them to `applyRecordsPublished`. That gathering is what this suite drives. Calling
 // the completion with a set the test wrote would stay green if the button handed over nothing, or
 // every id the zip carried.
 //

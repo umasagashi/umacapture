@@ -5,16 +5,20 @@ import 'package:flutter/foundation.dart';
 
 import '/src/chara_detail/archive_executor_shared.dart';
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/record_archive_state.dart';
 import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_body.dart';
 import '/src/chara_detail/record_export_shape.dart';
-import '/src/core/app_logger.dart';
+import '/src/chara_detail/record_notes.dart';
+import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_merge.dart';
+import '/src/chara_detail/value_write_time.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/fs/web_record_persistence.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/web_record_write_transaction.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/utils.dart';
 import '/src/core/storage/long_read_registry.dart';
 
 /// Why a record the zip carried was not written into the store.
@@ -94,6 +98,10 @@ class RecordZipTooLargeException extends FormatException {
   const RecordZipTooLargeException(super.message);
 }
 
+/// The device's records an import reads before its batch ([RecordZipService._donorsFor]): id → binding, and id → the
+/// image files of those a record of the zip can take images from.
+typedef _Donors = ({Map<String, RecordBinding?> bindings, Map<String, Map<String, Uint8List>> images});
+
 /// Imports record zips into the record store.
 ///
 /// Two layouts are accepted, because the app produces both:
@@ -149,6 +157,7 @@ class RecordZipService {
   /// two legs rather than a decision.
   static Future<Uint8List> export(
     List<DirectoryPath> recordDirs, {
+    required RefBase ref,
     RecordRecoveryGate? recoveryGate,
     required LongReadDeclaration declaration,
   }) async {
@@ -165,12 +174,13 @@ class RecordZipService {
       declaration: declaration,
       () async {
         final archive = Archive();
+        // The binding goes out with each record, placed first where the record
+        // carries none; the zip carries it even where `record.json` could not
+        // be rewritten.
+        final recordJsons = await placeRecordBindingsUnlocked(ref, recordDirs);
         for (final dir in recordDirs) {
           final recordId = dir.name;
-          // The binding goes out with the record, placed first where the record
-          // carries none; the zip carries it even where `record.json` could not
-          // be rewritten.
-          final recordJson = await placeRecordBindingUnlocked(dir);
+          final recordJson = recordJsons[dir.path];
           // Record directories are flat (the per-record files, no nested
           // directories), so every listed entry is a file; each is packed as the
           // export table says, and one it leaves on the device is not read.
@@ -346,6 +356,7 @@ class RecordZipService {
       return records;
     }
 
+    final donors = await _donorsFor(storageDir, grouped, store);
     final refusals = <String, RecordImportRefusal>{};
     final written = <String, CharaDetailRecord>{};
     // The whole zip goes to the store as one batch -- one acquisition, every
@@ -367,7 +378,7 @@ class RecordZipService {
           refusals[recordId] = RecordImportRefusal.duplicateOfExisting;
           return null;
         }
-        final planned = await _importPublication(storageDir, recordId, payload);
+        final planned = await _importPublication(storageDir, recordId, payload, donors);
         if (planned.record case final writtenRecord?) written[recordId] = writtenRecord;
         return planned.publication;
       },
@@ -384,19 +395,20 @@ class RecordZipService {
   /// How the record [recordId], whose files the zip carries as [payload], is published over the record the device
   /// holds of that id, and the record its `record.json` then holds (null where the zip's does not decode).
   ///
-  /// The record is made the zip's ([R4-6]):
+  /// What [syncImport] decides is written ([R4-6], [R4-8] 5), read from the device's record and the zip, and lowered
+  /// into the files of the record:
   ///
-  /// * **The body** is the zip's, written at the time of this import where it is not the body the device holds, and
-  ///   left as it is, with the zip's parents placed on it, where it is ([composeBodyImport]). The binding is the
-  ///   zip's; a zip of an older build carries none, and it is then worked out from the images the zip carries, or
-  ///   known for none of them where it carries no image.
+  /// * **The body** goes into `record.json` ([composeBodyImport]). The zip's binding is the one it carries; a zip of an
+  ///   older build carries none, and it is then worked out from the images the zip carries, or known for none of them
+  ///   where it carries no image. The device's binding is the one its record carries, or worked out from its images
+  ///   where the two hold the same content.
   /// * **The absorbed ids** are the zip's `merged_ids.json`, and none where it carries none.
-  /// * **The archive state** is the one the zip's `archive.json` notes — normal where it carries none — written at
-  ///   the time of this import where the device's record is in another ([importedArchiveNote]). The record lands in
-  ///   the store of that state, and its images take the form that state holds them in.
-  /// * **The images** are the zip's where it carries any. Where it carries none, the device's stay where the body
-  ///   stays, and otherwise only those the zip's binding names ([imagesInDirectoryBoundBy]) stay; `trainee.jpg`, cut
-  ///   from the factor image, stays with it. An image's geometry (`<image>.json`) goes with the last of its forms.
+  /// * **The archive state** is the one the zip's `archive.json` notes — normal where it carries none — and goes into
+  ///   the device's note ([importedArchiveNote]). The record lands in the store of that state, and its images take the
+  ///   form that state holds them in.
+  /// * **The images** are the zip's, the device's as they are, or those of the device's that the zip's binding names
+  ///   with the rest taken from [donors] ([recordImagesBoundBy]); `trainee.jpg`, cut from the factor image, goes with
+  ///   it. An image's geometry (`<image>.json`) goes with the last of its forms.
   ///
   /// Nothing the zip carries of a time is read, nor its relation bonus, which only the device that resolved it holds.
   /// The files the export table leaves on a device are not taken from the zip either ([recordFileExportOf]).
@@ -404,6 +416,7 @@ class RecordZipService {
     DirectoryPath storageDir,
     String recordId,
     List<RecordPersistenceFile> payload,
+    _Donors donors,
   ) async {
     final carried = {for (final file in payload) file.relativeSegments.join('/'): file.bytes};
     final dataRoot = storageDir / 'chara_detail';
@@ -414,7 +427,11 @@ class RecordZipService {
 
     final state = exportedArchiveState(carried[recordArchiveNoteName]);
     final store = state == RecordArchiveState.normal ? WebRecordWriteTransaction.activeStoreName : 'archive';
-    final note = await importedArchiveNote(state, localDir: localDir, localInArchive: localInArchive);
+    final note = localDir == null ? RecordArchiveNote.empty : await readRecordArchiveNote(localDir);
+    final heldStage = switch (localDir == null ? null : note.valueIn(archiveStore: localInArchive)) {
+      final held? => (value: held.state.option, time: held.writtenAt),
+      null => null,
+    };
     final asIs = [
       for (final MapEntry(:key, :value) in carried.entries)
         if (recordFileExportOf(key) == RecordFileExport.asIs)
@@ -422,12 +439,15 @@ class RecordZipService {
     ];
     Future<void> shape(DirectoryPath published) => shapeArchivedImagesUnlocked(published, state);
     final afterCommit = state == RecordArchiveState.normal ? null : shape;
-    final noteFile = note == null
-        ? null
-        : (recordId: recordId, relativeSegments: const [recordArchiveNoteName], bytes: note);
+    RecordPersistenceFile? noteFileOf(SyncValue<ArchiveImageOption?>? stage) =>
+        switch (importedArchiveNote(stage, note)) {
+          final bytes? => (recordId: recordId, relativeSegments: const [recordArchiveNoteName], bytes: bytes),
+          null => null,
+        };
 
     final imported = _decodeRecordJson(carried['record.json']);
     if (imported == null) {
+      final noteFile = noteFileOf(syncImportStage(heldStage, state.option, writeAt: valueWriteTime));
       // A body this build cannot read is no body to weigh against the device's: the files go as the zip has them,
       // and the loader judges the record.
       final recordJson = (recordId: recordId, relativeSegments: const ['record.json'], bytes: carried['record.json']!);
@@ -443,7 +463,7 @@ class RecordZipService {
       );
     }
     final local = localDir == null ? null : await _readLocalRecord(localDir);
-    final carriesImages = carried.keys.any(_isImageFile);
+    final carriesImages = carried.keys.any(isRecordImageFile);
     final importedBinding =
         imported.metadata.binding ?? (carriesImages ? await compute(recordBindingOf, _imageFilesOf(carried)) : null);
     final localBinding = local == null || localDir == null
@@ -452,38 +472,43 @@ class RecordZipService {
               (recognizedContentKey(local) == recognizedContentKey(imported)
                   ? await computeRecordBinding(localDir)
                   : null);
-    final record = composeBodyImport(local, imported, storedBinding: localBinding, importedBinding: importedBinding);
-    final sameBody = local != null && sameRecordBody(local, localBinding, imported, importedBinding);
+    final plan = syncImport(
+      recordId,
+      (body: _bodyOf(imported, importedBinding), stage: state.option, carriesImages: carriesImages),
+      body: switch (local) {
+        final local? => (value: _bodyOf(local, localBinding), time: local.metadata.bodyWrittenAt),
+        null => (value: null, time: null),
+      },
+      stage: heldStage,
+      others: donors.bindings,
+      writeAt: valueWriteTime,
+    );
+    final record = composeBodyImport(local, imported, body: plan.body, writes: plan.writesBody);
 
     final removals = <String>{if (!carried.containsKey(mergedIdsFileName)) mergedIdsFileName};
-    if (localDir != null) {
-      final localImages = <String>{};
-      await for (final entry in localDir.list()) {
-        if (entry is FilePath && _isImageFile(entry.name)) localImages.add(entry.name);
-      }
-      final Set<String> kept;
-      if (carriesImages) {
-        kept = const {};
-      } else if (sameBody) {
-        kept = localImages;
-      } else {
-        final bound = await imagesInDirectoryBoundBy(importedBinding, localDir);
-        final factorKept = bound.contains('factor.png') || bound.contains('factor.jpg');
-        kept = {
-          ...bound,
-          for (final image in recordBindingImages)
-            if (bound.contains('$image.png') || bound.contains('$image.jpg')) '$image.json',
-          if (factorKept) traineeIconFileName,
-        };
-      }
-      removals.addAll(localImages.difference(kept));
+    final localImages = localDir == null ? const <String, Uint8List>{} : await readRecordImageFiles(localDir);
+    final Map<String, Uint8List> taken;
+    switch (plan.images) {
+      case SyncImagesCarried():
+        removals.addAll(localImages.keys);
+        taken = const {};
+      case SyncImagesKept():
+        taken = const {};
+      case SyncImagesBound(:final sources):
+        final bound = await recordImagesBoundBy(plan.body.binding, localImages, [
+          for (final source in sources) donors.images[source] ?? const {},
+        ]);
+        removals.addAll(localImages.keys.toSet().difference(bound.kept));
+        taken = bound.taken;
     }
     return (
       publication: (
         files: [
           (recordId: recordId, relativeSegments: const ['record.json'], bytes: record.toRecordJsonBytes()),
           ...asIs,
-          ?noteFile,
+          ?noteFileOf(plan.stage),
+          for (final MapEntry(key: name, value: bytes) in taken.entries)
+            (recordId: recordId, relativeSegments: [name], bytes: bytes),
         ],
         removals: removals,
         store: store,
@@ -494,11 +519,90 @@ class RecordZipService {
     );
   }
 
-  /// Whether [name] is one of a record's images or what goes with one: `<image>.png`, `<image>.jpg` and the image's
-  /// geometry `<image>.json` of [recordBindingImages], and `trainee.jpg`.
-  static bool _isImageFile(String name) =>
-      name == traineeIconFileName ||
-      recordBindingImages.any((image) => name == '$image.png' || name == '$image.jpg' || name == '$image.json');
+  /// The body of [record] as sync carries it ([syncBodyOf]), its images bound as [binding].
+  static SyncBody _bodyOf(CharaDetailRecord record, RecordBinding? binding) {
+    final body = syncBodyOf(record);
+    return SyncBody(body.content, binding: binding, parents: body.parents, time: body.time);
+  }
+
+  /// The device's records an import of the records [grouped] can take images from ([SyncImagesBound]): the binding of
+  /// each record of either store — null where it is not worked out, or its `record.json` cannot be read — and the
+  /// image files of each one [syncImageDonors] gives for a record of the zip that can take images
+  /// ([syncImportTakesImages]). Nothing is read where no record of the zip can.
+  ///
+  /// Read before the batch, each record under its own lock ([WebRecordPersistence.readRecord]), let go of before the
+  /// next is taken and before the batch's acquisition, which takes only the locks of the records it publishes: no
+  /// lock is taken inside another. A record that changes between this read and the publication — archived, deleted,
+  /// written over, by another operation or by this batch — is not read again. What a record takes from these bytes is
+  /// what its binding names in them ([recordImagesBoundBy] hashes them against it), so only the images of the zip's
+  /// body land, whatever the record read from holds by then; a record no longer there, or no longer holding them, has
+  /// still held them on this device.
+  static Future<_Donors> _donorsFor(
+    DirectoryPath storageDir,
+    Map<String, List<RecordPersistenceFile>> grouped,
+    WebRecordPersistence store,
+  ) async {
+    final taking = <({String id, RecordBinding? binding})>[];
+    for (final MapEntry(key: id, value: files) in grouped.entries) {
+      final carried = {for (final file in files) file.relativeSegments.join('/'): file.bytes};
+      final imported = _decodeRecordJson(carried['record.json']);
+      if (imported == null) continue;
+      final binding = imported.metadata.binding;
+      final zip = (
+        body: _bodyOf(imported, binding),
+        stage: exportedArchiveState(carried[recordArchiveNoteName]).option,
+        carriesImages: carried.keys.any(isRecordImageFile),
+      );
+      if (syncImportTakesImages(zip)) taking.add((id: id, binding: binding));
+    }
+    final donors = (bindings: <String, RecordBinding?>{}, images: <String, Map<String, Uint8List>>{});
+    if (taking.isEmpty) return donors;
+    final dataRoot = storageDir / 'chara_detail';
+    for (final name in [WebRecordWriteTransaction.activeStoreName, 'archive']) {
+      final storeDir = dataRoot / name;
+      if (!await storeDir.exists()) continue;
+      await for (final entry in storeDir.list()) {
+        if (entry is! DirectoryPath || donors.bindings.containsKey(entry.name)) continue;
+        final id = entry.name;
+        try {
+          await store.readRecord(storageDir, id, () async {
+            if (!await entry.exists()) return;
+            final binding = (await _readRecordOrNull(entry))?.metadata.binding;
+            final images = taking.any((t) => syncImageDonors(t.id, t.binding, {id: binding}).isNotEmpty)
+                ? await readRecordImageFiles(entry)
+                : null;
+            donors.bindings[id] = binding;
+            if (images != null) donors.images[id] = images;
+          }, declaration: _readsTheImagesOfARecord);
+        } catch (error, stackTrace) {
+          // A record that cannot be read is one the import takes no image from; the records of the zip are still the
+          // user's to import.
+          logger.w('The import reads no image of $id: it could not be read.', error, stackTrace);
+        }
+      }
+    }
+    return donors;
+  }
+
+  static const _readsTheImagesOfARecord = LongReadDeclaration.none(
+    reason: 'reads the record.json and images of one record and lets go; the import above owns the window',
+  );
+
+  /// The record in [directory], or null where it holds none this build can read, logged.
+  static Future<CharaDetailRecord?> _readRecordOrNull(DirectoryPath directory) async {
+    final file = directory.filePath('record.json');
+    try {
+      if (!await file.exists()) return null;
+      return CharaDetailRecord.fromRecordJson(await file.readAsString());
+    } catch (error, stackTrace) {
+      logger.w(
+        'The record.json of ${directory.name} could not be read; its images are told by their bytes.',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
+  }
 
   static Map<String, RecordImageFiles> _imageFilesOf(Map<String, Uint8List> files) => {
     for (final image in recordBindingImages) image: (png: files['$image.png'], jpeg: files['$image.jpg']),

@@ -213,6 +213,38 @@ class DifferenceCommonItemsSwitch extends ConsumerWidget {
   }
 }
 
+/// The title field of a column whose title is a copy of its storage's (a rating or a memo column): what the field
+/// holds ([titleText]) and the column's title the screen shows as the one it has ([shownTitle]).
+///
+/// A sync round can give the storage another title while the settings are open, and gives the columns' copies of it
+/// that title too (`retitleColumnsInPresets`); the field follows it until the user types into it ([followShownTitle]).
+/// A confirm that left the field as shown writes no title ([titleEdited]): showing a title is not writing it, and
+/// writing it would put the title shown back over one written after it.
+mixin StorageColumnTitle<W extends ConsumerStatefulWidget> on ConsumerState<W> {
+  /// The id of the column whose settings these are.
+  String get titleSpecId;
+
+  late String shownTitle;
+  late String titleText;
+
+  /// Call from [initState].
+  void initShownTitle() => shownTitle = titleText = ref.read(specCloneProvider(titleSpecId)).title;
+
+  bool get titleEdited => titleText != shownTitle;
+
+  /// Call from [build]. A field keyed by [shownTitle] starts again from [titleText] when it follows.
+  void followShownTitle() {
+    ref.listen(currentColumnSpecsLoaderProvider, (_, _) {
+      final title = ref.read(currentColumnSpecsLoaderProvider.notifier).getById(titleSpecId)?.title;
+      if (title == null || title == shownTitle) return;
+      setState(() {
+        if (!titleEdited) titleText = title;
+        shownTitle = title;
+      });
+    });
+  }
+}
+
 /// The free-text "description" (説明) note shared by every column's notation (表示)
 /// group.
 ///

@@ -13,7 +13,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_archive_state.dart';
-import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_export_shape.dart';
 import '/src/chara_detail/record_zip.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -671,13 +670,9 @@ class ZipExporter extends Exporter {
       () async {
         // The binding goes out with each record, placed first where the record carries none, under the locks
         // taken here; the zip carries it even where `record.json` could not be rewritten.
-        final recordJsons = <String, Uint8List>{};
+        final recordJsons = await placeRecordBindingsUnlocked(ref, recordDirs);
         final archiveNotes = <String, Uint8List>{};
         for (final dir in recordDirs) {
-          final recordJson = await placeRecordBindingUnlocked(dir);
-          if (recordJson != null) {
-            recordJsons[dir.path] = recordJson;
-          }
           if (await exportedArchiveNoteOf(dir) case final note?) {
             archiveNotes[dir.path] = note;
           }
@@ -711,6 +706,7 @@ class ZipExporter extends Exporter {
     // read in it.
     return RecordZipService.export(
       recordDirs,
+      ref: ref,
       recoveryGate: ref.read(exportRecoveryGateProvider),
       declaration: exportLongReadDeclaration(
         ref,

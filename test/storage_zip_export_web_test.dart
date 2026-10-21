@@ -45,6 +45,7 @@ import 'package:archive/archive.dart';
 // silence the same lint the same way.
 // ignore: depend_on_referenced_packages
 import 'package:test/test.dart';
+import 'package:umacapture/src/core/fs/opfs_directory.dart';
 import 'package:umacapture/src/core/storage/zip_bundle.dart';
 import 'package:umacapture/src/core/storage/zip_export_limit.dart';
 import 'package:web/web.dart' as web;
@@ -215,5 +216,65 @@ void main() {
       StorageZipLimitVerdict.withinLimit,
       reason: 'the largest single training record measured on a real machine',
     );
+  });
+
+  // The directory a record scan resolves once and then reads a record's files, and looks for its journal slots,
+  // from. It is in this suite because this is the browser suite that writes OPFS trees; `OpfsDirectory` is kept
+  // Flutter-free so that `dart test` can compile it, and `WebVfs` builds its own walk on the same `descendOpfs`.
+  group('a directory opened once', () {
+    const name = 'storage_zip_export_web_test_opened';
+    late web.FileSystemDirectoryHandle root;
+    late web.FileSystemDirectoryHandle dir;
+
+    setUp(() async {
+      root = await web.window.navigator.storage.getDirectory().toDart;
+      dir = await _freshDir(name);
+      await _write(await _child(dir, 'record'), 'record.json', '{"id":1}'.codeUnits);
+      await _child(await _child(await _child(dir, 'journal'), 'v1'), 'slot');
+    });
+
+    tearDown(() async {
+      await root.removeEntry(name, web.FileSystemRemoveOptions(recursive: true)).toDart;
+    });
+
+    test('reads a file that is there, and finds one that is not absent', () async {
+      final record = await OpfsDirectory.open(root, '$name/record');
+      expect(await record.readBytesIfPresent('$name/record/record.json'), '{"id":1}'.codeUnits);
+      expect(await record.readString('$name/record/record.json'), '{"id":1}');
+      expect(await record.readBytesIfPresent('$name/record/archive.json'), isNull);
+      await expectLater(record.readBytes('$name/record/archive.json'), throwsA(isA<FileSystemException>()));
+    });
+
+    test('answers for a directory beneath it, and not for a file or nothing', () async {
+      final store = await OpfsDirectory.open(root, name);
+      expect(await store.isDirectory('$name/journal/v1/slot'), isTrue);
+      expect(await store.isDirectory('$name/journal/v1/other'), isFalse);
+      expect(await store.isDirectory('$name/archive_journal/v1/slot'), isFalse);
+      expect(await store.isDirectory('$name/record/record.json'), isFalse);
+      expect(await store.isDirectory(name), isTrue);
+    });
+
+    test('a directory that was not there when opened has nothing beneath it', () async {
+      final missing = await OpfsDirectory.open(root, '$name/missing');
+      expect(await missing.isDirectory('$name/missing'), isFalse);
+      expect(await missing.readBytesIfPresent('$name/missing/record.json'), isNull);
+      await expectLater(missing.readBytes('$name/missing/record.json'), throwsA(isA<FileSystemException>()));
+    });
+
+    test('a directory removed after it was opened has nothing beneath it', () async {
+      final record = await OpfsDirectory.open(root, '$name/record');
+      final store = await OpfsDirectory.open(root, name);
+      await dir.removeEntry('record', web.FileSystemRemoveOptions(recursive: true)).toDart;
+      await dir.removeEntry('journal', web.FileSystemRemoveOptions(recursive: true)).toDart;
+      expect(await record.readBytesIfPresent('$name/record/record.json'), isNull);
+      await expectLater(record.readBytes('$name/record/record.json'), throwsA(isA<FileSystemException>()));
+      expect(await store.isDirectory('$name/journal/v1/slot'), isFalse);
+    });
+
+    test('refuses a path that is not beneath it', () async {
+      final record = await OpfsDirectory.open(root, '$name/record');
+      await expectLater(record.readBytesIfPresent('$name/other/record.json'), throwsArgumentError);
+      await expectLater(record.isDirectory(name), throwsArgumentError);
+    });
   });
 }

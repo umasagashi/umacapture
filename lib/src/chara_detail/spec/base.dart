@@ -998,6 +998,26 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     _commit(<ColumnSpec>[]);
   }
 
+  /// Gives every column whose stored map [heads] picks the title [title] ([retitleColumnsInPresets]). A broken column
+  /// takes it in the map it is kept in verbatim, and stays broken.
+  void retitleColumns(bool Function(Map<String, dynamic> stored) heads, String title) {
+    var specs = _specs;
+    var changed = false;
+    for (final spec in flattenForest(_specs)) {
+      final raw = _rawById[spec.id];
+      final stored = raw ?? spec.toMap();
+      if (!heads(stored) || stored['title'] == title) continue;
+      changed = true;
+      if (raw != null) {
+        _rawById[spec.id] = {...raw, 'title': title};
+      }
+      if (spec is BrokenPlaceholderSpec) continue;
+      final retitled = ColumnSpecMapper.fromMap({...spec.toMap(), 'title': title});
+      specs = replaceInForest(specs, retitled) ?? specs;
+    }
+    if (changed) _commit([...specs]);
+  }
+
   // Publish [specs] as the new state and write it back to storage. Callers must
   // pass a freshly-built list (never state.requireValue) so we don't mutate the
   // list held by the live AsyncData, which would defeat riverpod's

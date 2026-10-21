@@ -35,6 +35,13 @@ import 'support/web_like_fs_backend.dart';
 
 final _refProvider = Provider<RefBase>((ref) => ref.base);
 
+/// A ref over a container whose record stores are never built, for an export that has no stores to update.
+RefBase _refWithoutStores() {
+  final container = ProviderContainer();
+  addTearDown(container.dispose);
+  return container.read(containerRefProvider);
+}
+
 void main() {
   setUpAll(initializeMappers);
 
@@ -192,7 +199,11 @@ void main() {
       final pngs = bindingImagePngs();
       final dir = seedUnboundRecord(info.charaDetailActiveDir.path, UnboundRecord.captured, pngs);
 
-      final bytes = await RecordZipService.export([DirectoryPath(dir)], declaration: undeclaredInTest);
+      final bytes = await RecordZipService.export(
+        [DirectoryPath(dir)],
+        ref: _refWithoutStores(),
+        declaration: undeclaredInTest,
+      );
 
       final id = UnboundRecord.captured.id;
       final recordJson = ZipDecoder().decodeBytes(bytes).findFile('chara_detail/active/$id/record.json');
@@ -251,7 +262,11 @@ void main() {
       seedRecordLocalFields(dir);
       final before = recordDirectoryNames(dir);
 
-      final bytes = await RecordZipService.export([DirectoryPath(dir)], declaration: undeclaredInTest);
+      final bytes = await RecordZipService.export(
+        [DirectoryPath(dir)],
+        ref: _refWithoutStores(),
+        declaration: undeclaredInTest,
+      );
 
       final id = UnboundRecord.captured.id;
       final archive = ZipDecoder().decodeBytes(bytes);

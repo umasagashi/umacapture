@@ -7,22 +7,22 @@
 // over temp directories seeded with synthetic record.json files.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/storage_archive_inheritance_test.dart
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
-import 'package:umacapture/src/core/fs/fs_backend_io.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/held_write_fs_backend.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
@@ -142,7 +142,7 @@ void main() {
 
     // Holds the one write that belongs to the archive store, so "is the run still going?" can be
     // asked at a moment when the archive write is the only thing outstanding.
-    final gate = _HeldWrite((archiveDir / 'child-archive').filePath('record.json').path);
+    final gate = HeldWriteFsBackend((archiveDir / 'child-archive').filePath('record.json').path);
     fsBackend = gate;
 
     final container = makeContainer(root);
@@ -200,7 +200,7 @@ void main() {
     // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
     container.read(charaDetailCaptureStateProvider.notifier).started('newly-captured');
 
-    active.add(captured);
+    active.add(captured, notes: RecordNotes.none);
 
     expect(newDir.existsSync(), isFalse, reason: 'duplicate capture dir deleted');
     expect(active.length, lengthBefore, reason: 'duplicate not added to the active set');
@@ -227,7 +227,7 @@ void main() {
     writeRecord(activeDir, captured); // the recognizer drops the dir before add()
 
     // The desktop capture path, which writes synchronously.
-    active.add(captured);
+    active.add(captured, notes: RecordNotes.none);
 
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent');
     expect(parentOnDisk(archiveDir, 'child-archive', 1), 'parent');
@@ -283,29 +283,5 @@ class _FailingArchiveStorage extends CharaDetailArchiveStorage {
   @override
   Future<List<CharaDetailRecord>> build() async {
     throw StateError('archive load failed');
-  }
-}
-
-/// Suspends the write of one file until [release] is called, and behaves as the real filesystem
-/// everywhere else. A record.json is replaced by renaming a staged file over it, so the rename onto
-/// [heldPath] is the moment its contents change, and the one held.
-class _HeldWrite extends IoFsBackend {
-  _HeldWrite(this.heldPath);
-
-  final String heldPath;
-  final Completer<void> _gate = Completer<void>();
-
-  /// Whether the held write has been reached and is waiting.
-  bool held = false;
-
-  void release() => _gate.complete();
-
-  @override
-  Future<void> rename(String source, String destination) async {
-    if (destination == heldPath) {
-      held = true;
-      await _gate.future;
-    }
-    return super.rename(source, destination);
   }
 }

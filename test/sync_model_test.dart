@@ -39,6 +39,7 @@ import 'support/sync_model/oplog_cases.dart';
 import 'support/sync_model/oplog_mutations.dart';
 import 'support/sync_model/oplog_world.dart';
 import 'support/sync_model/ops.dart';
+import 'support/sync_model/properties.dart';
 import 'support/sync_model/random_check.dart';
 import 'support/sync_model/seeds.dart';
 import 'support/sync_model/types.dart';
@@ -1221,6 +1222,43 @@ void main() {
     });
   });
 
+  group('file sync rules: a swap refused as stale', () {
+    // B syncs an edit between A's read of the list and A's swap, [times] times over, so the server moves on under A.
+    FileWorld refusedAsStale(int times) {
+      final w = FileWorld(['A', 'B'], judgeReadings: fileReadings)
+        ..run([
+          const SetImageForm('A', 'png'),
+          const Capture('A', 'R1', 1),
+          const SyncRound('A'),
+          const SyncRound('B'),
+          const Capture('A', 'R2', 2),
+        ]);
+      var left = times;
+      w.server.beforeSwap = (device) {
+        if (device != 'A' || left == 0) return;
+        left--;
+        w
+          ..execute(EditMemo('B', 'R1', 'from B $left'))
+          ..execute(const SyncRound('B'));
+      };
+      return w..apply(const SyncRound('A'));
+    }
+
+    test('is made once more in the same round, and a second refusal ends the round with the server ahead '
+        '([D-28])', () {
+      final once = refusedAsStale(1);
+      expect(once.server.swapsRefused, 1);
+      expect(once.devices['A']!.base?.generation, once.server.generation);
+      expect(once.server.list.records.keys, containsAll(['R1', 'R2']));
+
+      final twice = refusedAsStale(2);
+      expect(twice.server.swapsRefused, 2);
+      expect(twice.devices['A']!.base?.generation, isNot(twice.server.generation));
+      expect(twice.server.list.records.keys, isNot(contains('R2')));
+      expect(twice.devices['A']!.store.records.keys, containsAll(['R1', 'R2']));
+    });
+  });
+
   group('file sync rules: each rule broken on purpose turns a named sequence red', () {
     const turnsRed = {
       FileMutation.noBase: 'delete after sync is delivered',
@@ -1250,9 +1288,6 @@ void main() {
       FileMutation.pairsWaitForTheRoundsEnd:
           'a pair dismissed, one of its records deleted on one device and merged on the other, a round cut between '
           'the merge and records captured since',
-      FileMutation.absorbedRecordsLandApart:
-          'a pair taken out on one device, one of its records merged into an older one on the other, a round cut '
-          'once it took in the merge',
       FileMutation.dismissalsOfMissingRecordsStay: 'a pair dismissed, one of its records deleted elsewhere',
       FileMutation.splitOffDismissalsStay: 'a pair dismissed on a record split off',
       FileMutation.mergeEditsEveryCellItSettles: 'an edit made elsewhere before a merge that leaves its cell as it was',
@@ -1264,9 +1299,11 @@ void main() {
     };
     for (final MapEntry(key: mutation, value: name) in turnsRed.entries) {
       test(mutation.name, () {
+        // A mutation breaks the model's own rules, so the sequence runs on the model's round, whichever it runs on
+        // otherwise.
         final c = fileCases.singleWhere((c) => c.name == name);
-        expect(meets(c, runFileCase(c)), isTrue);
-        expect(meets(c, runFileCase(c, mutation: mutation)), isFalse);
+        expect(meets(c, runFileCase(c, round: FileRound.model)), isTrue);
+        expect(meets(c, runFileCase(c, mutation: mutation, round: FileRound.model)), isFalse);
       });
     }
 
@@ -1651,6 +1688,36 @@ void main() {
           expect(run.crash, isNull, reason: 'seed $seed');
           expect({for (final v in run.violations) v.kind}.intersection(structural), isEmpty, reason: 'seed $seed');
         }
+      });
+    }
+  });
+
+  group('file sync rules: a list sent in several swaps (G142 (b))', () {
+    // The app sends a list that changes more slots of the root than the server takes in one replacement in several,
+    // each an operation whole, in the order [syncListChanges] gives them. At every round of the generated sequences,
+    // sent in several swaps — one operation in each, the finest the app may split it, or as many as the server's limit
+    // of slots packs —, with the other device's round right after each of its swaps in turn, the property
+    // [splitSwapsPerGroup] holds: the round ends, change by change, as a list swapped in whole does with the other
+    // device's round after it where the change went at or before the swap that round followed, and before it
+    // otherwise. The bounded universes the property is checked over run in sync_properties_test.dart; these are the
+    // generated sequences.
+    const config = ModelConfig(rules: Rules.file, judgeReadings: fileReadings, bystander: fileBystander);
+    for (final splitter in [oneEach, fourSlots]) {
+      test('${splitter.name}: at the rounds of seeds 1..150, ends change by change as the list swapped in whole does '
+          'with the other round on the side of it the change went', () {
+        var split = 0;
+        final failures = <String>[];
+        for (var seed = 1; seed <= 150; seed++) {
+          final ops = replay(config, generate(seed, config)).ops;
+          for (var i = 0; i < ops.length; i++) {
+            if (ops[i] is! SyncRound && ops[i] is! Push) continue;
+            final verdict = splitSwapsPerGroup.holds(SplitRound(ops.sublist(0, i + 1), splitter));
+            split += verdict.checks;
+            failures.addAll([for (final f in verdict.failures) 'seed $seed op $i ${ops[i]}, ${f.check}']);
+          }
+        }
+        expect(split, greaterThan(0), reason: 'some round sends its list in several swaps');
+        expect(failures, isEmpty);
       });
     }
   });

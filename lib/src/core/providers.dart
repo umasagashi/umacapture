@@ -301,6 +301,14 @@ class PathInfo {
   /// lists must not find it.
   FilePath get charaDetailEnhancementDismissedFile => charaDetailMetadataDir.filePath("enhancement_dismissed.json");
 
+  /// What sync keeps of the list this device last agreed with the server on, and of the list it last asked the server
+  /// to take: `base.json` and `sent.json` (`record_sync_app_place.dart`).
+  ///
+  /// In the data directory beside the records, so that resetting the settings, clearing a cache or logging out leaves
+  /// it with them; a base lost while the records stay makes the next round one without a base, which takes back from
+  /// the server what this device removed since the last round.
+  DirectoryPath get charaDetailSyncDir => charaDetailMetadataDir / "sync";
+
   /// The directories this app owns, from which **every other path in this class is derived**.
   ///
   /// Handed to `registerAppRoots` so a diagnostic can say `<app>\chara_detail\active\7\` instead of

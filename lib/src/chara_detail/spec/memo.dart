@@ -458,19 +458,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
 }
 
-class _NotationSelectorState extends ConsumerState<_NotationSelector> {
-  late String title;
+class _NotationSelectorState extends ConsumerState<_NotationSelector> with StorageColumnTitle<_NotationSelector> {
   late final VoidCallback _commitTitle;
+
+  @override
+  String get titleSpecId => widget.specId;
 
   @override
   void initState() {
     super.initState();
-    final spec = _clonedSpecProvider.read(ref, widget.specId);
-    title = spec.title;
+    initShownTitle();
     _commitTitle = () {
+      final title = titleText;
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
+      if (!titleEdited) {
+        return;
+      }
 
       final memoController = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
       commitStorageChange(() => memoController.updateTitle(title: title));
@@ -503,6 +508,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   @override
   Widget build(BuildContext context) {
+    followShownTitle();
     return FormGroup(
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
@@ -511,10 +517,11 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           title: Text("$tr_common.notation.title.label".tr()),
           description: Text("$tr_common.notation.title.description".tr()),
           trailing: DenseTextField(
-            initialText: title,
+            key: ValueKey(shownTitle),
+            initialText: titleText,
             minWidth: 140,
             onChanged: (value) {
-              title = value;
+              titleText = value;
             },
           ),
         ),

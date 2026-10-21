@@ -90,7 +90,7 @@ void main() {
 
     final ok = await archiveRecordOnNative(argsFor('id-jpeg', ArchiveImageOption.resizedJpeg));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     // Source gone, destination present.
     expect(Directory('${activeDir.path}/id-jpeg').existsSync(), isFalse);
     final dst = DirectoryPath('${archiveDir.path}/id-jpeg');
@@ -119,7 +119,7 @@ void main() {
 
     final ok = await archiveRecordOnNative(argsFor('id-corrupt', ArchiveImageOption.resizedJpeg));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final destination = Directory('${archiveDir.path}/id-corrupt');
     expect(File('${destination.path}/skill.png').existsSync(), isTrue);
     expect(File('${destination.path}/skill.json').existsSync(), isTrue);
@@ -144,7 +144,7 @@ void main() {
 
     final ok = await archiveRecordOnNative(argsFor('id-none', ArchiveImageOption.none));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final dst = DirectoryPath('${archiveDir.path}/id-none');
     expect(File('${dst.path}/record.json').readAsStringSync(), '{"id":"id-none"}');
     // The icon is an image too, cut from the factor image.
@@ -172,7 +172,7 @@ void main() {
 
     final ok = await archiveRecordOnNative(argsFor('id-jpeg-only', ArchiveImageOption.none));
 
-    expect(ok, isTrue);
+    expect(ok, isNotNull);
     final dst = '${archiveDir.path}/id-jpeg-only';
     expect(Directory(dst).listSync().map((e) => e.uri.pathSegments.last).toSet(), {'record.json', 'archive.json'});
   });
@@ -188,7 +188,7 @@ void main() {
   });
 
   test('returns false when the source directory is missing', () async {
-    expect(await archiveRecordOnNative(argsFor('does-not-exist', ArchiveImageOption.none)), isFalse);
+    expect(await archiveRecordOnNative(argsFor('does-not-exist', ArchiveImageOption.none)), isNull);
   });
 
   test('returns false and leaves the source intact when the destination already exists', () async {
@@ -199,7 +199,7 @@ void main() {
 
     final ok = await archiveRecordOnNative(argsFor('id-dup', ArchiveImageOption.none));
 
-    expect(ok, isFalse);
+    expect(ok, isNull);
     // Source untouched: its PNGs are still present (not stripped) and not moved.
     expect(File('${activeDir.path}/id-dup/skill.png').existsSync(), isTrue);
     expect(File('${activeDir.path}/id-dup/record.json').existsSync(), isTrue);
@@ -218,7 +218,7 @@ void main() {
 
     final results = await archiveRecordsOnNative(ArchiveBatchArgs(items));
 
-    expect(results, [true, false, true]);
+    expect([for (final note in results) note != null], [true, false, true]);
     expect(Directory('${archiveDir.path}/id-a').existsSync(), isTrue);
     expect(Directory('${archiveDir.path}/id-c').existsSync(), isTrue);
     expect(Directory('${activeDir.path}/id-a').existsSync(), isFalse);
@@ -301,7 +301,7 @@ void main() {
 
           final ok = await archiveRecordOnNative(argsFor(kind.id, option));
 
-          expect(ok, isTrue);
+          expect(ok, isNotNull);
           final archived = File('${archiveDir.path}/${kind.id}/record.json').readAsBytesSync();
           expect(bindingIn(archived), expectedBinding(pngs));
           expect(File('${archiveDir.path}/${kind.id}/skill.png').existsSync(), isFalse, reason: 'the PNGs went');
@@ -320,7 +320,7 @@ void main() {
 
         final ok = await archiveRecordOnNative(argsFor(id, ArchiveImageOption.resizedJpeg));
 
-        expect(ok, isTrue);
+        expect(ok, isNotNull);
         expect(File('${archiveDir.path}/$id/skill.jpg').existsSync(), isTrue);
         expect(File('${archiveDir.path}/$id/record.json').readAsBytesSync(), before);
         expect(File('${archiveDir.path}/$id/record.json.part').existsSync(), isFalse);
@@ -339,7 +339,7 @@ void main() {
 
       final ok = await archiveRecordOnNative(argsFor(id, ArchiveImageOption.resizedJpeg));
 
-      expect(ok, isTrue);
+      expect(ok, isNotNull);
       final after = CharaDetailRecord.fromRecordJson(File('${archiveDir.path}/$id/record.json').readAsStringSync());
       expect(after.metadata.binding, isNotNull, reason: 'the binding was placed');
       expect(after.metadata.bodyWrittenAt, 1700000000000);
@@ -367,7 +367,7 @@ void main() {
 
           final ok = await archiveRecordOnNative(argsFor('id-state', option));
 
-          expect(ok, isTrue);
+          expect(ok, isNotNull);
           expect(before, (state: RecordArchiveState.normal, writtenAt: null));
           final dst = DirectoryPath('${archiveDir.path}/id-state');
           expect(await readRecordArchiveState(dst, archiveStore: true), (state: state, writtenAt: 1767225600000));
@@ -389,7 +389,7 @@ void main() {
       final source = seedRecord('id-behind');
       File('$source/$recordArchiveNoteName').writeAsStringSync(jsonEncode({'normal_written_at': 1800000000000}));
 
-      expect(await archiveRecordOnNative(argsFor('id-behind', ArchiveImageOption.none)), isTrue);
+      expect(await archiveRecordOnNative(argsFor('id-behind', ArchiveImageOption.none)), isNotNull);
 
       expect(await readRecordArchiveState(DirectoryPath('${archiveDir.path}/id-behind'), archiveStore: true), (
         state: RecordArchiveState.none,
@@ -409,7 +409,7 @@ void main() {
 
         final ok = await archiveRecordOnNative(argsFor('id-stopped', ArchiveImageOption.none));
 
-        expect(ok, isFalse);
+        expect(ok, isNull);
         expect(Directory('${archiveDir.path}/id-stopped').existsSync(), isFalse);
         expect(await readRecordArchiveState(DirectoryPath(source), archiveStore: false), (
           state: RecordArchiveState.normal,

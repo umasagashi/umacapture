@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';

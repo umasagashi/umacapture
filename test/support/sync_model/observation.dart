@@ -116,17 +116,12 @@ class ObservedDevice {
     this.roomRefusals = 0,
     this.confirmedBodies = const {},
     this.baseGap,
-    this.imagesKept = const {},
     this.heldByLongMemos = 0,
   });
 
   /// How many memos over the send limit held the device's last round back, under rules that hold a
   /// round back for them; 0 where it ran.
   final int heldByLongMemos;
-
-  /// The images the device holds of no record it lists: those of the records a round that did not end
-  /// took off its list, kept until a round ends, under rules whose devices keep them so. By source.
-  final Set<String> imagesKept;
 
   /// Why the device holds no whole base, or null when it holds one (and under rules without one).
   final Unbased? baseGap;

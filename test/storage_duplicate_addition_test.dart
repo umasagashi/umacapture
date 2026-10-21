@@ -15,6 +15,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
@@ -100,7 +101,7 @@ void main() {
     );
     addTearDown(subscription.close);
 
-    active.add(incoming);
+    active.add(incoming, notes: RecordNotes.none);
     await Future<void>.delayed(Duration.zero);
 
     expect(recordDir.existsSync(), isTrue, reason: 're-adding a known id must not delete that stored record');
@@ -147,7 +148,7 @@ void main() {
     writeRecord(activeDir, incoming); // the recognizer drops the dir before add()
     container.read(charaDetailCaptureStateProvider.notifier).started('ccc');
 
-    active.add(incoming);
+    active.add(incoming, notes: RecordNotes.none);
     await Future<void>.delayed(Duration.zero);
 
     expect(container.read(charaDetailCaptureStateProvider).error, 'duplicated_character');

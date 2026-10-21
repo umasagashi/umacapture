@@ -13,6 +13,7 @@
 import 'package:crypto/crypto.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/value_write_time.dart';
 
@@ -62,70 +63,54 @@ String recognizedContentKey(CharaDetailRecord record) {
   return sha256.convert(body.toRecordJsonBytes()).toString();
 }
 
+/// The body of [record] as sync carries it: the name of its content ([recognizedContentKey]), its binding and its
+/// inheritance parents, at the time it was written (0 where it carries none).
+SyncBody syncBodyOf(CharaDetailRecord record) {
+  final ids = record.metadata.recordId;
+  return SyncBody(
+    recognizedContentKey(record),
+    binding: record.metadata.binding,
+    parents: {'parent1': ?ids.parent1, 'parent2': ?ids.parent2},
+    time: record.metadata.bodyWrittenAt ?? 0,
+  );
+}
+
 /// The record to write when the recognizer's result [recognized] lands on the stored record [stored], or null when
 /// nothing is to be written.
 ///
-/// The record written carries the time of this write as its body's time ([valueWriteTime] over the stored body's), in
-/// the same `record.json` as the body. With no stored record (a capture), the record is [recognized] as the recognizer
-/// wrote it. Over a stored record (a re-recognition), the body comes from [recognized] and is written in the current
-/// format, and the record's own fields
-/// stay the stored record's: its id and capture date, its inheritance parents, its relation bonus, and its binding —
-/// a re-recognition reads the images the stored body was read from, so the binding is the stored one, or still not
-/// worked out. A capture writes no binding: nothing here reads an image. A result whose
-/// body is the stored one ([recognizedContentKey]) writes nothing, so a re-recognition that read the same leaves the
-/// stored `record.json` as it was, its body's time included, whatever has been placed on it.
+/// Whether and when the body is written is [syncBodyWrite]'s decision, by [valueWriteTime] over the stored body's
+/// time, and the record written carries that time as its body's, in the same `record.json` as the body. With no
+/// stored record (a capture), the record is [recognized] as the recognizer wrote it. Over a stored record (a
+/// re-recognition), the body comes from [recognized] and is written in the current format, and the record's own
+/// fields stay the stored record's: its id and capture date, its inheritance parents, its relation bonus, and its
+/// binding — a re-recognition reads the images the stored body was read from, so the binding is the stored one, or
+/// still not worked out. A capture writes no binding: nothing here reads an image. A result whose body is the stored
+/// one ([recognizedContentKey]) writes nothing, so a re-recognition that read the same leaves the stored
+/// `record.json` as it was, its body's time included, whatever has been placed on it.
 CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord recognized) {
   final r = recognized.upgradeFormat();
-  if (stored == null) {
-    final m = r.metadata;
-    return CharaDetailRecord(
-      Metadata(
-        m.formatVersion,
-        m.region,
-        m.recordId,
-        m.trainerId,
-        m.capturedDate,
-        m.recognizerVersion,
-        m.stage,
-        m.strategy,
-        m.relationBonus,
-        m.recordType,
-        m.binding,
-        valueWriteTime(null),
-      ),
-      r.trainee,
-      r.evaluationValue,
-      r.status,
-      r.aptitudes,
-      r.skills,
-      r.factors,
-      r.supportCards,
-      r.family,
-      r.fans,
-      r.scenario,
-      r.trainedDate,
-      r.races,
-    );
-  }
-  if (recognizedContentKey(stored) == recognizedContentKey(r)) {
-    return null;
-  }
-  final s = stored.metadata;
+  final body = syncBodyWrite(
+    (value: stored == null ? null : syncBodyOf(stored), time: stored?.metadata.bodyWrittenAt),
+    syncBodyOf(r),
+    writeAt: valueWriteTime,
+  );
+  if (body == null) return null;
   final m = r.metadata;
+  final own = (stored ?? r).metadata;
   return CharaDetailRecord(
     Metadata(
       m.formatVersion,
       m.region,
-      s.recordId,
+      RecordId(own.recordId.self, body.parents['parent1'], body.parents['parent2']),
       m.trainerId,
-      s.capturedDate,
+      own.capturedDate,
       m.recognizerVersion,
       m.stage,
       m.strategy,
-      s.relationBonus,
+      own.relationBonus,
       m.recordType,
-      s.binding,
-      valueWriteTime(s.bodyWrittenAt),
+      body.binding,
+      body.time,
     ),
     r.trainee,
     r.evaluationValue,
@@ -142,37 +127,32 @@ CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord
   );
 }
 
-/// The record an import writes when the record [imported] arrives, its images bound as [importedBinding], over the
-/// record the device holds [stored] (null where it holds none, or holds one it cannot read).
+/// The record an import writes when the record [imported] arrives over the record the device holds [stored] (null
+/// where it holds none, or holds one it cannot read), its body the one [syncImport] decided on, [body], written where
+/// [writes].
 ///
-/// Where the two hold the same body — the same content ([recognizedContentKey]) and bindings that do not disagree,
-/// [storedBinding] being the stored record's — the stored record stays, its body's time included, with the imported
-/// parents placed on it and the two bindings merged ([RecordBinding.mergedWith]). Else the body is the imported one,
-/// with its parents and [importedBinding], written at the time of this write over the stored body's
-/// ([valueWriteTime]). Either way the record keeps what only this device holds: the stored record's relation bonus,
-/// none where there is no stored record. Nothing the import carries of a time or a relation bonus is read.
+/// Where the body is not written, the stored record stays, its body's time included, with [body]'s parents and binding
+/// placed on it. Else the body is the imported one, with [body]'s parents, binding and time, in the current format.
+/// Either way the record keeps what only this device holds: the stored record's relation bonus, none where there is no
+/// stored record. Nothing the import carries of a time or a relation bonus is read.
 CharaDetailRecord composeBodyImport(
   CharaDetailRecord? stored,
   CharaDetailRecord imported, {
-  required RecordBinding? storedBinding,
-  required RecordBinding? importedBinding,
+  required SyncBody body,
+  required bool writes,
 }) {
-  final i = imported.upgradeFormat();
-  final parents = (parent1: i.metadata.recordId.parent1, parent2: i.metadata.recordId.parent2);
-  if (stored != null && sameRecordBody(stored, storedBinding, i, importedBinding)) {
-    final binding = storedBinding == null
-        ? importedBinding
-        : importedBinding == null
-        ? storedBinding
-        : storedBinding.mergedWith(importedBinding);
-    return placeOnRecord(stored, parents: parents, binding: binding);
+  final parents = (parent1: body.parents['parent1'], parent2: body.parents['parent2']);
+  if (!writes) {
+    final held = stored ?? (throw ArgumentError('An import keeps the body of a record the device holds.'));
+    return placeOnRecord(held, parents: parents, binding: body.binding);
   }
+  final i = imported.upgradeFormat();
   final m = i.metadata;
   return CharaDetailRecord(
     Metadata(
       m.formatVersion,
       m.region,
-      m.recordId,
+      RecordId(m.recordId.self, parents.parent1, parents.parent2),
       m.trainerId,
       m.capturedDate,
       m.recognizerVersion,
@@ -180,8 +160,8 @@ CharaDetailRecord composeBodyImport(
       m.strategy,
       stored?.metadata.relationBonus,
       m.recordType,
-      importedBinding,
-      valueWriteTime(stored?.metadata.bodyWrittenAt),
+      body.binding,
+      body.time,
     ),
     i.trainee,
     i.evaluationValue,
@@ -197,11 +177,6 @@ CharaDetailRecord composeBodyImport(
     i.races,
   );
 }
-
-/// Whether [a], its images bound as [aBinding], and [b], bound as [bBinding], hold the same body: the same content
-/// ([recognizedContentKey]) and bindings that do not disagree, a binding not known saying nothing ([SyncBody.sameAs]).
-bool sameRecordBody(CharaDetailRecord a, RecordBinding? aBinding, CharaDetailRecord b, RecordBinding? bBinding) =>
-    SyncBody(recognizedContentKey(a), binding: aBinding).sameAs(SyncBody(recognizedContentKey(b), binding: bBinding));
 
 /// A record's two inheritance parent slots.
 typedef RecordParents = ({String? parent1, String? parent2});

@@ -141,7 +141,9 @@ const _groupDescriptions = <StorageGroupId, String>{
   // sentence said only the second.
   StorageGroupId.quarantine: '読み込めなくなったウマ娘のデータや、保存の途中で残ったデータの退避先',
   StorageGroupId.retired: '処理の途中で残ったファイル',
-  StorageGroupId.metadata: 'キャプチャ済みウマ娘に付けたメモやレーティング、「統合しない」を選んだ統合候補などのメタデータ',
+  // Reworded on 2026-10-22, and approved in that wording: the group holds sync's record of the list it last agreed
+  // on as well.
+  StorageGroupId.metadata: 'キャプチャ済みウマ娘に付けたメモやレーティング、統合、同期情報の控えなどのメタデータ',
   StorageGroupId.modules: '画像認識のためのモデルとラベル',
   StorageGroupId.settings: 'アプリのすべての設定',
   StorageGroupId.temp: 'アプリが処理の途中で生成する一時ファイル',

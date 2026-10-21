@@ -19,6 +19,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_directory_transaction.dart';
@@ -260,7 +261,7 @@ void main() {
         recoverRecordUnlocked: (_, _) async {},
         loadAction: (directory) async {
           loaded.add(directory.name);
-          return RecordLoaded(makeRecord(id: directory.name, card: 1));
+          return RecordLoaded(makeRecord(id: directory.name, card: 1), notes: RecordNotes.none);
         },
       );
     }
@@ -332,7 +333,7 @@ void main() {
         snapshotDirectories: (_) async => [activeRoot / 'has space', activeRoot / 'ok-1'],
         loadAction: (directory) async {
           loaded.add(directory.name);
-          return RecordLoaded(makeRecord(id: directory.name, card: 1));
+          return RecordLoaded(makeRecord(id: directory.name, card: 1), notes: RecordNotes.none);
         },
       );
       expect(loaded, ['ok-1']);

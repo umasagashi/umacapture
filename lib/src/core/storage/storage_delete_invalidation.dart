@@ -419,6 +419,18 @@ _MetadataOwner? _metadataOwnerOf(PathInfo info, PathEntity target) {
   return null;
 }
 
+/// Which column storage [file] is — a file directly in `metadata/rating/` or `metadata/memo/`, the files the stores
+/// list their columns from — or null when it is neither.
+///
+/// Beside [_metadataOwnerOf] because it is the same reading of the same two directories: what that one finds the
+/// controller of is what a delete keeps as the record of its removal (`storage_delete.dart`).
+MetadataStorageKind? metadataColumnStorageKindOf(PathInfo info, FilePath file) {
+  final parent = file.parent.path;
+  if (parent == info.charaDetailRatingDir.path) return MetadataStorageKind.rating;
+  if (parent == info.charaDetailMemoDir.path) return MetadataStorageKind.memo;
+  return null;
+}
+
 /// The store key a target names, or null when the target is the store directory.
 ///
 /// The key is the file's *stem* — `main.json` is the store named `main` — which

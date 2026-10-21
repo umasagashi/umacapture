@@ -356,6 +356,17 @@ final class PushCut extends Op {
   String toString() => '$device: push cut after $answered (${stored ? 'response' : 'request'} lost)';
 }
 
+/// A round of the app's own that ends at a swap with no answer, read on the server's endpoints: the server answers
+/// the first [answered] swaps of the round, and the next gets none — the server having swapped it ([stored]: the
+/// response is lost, or the app stops before it writes it down) or not (the request is lost). A swap is the app's
+/// unit of a push, where the model's round counts each body, image and list it sends ([PushCut]).
+final class SwapCut extends PushCut {
+  const SwapCut(super.device, super.answered, {required super.stored});
+
+  @override
+  String toString() => '$device: swap cut after $answered (${stored ? 'response' : 'request'} lost)';
+}
+
 /// A round that ends while it receives. The device sends as in any round, takes the first [received]
 /// operations the server numbered after the last one it had, and gets no answer to its next read — the
 /// answer is lost, the server refuses the read (429), or the app stops. What it took is part of its
@@ -368,10 +379,79 @@ final class ReceiveCut extends Op {
   String toString() => '$device: receive cut after $received';
 }
 
+/// A round of the app's own that ends while it puts what it received in place, read on the device's place: the first
+/// [received] writes of the round's result on the device land — each call of the place that writes it is one — and
+/// the next one fails, as one does where the app stops. The round does nothing more.
+final class PlaceCut extends ReceiveCut {
+  const PlaceCut(super.device, super.received);
+
+  @override
+  String toString() => '$device: place cut after $received writes';
+}
+
 /// The user asks for a sync now, or the app starts again: a device a full storage holds back tries
 /// again in its next round.
 final class Resume extends Op {
   const Resume(super.device);
   @override
   String toString() => '$device: resume';
+}
+
+/// An operation on the quarantine shelf of the rules of file sync, or one that has the record stores scan it: only those
+/// rules, on the app's round, have a shelf. The other rule sets have no path for any.
+sealed class ShelfOp extends Op {
+  const ShelfOp(super.device);
+}
+
+/// How a record comes to be one the app cannot read, which a store's scan moves onto the quarantine shelf.
+enum QuarantineCause {
+  /// Its `record.json` is torn or broken: a save cut short, a file damaged.
+  unreadable,
+
+  /// The user deleted its `record.json` alone from the storage view ([N15-22] (b)), which leaves the directory and
+  /// rescans the store.
+  recordJsonDeleted,
+}
+
+/// The record [id] becomes one the app cannot read, as [cause] says, and the scan of its store moves its directory
+/// whole onto the quarantine shelf, noting the id: the record, its images and what only the device holds of it go
+/// there; its cells and the dismissed pairs that name it stay in their files. Where [noted] is false, the directory on
+/// the shelf carries no note of the id: a write's recovery set it aside with none, or the user deleted the note alone
+/// from the storage view. The app neither names it nor puts it back.
+final class Quarantine extends ShelfOp {
+  const Quarantine(super.device, this.id, {this.cause = QuarantineCause.unreadable, this.noted = true});
+  final String id;
+  final QuarantineCause cause;
+  final bool noted;
+  @override
+  String toString() =>
+      '$device: ${cause == QuarantineCause.unreadable ? 'quarantine' : 'delete the record.json of'} $id'
+      '${noted ? '' : ', with no note'}';
+}
+
+/// The user deletes the record [id] on the quarantine shelf from the storage view ([N15-22] (d)): its directory goes,
+/// and the shelf notes the id as one the user deleted. Its cells and the pairs that name it go, as a delete from the
+/// list takes them.
+final class DeleteQuarantined extends ShelfOp {
+  const DeleteQuarantined(super.device, this.id);
+  final String id;
+  @override
+  String toString() => '$device: delete $id from the quarantine shelf';
+}
+
+/// The `record.json` of the record [id] on the quarantine shelf is made readable again from outside the app, as it was
+/// before the record went there. The next scan of its store puts it back ([Restart]).
+final class RepairQuarantined extends ShelfOp {
+  const RepairQuarantined(super.device, this.id);
+  final String id;
+  @override
+  String toString() => '$device: repair $id on the quarantine shelf';
+}
+
+/// The app starts again: the record stores scan again, and each record on the quarantine shelf whose `record.json`
+/// reads again as its own id, and whose id neither store holds, is put back where it came from.
+final class Restart extends ShelfOp {
+  const Restart(super.device);
+  @override
+  String toString() => '$device: restart';
 }

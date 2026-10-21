@@ -87,7 +87,11 @@ mixin _FakeRecordStore on CharaDetailRecordMutator {
       deleteAllAsync([id], effects: effects);
 
   @override
-  Future<RecordDeleteResult> deleteAllAsync(Iterable<String> ids, {required RecordWriteEffects effects}) async {
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) async {
     final idSet = ids.toSet();
     deleteAllCalls.add(idSet);
     _held.removeAll(idSet);

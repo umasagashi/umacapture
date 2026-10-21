@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/record_archive_state.dart';
@@ -13,51 +15,61 @@ import 'archive_executor_types.dart';
 
 const _archiveImageNames = ['skill.png', 'factor.png', 'campaign.png'];
 
+/// What an archived record carries in the archive store beside its images, as the archive left it: its `record.json`
+/// with the binding placed before the move (null where none could be read), and its archive note.
+typedef ArchivedRecord = ({Uint8List? recordJson, RecordArchiveNote note});
+
 /// Native implementation, called from [archive_executor_io.dart] in one worker
 /// isolate. Its directory rename preserves the native filesystem's atomic
 /// behavior, while image cleanup uses the same asynchronous implementation as
 /// the web transaction path.
-Future<List<bool>> archiveRecordsOnNative(ArchiveBatchArgs args) async {
-  final results = <bool>[];
+///
+/// Each item answers what its record carries in the archive store, or null where it was not archived.
+Future<List<ArchivedRecord?>> archiveRecordsOnNative(ArchiveBatchArgs args) async {
+  final results = <ArchivedRecord?>[];
   for (final item in args.items) {
     results.add(await archiveRecordOnNative(item));
   }
   return results;
 }
 
-Future<bool> archiveRecordOnNative(ArchiveRecordArgs args) async {
+/// Archives one record; answers what it carries in the archive store, or null where it was not archived.
+Future<ArchivedRecord?> archiveRecordOnNative(ArchiveRecordArgs args) async {
   try {
     final srcDir = DirectoryPath(args.srcDirPath);
-    if (!srcDir.existsSync()) return false;
+    if (!srcDir.existsSync()) return null;
     if (DirectoryPath(args.dstDirPath).existsSync()) {
       logger.e('Cannot archive ${args.srcDirPath}: destination ${args.dstDirPath} already exists.');
-      return false;
+      return null;
     }
-    await placeRecordBindingUnlocked(srcDir);
+    final recordJson = await placeRecordBindingUnlocked(srcDir);
     // The rename carries the choice with the record: it is in archive/ with this state, or still in active/.
-    await noteArchiveChoiceUnlocked(srcDir, args.option);
+    final note = await noteArchiveChoiceUnlocked(srcDir, args.option);
     final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));
-    if (dstDir == null) return false;
+    if (dstDir == null) return null;
     await _disposeArchivedImagesAsync(dstDir, args.option);
-    return true;
+    return (recordJson: recordJson, note: note);
   } catch (error, stackTrace) {
     logger.e('Failed to archive record ${args.srcDirPath}.', error, stackTrace);
-    return false;
+    return null;
   }
 }
 
 /// Web/OPFS implementation. A pre-existing destination is only resumed when it
 /// is an exact duplicate of the active tree; any partial or divergent tree is
 /// deliberately left untouched for recovery instead of being overwritten.
-Future<List<bool>> archiveRecordsAsync(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) async {
-  final results = <bool>[];
+///
+/// Answers per item as [archiveRecordsOnNative] does.
+Future<List<ArchivedRecord?>> archiveRecordsAsync(ArchiveBatchArgs args, {RecordRecoveryGate? recoveryGate}) async {
+  final results = <ArchivedRecord?>[];
   for (final item in args.items) {
     results.add(await archiveRecordAsync(item, recoveryGate: recoveryGate));
   }
   return results;
 }
 
-Future<bool> archiveRecordAsync(
+/// Archives one record under its lock; answers as [archiveRecordOnNative] does.
+Future<ArchivedRecord?> archiveRecordAsync(
   ArchiveRecordArgs args, {
   RecordRecoveryGate? recoveryGate,
   RecordMutationLock? mutationLock,
@@ -78,14 +90,14 @@ Future<bool> archiveRecordAsync(
   );
 }
 
-Future<bool> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
+Future<ArchivedRecord?> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
   try {
     final srcDir = DirectoryPath(args.srcDirPath);
     final dstDir = DirectoryPath(args.dstDirPath);
     // Before the images are let go of, under the record lock this leg holds; the desktop leg does the same.
-    await placeRecordBindingUnlocked(srcDir);
+    final recordJson = await placeRecordBindingUnlocked(srcDir);
     // The transaction carries the choice with the record, and a reload resumes or rolls back both together.
-    await noteArchiveChoiceUnlocked(srcDir, args.option);
+    final note = await noteArchiveChoiceUnlocked(srcDir, args.option);
     final result = await RecordDirectoryTransaction().execute(
       RecordDirectoryTransactionSpec(
         recordId: srcDir.name,
@@ -97,12 +109,12 @@ Future<bool> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
     );
     if (!result.isCommitted) {
       logger.e('Archive transaction for ${args.srcDirPath} stopped with ${result.name}.');
-      return false;
+      return null;
     }
-    return true;
+    return (recordJson: recordJson, note: note);
   } catch (error, stackTrace) {
     logger.e('Failed to archive record ${args.srcDirPath}.', error, stackTrace);
-    return false;
+    return null;
   }
 }
 

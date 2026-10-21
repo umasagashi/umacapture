@@ -14,6 +14,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_id_safety.dart';
@@ -168,7 +169,7 @@ void main() {
         recoverRecordUnlocked: (_, _) async {},
         loadAction: (directory) async {
           loaded.add(directory.name);
-          return RecordLoaded(makeRecord(id: directory.name, card: 1));
+          return RecordLoaded(makeRecord(id: directory.name, card: 1), notes: RecordNotes.none);
         },
       );
       return loaded;

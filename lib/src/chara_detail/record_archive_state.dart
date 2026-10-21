@@ -15,9 +15,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '/src/chara_detail/archive_executor_types.dart';
+import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/value_write_time.dart';
 import '/src/core/app_logger.dart';
-import '/src/core/fs/fs_backend.dart';
 import '/src/core/path_entity.dart';
 
 /// The name of the note in a record directory.
@@ -36,21 +37,30 @@ enum RecordArchiveState {
     ArchiveImageOption.resizedJpeg => RecordArchiveState.jpeg,
     ArchiveImageOption.none => RecordArchiveState.none,
   };
+
+  /// The state as sync carries it ([of] the other way): null where the record is normal.
+  ArchiveImageOption? get option => switch (this) {
+    RecordArchiveState.normal => null,
+    RecordArchiveState.jpeg => ArchiveImageOption.resizedJpeg,
+    RecordArchiveState.none => ArchiveImageOption.none,
+  };
 }
 
 /// A record's archive state and when it was written, in milliseconds since the epoch, or null for a state that
 /// carries no time.
 typedef RecordArchiveValue = ({RecordArchiveState state, int? writtenAt});
 
-/// The note's two slots: the time the record was made normal, and the state and time of its archive.
-class _Note {
-  const _Note(this.normalWrittenAt, this.archived);
+/// The note's two slots: the time the record was made normal, and the state and time of its archive. A record
+/// directory without a note holds [empty].
+class RecordArchiveNote {
+  const RecordArchiveNote(this.normalWrittenAt, this.archived);
 
   final int? normalWrittenAt;
   final RecordArchiveValue? archived;
 
-  static const empty = _Note(null, null);
+  static const empty = RecordArchiveNote(null, null);
 
+  /// The state of a record with this note, in the archive store when [archiveStore] and in the active store otherwise.
   RecordArchiveValue valueIn({required bool archiveStore}) => archiveStore
       ? archived ?? (state: RecordArchiveState.jpeg, writtenAt: null)
       : (state: RecordArchiveState.normal, writtenAt: normalWrittenAt);
@@ -62,10 +72,11 @@ class _Note {
     }),
   );
 
-  static _Note decode(String text) {
+  /// The note [text] holds. Throws where it is not one.
+  static RecordArchiveNote decode(String text) {
     final map = jsonDecode(text) as Map<String, Object?>;
     final archived = map['archived'];
-    return _Note(
+    return RecordArchiveNote(
       map['normal_written_at'] as int?,
       archived is Map<String, Object?>
           ? (
@@ -77,12 +88,12 @@ class _Note {
   }
 }
 
-Future<_Note> _readNote(DirectoryPath recordDir) async {
+Future<RecordArchiveNote> _readNote(DirectoryPath recordDir) async {
   final file = recordDir.filePath(recordArchiveNoteName);
   if (!await file.exists()) {
-    return _Note.empty;
+    return RecordArchiveNote.empty;
   }
-  return _Note.decode(await file.readAsString());
+  return RecordArchiveNote.decode(await file.readAsString());
 }
 
 /// The archive state of the record in [recordDir], which is in the archive store when [archiveStore] is true and in
@@ -102,10 +113,10 @@ bool isInArchiveStore(DirectoryPath recordDir) => recordDir.parent.name == 'arch
 /// So a record archived before notes were kept goes out archived, as it is read here, and a record made normal again
 /// does not take the archive its note still remembers. A note this build cannot read is read as an empty one, logged.
 Uint8List? exportedArchiveNote(Uint8List? stored, {required bool archiveStore}) {
-  var note = _Note.empty;
+  var note = RecordArchiveNote.empty;
   if (stored != null) {
     try {
-      note = _Note.decode(utf8.decode(stored));
+      note = RecordArchiveNote.decode(utf8.decode(stored));
     } catch (error, stackTrace) {
       logger.w(
         'An archive note could not be read, so the record is exported as one without a note.',
@@ -138,63 +149,77 @@ Future<Uint8List?> exportedArchiveNoteOf(DirectoryPath recordDir) async {
 RecordArchiveState exportedArchiveState(Uint8List? bytes) {
   if (bytes == null) return RecordArchiveState.normal;
   try {
-    return _Note.decode(utf8.decode(bytes)).archived?.state ?? RecordArchiveState.normal;
+    return RecordArchiveNote.decode(utf8.decode(bytes)).archived?.state ?? RecordArchiveState.normal;
   } catch (error, stackTrace) {
     logger.w('An imported archive note could not be read, so the record is read as normal.', error, stackTrace);
     return RecordArchiveState.normal;
   }
 }
 
-/// The note an import publishes for a record it makes [state], over the record in [localDir] — in the archive store
-/// when [localInArchive] — or over none where [localDir] is null.
-///
-/// Null where the record the device holds is already in [state]: the note stays as it is, its time included. Else
-/// the device's note with [state] in the slot of the store [state] is held in, at the time of this write over the
-/// time of the state the device's record is in ([valueWriteTime]); the other slot stays as it was. Throws when the
-/// device's note cannot be read.
-Future<Uint8List?> importedArchiveNote(
-  RecordArchiveState state, {
-  required DirectoryPath? localDir,
-  required bool localInArchive,
-}) async {
-  final note = localDir == null ? _Note.empty : await _readNote(localDir);
-  final current = localDir == null ? null : note.valueIn(archiveStore: localInArchive);
-  if (current?.state == state) return null;
-  final writtenAt = valueWriteTime(current?.writtenAt);
-  final next = state == RecordArchiveState.normal
-      ? _Note(writtenAt, note.archived)
-      : _Note(note.normalWrittenAt, (state: state, writtenAt: writtenAt));
+/// The note of the record in [recordDir], [RecordArchiveNote.empty] where it carries none. Throws when it cannot be
+/// read.
+Future<RecordArchiveNote> readRecordArchiveNote(DirectoryPath recordDir) => _readNote(recordDir);
+
+/// The note an import publishes for a record whose archive state [syncImport] writes as [written], over the note
+/// [held] the device's record carries — [RecordArchiveNote.empty] where the device holds no record of the id: [written]
+/// in the slot of the store its state is held in, the other slot as it was. Null where [written] is: the note stays as
+/// it is, its time included.
+Uint8List? importedArchiveNote(SyncValue<ArchiveImageOption?>? written, RecordArchiveNote held) {
+  if (written == null) return null;
+  final next = switch (written.value) {
+    null => RecordArchiveNote(written.time, held.archived),
+    final option => RecordArchiveNote(held.normalWrittenAt, (
+      state: RecordArchiveState.of(option),
+      writtenAt: written.time,
+    )),
+  };
   return Uint8List.fromList(next.toBytes());
 }
 
-/// The note a merge publishes for its survivor, whose id is the record in [olderDir] and whose state is the one the
-/// record in [keptDir] is read in: that state, at the time the older record's state holds where the two are the same
-/// state and at the time of this write over it ([valueWriteTime]) where they are not. The kept record's own time is
-/// never carried: the survivor shows the older record's value until the merge writes another.
-///
-/// Each record is read as being in the archive store when its `…InArchive` flag is true. The survivor lives in the
-/// kept record's store, so the note holds the slot of that store and no other. Null where that note is empty and the
-/// kept record has none, so the kept tree already reads as it. Throws when either note cannot be read.
-Future<Uint8List?> survivorArchiveNote({
+/// The archive states a merge decides its survivor's on ([syncMerge]): the state the older record, its id's, is read in
+/// ([shown]), the state of the record whose content it keeps ([kept]), and whether that record's directory holds a
+/// note ([keptHasNote]).
+typedef MergedArchiveStates = ({RecordArchiveValue shown, RecordArchiveValue kept, bool keptHasNote});
+
+/// [MergedArchiveStates] of a merge of the record in [olderDir] that keeps the content of the record in [keptDir],
+/// each read as being in the archive store when its `…InArchive` flag is true. Throws when either note cannot be read.
+Future<MergedArchiveStates> readMergedArchiveStates({
   required DirectoryPath olderDir,
   required bool olderInArchive,
   required DirectoryPath keptDir,
   required bool keptInArchive,
-}) async {
-  final shown = (await _readNote(olderDir)).valueIn(archiveStore: olderInArchive);
-  final kept = (await _readNote(keptDir)).valueIn(archiveStore: keptInArchive);
-  final writtenAt = kept.state == shown.state ? shown.writtenAt : valueWriteTime(shown.writtenAt);
-  final note = keptInArchive ? _Note(null, (state: kept.state, writtenAt: writtenAt)) : _Note(writtenAt, null);
-  if (note.normalWrittenAt == null &&
-      note.archived == null &&
-      !await keptDir.filePath(recordArchiveNoteName).exists()) {
+}) async => (
+  shown: (await _readNote(olderDir)).valueIn(archiveStore: olderInArchive),
+  kept: (await _readNote(keptDir)).valueIn(archiveStore: keptInArchive),
+  keptHasNote: await keptDir.filePath(recordArchiveNoteName).exists(),
+);
+
+/// The note a merge publishes for its survivor, whose id is the older record's and whose tree is the kept record's, of
+/// the [states] it read: the kept record's state, written as the merge's decision writes it ([written] —
+/// [SyncMergePlan.stage]), and at the time the older record's state holds where that decision writes none — the two
+/// records are in one state. The kept record's own time is never carried: the survivor shows the older record's value
+/// until the merge writes another.
+///
+/// The survivor lives in the kept record's store — the archive store when [keptInArchive] — so the note holds the slot
+/// of that store and no other. Null where that note is empty and the kept record has none, so the kept tree already
+/// reads as it.
+Uint8List? survivorArchiveNote(
+  SyncValue<ArchiveImageOption?>? written, {
+  required MergedArchiveStates states,
+  required bool keptInArchive,
+}) {
+  final writtenAt = written?.time ?? states.shown.writtenAt;
+  final note = keptInArchive
+      ? RecordArchiveNote(null, (state: states.kept.state, writtenAt: writtenAt))
+      : RecordArchiveNote(writtenAt, null);
+  if (note.normalWrittenAt == null && note.archived == null && !states.keptHasNote) {
     return null;
   }
   return Uint8List.fromList(note.toBytes());
 }
 
 /// Writes into the note of the active record in [recordDir] that it is archived with [option], at the time of this
-/// write over the time of its normal state ([valueWriteTime]).
+/// write over the time of its normal state: [syncArchive]'s decision, by [valueWriteTime].
 ///
 /// A note that already holds this choice, written after the normal state, is left as it is: an archive that stopped
 /// before its move left it, and the retry is the same archive, so it moves the same bytes the stopped one staged — a
@@ -202,7 +227,9 @@ Future<Uint8List?> survivorArchiveNote({
 ///
 /// Called before the directory moves to the archive store, under the record lock the move holds: until it moves the
 /// record is still read as normal, at the time it was, and once it has moved it is read as this.
-Future<void> noteArchiveChoiceUnlocked(DirectoryPath recordDir, ArchiveImageOption option) async {
+///
+/// Returns the note [recordDir] holds afterwards, the one the move carries.
+Future<RecordArchiveNote> noteArchiveChoiceUnlocked(DirectoryPath recordDir, ArchiveImageOption option) async {
   final note = await _readNote(recordDir);
   final current = note.valueIn(archiveStore: false);
   final state = RecordArchiveState.of(option);
@@ -210,18 +237,17 @@ Future<void> noteArchiveChoiceUnlocked(DirectoryPath recordDir, ArchiveImageOpti
     state: final noted,
     writtenAt: final at?,
   ) when noted == state && at > (current.writtenAt ?? -1)) {
-    return;
+    return note;
   }
-  final next = _Note(note.normalWrittenAt, (state: state, writtenAt: valueWriteTime(current.writtenAt)));
-  final file = recordDir.filePath(recordArchiveNoteName);
-  if (fsBackend.renameReplacesFileAtomically) {
-    // A torn note would lose the time of the normal state; the staging file is replaced whole or not at all.
-    final staging = recordDir.filePath('$recordArchiveNoteName.part');
-    await staging.writeAsBytes(next.toBytes(), flush: true);
-    await staging.rename(file);
-  } else {
-    // An OPFS writable is published whole when it closes.
-    await file.writeAsBytes(next.toBytes(), flush: true);
-  }
+  final written = syncArchive((value: current.state.option, time: current.writtenAt), option, writeAt: valueWriteTime);
+  // Not null here: a record in the active store is normal, and an archive is never that state.
+  if (written == null) return note;
+  final next = RecordArchiveNote(note.normalWrittenAt, (
+    state: RecordArchiveState.of(written.value),
+    writtenAt: written.time,
+  ));
+  // A torn note would lose the time of the normal state.
+  await recordDir.filePath(recordArchiveNoteName).replaceWhole(next.toBytes());
   logger.d('Noted the archive of ${recordDir.name} as ${state.name}.');
+  return next;
 }

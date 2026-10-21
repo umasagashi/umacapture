@@ -1,4 +1,5 @@
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/spec/base.dart';
 
 /// Whether a factor is one that factor enhancement can star up (coloured) or one it can add (white).
@@ -172,17 +173,12 @@ final class EnhancementCandidate {
 /// after every parseable one, and the lexicographically smaller id on a tie.
 ///
 /// This decides only which id survives a merge; which side is enhanced is decided by factor content
-/// alone, because a pre-enhancement record can be captured again later.
+/// alone, because a pre-enhancement record can be captured again later. The order is the merge's
+/// ([syncCompareAge]), of each record's id and the instant its date parses to.
 int compareRecordAge(CharaDetailRecord a, CharaDetailRecord b) {
-  final dateA = DateTime.tryParse(a.metadata.capturedDate);
-  final dateB = DateTime.tryParse(b.metadata.capturedDate);
-  final byDate = switch ((dateA, dateB)) {
-    (null, null) => 0,
-    (null, _) => 1,
-    (_, null) => -1,
-    (final x?, final y?) => x.compareTo(y),
-  };
-  return byDate != 0 ? byDate : a.id.compareTo(b.id);
+  ({String id, int? captured}) ageOf(CharaDetailRecord r) =>
+      (id: r.id, captured: DateTime.tryParse(r.metadata.capturedDate)?.microsecondsSinceEpoch);
+  return syncCompareAge(ageOf(a), ageOf(b));
 }
 
 /// How two stored records relate as merge candidates.

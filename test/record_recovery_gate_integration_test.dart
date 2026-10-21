@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/archive_executor.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
@@ -92,7 +93,7 @@ void main() {
       loadAction: (directory) async {
         events.add('load');
         expect(await directory.filePath('record.json').readAsString(), contains('desired'));
-        return RecordLoaded(makeRecord(id: id, card: 1));
+        return RecordLoaded(makeRecord(id: id, card: 1), notes: RecordNotes.none);
       },
     );
 
@@ -140,7 +141,7 @@ void main() {
       activeRoot,
       declaration: undeclaredInTest,
       recoveryGate: gate,
-      loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1)),
+      loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1), notes: RecordNotes.none),
     );
     final listed = await scan();
     expect(listed.unavailable, isEmpty);
@@ -204,7 +205,7 @@ void main() {
       activeRoot,
       declaration: undeclaredInTest,
       recoveryGate: gate,
-      loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1)),
+      loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1), notes: RecordNotes.none),
     );
     final listed = await scan();
     expect(listed.unavailable, isEmpty);
@@ -251,7 +252,7 @@ void main() {
       ),
       recoveryGate: gate,
     );
-    expect(archived, isTrue);
+    expect(archived, isNotNull);
     expect(
       await (dataRoot / 'archive' / archiveId).filePath('record.json').readAsString(),
       contains('archive-desired'),
