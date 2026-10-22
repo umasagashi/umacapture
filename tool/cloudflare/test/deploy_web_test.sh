@@ -10,7 +10,7 @@
 # Hosts are directories under $STUB_WEB/<host>/. The fake `wrangler deploy`
 # copies build/web/ to umacapture.com, or to the staging workers.dev host when
 # given `--env staging`; `--dry-run` copies nothing. A deploy of
-# server/wrangler.jsonc also brings up the record-sharing Worker on that host
+# server/wrangler.jsonc also brings up the sharing and sync Worker on that host
 # (marked by $STUB_WEB/<host>.worker), unless STUB_NO_WORKER is set; a deploy
 # of server/wrangler.assets-only.jsonc never does. The fake `curl` answers a
 # GET from the host directory (200 with the file, 404 without it), sends
@@ -235,7 +235,7 @@ check "verified on the staging host" called "curl GET https://$STAGING_HOST/r/00
 echo "(7) production, the deploy brings up no Worker"
 SENTRY_AUTH_TOKEN=stub-sentry STUB_NO_WORKER=1 run_world prod_no_worker --yes
 check "stops" test "$STATUS" -ne 0
-check "stops at the Worker check" grep -q "is not answered by the record-sharing Worker" "$ROOT/prod_no_worker/out.log"
+check "stops at the Worker check" grep -q "is not answered by the sharing and sync Worker" "$ROOT/prod_no_worker/out.log"
 check "tables not promoted" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.production.json"
 
 echo

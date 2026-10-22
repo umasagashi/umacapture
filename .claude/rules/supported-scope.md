@@ -12,7 +12,7 @@ destroys data the product does promise to keep.
 - **Web app**: one tab per origin (a page-lifetime Web Lock; a second tab waits and continues when the
   first closes). Requires WebAssembly SIMD, `SharedArrayBuffer` and cross-origin isolation; the worker
   refuses the session otherwise. Normal browsers are desktop Chromium-based browsers and Firefox.
-  Android Chrome is normal for **video import only**. iOS is not promised (never measured). The embedded
+  Android Chrome is normal for **video import and file sync only**. iOS is not promised (never measured). The embedded
   browser pane of desktop chat clients is not promised (it cannot nest workers).
   Accepted limits: without `navigator.locks` two tabs are not excluded and settings are last-write-wins;
   a tab of a build older than the single-tab lock is not excluded across an update.
@@ -49,9 +49,29 @@ destroys data the product does promise to keep.
 - Records captured before the recognizer module's minimum date are unsupported for recognition: viewing,
   export, delete and merge are normal; re-recognition is a warned, long-press rescue and is not a
   verification target.
+- **One record id that two devices hold with images of different captures, made by v0.3.0's zip export and
+  import followed by a merge** (v0.3.0's merge copied the kept record's content, images included, into the
+  older id): when sync brings the two copies together, which device's images the record keeps is not
+  promised.
 - Operations started from the UI may overlap (an export running while a delete is pressed, and so on);
   that is normal, and the promised response is to refuse while busy. A window a person cannot aim for is
   coincidental reachability, not normal.
+
+## File sync
+
+- **Two devices** of one person sync through one account. Three or more devices are not promised.
+- **Normal operations** of the account, sharing and sync: logging in; sharing records in bulk; withdrawing a
+  share from a device other than the one that shared it; a sync round trip between the two devices; switching
+  sync on and off; deleting the account.
+- **Devices**: the Windows desktop app, the normal desktop browsers above, and Android Chrome. iOS is
+  not promised.
+- **A zip in the older format**, one that carries no sync state, is read as ordinary records. Its import
+  is best effort and not promised.
+- **Not promised**, and nothing is added to the app or the server for them: using one device's data with
+  more than one account; syncing three or more devices; opening and changing the data with an older
+  version of the app (one that writes no sync fields) after sync has begun (upgrading once from an older
+  version to a newer one is normal); copying a data directory whole to another device and using both
+  copies before syncing.
 
 ## User-authored content
 
