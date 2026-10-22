@@ -1,4 +1,4 @@
-// The web app (build/web/ on Workers Static Assets) together with the record-sharing Worker.
+// The web app (build/web/ on Workers Static Assets) together with the Worker for logins, record sharing and file sync.
 //
 // The top level is production: the assets at umacapture.com with the Worker in front of /r/*,
 // /u/* and /api/*, its own D1 and its own Turnstile widget. env.staging is the same Worker on
@@ -81,8 +81,8 @@
   },
 
   "env": {
-    // Served at umacapture-web-staging.<account subdomain>.workers.dev, with its own D1. It shares
-    // the account's daily Worker and D1 quotas with production.
+    // Served at umacapture-web-staging.<account subdomain>.workers.dev, with its own D1. Its Worker
+    // and D1 usage is billed to the same account as production's.
     "staging": {
       "main": "src/index.mjs",
       // routes, workers_dev and assets are inherited from the top level unless set here; staging
@@ -127,7 +127,9 @@
         "TURNSTILE_HOSTNAME": "umacapture-web-staging.umasagashi.workers.dev",
         "TURNSTILE_ACTION": "login",
         // Staging's own value: the top level's vars are not inherited once env.staging sets "vars".
-        "GOOGLE_CLIENT_ID": "",
+        // Staging signs in through production's OAuth client, which also registers staging's
+        // redirect URI, so this is production's client id.
+        "GOOGLE_CLIENT_ID": "398895641600-5oqtrm01eo0j66qvne28dslqvq84bb2k.apps.googleusercontent.com",
         // Staging's own origin, so staging's logins come back to staging, where their rows are.
         "AUTH_REDIRECT_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
         // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.

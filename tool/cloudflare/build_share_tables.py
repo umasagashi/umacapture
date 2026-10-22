@@ -12,7 +12,7 @@ archive is fetched anonymously and checked against both, and the tables are read
 modules/labels.json and modules/*_info.json. The output shape is the contract stated at the top of
 server/src/tables.mjs: {version, names, gids}.
 
-A published record stores sids, and its names are looked up in whichever tables are deployed when
+A shared record stores sids, and its names are looked up in whichever tables are deployed when
 it is read, so the tables may only ever grow at the end. The tables last deployed are kept as the
 baseline, given with --previous. It is required and has no default, because each deploy target has
 its own D1 and so its own baseline (tool/cloudflare/deploy_web.sh passes

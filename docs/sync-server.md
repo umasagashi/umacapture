@@ -4,7 +4,8 @@ What the Worker's file sync is made of, for whoever deploys it, configures its b
 code: the configuration it reads, what it assumes of the B2 bucket, its endpoints and D1 schema, every
 limit it enforces, and the invariants its hides and shows keep. What a client must send and may expect
 back is [`sync-protocol.md`](sync-protocol.md); this document does not repeat it, and points there for
-what a client sees. It states facts, not operating procedures.
+what a client sees. It states facts, not operating procedures: setting up the bucket, the key and the
+secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 
 ## Configuration
 

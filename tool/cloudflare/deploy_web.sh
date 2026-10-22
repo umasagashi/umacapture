@@ -6,12 +6,14 @@
 #     production (default)  https://umacapture.com (the top level of the config)
 #     staging               https://umacapture-web-staging.umasagashi.workers.dev
 #                           (env.staging of the config)
-#   --sharing  whether the record-sharing Worker comes with the assets
+#   --sharing  whether the Worker (logins, record sharing, file sync and its
+#              hourly run) comes with the assets
 #     on (default)  server/wrangler.jsonc: the Worker answers /r/*, /u/* and /api/*
 #                   and every path that matches no file, with its D1
 #     off           server/wrangler.assets-only.jsonc: no Worker script at all,
-#                   so those paths get the static 404. This is how sharing is
-#                   switched off with the assets of the current HEAD.
+#                   so those paths get the static 404. This is how logins,
+#                   sharing and sync are all switched off together with the
+#                   assets of the current HEAD.
 #
 # Invariant, for every combination: what is uploaded is build/web/ as built
 # from the committed HEAD in THIS run. A previous build/web/ is never reused,
@@ -139,7 +141,7 @@ case "$SHARING" in
   on)
     CONFIG=server/wrangler.jsonc
     SHARE_TABLES=1
-    NOT_FOUND_FROM="the record-sharing Worker"
+    NOT_FOUND_FROM="the sharing and sync Worker"
     NOT_FOUND_ROBOTS=noindex
     ;;
   off)
@@ -151,7 +153,7 @@ case "$SHARING" in
   *) fail "$usage" ;;
 esac
 WRANGLER_ARGS=(-c "$CONFIG" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"})
-# The tables last deployed to this target. Each target has its own D1, holding records published
+# The tables last deployed to this target. Each target has its own D1, holding records shared
 # under its own tables, so one target's tables say nothing about what the other may drop.
 TABLES_BASELINE="tool/cloudflare/.deploy-backup/tables.$TARGET.json"
 

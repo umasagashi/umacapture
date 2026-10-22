@@ -1,14 +1,18 @@
 # Deploying the web app
 
 The web app is served from `https://umacapture.com` by **Cloudflare Workers Static Assets**,
-together with the **record-sharing Worker** (`server/src/`, configured by `server/wrangler.jsonc`)
-and its D1 database. The Worker answers the record pages `/r/<id>`, their JSON `/r/<id>.json` and
-the API under `/api/`, and answers 404 to any other path that matches no file. A request for a file
-in `build/web/` is a static-asset request: no Worker script runs and the Worker request quota is
-not used.
+together with the **Worker** (`server/src/`, configured by `server/wrangler.jsonc`) and its D1
+database. The Worker carries logins (Google, behind Turnstile), record sharing and file sync. It
+answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, an account's list of shared records
+`/u/<id>` and `/u/<id>.json`, and the API under `/api/` (file sync under `/api/sync/`), and answers 404
+to any other path that matches no file. An hourly run of the same Worker tidies file sync's storage
+(`triggers.crons`). File sync stores its objects in a Backblaze B2 bucket per environment, which the
+Worker alone reaches, with a key held in Worker secrets ([`sync-server.md`](sync-server.md)). A
+request for a file in `build/web/` is a static-asset request: no Worker script runs and it is not
+counted as a Worker request.
 
-Record sharing can be switched off without touching the app: `server/wrangler.assets-only.jsonc`
-deploys the same assets with no Worker script at all, so every path that matches no file gets the
+The Worker can be switched off without touching the app: `server/wrangler.assets-only.jsonc` deploys
+the same assets with no Worker script and no hourly run, so every path that matches no file gets the
 static 404 (see "Rolling back and switching off").
 
 Deployment runs from the one PC that can build the wasm recognition core (CI cannot; see
@@ -24,8 +28,8 @@ Deployment runs from the one PC that can build the wasm recognition core (CI can
 | Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`, except `/og/fonts/*` (one day, see the Vercel section). Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
 | CanvasKit | Served from the bundle's own `canvaskit/`. `tool/build_web.sh` always passes `--no-web-resources-cdn`, so nothing is loaded from `www.gstatic.com` |
 | Fonts | Still fetched at runtime from `fonts.gstatic.com` (not bundled) |
-| Record pages and API | `/r/*` and `/api/*` run the Worker first (`assets.run_worker_first`), so a static file can never shadow an endpoint |
-| Unknown paths | `not_found_handling: "none"`: no SPA fallback. With sharing on, the Worker's 404, which carries `X-Robots-Tag: noindex`; with sharing off, the static 404. The app uses hash routing and needs no server-side path but `/` |
+| Record pages, lists and API | `/r/*`, `/u/*` and `/api/*` run the Worker first (`assets.run_worker_first`), so a static file can never shadow an endpoint |
+| Unknown paths | `not_found_handling: "none"`: no SPA fallback. With `--sharing on`, the Worker's 404, which carries `X-Robots-Tag: noindex`; with `--sharing off`, the static 404. The app uses hash routing and needs no server-side path but `/` |
 | Build marker | `build/web/deploy.json`: `git_sha`, `built_at`, `wasm_sha256` of what was deployed, and with sharing on `tables_module_sha256`, the module archive the Worker's name tables were built from |
 
 With the real COOP/COEP headers the page is cross-origin isolated on the first load, and
@@ -52,15 +56,17 @@ These are outward-facing or account-level operations. Nothing in the repository 
    authenticated transmission to Sentry. Put a Sentry auth token with release / artifact upload
    rights in `~/.sentry_token` and export it before deploying (below).
 3. **Pre-deployment checks.** Confirm and write down the result before the first deployment.
-   They are the grounds for the claim that this deployment cannot be billed:
-   - The account is on **Workers Free** (Dashboard › Workers & Pages › Plans). On Free, exceeding
-     a limit stops requests instead of billing, and D1 past its daily limits refuses queries with
-     an error until 00:00 UTC.
-   - `server/wrangler.jsonc` declares **no billable binding**: its one binding is the D1 database
-     `DB`; no R2 and no Workers Paid product. `server/wrangler.assets-only.jsonc` declares none at
-     all. Read both again before deploying.
+   They are the grounds for what this deployment can be billed for:
+   - The account is on **Workers Paid** (Dashboard › Workers & Pages › Plans). Past what the plan
+     includes a month it bills rather than stops. File sync's service-wide daily limits in
+     `server/src/limits.mjs` are set so that production and staging both using them up every day of
+     a month stay within what the plan includes; their comments derive each figure.
+   - `server/wrangler.jsonc` declares **one binding**, the D1 database `DB`, and no R2.
+     `server/wrangler.assets-only.jsonc` declares none at all. Read both again before deploying.
+   - **Backblaze B2** is billed by Backblaze, outside Cloudflare. Its data caps and alerts (below)
+     stop it rather than bill past them.
    - The **list of existing Workers** in the account (Workers & Pages › Overview). They share the
-     daily request quota with this one; write the names down.
+     plan's included usage with this one; write the names down.
    - The **entrance list** below matches the actual settings.
 4. **Custom domain.** The config routes `umacapture.com` as a custom domain
    (`"custom_domain": true`). The first `wrangler deploy` creates the DNS record and certificate.
@@ -75,48 +81,107 @@ These are outward-facing or account-level operations. Nothing in the repository 
    ```
 
    The top-level `d1_databases` entry is the staging one with the production name and id: binding
-   `DB`, `database_name` `umacapture-share`, `migrations_dir` `migrations`.
-6. **Turnstile.** Create the widget in the dashboard for the hostname `umacapture.com`, in Managed
-   mode. Its sitekey goes into the config (below). Its secret key is a Worker secret, never a var
-   and never in a file in the repository; put it before the first deployment with the Worker:
+   `DB`, `database_name` `umacapture-share`, `migrations_dir` `migrations`. The same `migrations
+   apply` applies the migrations a database does not have yet; apply them before deploying a Worker
+   that reads their tables, because a deployment does not apply them.
+6. **Worker secrets.** A secret is never a var and never in a file in the repository. Put each one
+   before the first deployment with the Worker:
 
    ```bash
-   server/node_modules/.bin/wrangler secret put TURNSTILE_SECRET -c server/wrangler.jsonc
+   server/node_modules/.bin/wrangler secret put <NAME> -c server/wrangler.jsonc
    ```
 
    In a terminal `secret put` asks for the value; otherwise it reads it from standard input.
    It creates a new version of the Worker and deploys it at once; it uploads no local code. A
-   Worker running without the secret
-   refuses every ticket (`403 verification_failed`). A deployment never deletes a secret.
-7. **Production config.** The top level of `server/wrangler.jsonc` carries what `env.staging`
-   does, with production values: `"main": "src/index.mjs"`, `assets.run_worker_first`
-   `["/r/*", "/api/*"]`, `"observability": { "enabled": false }`, the D1 entry above, and these
-   `vars`, which are every variable the Worker
-   reads:
+   deployment never deletes a secret. These are every secret the Worker reads:
 
-   | Var | Production value |
-   |---|---|
-   | `PUBLIC_ORIGIN` | `https://umacapture.com` |
-   | `OG_IMAGE_MODE` | `"static"` until `og.umacapture.com` answers, then `"vercel"` (see the Vercel section) |
-   | `OG_IMAGE_ORIGIN` | `https://og.umacapture.com` |
-   | `PUBLISH_ENABLED` | `"true"`; `"false"` stops new tickets and publishes (`503 publishing_paused`) while reads and withdrawals go on |
-   | `TURNSTILE_SITEKEY` | The widget's sitekey |
-   | `TURNSTILE_TESTING_KEY` | `"false"`: answers issued for Turnstile's testing secrets are refused |
-   | `TURNSTILE_HOSTNAME` | `umacapture.com` |
-   | `TURNSTILE_ACTION` | `publish` |
+   | Secret | What it is | Without it |
+   |---|---|---|
+   | `TURNSTILE_SECRET` | The Turnstile widget's secret key (step 7) | Every login begin is refused (`403`) |
+   | `GOOGLE_CLIENT_SECRET` | The Google OAuth client's secret (step 8) | Every login fails at the callback |
+   | `IDENTITY_HMAC_KEY` | 32 random bytes as 64 lowercase hex digits (step 9) | Every login fails at the callback |
+   | `B2_KEY_ID`, `B2_APPLICATION_KEY` | The application key of the environment's B2 bucket (step 10) | Every sync request that reaches B2 and every account deletion fail (`502`), and so does every hourly run |
+7. **Turnstile.** Create the widget in the dashboard for the hostname `umacapture.com`, in Managed
+   mode. Its sitekey goes into the config (below), its secret key into `TURNSTILE_SECRET`. The
+   login start page (`/api/auth/start`) shows the widget, and a login begin
+   (`POST /api/auth/begin`) is refused unless siteverify reports this hostname and the action
+   `login`.
+8. **Google login.** In Google Cloud, an OAuth client of type Web application; the Worker asks it
+   for the scope `openid email`. Its redirect URI is `<AUTH_REDIRECT_ORIGIN>/api/auth/callback/google`:
+   `https://umacapture.com/api/auth/callback/google` for production. Its client id goes into
+   `vars.GOOGLE_CLIENT_ID`, its secret into `GOOGLE_CLIENT_SECRET`. While `GOOGLE_CLIENT_ID` is empty,
+   a login begin refuses to run rather than send Google a request without a client.
+9. **Identity key.** `IDENTITY_HMAC_KEY` is the key every login identity is stored under
+   (HMAC-SHA256 of the provider and the provider's user id). Make it once per environment and keep a
+   copy outside Cloudflare: a secret cannot be read back, and an environment whose key is lost or
+   changed can no longer reach any of its accounts by logging in.
 
-   `wrangler deploy` replaces the Worker's vars with the ones in the config, so a var set in the
-   dashboard does not survive the next deployment.
-8. **Zone rate limiting.** One WAF rate limiting rule on the `umacapture.com` zone: requests whose URI path starts with `/r/` or `/api/` and that do not come
-   from a verified bot, counted per IP, 10 requests in 10 seconds, blocked for 10 seconds. The Free
-   plan allows exactly one such rule, with those fields, that counting key, that period and that
-   timeout; if the zone already has one, decide which to keep rather than overwriting it.
+   ```bash
+   python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+
+10. **Backblaze B2.** One account in the region `us-west-004`, and per environment:
+    - **A private bucket**: `umacapture-sync` for production, `umacapture-sync-staging` for staging
+      (`vars.B2_BUCKET`). The endpoint `s3.us-west-004.backblazeb2.com` and the region go into
+      `vars.B2_ENDPOINT` and `vars.B2_REGION`.
+    - **An application key** restricted to that bucket, with read and write access (which lists,
+      reads, writes and deletes files), into `B2_KEY_ID` and `B2_APPLICATION_KEY`.
+    - **The lifecycle rule** `daysFromHidingToDeleting` 6 covering the prefix `a/`, under which the
+      Worker stores every object (`B2_DAYS_FROM_HIDING_TO_DELETING` in `server/src/limits.mjs`). The
+      Worker only hides what is no longer referenced, and counts on this rule to delete it; without
+      the rule nothing it hid is ever deleted ([`sync-server.md`](sync-server.md#the-b2-bucket)).
+    - **Data caps and alerts** on the B2 account (Caps & Alerts), the stop for B2's charges: storage
+      $0.50 a day and download $0.20 a day, and the transaction classes that offer a cap $0.10 a day,
+      with alerts at 75% and 100%. A cap that is reached makes B2 refuse what it covers, and the
+      Worker answers those requests `502`.
+11. **Production config.** The top level of `server/wrangler.jsonc` carries what `env.staging`
+    does, with production values: `"main": "src/index.mjs"`, `assets.run_worker_first`
+    `["/r/*", "/u/*", "/api/*"]`, `"observability": { "enabled": false }`, `triggers.crons`
+    `["30 * * * *"]` (staging `["45 * * * *"]`), the D1 entry above, and these `vars`, which with
+    the secrets above are every variable the Worker reads:
+
+    | Var | Production value |
+    |---|---|
+    | `PUBLIC_ORIGIN` | `https://umacapture.com` |
+    | `OG_IMAGE_MODE` | `"static"` until `og.umacapture.com` answers, then `"vercel"` (see the Vercel section) |
+    | `OG_IMAGE_ORIGIN` | `https://og.umacapture.com` |
+    | `SHARING_ENABLED` | `"true"`; `"false"` stops new logins and shares (`503 sharing_paused`) while reads, unshares and logouts go on |
+    | `TURNSTILE_SITEKEY` | The widget's sitekey |
+    | `TURNSTILE_TESTING_KEY` | `"false"`: answers issued for Turnstile's testing secrets are refused |
+    | `TURNSTILE_HOSTNAME` | `umacapture.com` |
+    | `TURNSTILE_ACTION` | `login` |
+    | `GOOGLE_CLIENT_ID` | The OAuth client's id (step 8) |
+    | `AUTH_REDIRECT_ORIGIN` | `https://umacapture.com`, the origin of the redirect URI registered with Google |
+    | `SYNC_ENABLED` | `"true"` in the committed config; the value of the first production deployment is not decided yet (see "Deploying"). `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` and stops the hourly run, while sharing, logins and account deletion go on |
+    | `B2_ENDPOINT` | `s3.us-west-004.backblazeb2.com` |
+    | `B2_REGION` | `us-west-004` |
+    | `B2_BUCKET` | `umacapture-sync` |
+
+    `SHARING_ENABLED` and `SYNC_ENABLED` must be `"true"` or `"false"`; any other value is a
+    configuration error. `wrangler deploy` replaces the Worker's vars with the ones in the config,
+    so a var set in the dashboard does not survive the next deployment.
+12. **Zone rate limiting.** One WAF rate limiting rule on the `umacapture.com` zone: requests whose
+    URI path starts with `/r/`, `/u/` or `/api/` but not with `/api/sync/`, and that do not come
+    from a verified bot, counted per IP, 10 requests in 10 seconds, blocked for 10 seconds. The
+    path part of its expression:
+
+    ```
+    (starts_with(http.request.uri.path, "/r/") or starts_with(http.request.uri.path, "/u/")
+     or starts_with(http.request.uri.path, "/api/"))
+    and not starts_with(http.request.uri.path, "/api/sync/")
+    ```
+
+    File sync is left out on purpose: it is held by its own limits instead (per account and over
+    every account, per day, [`sync-server.md`](sync-server.md#limits)). Every
+    sync endpoint is under `/api/sync/`, so the one prefix covers them. The zone's Free plan allows
+    exactly one such rule, with those fields, that counting key, that period and that timeout; if
+    the zone already has one, decide which to keep rather than overwriting it.
 
 ### Entrance list
 
 | Entrance | What it serves | Zone WAF | Expected setting |
 |---|---|---|---|
-| `umacapture.com` (custom domain) | The web app and the record-sharing Worker (`umacapture-web`) | Applies: the rate limiting rule on `/r/` and `/api/` | Production entrance |
+| `umacapture.com` (custom domain) | The web app and the Worker (`umacapture-web`) | Applies: the rate limiting rule on `/r/`, `/u/` and `/api/`, except `/api/sync/` | Production entrance |
 | `data.umacapture.com` (custom domain) | Recognizer modules and announcements (`umacapture-data`, static assets only, no R2) | Applies, unused | Production entrance |
 | `og.umacapture.com` (Vercel project domain, CNAME, DNS only) | The OGP image function (`umacapture-og` on Vercel) | Does not apply: the zone does not proxy it. The Vercel Firewall rule applies (see the Vercel section) | Production entrance |
 | `umacapture-og.vercel.app` | The project's own production domain on Vercel | Does not apply | Kept. It answers without the bypass header: `/` gets the platform's 404 and `/r/<id>.png` reaches the function, because production domains are outside deployment protection. Whether the Vercel Firewall rule also applies here is not measured: the burst test ran against `og.umacapture.com` only |
@@ -124,6 +189,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
 | `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
 | R2 bucket `umasagashi-data` | Nothing public | — | No custom domain, `r2.dev` disabled |
+| B2 buckets `umacapture-sync`, `umacapture-sync-staging` | Nothing public: file sync's objects, reached only by the Worker with the bucket's key | Does not apply | Private |
 
 After the first deployment, confirm in the dashboard (Worker › Settings › Domains & Routes) that
 `workers.dev` and preview URLs are shown as disabled and that each Worker has exactly one domain:
@@ -131,6 +197,19 @@ After the first deployment, confirm in the dashboard (Worker › Settings › Do
 points at either of them.
 
 ## Deploying
+
+**Not decided yet: the first production deployment.** The value `SYNC_ENABLED` is first deployed
+with in production, and the order of the first release, are open decisions; settle them before the
+first production run of the commands below. The committed production `vars.SYNC_ENABLED` is already
+`"true"`, so a deployment of it opens `/api/sync/` at once. The open points:
+
+- Google's brand verification and the In production review look at the home page and
+  `https://umacapture.com/privacy/`, which only a production deployment publishes; which comes
+  first is not decided.
+- Whether production first goes out with `SYNC_ENABLED` `"false"` or `"true"`.
+- Production `vars.GOOGLE_CLIENT_ID` is empty in `server/wrangler.jsonc` and is filled before the
+  deployment that should allow logins (step 8).
+- A production deployment also adds the hourly run `30 * * * *` (`triggers.crons`).
 
 From Git Bash at the repository root, on a clean, committed tree:
 
@@ -142,8 +221,10 @@ bash tool/cloudflare/deploy_web.sh             # the same, then asks 'yes' and d
 
 Two independent options pick what is deployed: `--target production|staging` (default
 `production`) and `--sharing on|off` (default `on`). With sharing on the config is
-`server/wrangler.jsonc`; with sharing off it is `server/wrangler.assets-only.jsonc`. `--yes`
-answers the confirmation without a prompt; `--dry-run` stops before it.
+`server/wrangler.jsonc`, and the Worker comes with the assets: logins, sharing, file sync and the
+hourly run. With sharing off it is `server/wrangler.assets-only.jsonc`: the assets alone, with no
+Worker and no hourly run. `--yes` answers the confirmation without a prompt; `--dry-run` stops
+before it.
 
 The script stops on a dirty tree, rebuilds `build/web/` from scratch (never reusing an earlier
 build), uploads source maps (production only; this rewrites the JS files with debug ids, so it runs
@@ -166,7 +247,7 @@ that:
 **Name tables.** With sharing on, the run builds `server/src/tables.generated.json` with
 `tool/cloudflare/build_share_tables.py` from the module archive the live pointer on
 `data.umacapture.com` names, and records that archive's sha256 in `deploy.json` as
-`tables_module_sha256`. A published record stores ids, and its names are looked up in the tables
+`tables_module_sha256`. A shared record stores ids, and its names are looked up in the tables
 deployed when it is read, so the tables must only grow at the end. Each target has its own D1 and
 so its own baseline, `tool/cloudflare/.deploy-backup/tables.<target>.json` (gitignored; it holds
 game text), which the script passes as `--previous`; `build_share_tables.py` has no default
@@ -184,27 +265,34 @@ publishing a new module set, deploy each target that has sharing on again.
 ### After a deployment with sharing on — the Turnstile check
 
 This shows that production does not accept Turnstile's testing pair. Turnstile's testing sitekeys
-produce the dummy token `XXXX.DUMMY.TOKEN.XXXX`, which a production secret key rejects:
+produce the dummy token `XXXX.DUMMY.TOKEN.XXXX`, which a production secret key rejects. The begin
+is the start page's form, so the request carries the form's content type and the start page's
+`Origin`:
 
 ```bash
-H=$(python -c "import secrets; print(secrets.token_hex(32))")   # a ticket hash no one holds the source of
-curl -sS -i -X POST https://umacapture.com/api/tickets \
-  -H 'Content-Type: application/json' \
-  --data "{\"h\":\"$H\",\"token\":\"XXXX.DUMMY.TOKEN.XXXX\"}"
+H=$(python -c "import secrets; print(secrets.token_hex(32))")   # a login hash no one holds the source of
+curl -sS -i -X POST https://umacapture.com/api/auth/begin \
+  -H 'Origin: https://umacapture.com' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data "h=$H&p=google&token=XXXX.DUMMY.TOKEN.XXXX"
 ```
 
-- Expected: `403` with `{"error":"verification_failed"}`. The body has exactly the two keys `h` and
-  `token`; any other key is a `400`.
+- Expected: `403` with the refusal page that reads 「確認できませんでした。アプリからログインをやり直してください。」.
+  The form has exactly the fields `h`, `p` and `token` (and optionally `port`); any other field is
+  a `400`, and so is any other content type. Another `Origin` is a `403` before Turnstile is asked,
+  so leave it as above.
 - It shows that the Worker does not run on the always-passing testing secret together with
-  `TURNSTILE_TESTING_KEY: "true"`, the only combination that issues a ticket for this token.
+  `TURNSTILE_TESTING_KEY: "true"`, the only combination that lets this token through.
 - It does not show that `TURNSTILE_TESTING_KEY` is `"false"` (a real secret refuses the dummy token
   either way), nor tell a missing or wrong secret, or a failed call to siteverify, from a working
   one: all of them answer `403`. For the first, read `vars.TURNSTILE_TESTING_KEY` at the top level
   of `server/wrangler.jsonc` as of the `git_sha` the live `/deploy.json` names (a deployment takes
-  its vars from the config); for the second, publish a record from the web app with the real widget.
-- A `204` means the testing pair is live: stop sharing at once (below). The ticket it issued is
-  bound to `H`, whose source no one has, so it cannot be used, but it and one count of the day's
-  ticket limit stay in D1.
+  its vars from the config); for the second, log in from the web app with the real widget.
+- A `302` to Google means the testing pair is live: stop logins at once (`SHARING_ENABLED`, below).
+  The login it began is bound to `H`, whose source no one has, so it cannot be claimed, but its row
+  and one count of the day's login limit (`LOGIN_LIMIT`) stay in D1. While `GOOGLE_CLIENT_ID` is
+  empty, a begin that passed Turnstile fails instead of answering `302`; anything but the `403`
+  above means the same.
 
 ## After the first deployment — checks only a real browser can make
 
@@ -259,8 +347,9 @@ not show that Cloudflare's edge applies them, which only the post-deployment che
 `bash tool/cloudflare/deploy_web.sh --target staging [--sharing on|off] [--dry-run] [--yes]`
 deploys the same `build/web/` to `https://umacapture-web-staging.umasagashi.workers.dev`, from
 `env.staging` of the config the `--sharing` option picks: with sharing on, together with the
-record-sharing Worker (`server/src/`) and the staging database, from `server/wrangler.jsonc`; with
-sharing off, the assets alone, from `server/wrangler.assets-only.jsonc`. Both name the same Worker,
+Worker (`server/src/`), the staging database, the staging bucket and staging's hourly run
+(`45 * * * *`), from `server/wrangler.jsonc`; with sharing off, the assets alone, from
+`server/wrangler.assets-only.jsonc`. Both name the same Worker,
 `umacapture-web-staging`, so either deployment replaces the other. The invariants are the
 production ones: a clean tree, a fresh build from `HEAD` in the same run, and a `deploy.json`
 verified through the public URL.
@@ -269,27 +358,35 @@ verified through the public URL.
   The staging database (`umacapture-share-staging`) is created once by hand, its id written into
   `env.staging.d1_databases`, and the migrations applied with
   `wrangler d1 migrations apply umacapture-share-staging --env staging --remote -c server/wrangler.jsonc`.
-  The Turnstile secret is a Worker secret, set once with
-  `wrangler secret put TURNSTILE_SECRET --env staging -c server/wrangler.jsonc`; staging uses
-  Turnstile's always-passing test keys, so its publish endpoint has no abuse protection.
+  Every secret of the table in "One-time preparation" is set once for staging too, with
+  `wrangler secret put <NAME> --env staging -c server/wrangler.jsonc`: staging's own
+  `IDENTITY_HMAC_KEY` (kept as production's is), and the key of the staging bucket. Staging uses
+  Turnstile's always-passing test keys, so its login has no abuse protection.
+- **Google login.** `env.staging.vars.GOOGLE_CLIENT_ID` names the client staging logs in with, and
+  that client must have staging's redirect URI registered:
+  `https://umacapture-web-staging.umasagashi.workers.dev/api/auth/callback/google`
+  (`env.staging.vars.AUTH_REDIRECT_ORIGIN`), so a staging login comes back to staging, where its
+  row is.
 - **workers.dev.** Staging has no custom domain. Its `workers.dev` URL bypasses the zone WAF and
-  anyone who has it can open it; nothing links to it. It shares the account's daily Worker and D1
-  quotas with production.
+  anyone who has it can open it; nothing links to it. It shares the plan's included Worker and D1
+  usage with production, while its daily limits are counted in its own D1.
 - **No Sentry.** A staging run uploads no source maps and needs no `SENTRY_AUTH_TOKEN`; the maps
   are still excluded from the deployment by `.assetsignore`.
 - **Name tables.** With sharing on, a staging run builds and checks the tables as production does
   (see "Deploying"), against staging's own baseline
   `tool/cloudflare/.deploy-backup/tables.staging.json`.
 - **Local web builds.** A web app served locally (`serve_web_build.py`) cannot call the staging
-  API: the API is same-origin only. Test sharing from the web app on the staging host; a staging
-  run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging URL, so it
-  shares through the staging Worker rather than `umacapture.com`.
-- **Stopping staging.** `env.staging.vars.PUBLISH_ENABLED: "false"` and a redeploy stop new
-  tickets and publishes while reads and withdrawals go on.
+  API: the API is same-origin only. Test logins, sharing and sync from the web app on the staging
+  host; a staging run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging
+  URL, so it logs in, shares and syncs through the staging Worker rather than `umacapture.com`.
+- **Stopping staging.** `env.staging.vars.SHARING_ENABLED: "false"` and a redeploy stop new
+  logins and shares while reads, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
+  "false"` and a redeploy stop sync and staging's hourly run.
   `bash tool/cloudflare/deploy_web.sh --target staging --sharing off` takes the Worker off staging
-  and keeps its assets: `/r/` and `/api/` get the static 404, and staging no longer uses the Worker
-  request quota or the D1 quota it shares with production. Do this before the Worker ships to
-  production. The staging database is left as it is; deleting it is a separate step.
+  and keeps its assets: `/r/`, `/u/` and `/api/` get the static 404, the hourly run goes, and
+  staging no longer uses the Worker and D1 usage it shares with production. Do this before the
+  Worker ships to production. The staging database and bucket are left as they are; deleting them
+  is a separate step.
 
 ## Publishing to data.umacapture.com
 
@@ -461,8 +558,9 @@ the deployment URL that an absent id and a query string both answer 404 from the
 
 ## Rolling back and switching off
 
-Restoring an earlier version, stopping record sharing, and removing what sharing created are three
-different things. The first two are below; the third is a separate decision taken after a stop.
+Restoring an earlier version, stopping record sharing or file sync, and removing what the Worker
+created are three different things. The first two are below; the third is a separate decision taken
+after a stop.
 
 ### The version record
 
@@ -487,14 +585,14 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   `--name` names the Worker; `-c` is read only for the account. For staging use
   `--name umacapture-web-staging`.
 - It needs the API token and the pinned wrangler only: no build, no Sentry, no clean tree.
-- Bound resources are not rolled back: D1 keeps its current contents.
+- Bound resources are not rolled back: D1 and the B2 bucket keep their current contents.
 - Only the 100 most recently published versions can be rolled back to.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
 
 **Between two versions with sharing on**, roll back only when both `deploy.json` files name the
-same `tables_module_sha256`. The tables only grow, a record published under longer tables cannot be
+same `tables_module_sha256`. The tables only grow, a record shared under longer tables cannot be
 read with shorter ones, and D1 is not rolled back. If they differ, stop sharing instead (below), or
 deploy a new version whose tables are at least as long. Before a redeploy you may want to roll back
 from, compare `module_archive.sha256` in `https://data.umacapture.com/umacapture/version_info.json`
@@ -508,21 +606,55 @@ In this order of preference:
 
 | Means | Effect | Depends on |
 |---|---|---|
-| **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*` and `/api/*` get the static 404 and use no Worker quota; the assets, the notice included, return to that version's. D1 keeps its data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `PUBLISH_ENABLED` `"false"`, committed, then `deploy_web.sh` | New tickets and publishes stop (`503 publishing_paused`); reading and withdrawing go on | A clean tree, a build, the Sentry upload, the data host's pointer and archive (for the tables), the pinned wrangler. Not usable while any of them is broken |
-| `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD` | As above, except the data host: no tables are built. Use it once the version without the Worker is no longer among the last 100 |
+| **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), the data host's pointer and archive (for the tables), the pinned wrangler. Not usable while any of them is broken |
+| `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except the data host: no tables are built. Use it once the version without the Worker is no longer among the last 100 |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the tables condition above), or a deployment with the dependencies above |
 | On Vercel | Deny `/r/` with a Firewall rule | The Vercel dashboard. After `OG_IMAGE_MODE` is `"static"` |
 
 None of them recalls source maps already sent to Sentry, cards already taken by social networks, or
 copies made by third parties.
 
-### Removing what sharing created
+Every means above or below that runs `deploy_web.sh --target production` sends the source maps to
+Sentry again: stage 2 of the script runs for every production run, `--dry-run` included, and there
+is no option to skip it. A staging run sends nothing to Sentry.
 
-Separate from a stop, and decided on its own: the D1 database, the Turnstile widget, the zone's
-rate limiting rule and the Vercel Firewall rule, the `og` DNS record, the Vercel domain, deployments
-and environment variables, and the extra token permissions. While D1 holds published records, it is
-not deleted.
+### Stopping file sync
+
+Sync can be stopped alone, with logins and sharing going on. In this order of preference:
+
+| Means | Effect | Depends on |
+|---|---|---|
+| `SYNC_ENABLED` `"false"` in the target's `vars`, committed, then `deploy_web.sh --target <target>` | Every endpoint under `/api/sync/` answers `503 sync_paused` before it reads anything, and the hourly run does nothing. Logins, sharing and account deletion go on, account deletion's B2 part included. D1 and B2 keep their data. What cut-off requests left to hide stays unhidden, and so undeleted by the lifecycle rule, until sync is on again | As `SHARING_ENABLED` above, the Sentry upload included for production |
+| Revoke the bucket's application key in the B2 console | B2 refuses every request the Worker sends: a sync request that has to reach B2 answers `502`, the hourly run fails, and no account deletion can finish (each call answers `502 storage_unavailable` after its D1 part). Sync resumes once a new key pair is put with `wrangler secret put B2_KEY_ID` and `B2_APPLICATION_KEY`, each of which deploys a new version at once | The B2 console only. Use it when the Worker cannot be deployed, or when the key itself may have leaked |
+| Lower a limit in `server/src/limits.mjs` (the daily limits per account and over every account, the capacity), committed, then `deploy_web.sh` | Sync past the new limit is refused (`429 daily_limit` to the next UTC day, `507` for capacity); the rest goes on ([`sync-server.md`](sync-server.md#limits)) | As `SYNC_ENABLED` |
+| B2's data caps (One-time preparation, step 10) | Bound what B2 can charge a day. A cap that is reached makes B2 refuse what it covers for the rest of the day, which the Worker answers `502`. They bound the cost, not who syncs | The B2 console only |
+| Roll back to the last version without the Worker, or `deploy_web.sh --sharing off` | Sync stops together with logins and sharing (above) | As above |
+
+Turning `SYNC_ENABLED` back to `"true"` is the same commit and deployment; the next hourly run and
+each account's next sync write take on what was left over, with one exception.
+
+**A stop also stops the repair of referenced images left hidden, and a long one can lose them.** A
+request cut off at the wrong point can leave an object that a current list references hidden in B2;
+the hourly run and the account's next sync write show it again (`showLeftovers`, `tidyLeftoversOf`).
+Every means above that stops the hourly run or keeps it from reaching B2 — `SYNC_ENABLED` `"false"`,
+a revoked key, the rollback, `--sharing off` — stops that repair too. Once such an object has been
+hidden for 143 hours (`B2_DAYS_FROM_HIDING_TO_DELETING` days less `RESTORE_MARGIN_SECONDS`, both in
+`server/src/limits.mjs`), counted from its first hide and not from the stop, the server treats it as
+gone: neither the hourly run nor a write shows it again after sync resumes, and the lifecycle rule
+may delete its version. Only a client putting the same bytes again stores it anew. So a stop that
+has already lasted a while is not made safe by turning sync back on. Before choosing a long stop,
+weigh what may be left hidden and how much of those 143 hours remains; resuming alone does not bring
+back a version the lifecycle rule has deleted.
+
+### Removing what the Worker created
+
+Separate from a stop, and decided on its own: the D1 database, the B2 buckets and their keys, the
+Turnstile widget, the Google OAuth client, the zone's rate limiting rule and the Vercel Firewall
+rule, the `og` DNS record, the Vercel domain, deployments and environment variables, and the extra
+token permissions. While D1 holds shared records or accounts, it is not deleted; while D1 lists
+synced objects, their bucket is not deleted. The kept copy of `IDENTITY_HMAC_KEY` goes only with
+the accounts it reaches.
 
 ### Other
 
