@@ -105,7 +105,7 @@ HarvestSelection selectPublishableRecordFiles(Iterable<WorkerRecordFile> files) 
   for (final entry in byRecord.entries) {
     ComposedRecordFiles? composed;
     try {
-      composed = composeRecordFiles(entry.value);
+      composed = composeRecordFiles(entry.value, heldIcon: null);
     } on FormatException {
       composed = null;
     }
@@ -126,7 +126,8 @@ HarvestSelection selectPublishableRecordFiles(Iterable<WorkerRecordFile> files) 
 ///
 /// [bodyUnchanged] is true when the result holds the body the stored `record.json` among
 /// the same files already holds ([composeBodyWrite] wrote nothing): a re-recognition that
-/// read the same, which has nothing to publish.
+/// read the same and cut the same icon, which has nothing to publish. One that cut the icon
+/// into other bytes writes the body, and its files carry the new `trainee.jpg`.
 typedef ComposedRecordFiles = ({List<WorkerRecordFile> files, bool bodyUnchanged});
 
 /// Composes the files of one record directory into the files the store keeps, or returns
@@ -134,15 +135,20 @@ typedef ComposedRecordFiles = ({List<WorkerRecordFile> files, bool bodyUnchanged
 ///
 /// The result (`recognized.json`) lands on the stored `record.json` among the same files
 /// when there is one — a re-recognition, whose input the worker hands back with it — and
-/// is the record as read otherwise ([composeBodyWrite]). The composed `record.json` takes
-/// the result's place and the result itself is left out, so it never reaches the store.
+/// is the record as read otherwise ([composeBodyWrite]), with the icon (`trainee.jpg`) the
+/// record directory holds once the files are laid over it: the one among the same files, as
+/// the recognizer left it, else [heldIcon], the one the store holds — a re-recognition that
+/// cut none leaves that where it is, as the desktop recognizer leaves its directory's. The
+/// composed `record.json` takes the result's place and the result itself is left out, so it
+/// never reaches the store.
 /// Files with a stored record and no result are already composed and come back as they are.
 ///
 /// Every file must belong to one record; only the files directly in its directory are
 /// read. Throws [FormatException] when the result or the stored record does not decode.
-ComposedRecordFiles? composeRecordFiles(List<WorkerRecordFile> files) {
+ComposedRecordFiles? composeRecordFiles(List<WorkerRecordFile> files, {required Uint8List? heldIcon}) {
   int? recognizedAt;
   int? storedAt;
+  int? iconAt;
   for (var i = 0; i < files.length; i++) {
     final parts = _splitHarvestPath(files[i].path);
     if (parts == null || parts.length != 4) {
@@ -152,6 +158,8 @@ ComposedRecordFiles? composeRecordFiles(List<WorkerRecordFile> files) {
       recognizedAt = i;
     } else if (parts[3] == _recordJsonName) {
       storedAt = i;
+    } else if (parts[3] == traineeIconFileName) {
+      iconAt = i;
     }
   }
   if (recognizedAt == null) {
@@ -159,7 +167,11 @@ ComposedRecordFiles? composeRecordFiles(List<WorkerRecordFile> files) {
   }
   final recognizedFile = files[recognizedAt];
   final stored = storedAt == null ? null : _decodeRecordJson(files[storedAt].bytes);
-  final composed = composeBodyWrite(stored, _decodeRecordJson(recognizedFile.bytes));
+  final composed = composeBodyWrite(
+    stored,
+    _decodeRecordJson(recognizedFile.bytes),
+    icon: recordIconName(iconAt == null ? heldIcon : files[iconAt].bytes),
+  );
   final directory = recognizedFile.path.substring(0, recognizedFile.path.length - _recognizedJsonName.length);
   final out = <WorkerRecordFile>[];
   for (var i = 0; i < files.length; i++) {

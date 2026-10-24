@@ -28,6 +28,8 @@ CharaDetailRecord makeRecord({required String id, String? parent1Id, String? par
     RecordType.standard,
     null,
     null,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

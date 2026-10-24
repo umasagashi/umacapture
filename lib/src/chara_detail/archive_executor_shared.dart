@@ -13,7 +13,34 @@ import '/src/core/utils.dart';
 
 import 'archive_executor_types.dart';
 
-const _archiveImageNames = ['skill.png', 'factor.png', 'campaign.png'];
+/// Every image file a record directory may hold ([isRecordImageFile]).
+final _archivedImageFileNames = [
+  for (final image in recordBindingImages) ...['$image.png', '$image.jpg', '$image.json'],
+  traineeIconFileName,
+];
+
+/// What an archive with [option] does to the image files of a record directory that holds [names]: the PNGs it reduces
+/// to their JPEGs ([archiveJpegOf]) — each let go of once its JPEG is written, and kept where it cannot be decoded —,
+/// and the files it removes. With resized images every PNG is reduced and nothing else changes; without images every
+/// image file goes ([isRecordImageFile]), the reduced JPEGs, the geometry and the icon cut from the factor image
+/// included: a record with no images holds none of either form. Pure.
+({List<String> reduced, Set<String> removed}) archivedImagePlan(ArchiveImageOption option, Set<String> names) =>
+    switch (option) {
+      ArchiveImageOption.resizedJpeg => (
+        reduced: [
+          for (final image in recordBindingImages)
+            if (names.contains('$image.png')) '$image.png',
+        ],
+        removed: const {},
+      ),
+      ArchiveImageOption.none => (
+        reduced: const [],
+        removed: {
+          for (final name in names)
+            if (isRecordImageFile(name)) name,
+        },
+      ),
+    };
 
 /// What an archived record carries in the archive store beside its images, as the archive left it: its `record.json`
 /// with the binding placed before the move (null where none could be read), and its archive note.
@@ -201,55 +228,43 @@ Future<void> _disposeArchivedImagesAsync(
 }) async {
   try {
     await recordDir.filePath('prediction.json').delete(emptyOk: true);
-    if (option == ArchiveImageOption.resizedJpeg) {
-      final imageNames = <String>[];
-      final srcs = <String>[];
-      final dsts = <String>[];
-      for (final imageName in _archiveImageNames) {
-        final png = recordDir.filePath(imageName);
-        if (await png.exists()) {
-          imageNames.add(imageName);
-          srcs.add(png.path);
-          dsts.add(recordDir.filePath(imageName.replaceAll('.png', '.jpg')).path);
-        }
+    final plan = archivedImagePlan(option, {
+      for (final name in _archivedImageFileNames)
+        if (await recordDir.filePath(name).exists()) name,
+    });
+    final imageNames = plan.reduced;
+    final srcs = [for (final imageName in imageNames) recordDir.filePath(imageName).path];
+    final dsts = [for (final imageName in imageNames) recordDir.filePath(imageName.replaceAll('.png', '.jpg')).path];
+    final results = srcs.isEmpty
+        ? const <ImageConvertResult?>[]
+        : await convertPngBatchAsync(ImageConvertArgs(srcs, dsts));
+    for (var i = 0; i < imageNames.length; i++) {
+      final imageName = imageNames[i];
+      final jpg = recordDir.filePath(imageName.replaceAll('.png', '.jpg'));
+      final result = i < results.length ? results[i] : null;
+      if (result == null) {
+        // Undecodable input: keep the original PNG and its unscaled geometry.
+        logger.w('Kept archived image ${recordDir.filePath(imageName).path}: it could not be converted.');
+        continue;
       }
-      final results = srcs.isEmpty
-          ? const <ImageConvertResult?>[]
-          : await convertPngBatchAsync(ImageConvertArgs(srcs, dsts));
-      for (var i = 0; i < imageNames.length; i++) {
-        final imageName = imageNames[i];
-        final jpg = recordDir.filePath(imageName.replaceAll('.png', '.jpg'));
-        final result = i < results.length ? results[i] : null;
-        if (result == null) {
-          // Undecodable input: keep the original PNG and its unscaled geometry.
-          logger.w('Kept archived image ${recordDir.filePath(imageName).path}: it could not be converted.');
-          continue;
-        }
-        try {
-          await scaleIntersectionJsonAsync(
-            recordDir.filePath(imageName.replaceAll('.png', '.json')),
-            newWidth: result.dstWidth,
-            newHeight: result.dstHeight,
-          );
-        } catch (error, stackTrace) {
-          // Malformed geometry json: also record content, so also never fatal.
-          // The JPEG below still replaces the PNG; only the (already broken)
-          // layout box stays at its original size.
-          logger.e('Failed to rescale geometry for ${recordDir.filePath(imageName).path}.', error, stackTrace);
-        }
-        if (await jpg.exists()) {
-          await recordDir.filePath(imageName).delete(emptyOk: true);
-        }
+      try {
+        await scaleIntersectionJsonAsync(
+          recordDir.filePath(imageName.replaceAll('.png', '.json')),
+          newWidth: result.dstWidth,
+          newHeight: result.dstHeight,
+        );
+      } catch (error, stackTrace) {
+        // Malformed geometry json: also record content, so also never fatal.
+        // The JPEG below still replaces the PNG; only the (already broken)
+        // layout box stays at its original size.
+        logger.e('Failed to rescale geometry for ${recordDir.filePath(imageName).path}.', error, stackTrace);
       }
-    } else {
-      // Every form of every image goes, the reduced JPEGs as well as the PNGs, and the icon cut from the factor image
-      // with them: a record with no images holds none of either form.
-      for (final imageName in _archiveImageNames) {
+      if (await jpg.exists()) {
         await recordDir.filePath(imageName).delete(emptyOk: true);
-        await recordDir.filePath(imageName.replaceAll('.png', '.jpg')).delete(emptyOk: true);
-        await recordDir.filePath(imageName.replaceAll('.png', '.json')).delete(emptyOk: true);
       }
-      await recordDir.filePath(traineeIconFileName).delete(emptyOk: true);
+    }
+    for (final name in plan.removed) {
+      await recordDir.filePath(name).delete(emptyOk: true);
     }
   } catch (error, stackTrace) {
     logger.e('Failed to dispose archived images in ${recordDir.path}.', error, stackTrace);

@@ -689,11 +689,16 @@ void main() {
 
       for (final retiredBinding in [null, const RecordBinding(campaignPng: 'retired-png')]) {
         useFreshRoot();
-        writeRecord(info.charaDetailActiveDir, placeOnRecord(preRecord('older'), binding: olderBinding));
+        writeRecord(
+          info.charaDetailActiveDir,
+          placeOnRecord(preRecord('older'), images: (binding: olderBinding, geometry: null, icon: null)),
+        );
         final retired = postRecord('retired');
         writeRecord(
           info.charaDetailActiveDir,
-          retiredBinding == null ? retired : placeOnRecord(retired, binding: retiredBinding),
+          retiredBinding == null
+              ? retired
+              : placeOnRecord(retired, images: (binding: retiredBinding, geometry: null, icon: null)),
           files: {'front.png': 'front of retired'},
         );
         final retiredDir = info.charaDetailActiveDir / 'retired';

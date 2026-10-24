@@ -13,6 +13,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
@@ -128,11 +129,19 @@ void main() {
     expect(imported.skippedEntries, 1, reason: 'labels.json is skipped, not written and not rejected');
     final restored = fresh / 'chara_detail' / 'active' / 'record-1';
     expect(await restored.filePath('trainee.jpg').readAsBytes(), [9, 8, 7]);
-    // The record the export carried, with the binding it placed (there was no image to bind), written at the time of
-    // the import into a store that held none.
+    // The record the export carried, with the binding it placed (there was no image to bind) and, in the same write,
+    // the geometry (none either) and the name of the icon it holds, written at the time of the import into a store that
+    // held none.
     expect(
       CharaDetailRecord.fromRecordJson(await restored.filePath('record.json').readAsString()),
-      placeOnRecord(composeBodyWrite(null, record)!, binding: const RecordBinding()),
+      placeOnRecord(
+        composeBodyWrite(null, record, icon: null)!,
+        images: (
+          binding: const RecordBinding(),
+          geometry: const RecordGeometry(),
+          icon: sha256.convert([9, 8, 7]).toString(),
+        ),
+      ),
     );
   });
 

@@ -9,6 +9,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive.dart';
@@ -18,6 +19,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
+import 'package:umacapture/src/chara_detail/image_converter.dart';
 import 'package:umacapture/src/chara_detail/record_archive_state.dart';
 import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/record_quarantine_ledger.dart';
@@ -45,6 +47,7 @@ import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/gui/chara_detail/column_spec_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
+import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart' show ImageSizeContainer;
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
@@ -96,6 +99,11 @@ CharaDetailRecord _bound(String id) {
   return CharaDetailRecordMapper.fromMap(map);
 }
 
+/// A request whose answer did not arrive: a connection that dropped.
+class _Dropped implements Exception {
+  const _Dropped();
+}
+
 /// [server], counting every request a round makes of it; [beforeGeneration], where given, is awaited before the first.
 class _CountedServer implements SyncServer {
   _CountedServer(this.server, {this.beforeGeneration});
@@ -145,6 +153,36 @@ class _CountedServer implements SyncServer {
   Future<int> replaceRoot(int generation, String name, String text) {
     calls++;
     return server.replaceRoot(generation, name, text);
+  }
+
+  @override
+  Future<String> imageForm() {
+    calls++;
+    return server.imageForm();
+  }
+
+  @override
+  Future<void> putImageForm(String form) {
+    calls++;
+    return server.putImageForm(form);
+  }
+
+  @override
+  Future<Set<String>> held(List<String> names) {
+    calls++;
+    return server.held(names);
+  }
+
+  @override
+  Future<void> putImage(String name, Uint8List bytes, {required bool jpeg}) {
+    calls++;
+    return server.putImage(name, bytes, jpeg: jpeg);
+  }
+
+  @override
+  Future<Uint8List?> image(String name) {
+    calls++;
+    return server.image(name);
   }
 }
 
@@ -764,24 +802,64 @@ void main() {
       }
     }
 
+    /// The rectangle the geometry file of the [i]-th image of capture [n] holds, as the native pipeline writes one: a
+    /// rectangle of its own, away from the origin.
+    Map<String, Object?> intersectionOfShot(int n, int i) => {
+      'top_left': {
+        'x': 3 * n + i,
+        'y': 5 * n + 7 * i,
+        'anchor': {'h': 'ScreenStart', 'v': 'ScreenStart'},
+      },
+      'bottom_right': {
+        'x': 3 * n + i + 8,
+        'y': 5 * n + 7 * i + 12,
+        'anchor': {'h': 'ScreenStart', 'v': 'ScreenEnd'},
+      },
+    };
+
+    /// The geometry file of a rect [intersection], laid out as the app writes one (an indent of four spaces), so that a
+    /// file the app writes of the same rect holds the same bytes.
+    Uint8List geometryFile(Map<String, Object?> intersection) =>
+        utf8.encode(const JsonEncoder.withIndent('    ').convert({'intersection': intersection}));
+
     /// The images of capture [n] as a record directory holds them: three real PNGs of pixels no other capture has, the
-    /// factor image's geometry, and the icon cut from it.
+    /// geometry of each, and the icon cut from the factor image.
     final shots = <int, Map<String, Uint8List>>{};
     Map<String, Uint8List> shot(int n) => shots[n] ??= {
-      for (final (i, image) in ['skill', 'factor', 'campaign'].indexed)
+      for (final (i, image) in ['skill', 'factor', 'campaign'].indexed) ...{
         '$image.png': img.encodePng(
           img.Image(width: 8, height: 12)..clear(img.ColorRgb8(30 * n, 60 + 40 * i, 250 - 30 * n)),
         ),
-      'factor.json': utf8.encode('{"capture":$n}'),
+        '$image.json': geometryFile(intersectionOfShot(n, i)),
+      },
       'trainee.jpg': img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(20 * n, 20 * n, 20 * n))),
     };
     RecordBinding bindingOfShot(int n) => expectedBinding({
       for (final image in ['skill', 'factor', 'campaign']) image: shot(n)['$image.png']!,
     });
 
+    /// `metadata.geometry` of a record read from capture [n] whose directory holds its PNGs: each PNG's rectangle, and
+    /// the same rectangle for its reduced JPEG — a PNG as narrow as these is not reduced, and so neither is its rect.
+    Map<String, Object?> geometryOfShot(int n) => {
+      for (final (i, image) in ['skill', 'factor', 'campaign'].indexed) ...{
+        '${image}_png': intersectionOfShot(n, i),
+        '${image}_jpeg': intersectionOfShot(n, i),
+      },
+    };
+
+    /// `metadata.icon` of a record read from capture [n]: the SHA-256 of the icon cut from it.
+    String iconOfShot(int n) => sha256.convert(shot(n)['trainee.jpg']!).toString();
+
     /// The record [id] on [device], its body read from capture [n] and its directory holding that capture's images.
     void seedShot(SyncTestDevice device, String id, int n) {
-      final dir = device.seedRecord(id, binding: bindingOfShot(n), bodyWrittenAt: 1767225600100 + n, fans: 1000 + n);
+      final dir = device.seedRecord(
+        id,
+        binding: bindingOfShot(n),
+        geometry: geometryOfShot(n),
+        icon: iconOfShot(n),
+        bodyWrittenAt: 1767225600100 + n,
+        fans: 1000 + n,
+      );
       for (final MapEntry(key: name, value: bytes) in shot(n).entries) {
         File(dir.filePath(name).path).writeAsBytesSync(bytes);
       }
@@ -800,6 +878,34 @@ void main() {
     }
 
     bool holds(SyncTestDevice device, String id) => Directory((device.charaDetail / 'active' / id).path).existsSync();
+
+    /// The rect of each image of the record [id] in [device]'s store [store] as the preview reads it
+    /// ([ImageSizeContainer]), as `[left, top, right, bottom]`.
+    Future<List<List<int>>> previewRectsOf(SyncTestDevice device, String id, {String store = 'active'}) async {
+      final size = (await ImageSizeContainer.load(device.charaDetail / store / id))!;
+      return [
+        for (final info in [size.skill, size.factor, size.campaign])
+          [
+            info.intersection.topLeft.x,
+            info.intersection.topLeft.y,
+            info.intersection.bottomRight.x,
+            info.intersection.bottomRight.y,
+          ],
+      ];
+    }
+
+    /// The rects of capture [n]'s images ([intersectionOfShot]), as [previewRectsOf] reads them.
+    List<List<int>> rectsOfShot(int n) => [
+      for (final i in [0, 1, 2]) [3 * n + i, 5 * n + 7 * i, 3 * n + i + 8, 5 * n + 7 * i + 12],
+    ];
+
+    /// Removes the geometry files of the record [id] on [device], leaving its images: a directory that holds no
+    /// geometry of the images its body carries one of.
+    void dropGeometryFiles(SyncTestDevice device, String id) {
+      for (final image in ['skill', 'factor', 'campaign']) {
+        File((device.charaDetail / 'active' / id).filePath('$image.json').path).deleteSync();
+      }
+    }
 
     Future<void> writeMemo(SyncTestDevice device, String id, String memo) async {
       final container = await device.open();
@@ -2159,6 +2265,21 @@ void main() {
           addTearDown(() => fsBackend = original);
         }
 
+        // The order of a delete is the storage view's, whatever the backend: one backend.
+        if (!webLike) {
+          test('[D-65]: a delete of the whole quarantine shelf deletes each record\'s note with its directory, and the '
+              'record it names goes with its memo and its pair', () async {
+            await seedSynced();
+            await a.breakRecord('R1');
+            final report = await a.deleteInStorageView(StorageGroupId.quarantine, StorageDeletePathsRequest([a.shelf]));
+            expect(report.isComplete, isTrue);
+            expect(Directory((a.shelf / 'R1').path).existsSync(), isFalse);
+            final local = await listOf(a);
+            expect(local.cells.keys.where((cell) => cell.$2 == 'R1'), isEmpty, reason: 'its memo goes with it');
+            expect(local.dismissed, isEmpty, reason: 'and its pair');
+          });
+        }
+
         test('[D-65]: the note of a record on the quarantine shelf is not deleted alone in the storage view, and the '
             'record it names still goes with its memo and its pair when its directory is deleted$on', () async {
           if (webLike) useBackend(WebLikeFsBackend.new);
@@ -2892,6 +3013,51 @@ void main() {
         return splitId;
       }
 
+      // L386: a merge that keeps the body of the same content under another icon names it, and is a write of the
+      // body as a re-recognition that cuts the icon again is — else an older write of the icon by another device
+      // stands over it by time, the device cannot put the bytes it holds under that name, and a new device gets none.
+      test('T-R5d: a merge that keeps the same content under another icon writes the body, and a new device takes '
+          'that icon over another device\'s earlier write of the icon$backend', () async {
+        await seedShots(['R1', 'R2', 'R3']);
+        final splitId = await splitOffWithR1sBody(1);
+        await a.round(server);
+        Future<Uint8List> cutAgain(SyncTestDevice device, String id, int red, int at) async {
+          final icon = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(red, 10, 10)));
+          final directory = device.charaDetail / 'active' / id;
+          File(directory.filePath('trainee.jpg').path).writeAsBytesSync(icon);
+          final stored = (jsonDecode(File(directory.filePath('record.json').path).readAsStringSync()) as Map)
+              .cast<String, dynamic>();
+          clockAt(at);
+          await device.recognizeAgain(
+            id,
+            (result) => result
+              ..clear()
+              ..addAll(stored),
+          );
+          return icon;
+        }
+
+        final icon = await cutAgain(a, splitId, 200, hour(10));
+        final before = (await listOf(a)).rows;
+        expect(before['R1']!.record.body.sameAs(before[splitId]!.record.body), isTrue, reason: 'the same content');
+        await cutAgain(b, 'R1', 100, hour(10) + 1000);
+        await b.round(server);
+        expect(server.images, isEmpty, reason: 'under none B put no icon');
+        a.close();
+        await a.deleteDismissedFile();
+        clockAt(hour(11));
+        await a.merge('R1', splitId, keep: splitId);
+        final merged = (await listOf(a)).rows['R1']!.record.body;
+        expect((merged.icon, merged.time), (syncObjectName(icon), hour(11)), reason: 'the merge wrote the body');
+        onBackend();
+        server.form = 'png';
+        await a.round(server);
+        final c = SyncTestDevice('t-r5d-c');
+        addTearDown(c.dispose);
+        await c.round(server);
+        expect(imagesOf(c, 'R1')['trainee.jpg'], icon, reason: 'C takes the icon the merge kept');
+      });
+
       test('a record taken in takes the images its body names from a record of the device it is not joined with, '
           'which keeps them$backend', () async {
         onBackend();
@@ -2903,6 +3069,25 @@ void main() {
         expect(imagesOf(a, 'R1'), shot(1));
         expect(holds(a, 'R3'), isFalse);
       });
+
+      // D-ICON-3a (iii), (iv), S-11: the geometry of a form a record takes from another record of the device is written
+      // from the record's body, and not left to what the record it is taken from holds.
+      if (webLike) {
+        test(
+          'D-ICON-3a (iii), (iv): a record taken in that takes the images its body names from a record of the device '
+          'holding none of their geometry holds the geometry its body carries$backend',
+          () async {
+            onBackend();
+            await seedShots(['R1', 'R2', 'R3']);
+            final splitId = await splitOffWithR1sBody(1);
+            dropGeometryFiles(a, 'R1');
+
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(imagesOf(a, splitId), shot(1), reason: 'A\'s R1\'s images, and the geometry of capture 1');
+            expect(await previewRectsOf(a, splitId), rectsOfShot(1));
+          },
+        );
+      }
 
       test('a record taken in takes the images its body names from a record the device has archived, not joined with '
           'it$backend', () async {
@@ -3215,7 +3400,1031 @@ void main() {
         expect(imagesOf(a, 'R1'), shot(2));
         expect(holds(a, 'R2'), isFalse);
       });
+
+      // [R4-8] 5, [R2-4], S-09, S-11: once the device and the server hold one list, a round puts on the server the
+      // images of the bodies it lists that the server holds no form of, and takes from it those it wants and does not
+      // hold. The server's image form is none until a test sets it.
+      group('the images on the server', () {
+        /// The PNGs of capture [n], by file name.
+        Map<String, Uint8List> pngsOf(int n) => {
+          for (final MapEntry(:key, :value) in shot(n).entries)
+            if (key.endsWith('.png')) key: value,
+        };
+
+        /// The names the server holds the PNGs of capture [n] by.
+        Set<String> pngNames(int n) => {for (final bytes in pngsOf(n).values) syncObjectName(bytes)};
+
+        /// The PNGs of capture [n] with the geometry file of each, by file name: what a device that takes the PNGs holds
+        /// of them, for a device that places a form of an image writes its geometry with it (S-11).
+        Map<String, Uint8List> takenPngsOf(int n) => {
+          for (final MapEntry(:key, :value) in shot(n).entries)
+            if (key.endsWith('.png') || key.endsWith('.json')) key: value,
+        };
+
+        /// What a device that takes the PNGs of capture [n] and its icon holds of them ([takenPngsOf]), the icon the
+        /// capturing device holds included (L373, S-11: the icon is an image).
+        Map<String, Uint8List> takenOf(int n) => {...takenPngsOf(n), 'trainee.jpg': shot(n)['trainee.jpg']!};
+
+        /// The image files of the record [id] in [device]'s store [store]; none where it holds no record [id] there.
+        Map<String, Uint8List> filesIn(SyncTestDevice device, String id, {String store = 'active'}) {
+          final dir = Directory((device.charaDetail / store / id).path);
+          if (!dir.existsSync()) return const {};
+          return {
+            for (final file in dir.listSync().whereType<File>())
+              if (RegExp(
+                r'^((skill|factor|campaign)\.(png|jpg|json)|trainee\.jpg)$',
+              ).hasMatch(file.uri.pathSegments.last))
+                file.uri.pathSegments.last: file.readAsBytesSync(),
+          };
+        }
+
+        Future<void> archive(SyncTestDevice device, String id, ArchiveImageOption option) async {
+          final container = await device.open();
+          await container
+              .read(charaArchiveControllerProvider.notifier)
+              .archive([id], option, effects: archiveEffects(container));
+        }
+
+        test('[R2-4]: an archive without images that reaches a device lets go of the images it held and had not sent, '
+            'and no round sends them$backend', () async {
+          await seedShots(['R1']);
+          expect(server.images, isEmpty, reason: 'nothing is sent under the form none');
+          // The archive is the desktop app's, made before the backend of this test's rounds is put in.
+          await archive(a, 'R1', ArchiveImageOption.none);
+          onBackend();
+          await a.round(server);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(filesIn(b, 'R1', store: 'archive'), isEmpty, reason: 'B lets go of every image it held');
+
+          server.form = 'png';
+          await b.round(server);
+          await a.round(server);
+          expect(server.images, isEmpty, reason: 'neither device holds an image of R1 to send');
+        });
+
+        test('[R2-4]: a record back in its normal state takes the images of its body the server holds, where it holds '
+            'none of them$backend', () async {
+          server.form = 'png';
+          await seedShots(['R1']);
+          expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+          final zip = await a.exportZip('R1');
+          await archive(b, 'R1', ArchiveImageOption.none);
+          onBackend();
+          await b.round(server);
+          await a.round(server);
+          expect(filesIn(a, 'R1', store: 'archive'), isEmpty, reason: 'A took B\'s archive without images in');
+          // A takes R1 back from its zip, normal and with its images.
+          await a.importZip(zip);
+          await a.round(server);
+
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(
+            filesIn(b, 'R1'),
+            takenOf(1),
+            reason: 'B takes the PNGs of R1\'s body, with their geometry, and its icon; the server holds nothing else',
+          );
+        });
+
+        test('S-11: a normal record that holds the reduced JPEGs alone takes the PNGs of its body the server '
+            'holds$backend', () async {
+          server.form = 'png';
+          seedShot(a, 'R1', 1);
+          // B holds R1 from before the binding, the same body, its directory holding capture 1's reduced JPEGs alone.
+          final legacy = b.seedRecord('R1', bodyWrittenAt: 1767225600101, fans: 1001);
+          for (final MapEntry(key: name, value: png) in pngsOf(1).entries) {
+            File(legacy.filePath(name.replaceAll('.png', '.jpg')).path).writeAsBytesSync(archiveJpegOf(png)!);
+          }
+          onBackend();
+          await a.round(server);
+
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          final held = filesIn(b, 'R1');
+          expect({for (final name in pngsOf(1).keys) name: held[name]}, pngsOf(1), reason: 'B takes the PNGs');
+          expect((await listOf(b)).rows['R1']!.record.body.binding, bindingOfShot(1));
+        });
+
+        test('[R4-9] (ii): a record from before the binding that takes a body bound to the images it holds works the '
+            'binding out of them, and keeps them$backend', () async {
+          seedShot(a, 'R1', 1);
+          // B holds R1 from before the binding, its directory holding capture 1.
+          final legacy = b.seedRecord('R1', bodyWrittenAt: 1767225600101, fans: 1001);
+          for (final MapEntry(key: name, value: bytes) in shot(1).entries) {
+            File(legacy.filePath(name).path).writeAsBytesSync(bytes);
+          }
+          // A reads R1 again: another body, bound to the same images.
+          await a.recognizeAgain('R1', (result) => result['fans'] = 7);
+          onBackend();
+          await a.round(server);
+
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          final list = await listOf(b);
+          expect(list.rows['R1']!.record.body.content, (await listOf(a)).rows['R1']!.record.body.content);
+          expect(imagesOf(b, 'R1'), shot(1), reason: 'the images B holds are those the body is bound to');
+        });
+
+        test(
+          'C3: a body that reached a device before its images takes them in the next round, which finds the list and '
+          'the generation as it left them$backend',
+          () async {
+            onBackend();
+            seedShot(a, 'R1', 1);
+            await a.round(server);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), isEmpty, reason: 'under the form none A sent no image');
+
+            server.form = 'png';
+            final generation = server.generation;
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)}, reason: 'A put them');
+            expect(server.generation, generation, reason: 'A replaced no root');
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(server.generation, generation);
+            // D-ICON-3b (i): B takes the icon too, the bytes A's capture holds.
+            expect(filesIn(b, 'R1'), takenOf(1), reason: 'B took them, its records as they were');
+            // D-ICON-3a (i), (iv): the preview of B reads each image's rect as A's capture wrote it.
+            expect(await previewRectsOf(b, 'R1'), rectsOfShot(1));
+          },
+        );
+
+        // D-ICON-3a (ii), (iv), S-11: a device that takes the reduced JPEGs of a body writes the geometry of each in
+        // the JPEG's coordinates, the rect A's own archive writes as it reduces the PNG — a capture wide enough to be
+        // reduced, its rects away from the origin, where the rescaling rounds both ways.
+        if (!webLike) {
+          test('D-ICON-3a (ii), (iv): a new device that takes the reduced JPEGs of a record from before the binding '
+              'holds the geometry of each in the JPEG\'s coordinates, as the capturing device\'s archive writes it, '
+              'and its preview reads it', () async {
+            server.form = 'jpeg';
+            final legacy = a.seedRecord('R1', bodyWrittenAt: 1767225600101, fans: 1001);
+            for (final (i, image) in ['skill', 'factor', 'campaign'].indexed) {
+              File(legacy.filePath('$image.png').path).writeAsBytesSync(
+                img.encodePng(img.Image(width: 900, height: 10)..clear(img.ColorRgb8(40, 80 + 40 * i, 200))),
+              );
+              File(legacy.filePath('$image.json').path).writeAsBytesSync(
+                geometryFile({
+                  'top_left': {
+                    'x': 13 + i,
+                    'y': 27 + 7 * i,
+                    'anchor': {'h': 'ScreenStart', 'v': 'ScreenStart'},
+                  },
+                  'bottom_right': {
+                    'x': 913 + i,
+                    'y': 37 + 7 * i,
+                    'anchor': {'h': 'ScreenStart', 'v': 'ScreenEnd'},
+                  },
+                }),
+              );
+            }
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+
+            final held = filesIn(b, 'R1');
+            expect(held.keys.toSet(), {
+              for (final image in ['skill', 'factor', 'campaign']) ...['$image.jpg', '$image.json'],
+            }, reason: 'B takes the reduced JPEGs, the server holding no PNG');
+            // The PNG is 900 wide and its JPEG 720 by 8: each coordinate times 0.8, rounded, and the corner opposite
+            // the top left 720 by 8 from it.
+            final rects = [(10, 22), (11, 27), (12, 33)];
+            for (final (i, image) in ['skill', 'factor', 'campaign'].indexed) {
+              final (x, y) = rects[i];
+              expect(jsonDecode(utf8.decode(held['$image.json']!)), {
+                'intersection': {
+                  'top_left': {
+                    'x': x,
+                    'y': y,
+                    'anchor': {'h': 'ScreenStart', 'v': 'ScreenStart'},
+                  },
+                  'bottom_right': {
+                    'x': x + 720,
+                    'y': y + 8,
+                    'anchor': {'h': 'ScreenStart', 'v': 'ScreenEnd'},
+                  },
+                },
+              }, reason: '$image on B');
+            }
+            expect(await previewRectsOf(b, 'R1'), [
+              for (final (x, y) in rects) [x, y, x + 720, y + 8],
+            ]);
+
+            // A archives R1 with resized images: the geometry its archive writes is the one B holds.
+            final container = await a.open();
+            await container
+                .read(charaArchiveControllerProvider.notifier)
+                .archive(['R1'], ArchiveImageOption.resizedJpeg, effects: archiveEffects(container));
+            final archived = filesIn(a, 'R1', store: 'archive');
+            for (final image in ['skill', 'factor', 'campaign']) {
+              expect(
+                jsonDecode(utf8.decode(held['$image.json']!)),
+                jsonDecode(utf8.decode(archived['$image.json']!)),
+                reason: '$image as A\'s archive writes it',
+              );
+            }
+          });
+
+          test('D-ICON-3a (i), (iv): a device that takes the PNGs of a capture wide enough to be reduced holds the '
+              'geometry of each in the PNG\'s coordinates, not the reduced JPEG\'s', () async {
+            server.form = 'png';
+            final legacy = a.seedRecord('R1', bodyWrittenAt: 1767225600101, fans: 1001);
+            final written = <String, Uint8List>{};
+            for (final (i, image) in ['skill', 'factor', 'campaign'].indexed) {
+              File(legacy.filePath('$image.png').path).writeAsBytesSync(
+                img.encodePng(img.Image(width: 900, height: 10)..clear(img.ColorRgb8(40, 80 + 40 * i, 200))),
+              );
+              written['$image.json'] = geometryFile({
+                'top_left': {
+                  'x': 13 + i,
+                  'y': 27 + 7 * i,
+                  'anchor': {'h': 'ScreenStart', 'v': 'ScreenStart'},
+                },
+                'bottom_right': {
+                  'x': 913 + i,
+                  'y': 37 + 7 * i,
+                  'anchor': {'h': 'ScreenStart', 'v': 'ScreenEnd'},
+                },
+              });
+              File(legacy.filePath('$image.json').path).writeAsBytesSync(written['$image.json']!);
+            }
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+
+            final held = filesIn(b, 'R1');
+            for (final image in ['skill', 'factor', 'campaign']) {
+              expect(held.containsKey('$image.png'), isTrue, reason: 'B takes the PNG of $image');
+              expect(
+                jsonDecode(utf8.decode(held['$image.json']!)),
+                jsonDecode(utf8.decode(written['$image.json']!)),
+                reason: '$image on B, as A\'s capture wrote it',
+              );
+            }
+          });
+        }
+
+        test('C3: an image whose put a dropped connection cut short is put in the next round, which finds the list and '
+            'the generation as it left them, and reaches the other device$backend', () async {
+          onBackend();
+          server.form = 'png';
+          seedShot(a, 'R1', 1);
+          var drops = 1;
+          server.beforeImagePut = (_) async {
+            if (drops-- > 0) throw const _Dropped();
+          };
+          expect((await a.round(server)).end, SyncRoundEnd.done, reason: 'the list is the server\'s');
+          expect(server.images, isEmpty, reason: 'the first put dropped, and the round put no more');
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(filesIn(b, 'R1'), isEmpty);
+
+          final generation = server.generation;
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)}, reason: 'A put them');
+          expect(server.generation, generation, reason: 'A replaced no root');
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(filesIn(b, 'R1'), takenOf(1));
+        });
+
+        // D-ICON-3b, L374, [R4-8] 6: the name a body gives its icon is where a device that holds no icon takes one
+        // from; a device that keeps one of its own with the factor image keeps it. Which icon goes and comes is the
+        // shared round's decision; both backends take it through the C3 cases above.
+        if (!webLike) {
+          test('D-ICON-3b (iii): a device that keeps an icon of its own with the factor image keeps it once the body it '
+              'holds arrives naming another, its images not bound again: it puts none of its own under that name and '
+              'takes none, and the other device puts the one named', () async {
+            seedShot(a, 'R1', 1);
+            // B holds R1 from before the binding, the same body, its directory holding capture 1 and an icon of its own,
+            // cut from the same factor image into other bytes.
+            final legacy = b.seedRecord('R1', bodyWrittenAt: 1767225600101, fans: 1001);
+            for (final MapEntry(key: name, value: bytes) in shot(1).entries) {
+              File(legacy.filePath(name).path).writeAsBytesSync(bytes);
+            }
+            final own = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(200, 10, 10)));
+            File(legacy.filePath('trainee.jpg').path).writeAsBytesSync(own);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect((await listOf(b)).rows['R1']!.record.body.icon, iconOfShot(1), reason: 'the body names A\'s icon');
+
+            server.form = 'png';
+            final first = await b.round(server);
+            expect(first.imagesUndone, isNull, reason: 'B put nothing the server refused');
+            expect(server.images.keys.toSet(), pngNames(1), reason: 'B put the PNGs, and no icon');
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)}, reason: 'A put its icon');
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), {...takenPngsOf(1), 'trainee.jpg': own}, reason: 'B keeps its own icon');
+          });
+
+          test('D-ICON-3b (ii): no icon goes out while the account\'s form is none, nor of a record archived without '
+              'images whose directory still holds one; under png the icon of a normal record does', () async {
+            seedShot(a, 'R1', 1);
+            seedShot(a, 'R2', 2);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(asked, isEmpty, reason: 'under the form none');
+            await archive(a, 'R2', ArchiveImageOption.none);
+            // R2's directory holding its icon still, as an archive without images of an older app left it.
+            File(
+              (a.charaDetail / 'archive' / 'R2').filePath('trainee.jpg').path,
+            ).writeAsBytesSync(shot(2)['trainee.jpg']!);
+
+            server.form = 'png';
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(asked.toSet(), {...pngNames(1), iconOfShot(1)}, reason: 'R1 alone, its icon with it');
+          });
+
+          test('D-ICON-3b (iv): an icon whose put a dropped connection cut short is put in the next round from the '
+              'work left, and reaches the other device', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            var drops = 1;
+            server.beforeImagePut = (name) async {
+              if (name == iconOfShot(1) && drops-- > 0) throw const _Dropped();
+            };
+            final first = await a.round(server);
+            expect(first.end, SyncRoundEnd.done);
+            expect(first.imagesUndone?.records, 1, reason: 'R1\'s icon is left undone');
+            expect(server.images.keys.toSet(), pngNames(1));
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), takenPngsOf(1));
+
+            expect((await a.round(server)).imagesUndone, isNull);
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)}, reason: 'A put the icon');
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), takenOf(1));
+          });
+
+          test('D-ICON-3b (v): a re-recognition that cuts the icon again into other bytes names it, and the other '
+              'device, which holds no icon of the record, takes the new one', () async {
+            seedShot(a, 'R1', 1);
+            await a.round(server);
+            await b.round(server);
+            final icon = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(200, 10, 10)));
+            File((a.charaDetail / 'active' / 'R1').filePath('trainee.jpg').path).writeAsBytesSync(icon);
+            clockAt(hour(10));
+            await a.recognizeAgain('R1', (result) => result['fans'] = 7);
+
+            server.form = 'png';
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images.keys.toSet(), {...pngNames(1), syncObjectName(icon)}, reason: 'the icon cut again');
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), {...takenPngsOf(1), 'trainee.jpg': icon});
+          });
+
+          test(
+            'T-R5b: a re-recognition that reads the same content writes no body while it cuts the same icon, and '
+            'writes one naming the icon when it cuts it into other bytes, which the other device then takes',
+            () async {
+              seedShot(a, 'R1', 1);
+              await a.round(server);
+              await b.round(server);
+              final jsonFile = File((a.charaDetail / 'active' / 'R1').filePath('record.json').path);
+              void readTheStored(Map<String, dynamic> result) => result
+                ..clear()
+                ..addAll((jsonDecode(jsonFile.readAsStringSync()) as Map).cast<String, dynamic>());
+              final before = jsonFile.readAsBytesSync();
+              clockAt(hour(9));
+              await a.recognizeAgain('R1', readTheStored);
+              expect(jsonFile.readAsBytesSync(), before, reason: 'the same content and the same icon write nothing');
+
+              final icon = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(200, 10, 10)));
+              File((a.charaDetail / 'active' / 'R1').filePath('trainee.jpg').path).writeAsBytesSync(icon);
+              clockAt(hour(10));
+              await a.recognizeAgain('R1', readTheStored);
+              final metadata = (jsonDecode(jsonFile.readAsStringSync()) as Map)['metadata'] as Map;
+              expect(metadata['icon'], syncObjectName(icon), reason: 'the body names the icon cut again');
+
+              server.form = 'png';
+              expect((await a.round(server)).end, SyncRoundEnd.done);
+              expect((await b.round(server)).end, SyncRoundEnd.done);
+              expect(filesIn(b, 'R1'), {...takenPngsOf(1), 'trainee.jpg': icon});
+            },
+          );
+        }
+
+        test(
+          'a device whose rounds kept nothing of images, as one that ran them before rounds did, keeps its base: the '
+          'next round reads it as its base, works the images of every record, and loses none$backend',
+          () async {
+            onBackend();
+            seedShot(a, 'R1', 1);
+            await a.round(server);
+            await b.round(server);
+            server.form = 'png';
+            await a.round(server);
+            // B as a round left it before rounds kept anything of images: its base and nothing beside it.
+            final images = File(syncImagesFile(b.info).path);
+            expect(images.existsSync(), isTrue, reason: 'B\'s round kept what it left of R1\'s images');
+            images.deleteSync();
+            expect(
+              (jsonDecode(File(syncBaseFile(b.info).path).readAsStringSync()) as Map).keys.toSet(),
+              {'format', 'account', 'generation', 'parts'},
+              reason: 'the base says nothing of images',
+            );
+            final (rootsRead, heldAsked) = (server.rootsRead, server.heldAsked.length);
+
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(
+              server.rootsRead,
+              rootsRead,
+              reason: 'the base read, at the generation of the list: none read again',
+            );
+            expect(server.heldAsked.length, greaterThan(heldAsked), reason: 'B asked which images the server holds');
+            expect(filesIn(b, 'R1'), takenOf(1));
+            expect(images.existsSync(), isTrue, reason: 'and kept what it left of them');
+          },
+        );
+
+        /// The names the server holds the reduced JPEGs of capture [n] by: those an archive with resized images makes of
+        /// its PNGs ([archiveJpegOf]).
+        Set<String> jpegNames(int n) => {for (final png in pngsOf(n).values) syncObjectName(archiveJpegOf(png)!)};
+
+        /// The archive state of the row of [id] in the server's current root; null where it lists none.
+        String? stateOnServer(String id) {
+          for (final text in server.currentParts()) {
+            for (final row in ((jsonDecode(text) as Map<String, Object?>)['records'] as List<Object?>? ?? const [])) {
+              row as Map<String, Object?>;
+              if (row['id'] == id) return (row['archive'] as Map<String, Object?>)['state'] as String;
+            }
+          }
+          return null;
+        }
+
+        // S-09, S-11: a record archived with resized images owes the server its reduced JPEGs until they land, though
+        // the server holds its PNGs; a replacement refused under none is owed again in the next round. The decision is
+        // the shared round's: one backend.
+        if (!webLike) {
+          test('S-09: a device that took the PNGs of a record another device archived with resized images, the form '
+              'png, has not put the reduced JPEGs until they land, and puts them', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            await a.round(server);
+            await archive(a, 'R1', ArchiveImageOption.resizedJpeg);
+            server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit');
+            expect((await a.round(server)).imagesUndone?.records, 1);
+            server.beforeImagePut = null;
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(
+              filesIn(b, 'R1', store: 'archive').keys,
+              containsAll(['skill.jpg', 'factor.jpg', 'campaign.jpg']),
+              reason: 'B made the reduced JPEGs of the PNGs it took',
+            );
+            final generation = server.generation;
+            for (var i = 0; i < 3; i++) {
+              await b.round(server);
+            }
+            b.close();
+            await b.round(server);
+            expect(server.generation, generation);
+            expect(server.images.keys.toSet(), {
+              ...pngNames(1),
+              iconOfShot(1),
+              ...jpegNames(1),
+            }, reason: 'B holds the reduced JPEGs the server lacks, and puts them');
+          });
+
+          test(
+            'S-09: a replacement the server refused while the form is none is put again in the next round',
+            () async {
+              server.form = 'png';
+              seedShot(a, 'R1', 1);
+              await a.round(server);
+              await archive(a, 'R1', ArchiveImageOption.resizedJpeg);
+              server.form = 'none';
+              server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit');
+              expect((await a.round(server)).imagesUndone?.records, 1);
+              server.beforeImagePut = null;
+              expect((await a.round(server)).end, SyncRoundEnd.done);
+              expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1), ...jpegNames(1)});
+            },
+          );
+        }
+
+        // S-09: what a round puts follows the account's form, as the round read it and as this device sets it from
+        // then on; a refused put ends the puts of the round. The decision is the shared round's: one backend.
+        if (!webLike) {
+          test('S-09 (i): while the account\'s form is none a round asks to put no image', () async {
+            seedShot(a, 'R1', 1);
+            seedShot(a, 'R2', 2);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(asked, isEmpty);
+            expect(server.images, isEmpty);
+            expect(
+              outcome.imagesUndone,
+              isNull,
+              reason: 'what the form none spares the device from putting is not undone',
+            );
+          });
+
+          test('S-09 (ii): a round follows the form this device sets part way through it, from then on: set to none '
+              'once an image landed, the round asks to put no other', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            seedShot(a, 'R2', 2);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            server.afterImagePut = (_) async {
+              server.afterImagePut = null;
+              await a.setImageForm(server, 'none');
+            };
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(asked, hasLength(1), reason: 'the put that landed before the form was set to none, and no other');
+            expect(server.images.keys, asked);
+            expect(outcome.imagesUndone, isNull);
+          });
+
+          test('S-09 (ii): a device the server refuses an image puts none of the rest of the round\'s images: the form '
+              'another device set to none part way through the round', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            seedShot(a, 'R2', 2);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            server.afterImagePut = (_) async {
+              server.afterImagePut = null;
+              // The other device's `PUT /api/sync/settings`.
+              server.form = 'none';
+            };
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(asked, hasLength(2), reason: 'one landed, the next was refused, and no other was asked');
+            expect(server.images, hasLength(1));
+            expect(outcome.imagesUndone?.records, 2, reason: 'R1 refused part way, R2 not put');
+            expect(outcome.imagesUndone?.stops, {SyncImagesStop.refused});
+          });
+
+          test('S-09 (iii): set back from none, a round puts the images the server holds none of, of the records '
+              'captured meanwhile too, in the form set then', () async {
+            seedShot(a, 'R1', 1);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images, isEmpty);
+            a.close();
+            seedShot(a, 'R2', 2);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images, isEmpty);
+
+            await a.setImageForm(server, 'jpeg');
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images.keys.toSet(), {
+              ...jpegNames(1),
+              ...jpegNames(2),
+              iconOfShot(1),
+              iconOfShot(2),
+            }, reason: 'the reduced JPEGs alone, and the icons as they are');
+          });
+
+          test(
+            'S-11, L241 (B) (v): under png a device puts no PNG beside the reduced JPEG another device put first; it '
+            'keeps its PNGs',
+            () async {
+              server.form = 'jpeg';
+              seedShot(b, 'R1', 1);
+              expect((await b.round(server)).end, SyncRoundEnd.done);
+              expect(server.images.keys.toSet(), {...jpegNames(1), iconOfShot(1)});
+
+              server.form = 'png';
+              seedShot(a, 'R1', 1);
+              expect((await a.round(server)).end, SyncRoundEnd.done);
+              expect(server.images.keys.toSet(), {
+                ...jpegNames(1),
+                iconOfShot(1),
+              }, reason: 'the server keeps the form put first');
+              expect(filesIn(a, 'R1'), shot(1), reason: 'A holds the most original form it has');
+            },
+          );
+
+          test('[R7-1] (vi): a round whose image puts the server has no room for ends telling the images it left '
+              'undone, and the next round, with room, puts them', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit', 'bytes');
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done, reason: 'the list is the server\'s');
+            expect(outcome.imagesUndone?.records, 1);
+            expect(outcome.imagesUndone?.stops, {SyncImagesStop.room});
+            server.beforeImagePut = null;
+            final next = await a.round(server);
+            expect(next.imagesUndone, isNull);
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+          });
+
+          test('[R7-1] (vi): a round whose image put a dropped connection cut short ends telling the images it left '
+              'undone', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            seedShot(a, 'R2', 2);
+            server.beforeImagePut = (_) async => throw const _Dropped();
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(outcome.imagesUndone?.records, 2);
+            expect(outcome.imagesUndone?.stops, {SyncImagesStop.lost});
+          });
+        }
+
+        test(
+          'S-11, S-09 (iv): an archive with resized images replaces the PNGs the server holds with its reduced '
+          'JPEGs, put after the list that archives it, under the form none too, which puts no other image$backend',
+          () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+            await a.setImageForm(server, 'none');
+            a.close();
+            seedShot(a, 'R2', 2);
+            await archive(a, 'R1', ArchiveImageOption.resizedJpeg);
+            onBackend();
+            final states = <String?>[];
+            server.beforeImagePut = (_) async => states.add(stateOnServer('R1'));
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(outcome.imagesUndone, isNull);
+            expect(server.images.keys.toSet(), {
+              ...pngNames(1),
+              ...jpegNames(1),
+              iconOfShot(1),
+            }, reason: 'R2\'s images stay on A');
+            expect(states, ['jpeg', 'jpeg', 'jpeg'], reason: 'each JPEG put once the server listed R1 archived');
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(
+              filesIn(b, 'R1', store: 'archive').keys.where((name) => name.endsWith('.jpg') && name != 'trainee.jpg'),
+              hasLength(3),
+              reason: 'B takes the reduced JPEGs',
+            );
+          },
+        );
+
+        // S-11, S-09, L285: a device that took the PNGs of a record archived with resized images, and reduced them, owes
+        // the server the replacement as the device that archived it does — under the form none too, and whatever
+        // became of that device.
+        test('S-11, S-09: a device that took the PNGs of a record archived with resized images puts its reduced JPEGs '
+            'in their place under the form none, the device that archived it having had no room to and gone '
+            'offline$backend', () async {
+          server.form = 'png';
+          seedShot(a, 'R1', 1);
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          await archive(a, 'R1', ArchiveImageOption.resizedJpeg);
+          server.form = 'none';
+          server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit');
+          expect((await a.round(server)).imagesUndone?.records, 1, reason: 'A had no room for the replacement');
+          server.beforeImagePut = null;
+          expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+          onBackend();
+
+          // A is offline from here on: B alone runs rounds.
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(
+            filesIn(b, 'R1', store: 'archive').keys.where((name) => name.endsWith('.jpg') && name != 'trainee.jpg'),
+            hasLength(3),
+            reason: 'B took the PNGs and reduced them',
+          );
+          final generation = server.generation;
+          expect((await b.round(server)).imagesUndone, isNull);
+          expect(server.images.keys.toSet(), {
+            ...pngNames(1),
+            ...jpegNames(1),
+            iconOfShot(1),
+          }, reason: 'B put the reduced JPEGs in the PNGs\' place');
+          expect(server.generation, generation, reason: 'B replaced no root');
+        });
+
+        // S-09, S-11: under the form none, the one image a device puts is the replacement, owed only where the server
+        // holds a PNG; a record archived with resized images of which the server holds no form owes it nothing.
+        test(
+          'S-09, S-11: under the form none, a round asks the server nothing of a record archived with resized images '
+          'of which it holds no form, once one round saw it archived$backend',
+          () async {
+            seedShot(a, 'R1', 1);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            await archive(a, 'R1', ArchiveImageOption.resizedJpeg);
+            onBackend();
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.images, isEmpty, reason: 'nothing is sent under the form none');
+            server.heldAsked.clear();
+
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect(server.heldAsked, isEmpty, reason: 'A asked the server which images it holds of no record');
+          },
+        );
+
+        // S-11, D-65: a device takes again an image it holds no longer, whatever removed it; the storage view removes
+        // an image file of a record and leaves its row as it was.
+        Future<File> removeSkillImage(SyncTestDevice device) async {
+          final image = (device.charaDetail / 'active' / 'R1').filePath('skill.png');
+          final report = await device.deleteInStorageView(
+            StorageGroupId.activeRecords,
+            StorageDeletePathsRequest([image]),
+          );
+          expect(report.isComplete, isTrue);
+          expect(File(image.path).existsSync(), isFalse);
+          return File(image.path);
+        }
+
+        test('S-11, D-65: an image the storage view removed is taken again from the server in the next round, which '
+            'replaces no root$backend', () async {
+          server.form = 'png';
+          seedShot(a, 'R1', 1);
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          onBackend();
+          final image = await removeSkillImage(a);
+          final generation = server.generation;
+
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect(image.existsSync(), isTrue, reason: 'A took skill.png again');
+          expect(image.readAsBytesSync(), shot(1)['skill.png']);
+          expect(filesIn(a, 'R1'), shot(1));
+          expect(server.generation, generation, reason: 'A replaced no root');
+        });
+
+        if (!webLike) {
+          test(
+            'S-11, D-65: an image the storage view removed is taken again in the first round after a restart',
+            () async {
+              server.form = 'png';
+              seedShot(a, 'R1', 1);
+              expect((await a.round(server)).end, SyncRoundEnd.done);
+              final image = await removeSkillImage(a);
+              a.close();
+
+              expect((await a.round(server)).end, SyncRoundEnd.done);
+              expect(image.existsSync(), isTrue, reason: 'A took skill.png again');
+              expect(image.readAsBytesSync(), shot(1)['skill.png']);
+            },
+          );
+        }
+
+        // S-11, L373: a record a device holds has the geometry of the images it holds, whatever removed it; the body
+        // carries it, so nothing is taken for it.
+        test('S-11, L373: the geometry of an image the storage view removed is written again from the body in the next '
+            'round, which replaces no root$backend', () async {
+          server.form = 'png';
+          seedShot(a, 'R1', 1);
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          onBackend();
+          final geometry = (a.charaDetail / 'active' / 'R1').filePath('skill.json');
+          final report = await a.deleteInStorageView(
+            StorageGroupId.activeRecords,
+            StorageDeletePathsRequest([geometry]),
+          );
+          expect(report.isComplete, isTrue);
+          expect(File(geometry.path).existsSync(), isFalse);
+          final generation = server.generation;
+
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect(File(geometry.path).existsSync(), isTrue, reason: 'A wrote skill.json again');
+          expect(filesIn(a, 'R1'), shot(1));
+          expect(server.generation, generation, reason: 'A replaced no root');
+        });
+
+        // L382, S-11: a zip that carries the images places its `trainee.jpg`, and the body names that icon — as a
+        // device that cut the icon of the same factor image into other bytes exports the record of the same body. The
+        // decision is the import's ([syncImport]), whatever the backend writes it, so one backend runs it.
+        if (!webLike) {
+          test('L382, S-11: a zip of the same body with an icon of other bytes, imported over the record, names the '
+              'icon it places at the time of the import, and the other device takes that icon', () async {
+            seedShot(a, 'R1', 1);
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            final icon = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(200, 10, 10)));
+            final zip = ZipDecoder().decodeBytes(await a.exportZip('R1'));
+            const iconEntry = 'chara_detail/active/R1/trainee.jpg';
+            const bodyEntry = 'chara_detail/active/R1/record.json';
+            expect(zip.files.map((file) => file.name), containsAll([iconEntry, bodyEntry]));
+            final out = Archive();
+            for (final file in zip.files) {
+              final bytes = switch (file.name) {
+                iconEntry => icon,
+                bodyEntry => () {
+                  final map = jsonDecode(utf8.decode(file.content)) as Map<String, dynamic>;
+                  (map['metadata'] as Map)['icon'] = syncObjectName(icon);
+                  return utf8.encode(jsonEncode(map));
+                }(),
+                _ => file.content,
+              };
+              out.addFile(ArchiveFile(file.name, bytes.length, bytes));
+            }
+            clockAt(hour(10));
+
+            await a.importZip(Uint8List.fromList(ZipEncoder().encode(out)));
+            final metadata =
+                (jsonDecode(File((a.charaDetail / 'active' / 'R1').filePath('record.json').path).readAsStringSync())
+                        as Map)['metadata']
+                    as Map;
+            expect(filesIn(a, 'R1')['trainee.jpg'], icon, reason: 'A placed the zip\'s icon');
+            expect([metadata['icon'], metadata['body_written_at']], [syncObjectName(icon), hour(10)]);
+            server.form = 'png';
+            expect((await a.round(server)).end, SyncRoundEnd.done);
+            expect((await b.round(server)).end, SyncRoundEnd.done);
+            expect(filesIn(b, 'R1'), {...takenPngsOf(1), 'trainee.jpg': icon});
+          });
+        }
+      });
     }
+
+    // D-ICON: the geometry of a record's images and the name of its icon are carried in its body (`metadata.geometry`,
+    // `metadata.icon`), worked out with the binding and kept by every operation that composes a body. Read here from
+    // the JSON a device and the server hold.
+    group('the geometry of the images and the name of the icon', () {
+      /// The `metadata` of the `record.json` the record [id] holds on [device], in [store].
+      Map<String, Object?> metadataOn(SyncTestDevice device, String id, {String store = 'active'}) =>
+          (jsonDecode(File((device.charaDetail / store / id).filePath('record.json').path).readAsStringSync())
+                  as Map)['metadata']
+              as Map<String, Object?>;
+
+      /// What [metadata] carries of the images: the geometry, the icon's name and the binding.
+      List<Object?> carried(Map<String, Object?> metadata) => [
+        metadata['geometry'],
+        metadata['icon'],
+        metadata['binding'],
+      ];
+
+      /// What a record read from capture [n] carries of its images ([carried]).
+      List<Object?> ofShot(int n) => [geometryOfShot(n), iconOfShot(n), bindingOfShot(n).toMap()];
+
+      /// The `metadata` of every body of the record [id] the server holds.
+      List<Map<String, Object?>> bodiesOnServer(String id) => [
+        for (final body in server.storedBodies.values)
+          if ((jsonDecode(body) as Map)['metadata'] case final Map<String, Object?> m
+              when (m['record_id'] as Map)['self'] == id)
+            m,
+      ];
+
+      /// The record [id] on [device] from before the binding, its body read from capture [n] and its directory holding
+      /// that capture's images but those [without] names.
+      void seedLegacyShot(SyncTestDevice device, String id, int n, {Set<String> without = const {}}) {
+        final dir = device.seedRecord(id, bodyWrittenAt: 1767225600100 + n, fans: 1000 + n);
+        for (final MapEntry(key: name, value: bytes) in shot(n).entries) {
+          if (!without.contains(name)) File(dir.filePath(name).path).writeAsBytesSync(bytes);
+        }
+      }
+
+      /// A zip of the format from before the binding: the record [id] read from capture [n], its `record.json`
+      /// carrying no binding, with that capture's images where [images].
+      Uint8List legacyZip(String id, int n, {required bool images}) {
+        final map = recordFromFixture(id, '2026-01-01T00:00:00').toMap()..['fans'] = 1000 + n;
+        final archive = Archive();
+        void add(String name, List<int> bytes) => archive.addFile(ArchiveFile('$id/$name', bytes.length, bytes));
+        add('record.json', CharaDetailRecordMapper.fromMap(map).toRecordJsonBytes());
+        if (images) shot(n).forEach(add);
+        return Uint8List.fromList(ZipEncoder().encode(archive));
+      }
+
+      /// The names of the image files the record [id] holds on [device] in [store].
+      Set<String> imageFilesOn(SyncTestDevice device, String id, String store) => {
+        for (final file in Directory((device.charaDetail / store / id).path).listSync().whereType<File>())
+          if (RegExp(r'^((skill|factor|campaign)\.(png|jpg|json)|trainee\.jpg)$').hasMatch(file.uri.pathSegments.last))
+            file.uri.pathSegments.last,
+      };
+
+      Future<void> archiveOn(SyncTestDevice device, String id, ArchiveImageOption option) async {
+        final container = await device.open();
+        await container
+            .read(charaArchiveControllerProvider.notifier)
+            .archive([id], option, effects: archiveEffects(container));
+      }
+
+      test('(i), (iv): a record from before the binding goes out with the geometry of its images and the name of its '
+          'icon in every body that carries its binding — worked out with the binding in one write, by the round and '
+          'by an archive that lets go of its PNGs first —, and the other device holds them', () async {
+        seedLegacyShot(a, 'R1', 1);
+        seedLegacyShot(a, 'R2', 2);
+        await archiveOn(a, 'R2', ArchiveImageOption.resizedJpeg);
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+
+        for (final (id, n, store) in [('R1', 1, 'active'), ('R2', 2, 'archive')]) {
+          expect(bodiesOnServer(id), isNotEmpty);
+          for (final body in bodiesOnServer(id)) {
+            expect(carried(body), ofShot(n), reason: 'a body of $id the server holds');
+          }
+          expect(carried(metadataOn(a, id, store: store)), ofShot(n), reason: '$id on A');
+          expect(carried(metadataOn(b, id, store: store)), ofShot(n), reason: '$id on B');
+        }
+      });
+
+      test(
+        '(i), (iv): a device that imports a zip of reduced JPEGs from before the binding, and another that holds the '
+        'same body with its PNGs, each take the geometry the other knows',
+        () async {
+          final map = recordFromFixture('R1', '2026-01-01T00:00:00').toMap()..['fans'] = 1001;
+          final zip = Archive();
+          void add(String name, List<int> bytes) => zip.addFile(ArchiveFile('R1/$name', bytes.length, bytes));
+          add('record.json', CharaDetailRecordMapper.fromMap(map).toRecordJsonBytes());
+          for (final image in ['skill', 'factor', 'campaign']) {
+            add('$image.jpg', archiveJpegOf(shot(1)['$image.png']!)!);
+            add('$image.json', shot(1)['$image.json']!);
+          }
+          add('trainee.jpg', shot(1)['trainee.jpg']!);
+          seedLegacyShot(b, 'R1', 1);
+          await a.importZip(Uint8List.fromList(ZipEncoder().encode(zip)));
+          final geometry = metadataOn(a, 'R1')['geometry'] as Map;
+          expect(geometry.containsKey('factor_png'), isFalse, reason: 'A holds no PNG to know its field by');
+          expect(geometry.containsKey('factor_jpeg'), isTrue);
+
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(carried(metadataOn(b, 'R1')), ofShot(1), reason: 'B keeps the PNG fields A does not know');
+        },
+      );
+
+      test('(ii), (iv): a re-recognition names the icon the recognizer left and keeps the geometry, at the time it '
+          'writes the body, and the other device takes both with the body', () async {
+        seedShot(a, 'R1', 1);
+        seedShot(b, 'R1', 1);
+        await a.round(server);
+        await b.round(server);
+        // The recognizer cuts the icon again from the same factor image, into other bytes.
+        final icon = img.encodeJpg(img.Image(width: 4, height: 4)..clear(img.ColorRgb8(200, 10, 10)));
+        File((a.charaDetail / 'active' / 'R1').filePath('trainee.jpg').path).writeAsBytesSync(icon);
+        clockAt(hour(10));
+        await a.recognizeAgain('R1', (result) => result['fans'] = 7);
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+
+        for (final (name, device) in [('A', a), ('B', b)]) {
+          final m = metadataOn(device, 'R1');
+          expect(
+            [m['geometry'], m['icon'], m['body_written_at'], m['binding']],
+            [geometryOfShot(1), sha256.convert(icon).toString(), hour(10), bindingOfShot(1).toMap()],
+            reason: 'R1 on $name',
+          );
+        }
+      });
+
+      test(
+        '(iii), (iv): a merge keeps the geometry and the icon of the content it keeps, worked out with the binding '
+        'where that side carried none, and the merge of the lists keeps what either device knows of one body',
+        () async {
+          seedShot(a, 'R1', 1);
+          // B holds R1 from before the binding, the same body, its skill image and that image's geometry deleted.
+          seedLegacyShot(b, 'R1', 1, without: {'skill.png', 'skill.json'});
+          await a.round(server);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(carried(metadataOn(b, 'R1')), ofShot(1), reason: 'B knows what A does of the body both hold');
+          expect(metadataOn(b, 'R1')['body_written_at'], 1767225600101);
+
+          a.close();
+          seedLegacyShot(a, 'R2', 2);
+          clockAt(hour(9));
+          await a.merge('R1', 'R2', keep: 'R2');
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          for (final (name, device) in [('A', a), ('B', b)]) {
+            final m = metadataOn(device, 'R1');
+            expect([...carried(m), m['body_written_at']], [...ofShot(2), hour(9)], reason: 'R1 on $name');
+          }
+        },
+      );
+
+      test('D-ICON-3a (iii), (iv): a device that imports a zip whose images come without their geometry holds the '
+          'geometry the zip\'s body carries, and its preview reads it', () async {
+        seedShot(a, 'R1', 1);
+        dropGeometryFiles(a, 'R1');
+        final zip = await a.exportZip('R1');
+
+        await b.importZip(zip);
+        expect(imagesOf(b, 'R1'), shot(1), reason: 'the zip\'s images, and the geometry of capture 1');
+        expect(await previewRectsOf(b, 'R1'), rectsOfShot(1));
+      });
+
+      test('(iii), (iv): a zip import keeps the geometry and the icon — those of the body the device holds, and those '
+          'worked out of the images of a zip from before the binding —, through a restart, an archive without images '
+          'and the record taken back from the zip', () async {
+        seedShot(a, 'R1', 1);
+        clockAt(hour(9));
+        // R1: a zip of the same body without images, over the record A holds; R3: one with images, of none it holds.
+        await a.importZip(legacyZip('R1', 1, images: false));
+        await a.importZip(legacyZip('R3', 3, images: true));
+        a.close();
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+        void expectCarried(String when, {String r3Store = 'active'}) {
+          for (final (name, device) in [('A', a), ('B', b)]) {
+            final (r1, r3) = (metadataOn(device, 'R1'), metadataOn(device, 'R3', store: r3Store));
+            expect([...carried(r1), r1['body_written_at']], [...ofShot(1), 1767225600101], reason: 'R1 on $name $when');
+            expect([...carried(r3), r3['body_written_at']], [...ofShot(3), hour(9)], reason: 'R3 on $name $when');
+          }
+        }
+
+        expectCarried('after the import');
+        await archiveOn(a, 'R3', ArchiveImageOption.none);
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+        expect(imageFilesOn(b, 'R3', 'archive'), isEmpty, reason: 'B let go of the images of R3');
+        expectCarried('with R3 archived without images', r3Store: 'archive');
+        await a.importZip(legacyZip('R3', 3, images: true));
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+        expectCarried('with R3 taken back from the zip');
+      });
+    });
 
     test('[R7-2]: while the server holds back a body the result shows, no record is put in place', () async {
       final ids = [for (var i = 1; i <= 12; i++) 'R${'$i'.padLeft(2, '0')}'];

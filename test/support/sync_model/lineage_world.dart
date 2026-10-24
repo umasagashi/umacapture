@@ -68,7 +68,8 @@ class LineageWorld extends SyncWorld {
     EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
     EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
-    SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
+    SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() => false,
+    Resume() => false,
     ShelfOp() => false,
     _ => true,
   };
@@ -100,7 +101,8 @@ class LineageWorld extends SyncWorld {
         d.editMemo(id, value);
       case EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link():
       case DeleteAccount() || Elapse() || OldApp() || Upgrade():
-      case SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume():
+      case SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut():
+      case Resume():
       case ShelfOp():
         throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):

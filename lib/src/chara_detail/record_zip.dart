@@ -408,7 +408,8 @@ class RecordZipService {
   ///   form that state holds them in.
   /// * **The images** are the zip's, the device's as they are, or those of the device's that the zip's binding names
   ///   with the rest taken from [donors] ([recordImagesBoundBy]); `trainee.jpg`, cut from the factor image, goes with
-  ///   it. An image's geometry (`<image>.json`) goes with the last of its forms.
+  ///   it. An image's geometry (`<image>.json`) goes with its forms; of a form placed — the zip's, or one taken from
+  ///   [donors] — it is written from the body's geometry ([recordGeometryFiles]).
   ///
   /// Nothing the zip carries of a time is read, nor its relation bonus, which only the device that resolved it holds.
   /// The files the export table leaves on a device are not taken from the zip either ([recordFileExportOf]).
@@ -464,19 +465,28 @@ class RecordZipService {
     }
     final local = localDir == null ? null : await _readLocalRecord(localDir);
     final carriesImages = carried.keys.any(isRecordImageFile);
-    final importedBinding =
-        imported.metadata.binding ?? (carriesImages ? await compute(recordBindingOf, _imageFilesOf(carried)) : null);
-    final localBinding = local == null || localDir == null
+    // A record whose binding is not worked out — one a zip from before the binding carries, or one the device holds
+    // from before it — has it worked out here, with the geometry and the icon, from the images it comes with.
+    final importedImages = imported.metadata.binding != null
+        ? _imagesOf(imported)
+        : (carriesImages
+              ? await compute(recordBodyImagesOf, {
+                  for (final MapEntry(:key, :value) in carried.entries)
+                    if (isRecordImageFile(key)) key: value,
+                })
+              : null);
+    final localImages = local == null || localDir == null
         ? null
-        : local.metadata.binding ??
-              (recognizedContentKey(local) == recognizedContentKey(imported)
-                  ? await computeRecordBinding(localDir)
-                  : null);
+        : local.metadata.binding != null
+        ? _imagesOf(local)
+        : (recognizedContentKey(local) == recognizedContentKey(imported)
+              ? await computeRecordBodyImages(localDir)
+              : null);
     final plan = syncImport(
       recordId,
-      (body: _bodyOf(imported, importedBinding), stage: state.option, carriesImages: carriesImages),
+      (body: _bodyOf(imported, importedImages), stage: state.option, carriesImages: carriesImages),
       body: switch (local) {
-        final local? => (value: _bodyOf(local, localBinding), time: local.metadata.bodyWrittenAt),
+        final local? => (value: _bodyOf(local, localImages), time: local.metadata.bodyWrittenAt),
         null => (value: null, time: null),
       },
       stage: heldStage,
@@ -486,28 +496,40 @@ class RecordZipService {
     final record = composeBodyImport(local, imported, body: plan.body, writes: plan.writesBody);
 
     final removals = <String>{if (!carried.containsKey(mergedIdsFileName)) mergedIdsFileName};
-    final localImages = localDir == null ? const <String, Uint8List>{} : await readRecordImageFiles(localDir);
+    final localFiles = localDir == null ? const <String, Uint8List>{} : await readRecordImageFiles(localDir);
     final Map<String, Uint8List> taken;
+    // The image files the record holds once it is published, and of those the ones placed from the zip or another
+    // record, whose geometry is written from the body's.
+    final Set<String> holds;
+    final Iterable<String> placed;
     switch (plan.images) {
       case SyncImagesCarried():
-        removals.addAll(localImages.keys);
+        removals.addAll(localFiles.keys);
         taken = const {};
+        holds = {...carried.keys.where(isRecordImageFile)};
+        placed = holds;
       case SyncImagesKept():
         taken = const {};
+        holds = const {};
+        placed = const [];
       case SyncImagesBound(:final sources):
-        final bound = await recordImagesBoundBy(plan.body.binding, localImages, [
+        final bound = await recordImagesBoundBy(plan.body.binding, localFiles, [
           for (final source in sources) donors.images[source] ?? const {},
         ]);
-        removals.addAll(localImages.keys.toSet().difference(bound.kept));
+        removals.addAll(localFiles.keys.toSet().difference(bound.kept));
         taken = bound.taken;
+        holds = {...bound.kept, ...taken.keys};
+        placed = taken.keys;
     }
+    final geometryFiles = recordGeometryFiles(plan.body.geometry, placed: placed, holds: holds);
     return (
       publication: (
         files: [
           (recordId: recordId, relativeSegments: const ['record.json'], bytes: record.toRecordJsonBytes()),
-          ...asIs,
+          for (final file in asIs)
+            if (!geometryFiles.containsKey(file.relativeSegments.join('/'))) file,
           ?noteFileOf(plan.stage),
-          for (final MapEntry(key: name, value: bytes) in taken.entries)
+          for (final MapEntry(key: name, value: bytes) in {...taken, ...geometryFiles}.entries)
             (recordId: recordId, relativeSegments: [name], bytes: bytes),
         ],
         removals: removals,
@@ -519,11 +541,23 @@ class RecordZipService {
     );
   }
 
-  /// The body of [record] as sync carries it ([syncBodyOf]), its images bound as [binding].
-  static SyncBody _bodyOf(CharaDetailRecord record, RecordBinding? binding) {
+  /// The body of [record] as sync carries it ([syncBodyOf]), with the binding, geometry and icon of [images]: those it
+  /// carries ([_imagesOf]), or those worked out of its images where it carries none; none where neither is.
+  static SyncBody _bodyOf(CharaDetailRecord record, RecordBodyImages? images) {
     final body = syncBodyOf(record);
-    return SyncBody(body.content, binding: binding, parents: body.parents, time: body.time);
+    return SyncBody(
+      body.content,
+      binding: images?.binding,
+      geometry: images?.geometry,
+      icon: images?.icon,
+      parents: body.parents,
+      time: body.time,
+    );
   }
+
+  /// The binding, geometry and icon [record] carries.
+  static RecordBodyImages _imagesOf(CharaDetailRecord record) =>
+      (binding: record.metadata.binding, geometry: record.metadata.geometry, icon: record.metadata.icon);
 
   /// The device's records an import of the records [grouped] can take images from ([SyncImagesBound]): the binding of
   /// each record of either store — null where it is not worked out, or its `record.json` cannot be read — and the
@@ -549,7 +583,7 @@ class RecordZipService {
       if (imported == null) continue;
       final binding = imported.metadata.binding;
       final zip = (
-        body: _bodyOf(imported, binding),
+        body: _bodyOf(imported, _imagesOf(imported)),
         stage: exportedArchiveState(carried[recordArchiveNoteName]).option,
         carriesImages: carried.keys.any(isRecordImageFile),
       );
@@ -603,10 +637,6 @@ class RecordZipService {
       return null;
     }
   }
-
-  static Map<String, RecordImageFiles> _imageFilesOf(Map<String, Uint8List> files) => {
-    for (final image in recordBindingImages) image: (png: files['$image.png'], jpeg: files['$image.jpg']),
-  };
 
   static CharaDetailRecord? _decodeRecordJson(Uint8List? bytes) {
     if (bytes == null) return null;

@@ -60,6 +60,14 @@ class RecordSync extends Notifier<RecordSyncState> {
     await _entry.push(on);
   }
 
+  /// Sets the account's image form to [form] on [server] (S-09), as the user does on this device: a round running
+  /// follows it from now on ([syncImageFormSettingProvider]) — this device sends no image the user just stopped sending
+  /// while the server is asked —, and every round after reads it of the server.
+  Future<void> setImageForm(SyncServer server, String form) async {
+    ref.read(syncImageFormSettingProvider).set(form);
+    await server.putImageForm(form);
+  }
+
   /// Runs one round against [server] as the session's account, where a round runs ([RecordSyncState.roundAccount]),
   /// and keeps what it told ([RecordSyncState.told]); null where none runs. A round asked for while one runs is the one
   /// round that runs after it ([_next]), however many are asked for: the running round read the device before what

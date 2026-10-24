@@ -48,6 +48,152 @@ enum FStage {
   };
 }
 
+/// The image files a record's directory holds, all of the images of one capture ([capture]): their PNGs ([png]), the
+/// reduced JPEGs an archive makes of those ([jpeg]), the icon the recognizer cuts from the factor image ([icon],
+/// `trainee.jpg`), and the geometry of the images (`<image>.json`, [geometry]). The three images of a capture go
+/// together: a directory holds a form of each of them, or of none — one of the three without the others is outside the
+/// model. A directory holds one only where it holds a form of the images, so the icon goes with the factor image.
+class FImages {
+  /// [geometry] unset: the geometry the capture wrote, in the coordinates of the form held — the PNG's where it holds the
+  /// PNG ([geometryOfCapture]).
+  FImages(this.capture, {this.png = true, this.jpeg = false, this.icon = true, Object? geometry = _asCaptured})
+    : assert(png || jpeg, 'a directory that holds no form of the images holds none'),
+      geometry = identical(geometry, _asCaptured) ? geometryOfCapture(capture, png: png) : geometry as String?;
+  final String capture;
+  final bool png, jpeg, icon;
+
+  /// The rect the directory's geometry file holds ([geometrySymbolOf]): `<capture>.png` where it is the capture's in
+  /// the PNG's coordinates, `<capture>.jpg` in the reduced JPEG's, `?<rect>` where it is neither; null where the
+  /// directory holds no geometry file.
+  final String? geometry;
+
+  static const _asCaptured = Object();
+
+  /// The same images in reduced JPEGs alone, as an archive with resized images leaves them: each PNG made into the
+  /// JPEG it reduces to, the icon kept, the geometry rewritten for the JPEG.
+  FImages get reduced => FImages(
+    capture,
+    png: false,
+    jpeg: true,
+    icon: icon,
+    geometry: !png || geometry == null ? geometry : (geometry == '$capture.png' ? '$capture.jpg' : '?'),
+  );
+
+  /// The same files without the geometry file.
+  FImages get withoutGeometry => FImages(capture, png: png, jpeg: jpeg, icon: icon, geometry: null);
+
+  /// The files by form, for a table: `<capture>.png`, `<capture>.jpg`, `icon` and the geometry's rect (`json <rect>`).
+  String get files => [
+    if (png) '$capture.png',
+    if (jpeg) '$capture.jpg',
+    if (icon) 'icon',
+    if (geometry case final g?) 'json $g',
+  ].join('+');
+
+  @override
+  bool operator ==(Object other) =>
+      other is FImages &&
+      other.capture == capture &&
+      other.png == png &&
+      other.jpeg == jpeg &&
+      other.icon == icon &&
+      other.geometry == geometry;
+
+  @override
+  int get hashCode => Object.hash(capture, png, jpeg, icon, geometry);
+
+  /// As the judge and the named sequences name the images of a record: by their capture alone ([files] tells the forms).
+  @override
+  String toString() => capture;
+}
+
+// The geometry of the model's images: where the game screen falls on each image of a capture, which the capture writes
+// beside its PNG (`<image>.json`). Each capture's rect is its own and away from the origin. The PNG is four pixels wide
+// and its rect eight, so the rect of the reduced JPEG — the one an archive writes as it reduces the PNG to a JPEG four
+// pixels wide — is the PNG's scaled by a half and rounded, stated here as it is and not through the app's rule.
+
+/// The rects by capture, in the order each was first asked for: the index of a capture's.
+final _geometryIndex = <String, int>{};
+
+/// The text of a rect ([_rectText]) → its symbol ([geometrySymbolOf]).
+final _symbolsByRect = <String, String>{};
+
+/// The rect of [capture]'s images in the coordinates of its PNG ([jpeg] false) or of its reduced JPEG.
+Map<String, dynamic> geometryRectOf(String capture, {required bool jpeg}) {
+  final i = _geometryIndex.putIfAbsent(capture, () {
+    final i = _geometryIndex.length;
+    _symbolsByRect['${2 * i + 3},${2 * i + 5},${2 * i + 11},${2 * i + 13}'] = '$capture.png';
+    _symbolsByRect['${i + 2},${i + 3},${i + 6},${i + 7}'] = '$capture.jpg';
+    return i;
+  });
+  final (x, y, size) = jpeg ? (i + 2, i + 3, 4) : (2 * i + 3, 2 * i + 5, 8);
+  return {
+    'top_left': {'x': x, 'y': y},
+    'bottom_right': {'x': x + size, 'y': y + size},
+  };
+}
+
+/// The symbol of the geometry the capture wrote, in the coordinates of its PNG where [png], else of its reduced JPEG.
+String geometryOfCapture(String capture, {required bool png}) => png ? '$capture.png' : '$capture.jpg';
+
+String? _rectText(Map<String, dynamic>? rect) {
+  if (rect?['top_left'] case {'x': final num x1, 'y': final num y1}) {
+    if (rect?['bottom_right'] case {'x': final num x2, 'y': final num y2}) return '$x1,$y1,$x2,$y2';
+  }
+  return null;
+}
+
+/// How the model names the rect [rect] ([FImages.geometry]): `<capture>.png` or `<capture>.jpg` where it is a capture's
+/// ([geometryRectOf]), else `?` and its corners; null where [rect] is null.
+String? geometrySymbolOf(Map<String, dynamic>? rect) {
+  if (rect == null) return null;
+  final text = _rectText(rect) ?? '';
+  return _symbolsByRect[text] ?? '?$text';
+}
+
+/// The rect [symbol] names ([geometrySymbolOf] the other way).
+Map<String, dynamic> geometryRectOfSymbol(String symbol) {
+  if (symbol.startsWith('?')) {
+    final [x1, y1, x2, y2] = symbol.substring(1).split(',').map(int.parse).toList();
+    return {
+      'top_left': {'x': x1, 'y': y1},
+      'bottom_right': {'x': x2, 'y': y2},
+    };
+  }
+  final at = symbol.lastIndexOf('.');
+  return geometryRectOf(symbol.substring(0, at), jpeg: symbol.substring(at + 1) == 'jpg');
+}
+
+/// The geometry a body carries of the image that stands for the three ([modelImage]): the symbol of the rect of its
+/// PNG and of its reduced JPEG, each null where it is not known.
+typedef FGeometry = ({String? png, String? jpeg});
+
+final _madeGeometries = <FGeometry, RecordGeometry>{};
+final _readGeometries = Expando<FGeometry>();
+
+/// The app's geometry of the model's [g]: the fields of [modelImage], the others not known; null where [g] is.
+RecordGeometry? recordGeometryOfRec(FGeometry? g) => g == null
+    ? null
+    : _madeGeometries.putIfAbsent(
+        g,
+        () => RecordGeometry(
+          factorPng: g.png == null ? null : geometryRectOfSymbol(g.png!),
+          factorJpeg: g.jpeg == null ? null : geometryRectOfSymbol(g.jpeg!),
+        ),
+      );
+
+/// The model's geometry of the app's [g] ([recordGeometryOfRec] the other way).
+FGeometry? recGeometryOf(RecordGeometry? g) {
+  if (g == null) return null;
+  return _readGeometries[g] ??= () {
+    final RecordGeometry(:skillPng, :skillJpeg, :factorPng, :factorJpeg, :campaignPng, :campaignJpeg) = g;
+    if (skillPng != null || skillJpeg != null || campaignPng != null || campaignJpeg != null) {
+      throw StateError('The model knows the geometry of one image for the three: $g.');
+    }
+    return (png: geometrySymbolOf(factorPng), jpeg: geometrySymbolOf(factorJpeg));
+  }();
+}
+
 const parentSlots = ['parent1', 'parent2'];
 
 class FRec {
@@ -58,7 +204,10 @@ class FRec {
     this.r = 1,
     this.bodyTime = 0,
     this.img,
+    this.pngUnknown = false,
     this.boundToNoImage = false,
+    this.geometry,
+    this.icon,
     Set<String>? absorbed,
     this.stage = FStage.active,
     this.stageTime = 0,
@@ -87,6 +236,12 @@ class FRec {
   /// ([bound]) and naming no image.
   String? img;
 
+  /// The binding knows the fields of the reduced JPEGs of [img]'s images and not those of their PNGs: worked out from a
+  /// directory that held the reduced JPEGs alone ([R4-9]), and not merged since with a binding of the same content that
+  /// knows the PNGs' ([R4-8] 5). Read only where [img] is not null: a binding that knows a PNG's field knows the JPEG's,
+  /// which is made from that PNG.
+  bool pngUnknown;
+
   /// The binding is worked out and names no image: the device worked it out from a directory that held none. The
   /// app's binding of such a directory is one whose every field is unknown, which is a binding all the same: the
   /// record is sent with it, and it is not worked out again. Read only where [img] is null.
@@ -94,6 +249,14 @@ class FRec {
 
   /// Whether the binding is worked out: false on a record from before the upgrade until the device works it out.
   bool get bound => img != null || boundToNoImage;
+
+  /// The geometry of the images the body was read from (`metadata.geometry`), placed with the binding and carried
+  /// with it; null where none is placed.
+  FGeometry? geometry;
+
+  /// The capture whose icon the body names (`metadata.icon`, the SHA-256 of that `trainee.jpg`), placed with the
+  /// binding; null where it names none.
+  String? icon;
 
   /// The ids of the records merged into this one (`merged_ids.json`).
   Set<String> absorbed;
@@ -114,7 +277,10 @@ class FRec {
     r: r,
     bodyTime: bodyTime,
     img: img,
+    pngUnknown: pngUnknown,
     boundToNoImage: boundToNoImage,
+    geometry: geometry,
+    icon: icon,
     absorbed: {...absorbed},
     stage: stage,
     stageTime: stageTime,
@@ -139,7 +305,7 @@ class FRec {
 
   @override
   String toString() =>
-      '$id=$body#${bound ? img ?? '' : null}^$bodyTime/${stage.name}^$stageTime/${absorbed.toList()..sort()}/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}/$forkedFrom';
+      '$id=$body#${bound ? '${img ?? ''}${img != null && pngUnknown ? '.jpg' : ''}' : null}${geometry == null ? '' : '[${geometry!.png},${geometry!.jpeg}]'}${icon == null ? '' : '~$icon'}^$bodyTime/${stage.name}^$stageTime/${absorbed.toList()..sort()}/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}/$forkedFrom';
 }
 
 /// A value a user wrote into a cell or a column's name, and when.
@@ -304,13 +470,92 @@ FPlan merge3(FState? base, FState local, FState server, {FileMutation? mutation}
 // The bridge between the model's values and the values sync carries, which the app's merge and the app's decisions of
 // the user's operations (`record_operation.dart`) take and give: a record, a cell and a title, each way.
 
-/// [r] as sync carries it. The model's binding is one hash, known or not: it rides in one field of the app's binding,
-/// which is null where the model's is not worked out ([FRec.bound]).
+/// The image of a capture's three that stands for the three in the model's directories and bindings ([FImages] holds
+/// them together): the app's rules of images read its PNG and its reduced JPEG, and the two fields of a binding that
+/// name those, and the fields of the other two images are unknown. The app binds all six; the model leaves four out,
+/// for every field's name is in the text of the list a round sends and hashes, and the four cost the K2 universes about
+/// a third of their time. It is the factor image, which the icon is cut from and goes with ([FImages.icon]): the app's
+/// rules keep `trainee.jpg` where they keep the factor image.
+const modelImage = 'factor';
+
+/// The app's binding of the model's binding of [r]: the PNG field and the reduced JPEG field of [modelImage], named by
+/// [nameOf] of the capture the model's names ([FRec.img]) and the file, the PNG's unknown where the model's knows the
+/// JPEG's alone ([FRec.pngUnknown]); every field unknown where it names no image; null where it is not worked out
+/// ([FRec.bound]).
+RecordBinding? recordBindingOfRec(FRec r, String Function(String capture, String file) nameOf) {
+  if (!r.bound) return null;
+  final capture = r.img;
+  if (capture == null) return const RecordBinding();
+  return RecordBinding(
+    factorPng: r.pngUnknown ? null : nameOf(capture, '$modelImage.png'),
+    factorJpeg: nameOf(capture, '$modelImage.jpg'),
+  );
+}
+
+/// The model's binding of the app's [binding] ([recordBindingOfRec] the other way): the capture its fields name, by
+/// [captureOf] of a field, and whether it knows the PNG's. The model's names a capture by the JPEG's field, which every
+/// binding that names one knows ([recordBindingOfRec]).
+({String? img, bool pngUnknown, bool boundToNoImage}) recBindingOf(
+  RecordBinding? binding,
+  String Function(String name) captureOf,
+) {
+  if (binding == null) return (img: null, pngUnknown: false, boundToNoImage: false);
+  final RecordBinding(:skillPng, :skillJpeg, :factorPng, :factorJpeg, :campaignPng, :campaignJpeg) = binding;
+  final capture = factorJpeg == null ? null : captureOf(factorJpeg);
+  final alike =
+      skillPng == null &&
+      skillJpeg == null &&
+      campaignPng == null &&
+      campaignJpeg == null &&
+      (capture != null || factorPng == null);
+  final pngs = factorPng == null ? 0 : 1;
+  if (!alike) throw StateError('The model binds all three images of one capture alike: $binding.');
+  return (img: capture, pngUnknown: capture != null && pngs == 0, boundToNoImage: capture == null);
+}
+
+/// The app's bindings of the model's ([recordBindingOfRec]), the files named by [nameOf], and the model's of the app's
+/// ([recBindingOf]), by [captureOf] of a field: each made once and kept — the one by the capture and the fields it
+/// knows, the other by the app's binding itself, which equals by its fields and hashes as itself —, for the merge reads
+/// and writes a record's binding at every step.
+class BindingFields {
+  BindingFields(this.nameOf, this.captureOf);
+  final String Function(String capture, String file) nameOf;
+  final String Function(String name) captureOf;
+  final _made = <(String, bool), RecordBinding>{};
+  final _read = Expando<({String? img, bool pngUnknown, bool boundToNoImage})>();
+
+  RecordBinding? of(FRec r) => switch (r.img) {
+    _ when !r.bound => null,
+    null => const RecordBinding(),
+    final capture => _made.putIfAbsent((capture, r.pngUnknown), () => recordBindingOfRec(r, nameOf)!),
+  };
+
+  ({String? img, bool pngUnknown, bool boundToNoImage}) read(RecordBinding? binding) => binding == null
+      ? (img: null, pngUnknown: false, boundToNoImage: false)
+      : _read[binding] ??= recBindingOf(binding, captureOf);
+
+  /// The app's name of the icon [r]'s body names: [nameOf] of its capture and `trainee.jpg`.
+  String? iconOf(FRec r) => switch (r.icon) {
+    final capture? => nameOf(capture, traineeIconFileName),
+    null => null,
+  };
+
+  /// The capture whose icon the app's [name] names ([iconOf] the other way).
+  String? readIcon(String? name) => name == null ? null : captureOf(name);
+}
+
+/// The names [syncRecordOfRec] gives the files of a capture: the capture and the file.
+final _rawFields = BindingFields((capture, file) => '$capture/$file', (name) => name.substring(0, name.indexOf('/')));
+
+/// [r] as sync carries it, its binding in the app's six fields ([recordBindingOfRec]), named here by capture and file
+/// — the names the app's decisions compare, and nothing hashes.
 SyncRecord syncRecordOfRec(FRec r) => SyncRecord(
   r.id,
   body: SyncBody(
     r.body,
-    binding: r.bound ? RecordBinding(skillPng: r.img) : null,
+    binding: _rawFields.of(r),
+    geometry: recordGeometryOfRec(r.geometry),
+    icon: _rawFields.iconOf(r),
     parents: {...r.parents},
     time: r.bodyTime,
   ),
@@ -324,14 +569,18 @@ SyncRecord syncRecordOfRec(FRec r) => SyncRecord(
 FRec recOfSyncRecord(SyncRecord r, {required int captured}) {
   final content = r.body.content;
   final at = content.lastIndexOf('@');
+  final binding = _rawFields.read(r.body.binding);
   return FRec(
     r.id,
     captured: captured,
     recognisedFrom: content.substring(0, at),
     r: int.parse(content.substring(at + 1)),
     bodyTime: r.body.time,
-    img: r.body.binding?.skillPng,
-    boundToNoImage: r.body.binding != null && r.body.binding?.skillPng == null,
+    img: binding.img,
+    pngUnknown: binding.pngUnknown,
+    boundToNoImage: binding.boundToNoImage,
+    geometry: recGeometryOf(r.body.geometry),
+    icon: _rawFields.readIcon(r.body.icon),
     absorbed: {...r.absorbed},
     stage: FStage.ofArchiveOption(r.stage.value),
     stageTime: r.stage.time,

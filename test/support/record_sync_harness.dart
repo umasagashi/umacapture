@@ -146,6 +146,10 @@ class SyncTestDevice {
     await (await open()).read(recordSyncProvider.notifier).setOn(on);
   }
 
+  /// Sets the account's image form to [form] on [server], as the user does on this device ([RecordSync.setImageForm]).
+  Future<void> setImageForm(SyncServer server, String form) async =>
+      (await open()).read(recordSyncProvider.notifier).setImageForm(server, form);
+
   /// One sync round against [server], asked for as the app asks for one ([RecordSync.round]); null where none runs.
   Future<SyncRoundOutcome?> roundAsAsked(SyncServer server) async =>
       (await open()).read(recordSyncProvider.notifier).round(server);
@@ -156,7 +160,8 @@ class SyncTestDevice {
   }
 
   /// Writes the record [id] into [store] as the app stores it: `record.json` from the shared fixture with the given
-  /// metadata, `archive.json` where a time or archived state is given, `merged_ids.json` where it absorbed records.
+  /// metadata — [geometry] and [icon] as `metadata.geometry` and `metadata.icon` are, the JSON a body carries —,
+  /// `archive.json` where a time or archived state is given, `merged_ids.json` where it absorbed records.
   ///
   /// Every record seeded is the same uma, so any two are a merge candidate ([merge]); [fans] gives one a body of its
   /// own without making it another uma, and [capturedDate] decides which of two is the older. [parentOfTheOthers]
@@ -166,6 +171,8 @@ class SyncTestDevice {
     String id, {
     String store = 'active',
     RecordBinding? binding,
+    Map<String, Object?>? geometry,
+    String? icon,
     int? bodyWrittenAt,
     String? parent1,
     String? parent2,
@@ -186,6 +193,8 @@ class SyncTestDevice {
     final metadata = (map['metadata'] as Map<String, dynamic>)
       ..['record_id'] = {'self': id, 'parent1': ?parent1, 'parent2': ?parent2}
       ..['binding'] = binding?.toMap()
+      ..['geometry'] = geometry
+      ..['icon'] = icon
       ..['body_written_at'] = bodyWrittenAt
       ..['relation_bonus'] = relationBonus;
     metadata.removeWhere((_, value) => value == null);
@@ -429,6 +438,16 @@ class FakeSyncServer implements SyncServer {
 
   final _bodies = <String, String>{};
   final _bodyBindings = <String, Map<String, Object?>>{};
+  final _bodyIcons = <String, String?>{};
+
+  /// Every body the server holds, by name.
+  Map<String, String> get storedBodies => Map.unmodifiable(_bodies);
+
+  /// The icon a body or a row names, as the Worker reads it: an image name, null where it names none, and not one
+  /// ([_notAnIcon]) where the value is neither.
+  static Object? _icon(Object? json) =>
+      json == null || (json is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(json)) ? json : _notAnIcon;
+  static const _notAnIcon = Object();
   final _parts = <String, String>{};
   final _roots = <String, String>{};
 
@@ -447,8 +466,14 @@ class FakeSyncServer implements SyncServer {
   @override
   Future<({int generation, String? root})> readGeneration() async => (generation: generation, root: rootName);
 
+  /// How many times a root was read: a round reads the list only where the generation moved from its base's.
+  int rootsRead = 0;
+
   @override
-  Future<String> root(String name) async => _roots[name] ?? (throw const SyncRefusal(404, 'not_found'));
+  Future<String> root(String name) async {
+    rootsRead++;
+    return _roots[name] ?? (throw const SyncRefusal(404, 'not_found'));
+  }
 
   @override
   Future<String> part(String name) async => _parts[name] ?? (throw const SyncRefusal(404, 'not_found'));
@@ -475,6 +500,9 @@ class FakeSyncServer implements SyncServer {
       final decoded = jsonDecode(body.body);
       final binding = decoded is Map<String, Object?> ? _binding((decoded['metadata'] as Map?)?['binding']) : null;
       if (binding == null) throw SyncRefusal(400, 'invalid_payload', 'bodies[$i].body');
+      if (identical(_icon((decoded as Map)['metadata']['icon']), _notAnIcon)) {
+        throw SyncRefusal(400, 'invalid_payload', 'bodies[$i].body');
+      }
     }
     return [for (final body in bodies) _storeBody(body.name, body.body)];
   }
@@ -483,6 +511,7 @@ class FakeSyncServer implements SyncServer {
     final status = _bodies.containsKey(name) ? 'exists' : 'stored';
     _bodies[name] = body;
     _bodyBindings[name] = _binding((jsonDecode(body) as Map)['metadata']['binding'])!;
+    _bodyIcons[name] = (jsonDecode(body) as Map)['metadata']['icon'] as String?;
     return status;
   }
 
@@ -526,6 +555,8 @@ class FakeSyncServer implements SyncServer {
           missing.add(bodyName);
         } else if (image == null || image.toString() != bodyBinding.toString()) {
           throw SyncRefusal(400, 'invalid_payload', 'part.records[$i].image');
+        } else if (_icon(row['icon']) != _bodyIcons[bodyName]) {
+          throw SyncRefusal(400, 'invalid_payload', 'part.records[$i].icon');
         }
       }
       if (missing.isNotEmpty) throw SyncRefusal(409, 'missing_objects', missing);
@@ -584,6 +615,105 @@ class FakeSyncServer implements SyncServer {
   List<String> currentParts() => rootName == null
       ? const []
       : [for (final name in (jsonDecode(_roots[rootName]!)['parts'] as Map).values) _parts[name]!];
+
+  /// The account's image form (`GET /api/sync/settings`): `png`, `jpeg` or `none`, which it is until the test sets one.
+  String form = 'none';
+
+  /// The images the account holds, by name.
+  final images = <String, Uint8List>{};
+
+  /// Runs as an image put arrives, before the server weighs it, with the image's name: a gate the test holds, or a
+  /// connection that drops (it throws).
+  Future<void> Function(String name)? beforeImagePut;
+
+  /// The names asked of `POST /api/sync/held`, each request's.
+  final heldAsked = <List<String>>[];
+
+  @override
+  Future<String> imageForm() async => form;
+
+  /// `PUT /api/sync/settings`: the account's image form, from now on.
+  @override
+  Future<void> putImageForm(String form) async => this.form = form;
+
+  /// Runs once an image put the server stored, or held already, answers, with the image's name.
+  Future<void> Function(String name)? afterImagePut;
+
+  /// `POST /api/sync/held`: the names of [names] the account holds.
+  @override
+  Future<Set<String>> held(List<String> names) async {
+    if (names.isEmpty || names.length > 1000) throw const SyncRefusal(400, 'invalid_payload', 'names');
+    heldAsked.add([...names]);
+    return {
+      for (final name in names)
+        if (images.containsKey(name)) name,
+    };
+  }
+
+  /// `PUT /api/sync/images/<name>`: an image whose bytes do not hash to its name is refused as the bucket refuses it,
+  /// one the account holds is there already, and under the form `none` a new one is refused but the reduced JPEG an
+  /// archive puts in place of a PNG the account holds, which a row of the current root archived as reduced JPEG names
+  /// with that PNG (`docs/sync-protocol.md`).
+  @override
+  Future<void> putImage(String name, Uint8List bytes, {required bool jpeg}) async {
+    await beforeImagePut?.call(name);
+    if (syncObjectName(bytes) != name) throw const SyncRefusal(502, 'storage_refused');
+    if (!images.containsKey(name)) {
+      if (form == 'none' && !(jpeg && _replacements().contains(name))) {
+        throw const SyncRefusal(409, 'images_not_synced');
+      }
+      images[name] = bytes;
+    }
+    await afterImagePut?.call(name);
+  }
+
+  /// `GET /api/sync/images/<name>`: the bytes of an image the account holds and its current root references; null,
+  /// for `404 not_found`, otherwise.
+  @override
+  Future<Uint8List?> image(String name) async => _referenced().contains(name) ? images[name] : null;
+
+  /// The rows of the current root's record parts.
+  Iterable<Map<String, Object?>> _rows() sync* {
+    for (final text in currentParts()) {
+      final part = jsonDecode(text) as Map<String, Object?>;
+      if (part['records'] case final List<Object?> records) yield* records.cast<Map<String, Object?>>();
+    }
+  }
+
+  /// Of a row's binding, each image's PNG and reduced JPEG name.
+  static Iterable<({String? png, String? jpeg})> _imagesOf(Map<String, Object?> row) {
+    final binding = (row['image'] as Map<String, Object?>?) ?? const {};
+    return [
+      for (final image in recordBindingImages)
+        (png: binding['${image}_png'] as String?, jpeg: binding['${image}_jpeg'] as String?),
+    ];
+  }
+
+  static String? _stateOf(Map<String, Object?> row) => (row['archive'] as Map<String, Object?>?)?['state'] as String?;
+
+  /// What the current root references of images: every image a normal row names; of a row archived as reduced JPEG,
+  /// each image's JPEG, and its PNG only while the account holds no JPEG of it; and the icon either names (`icon`); none
+  /// of a row archived without images.
+  Set<String> _referenced() => {
+    for (final row in _rows()) ...[
+      for (final (:png, :jpeg) in _imagesOf(row))
+        ...switch (_stateOf(row)) {
+          'normal' => [?png, ?jpeg],
+          'jpeg' => [?jpeg, if (jpeg == null || !images.containsKey(jpeg)) ?png],
+          _ => const <String>[],
+        },
+      if (_stateOf(row) case 'normal' || 'jpeg') ?(row['icon'] as String?),
+    ],
+  };
+
+  /// The reduced JPEGs the account takes under the form `none`: of each row of the current root archived as reduced
+  /// JPEG, the JPEG of an image whose PNG the account holds.
+  Set<String> _replacements() => {
+    for (final row in _rows())
+      if (_stateOf(row) == 'jpeg')
+        for (final (:png, :jpeg) in _imagesOf(row))
+          if (png != null && images.containsKey(png)) ?jpeg,
+  };
 
   /// `POST /api/sync/bodies/get`, for one body.
   String? body(String name) => _bodies[name];
@@ -762,7 +892,7 @@ class SyncStopFsBackend implements FsBackend {
 
 /// The filesystem as the app reads and writes through it, holding the work on the bindings of the records [ids]: the
 /// first look for the skill image of each, in either store, which the work on its binding starts with
-/// ([computeRecordBinding]), waits until the test lets it go ([go]) — a binding worked out as slowly as the test wants.
+/// ([computeRecordBodyImages]), waits until the test lets it go ([go]) — a binding worked out as slowly as the test wants.
 /// Everything else goes through.
 class SyncBindingGateFsBackend extends IoFsBackend {
   SyncBindingGateFsBackend(Set<String> ids)

@@ -1232,6 +1232,10 @@ class RunStep {
     this.told,
     required this.bases,
     required this.unanswered,
+    required this.serverImages,
+    required this.imageForm,
+    required this.room,
+    required this.bodiesTheServerLacks,
   });
   final Op op;
   final int time;
@@ -1239,7 +1243,7 @@ class RunStep {
   /// False of a round that stopped before its result was in place ([FDevice.receivedAll]); true of any other step.
   final bool placedAll;
   final Map<String, FState> sides;
-  final Map<String, Map<String, String>> images;
+  final Map<String, Map<String, FImages>> images;
   final Map<String, Set<String>> shelves;
 
   /// What the app's round of the step told its device's user ([FDevice.told]); null of a step that is no round, and of
@@ -1254,6 +1258,24 @@ class RunStep {
   /// The devices that asked for a swap and do not know the answer ([FDevice.unanswered]): their next round reads the
   /// base again against the server's list.
   final Set<String> unanswered;
+
+  /// The image files the server holds ([FServer.images]), each by its name: `<capture>` for the PNGs of a capture's
+  /// images, `<capture>.jpg` for their reduced JPEGs.
+  final Set<String> serverImages;
+
+  /// The account's image form ([FServer.imageForm]): `png`, `jpeg`, or `none`.
+  final String imageForm;
+
+  /// The server's room: whether the account's storage is full ([FServer.full]), and the room its database has left
+  /// for sync ([FServer.database]).
+  final ({bool storageFull, DatabaseRoom database}) room;
+
+  /// Of a step at which the server has no room for new bytes ([room]): device → the ids of the records it lists whose
+  /// body the server does not hold ([FServer.holdsBody]) — those a round of it cannot put. Empty of any other step.
+  final Map<String, Set<String>> bodiesTheServerLacks;
+
+  /// Whether the server has no room for new bytes: a body or an image it does not hold is refused.
+  bool get noRoomForNewBytes => room.storageFull || room.database != DatabaseRoom.room;
 }
 
 /// The app's round broken on purpose from outside, as [BrokenMerge] breaks the app's merge: what is done to a device
@@ -1399,6 +1421,18 @@ class WorldRun implements PropertyInput, OfTheAppsRounds<WorldRun> {
             for (final d in w.devices.values)
               if (d.unanswered) d.name,
           },
+          serverImages: {...w.server.images},
+          imageForm: w.server.imageForm,
+          room: (storageFull: w.server.full, database: w.server.database),
+          bodiesTheServerLacks: w.server.full || w.server.database != DatabaseRoom.room
+              ? {
+                  for (final d in w.devices.values)
+                    d.name: {
+                      for (final r in d.store.records.values)
+                        if (!w.server.holdsBody(syncBodyNameOf(r))) r.id,
+                    },
+                }
+              : const {},
         ),
       );
     }
@@ -1448,8 +1482,9 @@ bool _applies(Op op, FDevice device) {
 String _fingerprintOf(RunStep s) => [
   for (final side in _sides) '${s.sides[side]}',
   for (final MapEntry(:key, :value) in s.images.entries)
-    '$key:${(value.entries.map((e) => '${e.key}=${e.value}').toList()..sort()).join(',')}',
+    '$key:${(value.entries.map((e) => '${e.key}=${e.value.files}').toList()..sort()).join(',')}',
   for (final MapEntry(:key, :value) in s.shelves.entries) '$key shelf:${(value.toList()..sort()).join(',')}',
+  'server images:${(s.serverImages.toList()..sort()).join(',')}',
 ].join('|');
 
 /// An input whose worlds run the app's rounds, which a [RoundBreak] breaks.
@@ -1473,7 +1508,7 @@ final class BrokenRound<I extends OfTheAppsRounds<I>> extends Breaking<I> {
 WorldRun _runUnder(WorldRun run, FileMutation mutation) => run.under(mutation: mutation);
 
 /// What [s] holds of records it does not hold: cells, dismissed pairs that name one, and of [images] the images.
-List<String> _strays(FState s, Map<String, String>? images) => [
+List<String> _strays(FState s, Map<String, FImages>? images) => [
   for (final key in s.cells.keys)
     if (!s.records.containsKey(key.$2)) 'cell ${key.$1} ${key.$2}',
   for (final pair in s.dismissed)
@@ -1492,12 +1527,12 @@ bool _wrote(FState before, FState after, String stray) => switch (stray.split(' 
 
 /// What [s] holds of the record [id] besides the record: its cells, the dismissed pairs that name it, and where
 /// [images] are given its images.
-List<String> _carried(FState s, String id, [Map<String, String>? images]) => [
+List<String> _carried(FState s, String id, [Map<String, FImages>? images]) => [
   for (final MapEntry(:key, :value) in s.cells.entries)
     if (key.$2 == id) 'cell ${key.$1} $value',
   for (final pair in s.dismissed)
     if (pair.split('+').contains(id)) 'pair $pair',
-  if (images?[id] case final image?) 'image $image',
+  if (images?[id] case final image?) 'image ${image.files}',
 ];
 
 /// The ids [op] names, of the zips [zips] holds where it takes one in.
@@ -1537,6 +1572,7 @@ final _keepsItsOwnValues = RoundBreak('a round leaves the device its own values 
       ..r = had.r
       ..bodyTime = had.bodyTime
       ..img = had.img
+      ..pngUnknown = had.pngUnknown
       ..stage = had.stage
       ..stageTime = had.stageTime;
     for (final MapEntry(:key, :value) in was.cells.entries) {
@@ -2224,10 +2260,19 @@ Set<String> _heldParts(RunStep s) => {
     for (final MapEntry(:key, :value) in s.sides[side]!.cells.entries) '$side cell ${key.$1} ${key.$2} $value',
     for (final MapEntry(:key, :value) in s.sides[side]!.titles.entries) '$side title $key $value',
     for (final pair in s.sides[side]!.dismissed) '$side pair $pair',
-    for (final MapEntry(:key, :value) in s.images[side]?.entries ?? const <MapEntry<String, String>>[])
-      '$side image $key=$value',
+    for (final MapEntry(:key, :value) in s.images[side]?.entries ?? const <MapEntry<String, FImages>>[])
+      '$side image $key=${value.files}',
   ],
 };
+
+/// The binding of [r] as a part's text: the capture it names — its reduced JPEGs' fields alone, where it knows those
+/// alone —, `none` where it names none, `unbound` where it is not worked out.
+String _bindingText(FRec r) => !r.bound
+    ? 'unbound'
+    : switch (r.img) {
+        final capture? => r.pngUnknown ? '$capture.jpg' : capture,
+        null => 'none',
+      };
 
 String _recordText(FRec r) =>
     '${r.id}=${r.body}^${r.bodyTime}/${r.stage.name}^${r.stageTime}/${r.absorbed.toList()..sort()}';
@@ -2254,6 +2299,7 @@ final _bindsEveryRecordToNoImage = RoundBreak('a round that stops binds every re
   for (final r in d.store.records.values) {
     r
       ..img = null
+      ..pngUnknown = false
       ..boundToNoImage = true;
   }
 });
@@ -2336,7 +2382,7 @@ Set<String> _comparedParts(RunStep s, {String? side, bool images = true}) => {
   for (final p in _heldParts(s))
     if ((side == null || p.startsWith('$side ')) && (images || p.split(' ')[1] != 'image')) p,
   for (final x in side == null ? _sides : [side])
-    for (final r in s.sides[x]!.records.values) '$x binding ${r.id}=${r.bound ? r.img ?? 'none' : 'unbound'}',
+    for (final r in s.sides[x]!.records.values) '$x binding ${r.id}=${_bindingText(r)}',
 };
 
 /// The parts [a] and [b] do not both hold, as a failure's rows.
@@ -2626,7 +2672,7 @@ Set<String> _partsOfIds(RunStep s, String side, bool Function(String id) ofId, b
   final held = s.sides[side]!;
   return {
     for (final r in held.records.values)
-      if (ofId(r.id)) '$side record ${_recordText(r)} ${r.bound ? r.img ?? 'none' : 'unbound'}',
+      if (ofId(r.id)) '$side record ${_recordText(r)} ${_bindingText(r)}',
     for (final MapEntry(:key, :value) in held.cells.entries)
       if (ofId(key.$2)) '$side cell ${key.$1} ${key.$2} $value',
     for (final pair in held.dismissed)
@@ -3291,3 +3337,872 @@ bool _sameParts(Set<String> a, Set<String> b) => a.length == b.length && a.conta
 bool _sameIds(Set<String>? a, Set<String>? b) => a == null ? b == null : b != null && _sameParts(a, b);
 
 String _idsText(Set<String>? ids) => ids == null ? 'none' : (ids.toList()..sort()).join(', ');
+
+// --- images: their forms, the binding and the archive ([R4-8], [R4-9], [R2-4], S-09, S-11, S-16) -----------------
+//
+// The images of a record are of the body it shows (rule 4): the binding the body carries names them, form by form.
+// The model holds a capture's three images together — their PNGs, their reduced JPEGs, or both, the icon cut from the
+// factor image and the geometry file of their rect ([FImages]) —, and a binding knows the fields of both forms of a
+// capture's images, of the reduced JPEGs alone ([FRec.pngUnknown]), or of none, placed with the geometry and the name
+// of the icon ([FRec.geometry], [FRec.icon]); one image stands for the three in the files and the fields the app's
+// rules read ([modelImage]). The app's round sends the images and the icon and takes them, the geometry written beside
+// each form it places.
+
+/// The image files [side] holds in the directory of the record [id] at [s]; none of the server's, which holds no
+/// directory.
+FImages? _imagesOf(RunStep s, String side, String id) => s.images[side]?[id];
+
+/// Whether [s] is a round of the device [device]'s.
+bool _roundOf(RunStep s, String device) => _isRound(s.op) && s.op.device == device;
+
+/// The images each device held as the round now running began, for the controls that put back what a round changed.
+final _imagesAsTheRoundBegan = Expando<Map<String, FImages>>();
+
+void _noteImages(FDevice d, FServer _) => _imagesAsTheRoundBegan[d] = {...d.images};
+
+/// A round that leaves each record it puts in place with the image files the device held of it as it began: a record
+/// shows another body, and keeps the images of the one it showed.
+final _keepsTheImagesItHad = RoundBreak('a round keeps the images a record held, whatever body it puts on it', (
+  d,
+  _,
+  _,
+) {
+  final had = _imagesAsTheRoundBegan[d] ?? const {};
+  for (final id in d.store.records.keys) {
+    if (had[id] case final held?) d.images[id] = held;
+  }
+}, before: _noteImages);
+
+/// A round that lets go of the image files of every record it puts in place.
+final _letsGoOfTheImagesItPlaces = RoundBreak('a round lets go of the images of every record it puts in place', (
+  d,
+  _,
+  _,
+) {
+  d.tookIn.forEach(d.images.remove);
+});
+
+/// A place that carries no file with a record split off ([FDevice.carriesNoFiles]): the promise of the place's
+/// [SyncPlace.carriedBy] broken from outside.
+final _carriesNoFilesSplitOff = RoundBreak(
+  'the place carries no file with a record split off',
+  (d, _, _) => d.carriesNoFiles = false,
+  before: (d, _) => d.carriesNoFiles = true,
+);
+
+/// images-are-of-the-body ([R4-8]): the image files in a record's directory are those its binding names.
+final imagesAreOfTheBody = SyncProperty<WorldRun>(
+  'images-are-of-the-body',
+  'After every operation and every round, each image file a device holds in the directory of a record it lists is one '
+      'the binding of the body the record shows names — of the capture the binding names, in either form, and the '
+      'icon with the factor image —, wherever the binding is worked out; a record whose binding names no image holds '
+      'none.',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (var i = run.shared; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      for (final d in const ['A', 'B']) {
+        for (final r in step.sides[d]!.records.values.where((r) => r.bound)) {
+          checks++;
+          final held = _imagesOf(step, d, r.id);
+          // Where the record held, as the step began, the images of a capture its binding does not name now, an end
+          // that keeps them fails, and one that lets go of them holds.
+          if (_imagesOf(was, d, r.id) case final before? when before.capture != r.img) decisive++;
+          if (held == null || held.capture == r.img) continue;
+          failures.add(
+            Failure('$d after #${i - run.shared + 1} (${step.op})', [
+              ['record', 'binding', 'image files'],
+              [r.id, _bindingText(r), held.files],
+            ]),
+          );
+        }
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_keepsTheImagesItHad)],
+);
+
+/// The image files a record [r] that a round of the device [d] put in place may hold by the rules ([R4-8] 5, [R2-4]),
+/// of what the device held as the round began ([was]): the files it held where the body it shows is the one it held —
+/// the binding of a record that carried none worked out of its directory first ([R4-9] (ii)) —, a record split off with
+/// the files of the device's record it is split off; else those of its own its binding names; else those of any of
+/// the device's other records whose files the binding names — the rules name no one of them —, or none where no record
+/// holds them; each in the form its stage holds them in. Also whether the ends the rules give differ from the one of a
+/// round that leaves the record's files as they were.
+({Set<FImages?> images, bool decisive}) _imagesTheRulesGive(RunStep was, String d, FRec r) {
+  final held = was.sides[d]!.records;
+  final from = held.containsKey(r.id) ? r.id : r.forkedFrom;
+  final before = from == null ? null : held[from];
+  final own = from == null ? null : _imagesOf(was, d, from);
+  final bound = before == null ? null : (before.bound ? before.img : own?.capture);
+  final same = before != null && before.body == r.body && (bound == null || r.img == null || bound == r.img);
+  final List<FImages?> named;
+  if (same || (own != null && own.capture == r.img)) {
+    named = [own];
+  } else if (r.img case final capture?) {
+    final others = [
+      for (final id in held.keys)
+        if (id != r.id && _imagesOf(was, d, id)?.capture == capture) _imagesOf(was, d, id),
+    ];
+    named = others.isEmpty ? [null] : others;
+  } else {
+    named = [null];
+  }
+  FImages? shaped(FImages? f) => switch (r.stage) {
+    FStage.none => null,
+    FStage.resizedJpeg => f?.reduced,
+    FStage.active => f,
+  };
+  final images = {for (final f in named) shaped(f)};
+  return (images: images, decisive: images.length != 1 || images.single != own || from != r.id);
+}
+
+/// images-stay-with-their-body ([R4-8] 5, [R4-9] (ii)): a round places the images of the body a record shows.
+final imagesStayWithTheirBody = SyncProperty<WorldRun>(
+  'images-stay-with-their-body',
+  'A round of the app\'s leaves each record its device lists with the image files it held, where the body it shows '
+      'is the one it held — a record that carried no binding read by the one its directory gives —, and a record '
+      'split off with those of the device\'s record it is split off; else with those of its own the body\'s binding '
+      'names, else with those of the first of the device\'s records by id whose files the binding names, else none; '
+      'and beside those, the forms of the images its binding names that the server held as the round began, taken '
+      'from it, and the icon its body names where it holds none and the server held that icon; each in the form its '
+      'stage holds them in: none in an archive without images, the reduced JPEGs alone in one with resized images. '
+      '(The geometry files beside them are received-images-are-usable.)',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (var i = run.shared; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      for (final d in const ['A', 'B']) {
+        if (!_roundOf(step, d)) continue;
+        for (final r in step.sides[d]!.records.values) {
+          checks++;
+          final (images: given, decisive: tells) = _imagesTheRulesGive(was, d, r);
+          if (tells) decisive++;
+          final images = {for (final f in given) f?.withoutGeometry};
+          final held = _imagesOf(step, d, r.id)?.withoutGeometry;
+          if (images.contains(held) || _takenFromTheServer(was, r, images, held)) continue;
+          failures.add(
+            Failure('$d after #${i - run.shared + 1} (${step.op})', [
+              ['record', 'binding', 'stage', 'held as the round began', 'the rules give', 'held'],
+              [
+                r.id,
+                _bindingText(r),
+                r.stage.name,
+                switch (r.forkedFrom) {
+                  final from? when !was.sides[d]!.records.containsKey(r.id) => '$from: ${_filesText(was, d, from)}',
+                  _ => _filesText(was, d, r.id),
+                },
+                images.map((f) => f?.files ?? '-').join(' or '),
+                held?.files ?? '-',
+              ],
+            ]),
+          );
+        }
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_letsGoOfTheImagesItPlaces), BrokenRound(_carriesNoFilesSplitOff)],
+);
+
+/// [imagesStayWithTheirBody] where the server holds every image and icon of the records a round splits off: the round
+/// that puts a record split off in place takes from the server, in its image step, each file a place that carries none
+/// would have carried with it ([_carriesNoFilesSplitOff]), so no end tells that control apart, and the other is the
+/// control.
+final imagesStayWithTheirBodyWhereTheServerHoldsThem = SyncProperty<WorldRun>(
+  imagesStayWithTheirBody.name,
+  imagesStayWithTheirBody.summary,
+  imagesStayWithTheirBody.holds,
+  controls: [BrokenRound(_letsGoOfTheImagesItPlaces)],
+);
+
+String _filesText(RunStep s, String side, String id) => _imagesOf(s, side, id)?.files ?? '-';
+
+/// Whether [held], the images a round left the record [r] with, are one of [images] — what the rules give it on its
+/// device — with forms beside them that the server held of the capture [r]'s binding names as the round began
+/// ([R4-8] 5, S-11, [R2-4]): a PNG where the record is not archived; a reduced JPEG where the server held it, or held
+/// the PNG of a record archived with resized images, which its device reduces; and the icon its body names, of that
+/// capture, where it holds no icon and the server held that one ([R4-8] 6, S-11).
+bool _takenFromTheServer(RunStep was, FRec r, Set<FImages?> images, FImages? held) {
+  final capture = r.img;
+  if (held == null || capture == null || held.capture != capture || r.stage == FStage.none) return false;
+  final png = was.serverImages.contains(_serverImageName(capture, 'png'));
+  final jpeg = was.serverImages.contains(_serverImageName(capture, 'jpeg'));
+  final icon = r.icon == capture && was.serverImages.contains(_serverImageName(capture, 'icon'));
+  return images.any((f) {
+    if (f != null && f.capture != capture) return false;
+    final (hadPng, hadJpeg, hadIcon) = (f?.png ?? false, f?.jpeg ?? false, f?.icon ?? false);
+    if (held.icon != hadIcon && !(held.icon && icon)) return false;
+    if ((hadPng && !held.png) || (hadJpeg && !held.jpeg)) return false;
+    final pngTaken = !held.png || hadPng || (png && r.stage == FStage.active);
+    final jpegTaken = !held.jpeg || hadJpeg || jpeg || (png && r.stage == FStage.resizedJpeg);
+    return pngTaken && jpegTaken;
+  });
+}
+
+/// A round that leaves the images of a record it puts in an archive in the form they had as it began.
+final _leavesArchivedImagesUnshaped = RoundBreak('a round leaves the images of a record it archives unshaped', (
+  d,
+  _,
+  _,
+) {
+  final had = _imagesAsTheRoundBegan[d] ?? const {};
+  for (final r in d.store.records.values) {
+    if (r.stage == FStage.active) continue;
+    if (had[r.id] case final held?) d.images[r.id] = held;
+  }
+}, before: _noteImages);
+
+/// stage-shapes-the-images ([R2-4], S-11): the stage of a record decides the form of the images its device holds.
+final stageShapesTheImages = SyncProperty<WorldRun>(
+  'stage-shapes-the-images',
+  'After every operation and every round, a record a device lists archived without images holds no image file, the '
+      'icon included, and one archived with resized images holds no PNG — the stage the device took in included, and '
+      'an image it had not sent yet —; an archive with resized images of a record that holds the reduced JPEGs alone '
+      'leaves them as they are.',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (var i = run.shared; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      for (final d in const ['A', 'B']) {
+        for (final r in step.sides[d]!.records.values.where((r) => r.stage != FStage.active)) {
+          checks++;
+          final held = _imagesOf(step, d, r.id);
+          // Where the record held PNGs as the step began, an end that leaves them as they were fails.
+          if (_imagesOf(was, d, r.id)?.png ?? false) decisive++;
+          final wrong = switch (r.stage) {
+            FStage.none => held != null,
+            FStage.resizedJpeg => held?.png ?? false,
+            FStage.active => false,
+          };
+          if (!wrong) continue;
+          failures.add(
+            Failure('$d after #${i - run.shared + 1} (${step.op})', [
+              ['record', 'stage', 'image files'],
+              [r.id, r.stage.name, held?.files ?? '-'],
+            ]),
+          );
+        }
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_leavesArchivedImagesUnshaped)],
+);
+
+/// The bindings each device's records carried as the round now running began, for [_forgetsThePngFields].
+final _bindingsAsTheRoundBegan = Expando<Map<String, bool>>();
+
+/// A round that leaves a record whose binding knew the reduced JPEGs' fields alone as it began knowing those alone: the
+/// fields of the PNGs another side's binding of the same content knows are not taken in.
+final _forgetsThePngFields = RoundBreak(
+  'a round takes in no field of a binding the device does not know',
+  (d, _, _) {
+    final had = _bindingsAsTheRoundBegan[d] ?? const {};
+    for (final r in d.store.records.values) {
+      if ((had[r.id] ?? false) && r.img != null) r.pngUnknown = true;
+    }
+  },
+  before: (d, _) =>
+      _bindingsAsTheRoundBegan[d] = {for (final r in d.store.records.values) r.id: r.img != null && r.pngUnknown},
+);
+
+/// binding-goes-with-the-body ([R4-9], S-16, [R4-8] 5): the binding is sent with the body whatever the image form, and
+/// the bindings of one content merge.
+final bindingGoesWithTheBody = SyncProperty<WorldRun>(
+  'binding-goes-with-the-body',
+  'At rest every side that lists a record — each device and the server\'s list — holds the same binding of it, whatever '
+      'the account\'s image form (the list carries a binding that names no image as one not worked out, and the two '
+      'read alike); and where a device worked out the binding of a record of the same recognised '
+      'content out of a directory that held the PNGs of the capture the binding names, every side\'s binding knows the '
+      'fields of those PNGs: the binding worked out of a directory knows the fields of the forms it holds, and two '
+      'bindings of one content that do not disagree are one, with the fields of both.',
+  (run) {
+    final end = run.end;
+    final failures = <Failure>[];
+    var (checks, decisive) = (0, 0);
+    // The contents whose binding a device worked out of a directory that held the PNGs, by the capture it names.
+    final workedOutOfPngs = <(String, String)>{};
+    for (var i = 1; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      for (final d in const ['A', 'B']) {
+        for (final r in step.sides[d]!.records.values) {
+          final before = was.sides[d]!.records[r.id];
+          final held = _imagesOf(was, d, r.id);
+          if (before == null || before.bound || !r.bound || held == null || !held.png) continue;
+          workedOutOfPngs.add((r.body, held.capture));
+        }
+      }
+    }
+    final ids = {for (final side in _sides) ...end.sides[side]!.records.keys};
+    for (final id in ids.toList()..sort()) {
+      checks++;
+      // The server's list carries a binding that names no image as one not worked out (`image` is `{}` for both), and
+      // every rule reads the two alike: neither names a file, and each agrees with every binding.
+      String text(String side, FRec r) => switch (_bindingText(r)) {
+        'unbound' when side == 'server' => 'none',
+        final t => t,
+      };
+      final texts = {
+        for (final side in _sides)
+          if (end.sides[side]!.records[id] case final r?) side: text(side, r),
+      };
+      // The rounds begin with the sides holding other bindings of it: an end that sends no binding, or merges none,
+      // holds them apart.
+      final began = {
+        for (final side in _sides)
+          if (run.beforeRounds.sides[side]!.records[id] case final r?) text(side, r),
+      };
+      if (began.length > 1) decisive++;
+      final records = [for (final side in _sides) ?end.sides[side]!.records[id]];
+      final known = {
+        for (final r in records)
+          if (r.img case final capture? when workedOutOfPngs.contains((r.body, capture))) capture,
+      };
+      if (known.isNotEmpty) decisive++;
+      final apart = texts.values.toSet().length > 1;
+      final unknown = records.any((r) => r.pngUnknown && known.contains(r.img));
+      if (!apart && !unknown) continue;
+      failures.add(
+        Failure('the binding of $id at rest', [
+          ['side', 'binding'],
+          for (final MapEntry(:key, :value) in texts.entries) [key, value],
+          if (unknown) ['a device worked it out of', 'the PNGs of ${known.join(', ')}'],
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_forgetsThePngFields)],
+);
+
+/// Of the forms the model's images take, the name of the server's object of [capture]'s images in [form]
+/// ([RunStep.serverImages]): `png`, `jpeg`, or `icon` for the icon cut from them.
+String _serverImageName(String capture, String form) => switch (form) {
+  'png' => capture,
+  'icon' => '$capture.icon',
+  _ => '$capture.jpg',
+};
+
+/// What [s] owes a device [d] that lists the record [r] of the content bound to the images of [capture], where the
+/// account's form at rest is not `none` (S-09, S-11, [R2-4]): the form of the images it holds — the most original it
+/// can have: a PNG where the record is active, the form is `png` and the server holds the PNGs, or [d] held them as the
+/// rounds began ([began]), else a reduced JPEG —, and of the server, a form of them. A PNG another device holds alone,
+/// beside a reduced JPEG the server holds, is not one [d] can have: the server keeps the form put first (S-11). Null
+/// where no device and not the server holds any form of them, or the record is archived without images.
+({bool png, bool jpeg})? _formsOwed(RunStep s, FRec r, String capture, String d, RunStep began) {
+  if (r.stage == FStage.none) return null;
+  final held = [
+    for (final d in const ['A', 'B'])
+      for (final images in s.images[d]!.values)
+        if (images.capture == capture) images,
+  ];
+  final serverPng = s.serverImages.contains(_serverImageName(capture, 'png'));
+  final any = serverPng || held.isNotEmpty || s.serverImages.contains(_serverImageName(capture, 'jpeg'));
+  if (!any) return null;
+  if (r.stage == FStage.resizedJpeg) return (png: false, jpeg: true);
+  final hadPng = began.images[d]!.values.any((h) => h.capture == capture && h.png);
+  return s.imageForm == 'png' && (serverPng || hadPng) ? (png: true, jpeg: false) : (png: false, jpeg: true);
+}
+
+/// A round that, while the form is not none, sends each image file its device holds as PNGs, and takes those the server
+/// holds of each record it lists as PNGs, whatever the record's stage: images sent and taken, in no form of their own.
+final _carriesEveryImageAsPngs = RoundBreak('a round sends and takes every image as PNGs, whatever the stage', (
+  d,
+  _,
+  server,
+) {
+  if (server.imageForm == 'none') return;
+  for (final images in d.images.values) {
+    server.images.add(_serverImageName(images.capture, 'png'));
+  }
+  for (final r in d.store.records.values) {
+    final capture = r.img;
+    if (r.stage == FStage.none || capture == null || !server.images.contains(capture)) continue;
+    d.images[r.id] = FImages(capture);
+  }
+});
+
+/// images-reach-every-device (S-09, S-11, [R2-4]): at rest, under a form that sends images, the images of every record
+/// are on the server and on each device in the form its stage and the form give.
+final imagesReachEveryDevice = SyncProperty<WorldRun>(
+  'images-reach-every-device',
+  'At rest, where the account\'s image form is not none, each device holds, of every record it lists that is not '
+      'archived without images and whose images some device or the server holds, those images in the most original '
+      'form it can have: the PNGs where the record is active and the form is png and the server holds the PNGs — one '
+      'that holds the reduced JPEGs alone takes them — or the device held them as the rounds began, else the reduced '
+      'JPEGs or the PNGs, which a record archived with resized images holds the reduced JPEGs of alone (a PNG another '
+      'device holds alone, where the server holds the reduced JPEG put first, is not one it can have: the server keeps '
+      'the form put first); the server holds a form of those images, and the icon the record\'s body names where a '
+      'device holds it with them; images sent while the form was none, or held back for it, reach it once the form is '
+      'png or jpeg. (That the server holds the reduced JPEGs of a record archived with resized images whose PNGs it '
+      'holds is resized-replaces-the-png; that a device holds the icon is received-images-are-usable.)',
+  (run) {
+    final end = run.end;
+    final failures = <Failure>[];
+    var (checks, decisive) = (0, 0);
+    if (end.imageForm == 'none') return const Verdict();
+    for (final r in end.sides['server']!.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
+      final capture = r.img;
+      if (capture == null) continue;
+      if (_formsOwed(end, r, capture, 'A', run.beforeRounds) == null) continue;
+      final rows = <List<String>>[];
+      for (final d in const ['A', 'B']) {
+        if (end.sides[d]!.records[r.id] == null) continue;
+        final owed = _formsOwed(end, r, capture, d, run.beforeRounds)!;
+        checks++;
+        final began = _imagesOf(run.beforeRounds, d, r.id);
+        bool holds(FImages? h) => h != null && h.capture == capture && (owed.png ? h.png : (h.png || h.jpeg));
+        bool exactly(FImages? h) => holds(h) && (r.stage != FStage.resizedJpeg || !h!.png);
+        if (!exactly(began)) decisive++;
+        final held = _imagesOf(end, d, r.id);
+        if (!exactly(held)) rows.add([d, held?.files ?? '-', owed.png ? '$capture.png' : '$capture.jpg']);
+      }
+      checks++;
+      final onServer = {
+        for (final form in const ['png', 'jpeg'])
+          if (end.serverImages.contains(_serverImageName(capture, form))) form,
+      };
+      if (onServer.isEmpty) rows.add(['server', '-', 'a form']);
+      // The icon the body names, where a device holds it with the record's images: an end whose server holds it not
+      // as the rounds began, and that sends none, fails.
+      if (r.icon == capture &&
+          const [
+            'A',
+            'B',
+          ].any((d) => end.sides[d]!.records.containsKey(r.id) && _imagesOf(end, d, r.id)?.icon == true)) {
+        checks++;
+        final iconName = _serverImageName(capture, 'icon');
+        if (!run.beforeRounds.serverImages.contains(iconName)) decisive++;
+        if (!end.serverImages.contains(iconName)) rows.add(['server', '-', iconName]);
+      }
+      if (rows.isEmpty) continue;
+      failures.add(
+        Failure('the images of ${r.id} (${r.stage.name}, form ${end.imageForm}) at rest', [
+          ['side', 'held', 'owed'],
+          ...rows,
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_carriesEveryImageAsPngs)],
+);
+
+/// A round that writes no geometry file beside the forms it places: each record whose images it changed holds them
+/// without one.
+final _placesNoGeometry = RoundBreak('a round places the images of a record without their geometry', (d, _, _) {
+  final had = _imagesAsTheRoundBegan[d] ?? const {};
+  for (final MapEntry(key: id, value: held) in d.images.entries.toList()) {
+    if (had[id] != held) d.images[id] = held.withoutGeometry;
+  }
+}, before: _noteImages);
+
+/// A round that takes no icon: each record that held none as it began holds none after it.
+final _takesNoIcon = RoundBreak('a round takes no icon of a record', (d, _, _) {
+  final had = _imagesAsTheRoundBegan[d] ?? const {};
+  for (final MapEntry(key: id, value: held) in d.images.entries.toList()) {
+    if (held.icon && !(had[id]?.icon ?? false)) {
+      d.images[id] = FImages(held.capture, png: held.png, jpeg: held.jpeg, icon: false, geometry: held.geometry);
+    }
+  }
+}, before: _noteImages);
+
+/// Whether the images [f] are usable as the device that captured them used them: beside each form, the geometry file of
+/// that form's rect ([geometryOfCapture]), and the icon.
+bool _usable(FImages? f) => f != null && f.icon && f.geometry == geometryOfCapture(f.capture, png: f.png);
+
+/// received-images-are-usable (S-11, [R4-8] 6, L373): the images a device holds of a record are usable as on the device
+/// that captured them — the geometry of each form beside it, and the icon.
+final receivedImagesAreUsable = SyncProperty<WorldRun>(
+  'received-images-are-usable',
+  'Of each capture whose images a device held, at some step, with the geometry file of the rect of a form it held '
+      'beside that form, or with the icon cut from them — what the device that captured them knew —: at rest, where '
+      'the account\'s image form is not none, each device that holds a form of those images for a record it lists, '
+      'not archived without images, holds beside it the geometry file of that form\'s rect — in the PNG\'s '
+      'coordinates where it holds the PNG, else in the reduced JPEG\'s —; and one that holds no icon with them holds '
+      'none only where no device holds that icon and the server does not.',
+  (run) {
+    final end = run.end;
+    final failures = <Failure>[];
+    var (checks, decisive) = (0, 0);
+    if (end.imageForm == 'none') return const Verdict();
+    // The captures whose geometry, and whose icon, a device held with their images: the facts the capture made.
+    final geometryKnown = <String>{};
+    final iconKnown = <String>{};
+    for (final s in run.steps) {
+      for (final held in s.images.values) {
+        for (final f in held.values) {
+          if (f.geometry == geometryOfCapture(f.capture, png: f.png)) geometryKnown.add(f.capture);
+          if (f.icon) iconKnown.add(f.capture);
+        }
+      }
+    }
+    bool iconHeldSomewhere(String capture) =>
+        end.serverImages.contains(_serverImageName(capture, 'icon')) ||
+        end.images.values.any((held) => held.values.any((f) => f.capture == capture && f.icon));
+    final rows = <List<String>>[];
+    for (final d in const ['A', 'B']) {
+      for (final r in end.sides[d]!.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
+        final held = _imagesOf(end, d, r.id);
+        if (held == null || r.stage == FStage.none) continue;
+        final capture = held.capture;
+        checks++;
+        // A device that held them as the rounds began not as they are usable, or none: an end that places the images
+        // without their geometry, or takes no icon, fails.
+        if (!_usable(_imagesOf(run.beforeRounds, d, r.id))) decisive++;
+        final geometry = geometryOfCapture(capture, png: held.png);
+        final wrongGeometry = geometryKnown.contains(capture) && held.geometry != geometry;
+        final noIcon = !held.icon && iconKnown.contains(capture) && iconHeldSomewhere(capture);
+        if (!wrongGeometry && !noIcon) continue;
+        rows.add([
+          d,
+          r.id,
+          held.files,
+          [if (wrongGeometry) 'json $geometry', if (noIcon) 'icon'].join('+'),
+        ]);
+      }
+    }
+    if (rows.isNotEmpty) {
+      failures.add(
+        Failure('the images at rest (form ${end.imageForm})', [
+          ['device', 'record', 'held', 'owed beside them'],
+          ...rows,
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_placesNoGeometry), BrokenRound(_takesNoIcon)],
+);
+
+/// A round that, of each record its device lists archived with resized images, puts the PNGs on the server in place of
+/// the reduced JPEGs: the replacement made the other way round.
+final _replacesTheJpegs = RoundBreak('a round puts the PNGs of an archive with resized images in place of its JPEGs', (
+  d,
+  _,
+  server,
+) {
+  for (final r in d.store.records.values) {
+    final capture = r.img;
+    if (r.stage != FStage.resizedJpeg || capture == null) continue;
+    server.images
+      ..remove(_serverImageName(capture, 'jpeg'))
+      ..add(_serverImageName(capture, 'png'));
+  }
+});
+
+/// resized-replaces-the-png (S-11's exception, the replacement; [R2-4]): the server holds the reduced JPEGs of an
+/// archive with resized images whose PNGs it holds.
+final resizedReplacesThePng = SyncProperty<WorldRun>(
+  'resized-replaces-the-png',
+  'At rest, of each record the server lists archived with resized images whose PNGs it holds, the server holds the '
+      'reduced JPEGs too, whatever the account\'s image form.',
+  (run) {
+    final end = run.end;
+    final failures = <Failure>[];
+    var (checks, decisive) = (0, 0);
+    for (final r in end.sides['server']!.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
+      final capture = r.img;
+      if (r.stage != FStage.resizedJpeg || capture == null) continue;
+      if (!end.serverImages.contains(_serverImageName(capture, 'png'))) continue;
+      checks++;
+      // An end whose server holds the PNGs alone, which is what it holds where nothing replaces them, is the wrong one.
+      decisive++;
+      if (end.serverImages.contains(_serverImageName(capture, 'jpeg'))) continue;
+      failures.add(
+        Failure('the images of ${r.id} on the server at rest', [
+          ['held', 'owed'],
+          ['$capture.png', '$capture.png+$capture.jpg'],
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_replacesTheJpegs)],
+);
+
+/// A round that, while the form is none, puts on the server every image its device holds.
+final _sendsWhileNone = RoundBreak('a round sends images while the account\'s form is none', (d, _, server) {
+  if (server.imageForm != 'none') return;
+  for (final images in d.images.values) {
+    server.images.add(_serverImageName(images.capture, images.png ? 'png' : 'jpeg'));
+  }
+});
+
+/// none-sends-only-the-replacement (S-09): while the account's form is none, no image goes to the server but the
+/// reduced JPEGs of an archive with resized images whose PNGs it holds.
+final noneSendsOnlyTheReplacement = SyncProperty<WorldRun>(
+  'none-sends-only-the-replacement',
+  'A round that begins while the account\'s image form is none puts no image on the server but the reduced JPEGs of a '
+      'record the server\'s list archives with resized images once the round made it, whose PNGs the server held as '
+      'the round began.',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (var i = run.shared; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      if (!_isRound(step.op) || was.imageForm != 'none') continue;
+      final d = step.op.device;
+      checks++;
+      final heldNotSent = was.images[d]!.values.any(
+        (h) => !was.serverImages.contains(_serverImageName(h.capture, h.png ? 'png' : 'jpeg')),
+      );
+      if (heldNotSent) decisive++;
+      // The replacement of a record the server's list archives with resized images once the round made it: the round
+      // puts its images after the list.
+      final allowed = {
+        for (final r in step.sides['server']!.records.values)
+          if (r.stage == FStage.resizedJpeg && r.img != null)
+            if (was.serverImages.contains(_serverImageName(r.img!, 'png'))) _serverImageName(r.img!, 'jpeg'),
+      };
+      final put = step.serverImages.difference(was.serverImages).difference(allowed);
+      if (put.isEmpty) continue;
+      failures.add(
+        Failure('$d\'s round #${i - run.shared + 1} under the form none', [
+          ['put on the server'],
+          for (final name in put.toList()..sort()) [name],
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_sendsWhileNone)],
+);
+
+// --- Room ([R7-4], L319) ----------------------------------------------------------------------------------------------
+//
+// The inputs of these properties start with the server's room used up — the account's storage full ([SetStorageFull]),
+// or its database's room down to the reserve or to none ([SetDatabaseRoom]) —; past the users' operations, the rounds
+// run while it stays so, then the room is given back ([_givesRoomBack]) and the world is driven to rest. Each device
+// changes records the other does not, so that what a device's change ends as is the device's own state or the server's
+// as the rounds began, and no merge of the two sides decides it.
+
+/// Whether [op] gives the server its room back: the account's storage no longer full, or the database's room made by
+/// the operator.
+bool _givesRoomBack(Op op) => op is SetStorageFull && !op.full || op is SetDatabaseRoom && op.room == DatabaseRoom.room;
+
+/// The step at rest while the room is used up: the one before the operation past the users' that gives it back; null
+/// where no such operation is.
+int? _atRestWithoutRoom(WorldRun run) {
+  for (var i = (run.users.lastOrNull ?? run.shared - 1) + 1; i < run.ops.length; i++) {
+    if (_givesRoomBack(run.ops[i])) return i - 1;
+  }
+  return null;
+}
+
+/// What a round sends of the id [id] that [s] holds: its record and its cells. (The dismissed pairs that name it are
+/// of two ids, and go with each record's removal — removed-record-keeps-nothing.)
+Set<String> _sentOf(FState s, String id) => {
+  if (s.records[id] case final r?) 'record ${_recordText(r)}',
+  for (final MapEntry(:key, :value) in s.cells.entries)
+    if (key.$2 == id) 'cell ${key.$1} $value',
+};
+
+/// Of [device], the ids of what it changed as the rounds began: those whose [_sentOf] it holds not as the server did.
+Set<String> _changedBy(WorldRun run, String device) {
+  final began = run.beforeRounds;
+  final (mine, server) = (began.sides[device]!, began.sides['server']!);
+  final ids = {...mine.records.keys, ...server.records.keys, for (final key in mine.cells.keys) key.$2};
+  return {
+    for (final id in ids)
+      if (!_sameParts(_sentOf(mine, id), _sentOf(server, id))) id,
+  };
+}
+
+/// Of [device] at [s], a step at which the server has no room for new bytes, the ids that wait for room: of each
+/// record it lists whose body the server does not hold ([RunStep.bodiesTheServerLacks]), its id and every id it
+/// absorbed ([R7-4]: a merge's end and the records it took away wait together).
+Set<String> _waitingForRoom(RunStep s, String device) {
+  final lacking = s.bodiesTheServerLacks[device] ?? const <String>{};
+  return {
+    for (final r in s.sides[device]!.records.values)
+      if (lacking.contains(r.id)) ...{r.id, ...r.absorbed},
+  };
+}
+
+/// A round that, where its device lists a merge's end whose body the server does not hold, takes the records the end
+/// absorbed off the server's list all the same: a merge's removals sent while its end waits.
+final _sendsTheRemovalsOfAWaitingMerge = RoundBreak(
+  'a round takes off the server what a merge waiting for room absorbed',
+  (d, _, server) {
+    final list = server.list;
+    for (final r in d.store.records.values) {
+      if (server.holdsBody(syncBodyNameOf(r))) continue;
+      for (final id in r.absorbed) {
+        if (id == r.id || list.records[id] == null) continue;
+        list.records.remove(id);
+        list.cells.removeWhere((key, _) => key.$2 == id);
+      }
+    }
+  },
+);
+
+/// A round its server refused for room that puts the server's list in place of what its device holds: what the
+/// device's user changed is gone from it, and no later round sends it ([R7-1]).
+final _dropsWhatTheRoomRefused = RoundBreak(
+  "a round refused for room puts the server's list in place of the device's",
+  (d, _, server) {
+    final end = d.told?.end;
+    if (end == null || end == SyncRoundEnd.done) return;
+    if (!server.full && server.database == DatabaseRoom.room) return;
+    final there = server.list.copy();
+    d.store
+      ..records.clear()
+      ..records.addAll(there.records)
+      ..cells.clear()
+      ..cells.addAll(there.cells)
+      ..dismissed.clear()
+      ..dismissed.addAll(there.dismissed);
+  },
+);
+
+/// A round whose server, once it refused a put of new bytes for room, refuses every write after it in that round
+/// ([FServer.roomRefusalEndsTheRound]): what needs no room is held back with what does.
+final _roomRefusalEndsTheRound = RoundBreak(
+  'a round refused a put for room is refused every write after it',
+  (_, _, server) => server.roomRefusalEndsTheRound = false,
+  before: (_, server) => server.roomRefusalEndsTheRound = true,
+);
+
+/// a-waiting-merge-takes-nothing-away ([R7-4], 検査 2): a merge's end that waits for room waits with what it absorbed.
+final aWaitingMergeTakesNothingAway = SyncProperty<WorldRun>(
+  'a-waiting-merge-takes-nothing-away',
+  'After every round, of each record the device that ran it listed as the round began that absorbed an id the server '
+      'listed then, the server lists that id still, or lists the record with the id among what it absorbed: the server '
+      'takes away no record a merge absorbed while the merge\'s end is not on it.',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (var i = run.shared; i < run.steps.length; i++) {
+      final (was, step) = (run.steps[i - 1], run.steps[i]);
+      if (!_isRound(step.op)) continue;
+      final d = step.op.device;
+      final (thereWas, there) = (was.sides['server']!, step.sides['server']!);
+      for (final r in was.sides[d]!.records.values) {
+        for (final id in r.absorbed) {
+          if (id == r.id || !thereWas.records.containsKey(id)) continue;
+          checks++;
+          // The merge is not on the server yet: an end that takes the id away without it is the wrong one.
+          if (!(thereWas.records[r.id]?.absorbed.contains(id) ?? false)) decisive++;
+          if (there.records.containsKey(id) || (there.records[r.id]?.absorbed.contains(id) ?? false)) continue;
+          failures.add(
+            Failure('$d\'s round #${i - run.shared + 1}: $id, which its ${r.id} absorbed', [
+              ['side', r.id, id],
+              ['$d as the round began', _recordText(r), '-'],
+              [
+                'server after it',
+                switch (there.records[r.id]) {
+                  final kept? => _recordText(kept),
+                  null => '-',
+                },
+                '-',
+              ],
+            ]),
+          );
+        }
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_sendsTheRemovalsOfAWaitingMerge)],
+);
+
+/// what-needs-no-room-goes ([R7-4], L319, [N15-15], 検査 2): while the room is used up, a change that needs none reaches
+/// the server and the other device, and one that needs some waits, with every record its merge absorbed.
+final whatNeedsNoRoomGoes = SyncProperty<WorldRun>(
+  'what-needs-no-room-goes',
+  'At rest while the account\'s storage is full or the database has no room past the reserve — after two passes of '
+      'rounds, by which a change that goes in one device\'s round reaches the other\'s —: of each id a device '
+      'changed as the rounds began — its record or its cells —, where the device lists a record whose body the server '
+      'does not hold and that is the id or absorbed it, the id waits: the server and the other device hold it as the '
+      'server did as the rounds began, and the device holds it as it did; else the server and the other device hold it '
+      'as the device does — a delete, an archive, a memo and a merge whose end the server holds the body of go.',
+  (run) {
+    final at = _atRestWithoutRoom(run);
+    if (at == null) return const Verdict();
+    final (began, s) = (run.beforeRounds, run.steps[at]);
+    if (!s.noRoomForNewBytes || s.room.database == DatabaseRoom.none) return const Verdict();
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final d in const ['A', 'B']) {
+      final other = d == 'A' ? 'B' : 'A';
+      final waiting = _waitingForRoom(s, d);
+      for (final id in _changedBy(run, d).toList()..sort()) {
+        checks++;
+        final waits = waiting.contains(id);
+        final made = _sentOf(began.sides[d]!, id);
+        final asBefore = _sentOf(began.sides['server']!, id);
+        final owed = {'server': waits ? asBefore : made, other: waits ? asBefore : made, d: made};
+        // An end in which the id went where it waits, or stayed where it goes, is the wrong one.
+        if (!_sameParts(made, asBefore)) decisive++;
+        final rows = [
+          for (final MapEntry(key: side, value: want) in owed.entries)
+            if (!_sameParts(_sentOf(s.sides[side]!, id), want))
+              [side, _partsText(_sentOf(s.sides[side]!, id)), _partsText(want)],
+        ];
+        if (rows.isEmpty) continue;
+        failures.add(
+          Failure('$id, which $d changed, ${waits ? 'waiting' : 'needing no room'} (${_roomText(s)})', [
+            ['side', 'held at rest', 'owed'],
+            ...rows,
+          ]),
+        );
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [
+    BrokenRound(_sendsTheRemovalsOfAWaitingMerge),
+    BrokenRound(_dropsWhatTheRoomRefused),
+    BrokenRound(_roomRefusalEndsTheRound),
+  ],
+);
+
+/// [parts] as a cell of a failure's table: `-` where they are none — the id held by nothing.
+String _partsText(Set<String> parts) => parts.isEmpty ? '-' : (parts.toList()..sort()).join('; ');
+
+String _roomText(RunStep s) => [
+  if (s.room.storageFull) 'storage full',
+  if (s.room.database != DatabaseRoom.room) 'database ${s.room.database.name}',
+].join(', ');
+
+/// what-waited-goes-once-there-is-room ([R7-4], L319): what waited for room goes once there is room again.
+final whatWaitedGoesOnceThereIsRoom = SyncProperty<WorldRun>(
+  'what-waited-goes-once-there-is-room',
+  'At rest once the room is given back — the account\'s storage no longer full, or the operator having made room in '
+      'the database —: of each id a device changed as the rounds began, every side holds it as the device did then.',
+  (run) {
+    final at = _atRestWithoutRoom(run);
+    if (at == null) return const Verdict();
+    final (began, s, end) = (run.beforeRounds, run.steps[at], run.end);
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final d in const ['A', 'B']) {
+      for (final id in _changedBy(run, d).toList()..sort()) {
+        checks++;
+        final made = _sentOf(began.sides[d]!, id);
+        // It had waited: an end in which it never goes, or goes as the server held it, is the wrong one.
+        if (!_sameParts(_sentOf(s.sides['server']!, id), made)) decisive++;
+        final rows = [
+          for (final side in _sides)
+            if (!_sameParts(_sentOf(end.sides[side]!, id), made))
+              [side, _partsText(_sentOf(end.sides[side]!, id)), _partsText(made)],
+        ];
+        if (rows.isEmpty) continue;
+        failures.add(
+          Failure('$id, which $d changed while ${_roomText(s)}, at rest with room', [
+            ['side', 'held at rest', 'owed'],
+            ...rows,
+          ]),
+        );
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_dropsWhatTheRoomRefused)],
+);

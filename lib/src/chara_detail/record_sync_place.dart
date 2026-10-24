@@ -8,6 +8,7 @@
 
 import 'dart:typed_data';
 
+import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_sync_list.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/record_sync_round.dart';
@@ -161,6 +162,13 @@ abstract interface class SyncPlace<C> {
   /// Replaces the list kept as [which] with [list], whole in one write; null forgets it. Done once the write is.
   Future<void> keep(SyncKept which, SyncKeptList? list);
 
+  /// What the image step of a round kept ([SyncKeptImages]); null where there is none. What cannot be read is none,
+  /// logged: a round that keeps nothing of the images reads every record's files once, which loses nothing.
+  Future<SyncKeptImages?> readKeptImages();
+
+  /// Replaces what the image step kept with [images], whole in one write; null forgets it. Done once the write is.
+  Future<void> keepImages(SyncKeptImages? images);
+
   /// Done when both record stores have loaded what they load: before the round reads the device, and after it put the
   /// result in place ([published]), so that the stores hold what it published.
   Future<void> loaded();
@@ -215,8 +223,8 @@ abstract interface class SyncPlace<C> {
   /// result's state and time ([R5-6]), the absorbed ids (removed where none), the files a record split off carries,
   /// and the images: where [SyncPublication.imageSources] is not null, the record's own images, read under the lock,
   /// those its binding does not name let go of, and an image it holds none of taken from the sources
-  /// ([recordImagesBoundBy]). The record goes into the store of its stage, out of the other; once it commits, the
-  /// images are shaped for an archive stage.
+  /// ([recordImagesBoundBy]), its geometry written from the body's ([recordGeometryFiles]). The record goes into the
+  /// store of its stage, out of the other; once it commits, the images are shaped for an archive stage.
   Future<SyncPublished> publish(SyncPublication<C> publication);
 
   /// Removes the records [asRead] names as the user removes them, the active store's and then the archive store's
@@ -234,4 +242,27 @@ abstract interface class SyncPlace<C> {
   /// stage, read under its lock; null where there is none. Whether it is still the body the list names is the round's
   /// to tell.
   Future<Uint8List?> bodyOf(SyncRecord listed);
+
+  /// The image files ([readRecordImageFiles]) the device holds now of the record [listed], in the store of its stage,
+  /// read under its lock, and the names of those its binding names ([imagesBoundBy]), with `trainee.jpg` where it holds
+  /// an icon, whatever its name ([R4-8] 6); null where the device holds the record not as [listed] has it
+  /// ([syncRecordsAgree]), or none.
+  Future<SyncRecordImages?> imagesOf(SyncRecord listed);
+
+  /// The names of the image files ([isRecordImageFile]) the device holds now in the directory of the record [listed], in
+  /// the store of its stage, listed under its lock and none of them read: what tells whether the files a round kept
+  /// the record held ([SyncImagesLeft.holds]) are there still, whatever removed one since.
+  Future<Set<String>> imageFileNamesOf(SyncRecord listed);
+
+  /// Writes [files] — image files by name, which the binding of [listed] names, and the icon its body names — into the
+  /// directory of the record [listed], with the geometry of each image written from the body of [listed]
+  /// ([recordGeometryFiles]) and that of each form the directory holds without its geometry ([recordGeometryLacking]),
+  /// whatever removed it — [files] may then be empty —, under its lock and only where the device holds the record then as [listed] has it, in
+  /// one publication of its directory as the others; once it commits, the images are shaped for its archive stage, as
+  /// a publication's are. Answers whether it committed.
+  Future<bool> placeImages(SyncRecord listed, Map<String, Uint8List> files);
 }
+
+/// What [SyncPlace.imagesOf] read of a record: its image [files] by name, and the names of those its binding names,
+/// with its icon ([bound]).
+typedef SyncRecordImages = ({Map<String, Uint8List> files, Set<String> bound});

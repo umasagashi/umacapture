@@ -317,12 +317,36 @@ final class Upgrade extends Op {
 }
 
 /// The account's storage has no room for another body or image ([full]): the server refuses each new
-/// one (507) until it has room again.
+/// one (507) until it has room again. On the app's endpoints, the account's cap (`507 account_limit`):
+/// what stores no new bytes — a part, a replacement, a body or an image it holds — still goes.
 final class SetStorageFull extends Op {
   const SetStorageFull(super.device, {required this.full});
   final bool full;
   @override
   String toString() => '$device: storage ${full ? 'full' : 'has room'}';
+}
+
+/// How much room the server's database, which sharing and sync share, has left for sync
+/// (`DATABASE_BUDGET`, `docs/sync-protocol.md`).
+enum DatabaseRoom {
+  room,
+
+  /// No more than the reserve one replacement keeps back: puts of bodies and images whose names the
+  /// account does not hold are refused (`507 database_full`); parts and replacements still go.
+  reserveOnly,
+
+  /// None: every write that stores something — a part and a replacement too — is refused
+  /// (`507 database_full`), until the operator makes room. Fetches still go.
+  none,
+}
+
+/// The server's database has [room] left for sync, from now until another of this operation ([DatabaseRoom]).
+/// Only the app's endpoints have a database: no other rules, nor the model's own round, have a path for it.
+final class SetDatabaseRoom extends Op {
+  const SetDatabaseRoom(super.device, this.room);
+  final DatabaseRoom room;
+  @override
+  String toString() => '$device: database ${room.name}';
 }
 
 /// The server stores [rows] more operations each day and refuses the rest (429) until the date

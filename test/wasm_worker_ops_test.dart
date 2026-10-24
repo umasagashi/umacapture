@@ -100,7 +100,7 @@ void main() {
         'chara_detail/active/rec/skill.png',
         'chara_detail/active/rec/record.json',
       ]);
-      expect(selection.publishable.last.bytes, composeBodyWrite(null, recognized)!.toRecordJsonBytes());
+      expect(selection.publishable.last.bytes, composeBodyWrite(null, recognized, icon: null)!.toRecordJsonBytes());
       expect(selection.incompleteRecordIds, ['half']);
     });
 

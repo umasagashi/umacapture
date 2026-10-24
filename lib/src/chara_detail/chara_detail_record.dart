@@ -299,6 +299,17 @@ class Metadata extends JsonEquatable with MetadataMappable {
   /// none; it is placed ([placeOnRecord]) the first time the record needs it, and goes with the body after that.
   final RecordBinding? binding;
 
+  /// Where the game screen falls on each form of the images the body was read from ([RecordGeometry]), or null where
+  /// it is not worked out yet. Worked out and placed with the [binding], in the same write, and kept by every write
+  /// of the body after that.
+  final RecordGeometry? geometry;
+
+  /// The name of the record's icon, `trainee.jpg` — the SHA-256 (64 lowercase hex digits) of its bytes, cut from the
+  /// factor image —, or null where the record has none or it is not worked out yet. Worked out and placed with the
+  /// [binding], in the same write; a body write over a record whose binding is worked out names the icon the
+  /// recognizer left with it.
+  final String? icon;
+
   /// When the body was written ([valueWriteTime]), in milliseconds since the epoch, or null for a body written
   /// before bodies carried a time — older than any body written with one. Only a body write sets it
   /// ([composeBodyWrite], and a merge that changes the body); placing a value on the record leaves it.
@@ -316,6 +327,8 @@ class Metadata extends JsonEquatable with MetadataMappable {
     this.relationBonus,
     this.recordType,
     this.binding,
+    this.geometry,
+    this.icon,
     this.bodyWrittenAt,
   );
 
@@ -331,6 +344,8 @@ class Metadata extends JsonEquatable with MetadataMappable {
     strategy,
     relationBonus,
     binding,
+    geometry,
+    icon,
     bodyWrittenAt,
   ];
 }
@@ -393,6 +408,54 @@ class RecordBinding extends JsonEquatable with RecordBindingMappable {
 
   @override
   List<Object?> properties() => _fields;
+}
+
+final _shallowEncoding = EncodingOptions(shallow: true);
+
+/// Where the game screen falls on each image a record's body was read from, as `metadata.geometry`: for each of the
+/// three images, the `intersection` of its geometry file `<image>.json` (the rectangle of the image the capture's
+/// screen covers, its corners `top_left` and `bottom_right`, as the native pipeline writes them) for its PNG and for
+/// its reduced JPEG, or null where that one is not known. A file is in the coordinates of the form it is held beside,
+/// and a reduced JPEG's is made from the PNG's by a rounding that does not go back, so the two forms are two fields,
+/// as they are in a [RecordBinding]. A null value writes no key.
+///
+/// The geometry goes with the images, not with what was read from them: it is no part of whether two bodies are the
+/// same. Of two that disagree, the one [mergedWith] is called on stands, field by field.
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class RecordGeometry extends JsonEquatable with RecordGeometryMappable {
+  final Map<String, dynamic>? skillPng;
+  final Map<String, dynamic>? skillJpeg;
+  final Map<String, dynamic>? factorPng;
+  final Map<String, dynamic>? factorJpeg;
+  final Map<String, dynamic>? campaignPng;
+  final Map<String, dynamic>? campaignJpeg;
+
+  const RecordGeometry({
+    this.skillPng,
+    this.skillJpeg,
+    this.factorPng,
+    this.factorJpeg,
+    this.campaignPng,
+    this.campaignJpeg,
+  });
+
+  /// Each field as this knows it, else as [other] does.
+  RecordGeometry mergedWith(RecordGeometry other) => RecordGeometry(
+    skillPng: skillPng ?? other.skillPng,
+    skillJpeg: skillJpeg ?? other.skillJpeg,
+    factorPng: factorPng ?? other.factorPng,
+    factorJpeg: factorJpeg ?? other.factorJpeg,
+    campaignPng: campaignPng ?? other.campaignPng,
+    campaignJpeg: campaignJpeg ?? other.campaignJpeg,
+  );
+
+  /// [toMap] without walking into the fields: each already holds the JSON it was read as, which encodes as itself, so
+  /// the two give the same JSON. A sync list encodes a body's geometry on every row each time it encodes the list,
+  /// where [toMap]'s walk through each value of each field is most of what the row costs.
+  Map<String, dynamic> toShallowMap() => RecordGeometryMapper.ensureInitialized().encodeMap(this, _shallowEncoding);
+
+  @override
+  List<Object?> properties() => [skillPng, skillJpeg, factorPng, factorJpeg, campaignPng, campaignJpeg];
 }
 
 /// Outcome of attempting to load a single record directory.
@@ -766,7 +829,12 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     validateDirectoryId(directory, recognized);
     final recordFile = directory.filePath("record.json");
     final stored = recordFile.existsSync() ? _decodeStored(directory, recordFile.readAsStringSync()).upgraded : null;
-    final composed = composeBodyWrite(stored, recognized);
+    final icon = directory.filePath(traineeIconFileName);
+    final composed = composeBodyWrite(
+      stored,
+      recognized,
+      icon: recordIconName(icon.existsSync() ? icon.readAsBytesSync() : null),
+    );
     if (composed != null) {
       replaceRecordJsonSyncUnlocked(directory, composed.toRecordJsonBytes());
     }
@@ -1033,6 +1101,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
         m.relationBonus,
         m.recordType,
         m.binding,
+        m.geometry,
+        m.icon,
         m.bodyWrittenAt,
       ),
       trainee,

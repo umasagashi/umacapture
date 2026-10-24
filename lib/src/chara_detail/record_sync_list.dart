@@ -13,8 +13,8 @@
 //
 // A record's body object is its `record.json` without what only this device holds ([recordJsonWithoutLocalFields]),
 // named by the SHA-256 of those bytes. The body's time travels in the row (`body.written_at`), as do the name of its
-// recognised content and its inheritance parents, so a round merges the server's list without fetching a body it does
-// not need.
+// recognised content, its inheritance parents, its binding (`image`), the geometry of its images (`body.geometry`) and
+// the name of its icon (`icon`), so a round merges the server's list without fetching a body it does not need.
 
 import 'dart:convert';
 import 'dart:math';
@@ -130,9 +130,11 @@ Map<String, Object?> _rowJson(SyncListRow row, Map<String, SyncValue<String?>> c
       'written_at': body.time,
       'content': body.content,
       if (body.parents.isNotEmpty) 'parents': {for (final slot in recordSyncParentSlots) slot: ?body.parents[slot]},
+      if (body.geometry case final geometry?) 'geometry': geometry.toShallowMap(),
     },
     'archive': {'state': _archiveStateName(record.stage.value), 'written_at': record.stage.time},
     'image': body.binding?.toMap() ?? const <String, Object?>{},
+    'icon': ?body.icon,
     if (record.absorbed.isNotEmpty) 'absorbed': record.absorbed.toList()..sort(),
     'split_from': ?record.splitFrom,
     if (cells.isNotEmpty)
@@ -226,6 +228,11 @@ SyncList syncListOfParts(Iterable<String> texts) {
               body: SyncBody(
                 body['content'] as String,
                 binding: image.isEmpty ? null : RecordBindingMapper.fromMap(image),
+                geometry: switch (body['geometry']) {
+                  final Map<String, Object?> geometry => RecordGeometryMapper.fromMap(geometry),
+                  _ => null,
+                },
+                icon: row['icon'] as String?,
                 parents: {...?(body['parents'] as Map<String, Object?>?)?.cast<String, String>()},
                 time: body['written_at'] as int,
               ),
@@ -727,7 +734,8 @@ Set<String> syncRecordsChangedSince(LocalSyncRead previous, SyncHeldRecords held
     if (!held.records.containsKey(id) && !held.unavailable.contains(id)) id,
 };
 
-/// Whether [b] holds every value [a] holds: the same body, binding, parents, times, absorbed ids and archive stage.
+/// Whether [b] holds every value [a] holds: the same body, binding, geometry, icon, parents, times, absorbed ids and
+/// archive stage.
 /// The id a round split a record off ([SyncRecord.splitFrom]) is the list's account of that round, which no record on
 /// the device carries, and is no part of it.
 bool syncRecordsAgree(SyncRecord a, SyncRecord? b) =>
@@ -735,6 +743,8 @@ bool syncRecordsAgree(SyncRecord a, SyncRecord? b) =>
     a.id == b.id &&
     a.body.content == b.body.content &&
     a.body.binding == b.body.binding &&
+    a.body.geometry == b.body.geometry &&
+    a.body.icon == b.body.icon &&
     a.body.time == b.body.time &&
     a.body.sameParents(b.body) &&
     a.absorbed.length == b.absorbed.length &&

@@ -6,6 +6,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
+
 import '/src/chara_detail/archive_executor_shared.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/enhancement_merge.dart';
@@ -32,6 +34,9 @@ FilePath syncBaseFile(PathInfo info) => info.charaDetailSyncDir.filePath('base.j
 
 /// The sent list, in [PathInfo.charaDetailSyncDir].
 FilePath syncSentFile(PathInfo info) => info.charaDetailSyncDir.filePath('sent.json');
+
+/// What the image step of a round kept ([SyncKeptImages]), in [PathInfo.charaDetailSyncDir].
+FilePath syncImagesFile(PathInfo info) => info.charaDetailSyncDir.filePath('images.json');
 
 /// What a record split off carries from the device's record it is split off ([SyncPlace.carriedBy]).
 typedef AppSyncCarried = ({String recordJson, List<(String, Uint8List)> files});
@@ -84,6 +89,33 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
     }
     await file.parent.create(recursive: true);
     await file.replaceWhole(list.toBytes());
+  }
+
+  @override
+  Future<SyncKeptImages?> readKeptImages() async {
+    final file = syncImagesFile(info);
+    try {
+      final bytes = await file.readAsBytesIfPresent();
+      return bytes == null ? null : SyncKeptImages.decode(bytes);
+    } catch (error, stackTrace) {
+      logger.w(
+        'The kept sync images at ${file.path} cannot be read; the round goes on without them.',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
+  }
+
+  @override
+  Future<void> keepImages(SyncKeptImages? images) async {
+    final file = syncImagesFile(info);
+    if (images == null) {
+      if (await file.exists()) await file.delete();
+      return;
+    }
+    await file.parent.create(recursive: true);
+    await file.replaceWhole(images.toBytes());
   }
 
   @override
@@ -309,6 +341,17 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
         if (note == null) throw StateError('The archive note of $id cannot be read.');
         final own = others == null || mine == null ? const <String, Uint8List>{} : await readRecordImageFiles(mine);
         final images = others == null ? null : await recordImagesBoundBy(r.body.binding, own, others);
+        // The forms taken from the other records, with the geometry of each in the coordinates of the form it holds.
+        final placed = images == null
+            ? const <String, Uint8List>{}
+            : {
+                ...images.taken,
+                ...recordGeometryFiles(
+                  r.body.geometry,
+                  placed: images.taken.keys,
+                  holds: {...images.kept, ...images.taken.keys},
+                ),
+              };
         return (
           files: [
             (recordId: id, relativeSegments: const ['record.json'], bytes: recordJson),
@@ -322,8 +365,7 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
               (recordId: id, relativeSegments: const [mergedIdsFileName], bytes: mergedIdsBytes(r.absorbed.toList())),
             for (final (name, bytes) in splitFrom?.carried.files ?? const <(String, Uint8List)>[])
               (recordId: id, relativeSegments: [name], bytes: bytes),
-            for (final MapEntry(key: name, value: bytes)
-                in images?.taken.entries ?? const <MapEntry<String, Uint8List>>[])
+            for (final MapEntry(key: name, value: bytes) in placed.entries)
               (recordId: id, relativeSegments: [name], bytes: bytes),
           ],
           removals: {
@@ -415,6 +457,91 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
   }
 
   @override
+  Future<SyncRecordImages?> imagesOf(SyncRecord listed) async {
+    final dir = _storeDir(listed.stage.value != null) / listed.id;
+    final files = await gate.runForRecord(info.storageDir, listed.id, () async {
+      if (await _leftSinceRead(listed.id, listed) != null) return null;
+      return readRecordImageFiles(dir);
+    }, declaration: _readsAndWritesRecords);
+    if (files == null) return null;
+    // The files are hashed off the UI isolate where the platform has one, as a binding is worked out.
+    final bound = await compute(recordImageFilesBoundBy, (binding: listed.body.binding, files: files));
+    return (files: files, bound: {...bound, if (files.containsKey(traineeIconFileName)) traineeIconFileName});
+  }
+
+  @override
+  Future<Set<String>> imageFileNamesOf(SyncRecord listed) {
+    final dir = _storeDir(listed.stage.value != null) / listed.id;
+    return gate.runForRecord(info.storageDir, listed.id, () async {
+      return {
+        await for (final entry in dir.list())
+          if (entry is FilePath && isRecordImageFile(entry.name)) entry.name,
+      };
+    }, declaration: _readsAndWritesRecords);
+  }
+
+  @override
+  Future<bool> placeImages(SyncRecord listed, Map<String, Uint8List> files) async {
+    final id = listed.id;
+    final dir = _storeDir(listed.stage.value != null) / id;
+    final recordJson = await gate.runForRecord(
+      info.storageDir,
+      id,
+      () => dir.filePath('record.json').readAsBytesIfPresent(),
+      declaration: _readsAndWritesRecords,
+    );
+    if (recordJson == null) return false;
+    final outcome = await platformWebRecordPersistence.persistFiles(
+      info.storageDir,
+      [
+        (recordId: id, relativeSegments: const ['record.json'], bytes: recordJson),
+      ],
+      plan: (_, _, _) async {
+        if (await _leftSinceRead(id, listed) != null) return null;
+        final holds = {
+          await for (final entry in dir.list())
+            if (entry is FilePath && isRecordImageFile(entry.name)) entry.name,
+          ...files.keys,
+        };
+        // The forms taken, with the geometry of each in the coordinates of the form the record holds, and the geometry
+        // of a form it holds that its directory holds none of.
+        final geometry = listed.body.geometry;
+        final placed = {
+          ...files,
+          ...recordGeometryFiles(geometry, placed: files.keys, holds: holds),
+          ...recordGeometryLacking(geometry, holds),
+        };
+        return (
+          files: [
+            (
+              recordId: id,
+              relativeSegments: const ['record.json'],
+              bytes: await dir.filePath('record.json').readAsBytes(),
+            ),
+            for (final MapEntry(key: name, value: bytes) in placed.entries)
+              (recordId: id, relativeSegments: [name], bytes: bytes),
+          ],
+          removals: const <String>{},
+          store: listed.stage.value == null ? 'active' : 'archive',
+          fromOtherStore: false,
+          afterCommit: switch (listed.stage.value) {
+            null => null,
+            final option => (DirectoryPath published) => shapeArchivedImagesUnlocked(
+              published,
+              RecordArchiveState.of(option),
+            ),
+          },
+        );
+      },
+    );
+    if (!outcome.contains(id)) return false;
+    // The record's images changed and nothing else of it: what shows them reads them again.
+    effects.images.apply(RecordImageScope(info: info, changed: [dir.path]));
+    effects.totals.apply(TotalsScope.recordRoot(info));
+    return true;
+  }
+
+  @override
   Future<Uint8List?> bodyOf(SyncRecord listed) async {
     final dir = _storeDir(listed.stage.value != null) / listed.id;
     final bytes = await gate.runForRecord(
@@ -427,8 +554,8 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
   }
 }
 
-/// [source]'s record as the record [id] of the result [r]: its body, with the result's binding, parents and time,
-/// and what only this device holds of [id] ([relationBonus]).
+/// [source]'s record as the record [id] of the result [r]: its body, with the result's binding, geometry, icon, parents
+/// and time, and what only this device holds of [id] ([relationBonus]).
 Uint8List _composeRecordJson(String sourceJson, String id, SyncRecord r, int? relationBonus) {
   final map = CharaDetailRecord.fromRecordJson(sourceJson).toMap();
   final metadata = map['metadata'] as Map<String, dynamic>;
@@ -442,10 +569,13 @@ Uint8List _composeRecordJson(String sourceJson, String id, SyncRecord r, int? re
   metadata
     ..['record_id'] = ids
     ..['binding'] = r.body.binding?.toMap()
+    ..['geometry'] = r.body.geometry?.toShallowMap()
+    ..['icon'] = r.body.icon
     ..['body_written_at'] = r.body.time == 0 ? null : r.body.time
     ..['relation_bonus'] = relationBonus;
   metadata.removeWhere(
-    (key, value) => value == null && const {'binding', 'body_written_at', 'relation_bonus'}.contains(key),
+    (key, value) =>
+        value == null && const {'binding', 'geometry', 'icon', 'body_written_at', 'relation_bonus'}.contains(key),
   );
   return CharaDetailRecordMapper.fromMap(map).toRecordJsonBytes();
 }

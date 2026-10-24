@@ -82,7 +82,10 @@ void main() {
     expect(result.recordIds, {id});
     final stored = await (_active(storageDir) / id).filePath('record.json').readAsString();
     // A record no store held is written at the time of the import, as a capture is.
-    expect(CharaDetailRecordMapper.fromJson(stored), composeBodyWrite(null, CharaDetailRecordMapper.fromJson(current)));
+    expect(
+      CharaDetailRecordMapper.fromJson(stored),
+      composeBodyWrite(null, CharaDetailRecordMapper.fromJson(current), icon: null),
+    );
   });
 
   test('counts skipped directory entries', () async {
@@ -434,7 +437,10 @@ void main() {
         final pngs = bindingImagePngs();
         final donor = chara / 'active' / 'record-0';
         await donor.create(recursive: true);
-        final donorRecord = placeOnRecord(makeRecord(id: 'record-0', card: 3), binding: expectedBinding(pngs));
+        final donorRecord = placeOnRecord(
+          makeRecord(id: 'record-0', card: 3),
+          images: (binding: expectedBinding(pngs), geometry: null, icon: null),
+        );
         await donor.filePath('record.json').writeAsBytes(_body(donorRecord));
         for (final MapEntry(:key, :value) in pngs.entries) {
           await donor.filePath('$key.png').writeAsBytes(value);
@@ -752,7 +758,7 @@ CharaDetailRecord _record(
 }) => placeOnRecord(
   makeRecord(id: 'record-1', card: card, parent1Id: parents.parent1, parent2Id: parents.parent2),
   relationBonus: (value: relationBonus),
-  binding: binding,
+  images: (binding: binding, geometry: null, icon: null),
 );
 
 /// [record] as `record.json`, its body written at [writtenAt] where given.

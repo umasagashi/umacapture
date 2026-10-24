@@ -1104,6 +1104,7 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
       RecordStageMapper.ensureInitialized();
       RecordTypeMapper.ensureInitialized();
       RecordBindingMapper.ensureInitialized();
+      RecordGeometryMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -1164,6 +1165,13 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
     'binding',
     _$binding,
   );
+  static RecordGeometry? _$geometry(Metadata v) => v.geometry;
+  static const Field<Metadata, RecordGeometry> _f$geometry = Field(
+    'geometry',
+    _$geometry,
+  );
+  static String? _$icon(Metadata v) => v.icon;
+  static const Field<Metadata, String> _f$icon = Field('icon', _$icon);
   static int? _$bodyWrittenAt(Metadata v) => v.bodyWrittenAt;
   static const Field<Metadata, int> _f$bodyWrittenAt = Field(
     'bodyWrittenAt',
@@ -1184,6 +1192,8 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
     #relationBonus: _f$relationBonus,
     #recordType: _f$recordType,
     #binding: _f$binding,
+    #geometry: _f$geometry,
+    #icon: _f$icon,
     #bodyWrittenAt: _f$bodyWrittenAt,
   };
   @override
@@ -1202,6 +1212,8 @@ class MetadataMapper extends ClassMapperBase<Metadata> {
       data.dec(_f$relationBonus),
       data.dec(_f$recordType),
       data.dec(_f$binding),
+      data.dec(_f$geometry),
+      data.dec(_f$icon),
       data.dec(_f$bodyWrittenAt),
     );
   }
@@ -1334,6 +1346,101 @@ mixin RecordBindingMappable {
   Map<String, dynamic> toMap() {
     return RecordBindingMapper.ensureInitialized().encodeMap<RecordBinding>(
       this as RecordBinding,
+    );
+  }
+}
+
+class RecordGeometryMapper extends ClassMapperBase<RecordGeometry> {
+  RecordGeometryMapper._();
+
+  static RecordGeometryMapper? _instance;
+  static RecordGeometryMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = RecordGeometryMapper._());
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'RecordGeometry';
+
+  static Map<String, dynamic>? _$skillPng(RecordGeometry v) => v.skillPng;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$skillPng = Field(
+    'skillPng',
+    _$skillPng,
+    key: r'skill_png',
+    opt: true,
+  );
+  static Map<String, dynamic>? _$skillJpeg(RecordGeometry v) => v.skillJpeg;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$skillJpeg = Field(
+    'skillJpeg',
+    _$skillJpeg,
+    key: r'skill_jpeg',
+    opt: true,
+  );
+  static Map<String, dynamic>? _$factorPng(RecordGeometry v) => v.factorPng;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$factorPng = Field(
+    'factorPng',
+    _$factorPng,
+    key: r'factor_png',
+    opt: true,
+  );
+  static Map<String, dynamic>? _$factorJpeg(RecordGeometry v) => v.factorJpeg;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$factorJpeg =
+      Field('factorJpeg', _$factorJpeg, key: r'factor_jpeg', opt: true);
+  static Map<String, dynamic>? _$campaignPng(RecordGeometry v) => v.campaignPng;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$campaignPng =
+      Field('campaignPng', _$campaignPng, key: r'campaign_png', opt: true);
+  static Map<String, dynamic>? _$campaignJpeg(RecordGeometry v) =>
+      v.campaignJpeg;
+  static const Field<RecordGeometry, Map<String, dynamic>> _f$campaignJpeg =
+      Field('campaignJpeg', _$campaignJpeg, key: r'campaign_jpeg', opt: true);
+
+  @override
+  final MappableFields<RecordGeometry> fields = const {
+    #skillPng: _f$skillPng,
+    #skillJpeg: _f$skillJpeg,
+    #factorPng: _f$factorPng,
+    #factorJpeg: _f$factorJpeg,
+    #campaignPng: _f$campaignPng,
+    #campaignJpeg: _f$campaignJpeg,
+  };
+  @override
+  final bool ignoreNull = true;
+
+  static RecordGeometry _instantiate(DecodingData data) {
+    return RecordGeometry(
+      skillPng: data.dec(_f$skillPng),
+      skillJpeg: data.dec(_f$skillJpeg),
+      factorPng: data.dec(_f$factorPng),
+      factorJpeg: data.dec(_f$factorJpeg),
+      campaignPng: data.dec(_f$campaignPng),
+      campaignJpeg: data.dec(_f$campaignJpeg),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static RecordGeometry fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<RecordGeometry>(map);
+  }
+
+  static RecordGeometry fromJson(String json) {
+    return ensureInitialized().decodeJson<RecordGeometry>(json);
+  }
+}
+
+mixin RecordGeometryMappable {
+  String toJson() {
+    return RecordGeometryMapper.ensureInitialized().encodeJson<RecordGeometry>(
+      this as RecordGeometry,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return RecordGeometryMapper.ensureInitialized().encodeMap<RecordGeometry>(
+      this as RecordGeometry,
     );
   }
 }
