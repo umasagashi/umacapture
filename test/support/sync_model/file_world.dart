@@ -22,10 +22,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:fake_async/fake_async.dart';
+import 'package:image/image.dart' as img;
+import 'package:umacapture/src/chara_detail/archive_executor_shared.dart';
 import 'package:umacapture/src/chara_detail/archive_executor_types.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
+import 'package:umacapture/src/chara_detail/image_converter.dart';
 import 'package:umacapture/src/chara_detail/record_binding.dart';
 import 'package:umacapture/src/chara_detail/record_operation.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
@@ -117,6 +121,15 @@ class FServer {
   int day = 0;
   String imageForm = 'none';
   bool full = false;
+
+  /// The room the server's database has left for sync ([SetDatabaseRoom]). Only the app's endpoints
+  /// ([_FileSyncServer]) read it.
+  DatabaseRoom database = DatabaseRoom.room;
+
+  /// A control of the properties breaks the room the endpoints keep: where true, once they refused a put of new bytes
+  /// for room in a round, they refuse every write after it in that round as a database with no room does
+  /// ([DatabaseRoom.none]).
+  bool roomRefusalEndsTheRound = false;
   int? dailyRows;
   int? dailyReads;
   int _rows = 0;
@@ -178,6 +191,13 @@ class FServer {
   }
 
   FAnswer putBody(String device, String name) => _put(device, bodies, 'b:', name);
+
+  /// Whether the app's endpoints hold the body named [name] ([_FileSyncServer]): put under that name, its content
+  /// stored.
+  bool holdsBody(String name) => switch (syncObjects[name]) {
+    final text? => bodies.contains(_contentIn(text)),
+    null => false,
+  };
 
   FAnswer putImage(String device, String name) =>
       imageForm == 'none' ? FAnswer.formNone : _put(device, images, 'i:', name);
@@ -266,8 +286,8 @@ class FZip {
   FZip(this.record, {required this.image});
   final FRec record;
 
-  /// The name of the image files; null when the directory had none.
-  final String? image;
+  /// The image files; null when the directory had none.
+  final FImages? image;
 }
 
 /// A record on the quarantine shelf ([FDevice.shelf]): its directory as the scan moved it — the record, the name of its
@@ -276,7 +296,7 @@ class FZip {
 class FShelved {
   FShelved(this.record, {required this.image, required this.bonus, required this.noted});
   final FRec record;
-  final String? image;
+  final FImages? image;
   final String? bonus;
   final bool noted;
   bool readable = false;
@@ -297,11 +317,10 @@ class FDevice {
   /// What the device holds of what sync carries.
   FState store = FState();
 
-  /// Record id → the name of the image files in its directory: their hash, which is what the device
-  /// reads by hashing them on the spot. The directory holds the images of the content the record shows,
-  /// and no other (rule 4): every operation and every round keeps that — a record from before the
-  /// upgrade included, whose directory is taken for its content's ([_bind]).
-  final Map<String, String> images = {};
+  /// Record id → the image files in its directory, which the device reads by hashing them on the spot. The directory
+  /// holds the images of the content the record shows, and no other (rule 4): every operation and every round keeps
+  /// that — a record from before the upgrade included, whose directory is taken for its content's ([_bind]).
+  final Map<String, FImages> images = {};
 
   /// Record id → the relation bonus the resolver derived here.
   final Map<String, String> bonus = {};
@@ -349,6 +368,9 @@ class FDevice {
   /// state, and the list sent.
   SyncKeptList? keptBase;
   SyncKeptList? keptSent;
+
+  /// What the image step of the app's round kept ([SyncKeptImages]), where the device runs it.
+  SyncKeptImages? keptImages;
 
   /// How the device sends its list where it changes more than one operation of the server's: the app's changes
   /// ([syncListChanges]) grouped into swaps, in order — null where one change alone is more than a swap takes, and the
@@ -438,14 +460,19 @@ class FDevice {
   /// is unknown. Run the first time the record needs one: before a round
   /// sends it, as a round compares a content it receives with the files the device holds, before an
   /// operation lets go of its images, and before a zip is made of it. Every operation that writes a
-  /// content writes its binding with it, so the binding comes out the same whenever this runs.
+  /// content writes its binding with it, so the binding comes out the same whenever this runs. The geometry of the
+  /// images and the name of the icon are worked out of the same directory and placed with it, as the app places the
+  /// three in one write ([recordBodyImagesOf]).
   void _bind(String id) {
     final r = store.records[id];
     if (r == null || r.bound) return;
-    final image = images[id];
+    final worked = _bodyImagesOfFiles(images[id]);
     r
-      ..img = image
-      ..boundToNoImage = image == null;
+      ..img = worked.img
+      ..pngUnknown = worked.pngUnknown
+      ..boundToNoImage = worked.boundToNoImage
+      ..geometry = worked.geometry
+      ..icon = worked.icon;
   }
 
   /// Works out the binding of every record it lists that carries none ([_bind]), at once: what the device does the
@@ -468,6 +495,10 @@ class FDevice {
   /// What the app's round lacks that it runs without here rather than refuse ([appSyncRound]): a world that checks
   /// what the app does where it lacks a part ([FileWorld.appRoundLacking]).
   Set<OfTheModelsRound> appRoundLacking = const {};
+
+  /// A control of the properties breaks the place's promise ([SyncPlace.carriedBy]) that a record split off carries the
+  /// files of the device's record it is split off: where true, the place's round carries none.
+  bool carriesNoFiles = false;
 
   /// Whether a round runs, told for the round that asks: no round runs while the device holds a memo
   /// over the send limit. The round reads what the gate read: nothing runs between the two.
@@ -513,12 +544,21 @@ class FDevice {
   void capture(String id, int captured, {required bool withImages, bool beforeTheUpgrade = false}) {
     final now = clock();
     if (store.records.containsKey(id)) throw StateError('$name captures $id, a record it lists');
+    if (withImages) images[id] = FImages(id);
     final read = FRec(id, captured: captured, recognisedFrom: id, img: id);
     final r = store.records[id] = beforeTheUpgrade
         ? _capturedBeforeTheUpgrade(id, captured)
         : _bodyWrite(null, read, _writeAt(now)) ?? (throw StateError('the app writes the body of every capture'));
+    if (!beforeTheUpgrade) {
+      // The binding the model's capture writes goes with the geometry and the icon worked out of the same directory:
+      // the values the app places with the binding, in one write, before the record first needs them ([R4-8] 1,
+      // [R4-9]).
+      final worked = _bodyImagesOfFiles(images[id]);
+      r
+        ..geometry = worked.geometry
+        ..icon = worked.icon;
+    }
     bodies.add(r.body);
-    if (withImages) images[id] = id;
     _cellsBack(id);
   }
 
@@ -778,15 +818,48 @@ class FDevice {
     }
     final r = _rec(id);
     final archived = option == 'none' ? ArchiveImageOption.none : ArchiveImageOption.resizedJpeg;
-    if (archived == ArchiveImageOption.none) _bind(id);
+    // Either archive lets go of images — the PNGs, or all —, and the app works the binding out first ([R4-9] (iii)).
+    _bind(id);
     if (syncArchive((value: r.stage.archiveOption, time: r.stageTime), archived, writeAt: _writeNow)
         case final written?) {
       r
         ..stage = FStage.ofArchiveOption(written.value)
         ..stageTime = written.time;
     }
-    if (r.stage == FStage.none) images.remove(id);
+    _shape(id);
     paused = false;
+  }
+
+  /// The image files of [id]'s record in the form its stage holds them in, as an archive leaves them: the app's plan
+  /// of the files its directory holds ([archivedImagePlan]) — none in an archive without images, the icon with them;
+  /// in one with resized images each PNG made into the JPEG the app's archive makes of it ([_reducedOf]), and of a
+  /// record that holds the reduced JPEGs alone, nothing changed ([N17-25] (e)).
+  void _shape(String id) {
+    final held = images[id];
+    final option = _rec(id).stage.archiveOption;
+    if (held == null || option == null) return;
+    final files = _dirFiles(held);
+    final plan = archivedImagePlan(option, files.keys.toSet());
+    final shaped = {...files}..removeWhere((name, _) => plan.removed.contains(name));
+    for (final png in plan.reduced) {
+      if (shaped.remove(png) case final bytes?) {
+        // A PNG the app cannot reduce stays as it is.
+        shaped[png] = bytes;
+        if (_reducedOf(bytes) case final jpeg?) {
+          shaped.remove(png);
+          shaped[png.replaceAll('.png', '.jpg')] = jpeg;
+          // The geometry of the PNG rewritten for the JPEG, as the app's archive rewrites it ([rescaledIntersection]).
+          final json = png.replaceAll('.png', '.json');
+          if (shaped[json] case final held?) shaped[json] = _rescaledGeometry(held, bytes);
+        }
+      }
+    }
+    switch (_imagesOfDir(shaped)) {
+      case final image?:
+        images[id] = image;
+      case null:
+        images.remove(id);
+    }
   }
 
   /// The app from before the upgrade archived ([archive]), which binds nothing and writes no time ([R5-5]); of its
@@ -797,7 +870,13 @@ class FDevice {
     _rec(id)
       ..stage = FStage.resizedJpeg
       ..stageTime = 0;
-    if (option == 'none') images.remove(id);
+    // That app reduced the PNGs as today's does. Its archive without images left the icon, which the model does not
+    // hold apart from the images: that leftover is outside the model.
+    if (option == 'none') {
+      images.remove(id);
+    } else {
+      _shape(id);
+    }
   }
 
   /// A save that leaves the cell's value as it was — the memo opened and closed with OK, the rating
@@ -906,13 +985,18 @@ class FDevice {
   /// it reads where that is not what the record shows ([R2-5]); where it is, it writes nothing ([R5-3]).
   void rerecognize(String id, int version) {
     final r = _rec(id);
-    // The content is recognised from the images in the record's directory, whichever those are.
+    // The content is recognised from the PNGs in the record's directory, whichever capture's those are; a reduced JPEG
+    // is not read ([N17-25] (d), [N15-10] (b)). The recognizer cuts the icon from the factor PNG again.
     final from = images[id];
-    if (r.stage != FStage.active || from == null) return;
+    if (r.stage != FStage.active || from == null || !from.png) return;
+    images[id] = FImages(from.capture, jpeg: from.jpeg, geometry: from.geometry);
+    // The body read names the icon the directory holds once the recognizer cut it ([composeBodyWrite]).
     final read = r.copy()
-      ..recognisedFrom = from
+      ..recognisedFrom = from.capture
       ..r = version
-      ..img = from;
+      ..img = from.capture
+      ..pngUnknown = false
+      ..icon = from.capture;
     if (_bodyWrite(r, read, _writeNow) case final written?) {
       store.records[id] = written;
       bodies.add(written.body);
@@ -928,7 +1012,10 @@ class FDevice {
     if (beforeTheUpgrade) {
       r
         ..img = null
+        ..pngUnknown = false
         ..boundToNoImage = false
+        ..geometry = null
+        ..icon = null
         ..stage = FStage.active;
     }
     return FZip(r, image: images[id]);
@@ -968,11 +1055,20 @@ class FDevice {
       z
         ..recognisedFrom = had.recognisedFrom
         ..r = had.r
-        ..img = had.img;
+        ..img = had.img
+        ..pngUnknown = had.pngUnknown;
     }
-    // A zip of the app from before the binding carries none: its content is of the images it holds, where
-    // it holds them ([R4-8] 5).
-    z.img ??= zip.image;
+    // A zip of the app from before the binding carries none: its content is of the images it holds, where it holds
+    // them ([R4-8] 5), as a directory's binding is worked out ([R4-9]), with their geometry and icon; of none, the
+    // binding is not worked out.
+    if (!z.bound && zip.image != null) {
+      final worked = _bodyImagesOfFiles(zip.image);
+      z
+        ..img = worked.img
+        ..pngUnknown = worked.pngUnknown
+        ..geometry = worked.geometry
+        ..icon = worked.icon;
+    }
     final writeAt = _writeAt(clock());
     final plan = syncImport(
       id,
@@ -1005,15 +1101,16 @@ class FDevice {
     store.records[id] = r;
     _cellsBack(id);
     bodies.add(r.body);
-    // The images: of the decision's sources, the first whose directory holds the image the binding names — the model's
-    // image is its hash, which the binding names it by.
-    bool named(String? image) => image != null && image == plan.body.binding?.skillPng;
+    // The images: of the decision's sources, the first whose directory holds the images the binding names — all of one
+    // capture's in the model, which the binding names by that capture.
+    bool named(FImages? image) => image != null && image.capture == r.img;
     final image = switch (plan.images) {
       SyncImagesCarried() => zip.image,
       SyncImagesKept() => mine,
       SyncImagesBound(:final sources) => named(mine) ? mine : sources.map((s) => images[s]).where(named).firstOrNull,
     };
-    image == null || r.stage == FStage.none ? images.remove(id) : images[id] = image;
+    image == null ? images.remove(id) : images[id] = image;
+    _shape(id);
     if (had == null) bonus.remove(id);
   }
 
@@ -1032,10 +1129,15 @@ class FDevice {
       r
         ..recognisedFrom = had.recognisedFrom
         ..r = had.r
-        ..img = had.img;
+        ..img = had.img
+        ..pngUnknown = had.pngUnknown;
     }
     // Of one content, a zip that carries no binding says nothing of it.
-    if (had != null && had.sameBody(r)) r.img ??= had.img;
+    if (had != null && had.sameBody(r) && r.img == null) {
+      r
+        ..img = had.img
+        ..pngUnknown = had.pngUnknown;
+    }
     r
       ..bodyTime = 0
       ..stageTime = 0;
@@ -1049,7 +1151,7 @@ class FDevice {
     // The directory's images stay as they are, whatever the zip shows (v6 §4): the record carries no binding, and its
     // directory is taken for its content's ([_bind]).
     if (zip.image case final image? when mutation != FileMutation.importLeavesTheZipsImages) images[id] = image;
-    if (r.stage == FStage.none) images.remove(id);
+    _shape(id);
     if (had == null) bonus.remove(id);
   }
 
@@ -1098,6 +1200,7 @@ class FDevice {
     _sent = null;
     keptBase = null;
     keptSent = null;
+    keptImages = null;
     paused = false;
   }
 
@@ -1216,7 +1319,8 @@ class FDevice {
       final hash = r.img;
       if (hash == null || !server.images.contains(hash)) continue;
       if (!server.read()) return;
-      images[r.id] = hash;
+      // The model's round sends and takes the images of a capture as one, in no form of their own.
+      images[r.id] = FImages(hash);
     }
   }
 
@@ -1285,15 +1389,15 @@ class FDevice {
   }
 
   /// A round of the app's own ([runSyncRoundOn]), with this device as its place and [server] as the endpoints
-  /// (`file_place.dart`). It has none of what only the model's round does: it sends and takes no image, and neither
-  /// the server's room nor the day's rows and reads hold it back. A world that has any of those is refused here, not
-  /// run without them ([OfTheModelsRound]), but those of [appRoundLacking].
+  /// (`file_place.dart`). It sends and takes images through the endpoints as the Worker answers them; it has none of
+  /// the rest of what only the model's round does: neither the server's room nor the day's rows and reads hold it
+  /// back. A world that has any of those is refused here, not run without them ([OfTheModelsRound]), but those of
+  /// [appRoundLacking].
   /// [placeWrites]: the place lands that many writes of the result and fails the rest ([PlaceCut]). [swapCut]: the
   /// endpoints answer that many swaps and not the next ([SwapCut]).
   void appSyncRound(FServer server, {int? placeWrites, SwapCut? swapCut}) {
     final missing = {
-      if (server.imageForm != 'none') OfTheModelsRound.images,
-      if (server.full || paused) OfTheModelsRound.room,
+      if (server.full || server.database != DatabaseRoom.room || paused) OfTheModelsRound.room,
       if (server.dailyRows != null || server.dailyReads != null) OfTheModelsRound.dailyLimits,
       if (cellsLeftBehind.isNotEmpty) OfTheModelsRound.cellsLeftBehind,
     }.difference(appRoundLacking);
@@ -1499,9 +1603,12 @@ class FDevice {
       if (r != null && r.stage != FStage.none) {
         if (mine != null && listed != null && listed.sameBody(r)) {
           images[id] = mine;
-        } else if (r.img case final hash?
-            when hash == own || (sourcesOf(id, from) ?? const []).any((other) => images[other] == hash)) {
-          images[id] = hash;
+        } else if (r.img case final hash?) {
+          final named = [
+            own,
+            for (final other in sourcesOf(id, from) ?? const <String>[]) images[other],
+          ].where((held) => held?.capture == hash).firstOrNull;
+          if (named != null) images[id] = named;
         }
       }
       cellsOf(id, result, store);
@@ -1738,7 +1845,7 @@ class FDevice {
     for (final r in store.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
       if (paused || busy || server.imageForm == 'none') break;
       if (waits.contains(r.id) || r.stage == FStage.none) continue;
-      final image = images[r.id];
+      final image = images[r.id]?.capture;
       if (image == null || image != r.img || server.images.contains(image)) continue;
       if (lost(() => server.putImage(name, image))) return false;
       switch (server.putImage(name, image)) {
@@ -1856,12 +1963,17 @@ enum FileRound {
 /// it until the app's does, and then it leaves this list, the app's round stops refusing it, and the sequences that
 /// need it move to the app's round with what they expect unchanged.
 enum OfTheModelsRound {
-  /// Images sent and taken: an account whose image form is not `none` ([SetImageForm]). Leaves when the app's round
-  /// sends and takes images; most named sequences need it.
+  /// Images sent and taken: an account whose image form is not `none` ([SetImageForm]). The app's round sends and
+  /// takes them, and a world that runs it is not refused one; the named sequences that set the form stay on the
+  /// model's round because the judge reads the server's images by their capture, in no form of their own, as the
+  /// model's round sends them — of the app's reduced JPEG it reads an image no row shows, and the capture's missing.
+  /// Leaves when the judge reads the two forms; most named sequences need it.
   images,
 
-  /// The server's room, and a device a full storage holds back ([SetStorageFull]). Leaves when the app's round waits
-  /// for room.
+  /// The server's room — the account's storage ([SetStorageFull]) and, of the app's endpoints alone, the database's
+  /// ([SetDatabaseRoom]) —, and a device a full storage holds back. The app's round meets a refusal for room as it
+  /// meets any refusal: it holds nothing back for room ([R7-4]), and sends nothing of a round whose bodies were refused.
+  /// Leaves when the app's round waits for room.
   room,
 
   /// The day's rows and reads ([SetDailyRows], [SetDailyReads]). Leaves when the app's round keeps to them.
@@ -2013,6 +2125,8 @@ class FileWorld extends SyncWorld {
     OldApp() || Upgrade() => false,
     // Only the app's round reads the shelf; the model's own does not, and a record goes onto it on no other.
     Quarantine() => round == FileRound.app,
+    // Only the app's endpoints have a database ([FServer.database]).
+    SetDatabaseRoom() => round == FileRound.app,
     _ => true,
   };
 
@@ -2063,6 +2177,7 @@ class FileWorld extends SyncWorld {
       op is DeleteAccount ||
       op is Elapse ||
       op is SetStorageFull ||
+      op is SetDatabaseRoom ||
       op is SetDailyRows ||
       op is SetDailyReads;
 
@@ -2146,6 +2261,10 @@ class FileWorld extends SyncWorld {
         server.elapse(days);
       case SetStorageFull(:final full):
         server.full = full;
+      case SetDatabaseRoom() when round == FileRound.model:
+        throw UnsupportedError('the model\'s round has no database: $op');
+      case SetDatabaseRoom(:final room):
+        server.database = room;
       case SetDailyRows(:final rows):
         server.dailyRows = rows;
       case SetDailyReads(:final reads):
@@ -2251,7 +2370,7 @@ class FileWorld extends SyncWorld {
             id: r.id,
             contentSet: r.recognisedFrom,
             archiveOption: r.stage.option,
-            imageSet: d.images[r.id],
+            imageSet: d.images[r.id]?.capture,
             forkedFrom: r.forkedFrom,
             hasSnapshot: d.base?.list.records.containsKey(r.id) ?? false,
             // The parents only: they carry no time of their own, and are shown at that of the content they go
@@ -2323,7 +2442,7 @@ class FileWorld extends SyncWorld {
     final b = StringBuffer(
       '${server.account}|${server.generation}|${server.list}|${server.images.toList()..sort()}'
       '|${server.bodies.toList()..sort()}|${server.imageForm}|${server.day}|${server.releasing}'
-      '|${server.full}|${server.dailyRows}|${server.dailyReads}',
+      '|${server.full}|${server.database}|${server.dailyRows}|${server.dailyReads}',
     );
     for (final d in devices.values) {
       b.write(

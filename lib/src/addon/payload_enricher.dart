@@ -119,7 +119,12 @@ String? _recordJsonOf(DirectoryPath directory) {
   if (!recognized.existsSync()) {
     return null;
   }
-  final composed = composeBodyWrite(null, CharaDetailRecord.fromRecordJson(recognized.readAsStringSync()));
+  final icon = directory.filePath(traineeIconFileName);
+  final composed = composeBodyWrite(
+    null,
+    CharaDetailRecord.fromRecordJson(recognized.readAsStringSync()),
+    icon: recordIconName(icon.existsSync() ? icon.readAsBytesSync() : null),
+  );
   return composed == null ? null : utf8.decode(composed.toRecordJsonBytes());
 }
 

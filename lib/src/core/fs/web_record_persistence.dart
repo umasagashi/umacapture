@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:collection';
 import 'dart:typed_data';
 
+import '/src/chara_detail/chara_detail_record.dart' show traineeIconFileName;
 import '/src/core/fs/record_id_safety.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
@@ -342,7 +343,11 @@ final class WebRecordPersistence {
       if (harvestedList.isEmpty) return RecordUpdateOutcome.failed;
       // Parsed before composing, so every path is known to name this record when the files are read as one.
       parseHarvestedRecordFiles(harvestedList, logContext: 'record regeneration', expectedRecordId: recordId);
-      final composed = composeRecordFiles(harvestedList);
+      // The icon the store holds stays beside what is laid over it, where the recognizer cut none.
+      final heldIcon = await (storageDir / 'chara_detail' / 'active' / recordId)
+          .filePath(traineeIconFileName)
+          .readAsBytesIfPresent();
+      final composed = composeRecordFiles(harvestedList, heldIcon: heldIcon);
       if (composed == null) {
         throw const FormatException('Regenerated payload holds neither a recognized.json nor a record.json.');
       }

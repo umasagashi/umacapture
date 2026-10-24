@@ -869,7 +869,9 @@ Future<List<_MetadataKeyFile>?> _readMetadataKeyFiles(DirectoryPath directory, v
 ///   is older, so a survivor that took the newer date would be re-ordered
 ///   against a third copy at the next merge and the chain would stop converging;
 /// * the **parents** and the time of the body are [body]'s: the parents travel with the body, but a link naming either
-///   side of the merge; the time is [older]'s where [body] is not written.
+///   side of the merge; the time is [older]'s where [body] is not written;
+/// * the **binding**, the **geometry** and the **icon** are [body]'s too: they go with the content side's images, whose
+///   tree the survivor keeps;
 ///
 /// [Metadata.relationBonus] is [relationBonus], the content side's as it stands ([SyncMergePlan.bonusFrom]). It is
 /// derived from the resolved lineage, so the resolution that follows a merge is
@@ -899,6 +901,8 @@ CharaDetailRecord _survivorRecord({
     relationBonus,
     content.metadata.recordType,
     body.binding,
+    body.geometry,
+    body.icon,
     writesBody ? body.time : older.metadata.bodyWrittenAt,
   );
   return CharaDetailRecord(
@@ -1635,14 +1639,14 @@ final class EnhancementMerge {
   /// The record of the content side, [held], with the binding of its body.
   ///
   /// The content side's tree becomes the survivor's, and the merge lets go of the other side's images, so where the
-  /// content side carries no binding yet it is worked out here from that tree, before the publication that replaces
-  /// it: the binding is one of the facts that decide whether the kept body is the one the older record shows
+  /// content side carries no binding yet it is worked out here from that tree, with the geometry and the icon, and
+  /// placed with them ([computeRecordBodyImages]), before the publication that replaces it: the binding is one of the facts that decide whether the kept body is the one the older record shows
   /// ([syncMergeBody]), and a binding not worked out yet may name another capture. The other side's binding is never
   /// worked out: when its content is not kept, its body goes with its images and nothing reads either — the older
   /// record kept for its id alone is read with the binding it carries, and one not worked out disagrees with none.
   Future<CharaDetailRecord> _bound(_HeldRecord held) async => held.record.metadata.binding != null
       ? held.record
-      : placeOnRecord(held.record, binding: await computeRecordBinding(held.directory));
+      : placeOnRecord(held.record, images: await computeRecordBodyImages(held.directory));
 
   /// Every record of [store] that names [retiredId] as a parent, with that slot
   /// pointing at [olderId] instead.

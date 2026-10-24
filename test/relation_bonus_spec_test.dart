@@ -37,6 +37,8 @@ CharaDetailRecord makeRecord({required String id, required int? relationBonus}) 
     RecordType.standard,
     null,
     null,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

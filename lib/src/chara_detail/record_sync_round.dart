@@ -44,6 +44,16 @@
 // What the round kept on the side that keeps more ([R3-5]) the device that ran it tells, each once: by the round after
 // which no round meets it again ([_told]).
 //
+// The images come last, once the device and the server hold one list ([_syncImages]): each record the device lists puts
+// on the server the images of its body the server holds no form of, and takes those it wants and does not hold
+// ([syncImageWork]). What tells a round there is image work left is data the device keeps — what the image step left of
+// each record's images ([SyncKeptImages]) — and not whether the list moved: a row may name an image put after it, so a
+// round that finds the list as it left it still works on every record not settled. The images follow the account's
+// form as the round read it, and as this device set it from then on ([SyncImageFormSetting], S-09); the reduced JPEG
+// that replaces the PNG of an archive with resized images goes under every form (S-11), after the list that archives
+// it, which is what the server takes it under the form none by. A round that leaves images undone for want of the
+// server's room or answer says so as it ends ([SyncRoundOutcome.imagesUndone], [R7-1]).
+//
 // A record whose binding the device has not worked out yet ([R4-9]) has it worked out before the round sends it, one
 // record at a time under its own lock. A first round of a device holding many such records works out a part of them,
 // sends what it may, and goes on with the next part, each part as large as what the device holds bound already and
@@ -62,6 +72,11 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/image_converter.dart';
+import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/record_sync_app_place.dart';
 import '/src/chara_detail/record_sync_list.dart';
@@ -72,8 +87,8 @@ import '/src/core/storage/record_write_effects.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/enhancement_merge_dialog.dart' show inheritanceResolutionDeclaration;
 
-// Where the app's place keeps the round's two lists, for the callers of [runSyncRound].
-export '/src/chara_detail/record_sync_app_place.dart' show syncBaseFile, syncSentFile;
+// Where the app's place keeps the round's two lists and what its image step kept, for the callers of [runSyncRound].
+export '/src/chara_detail/record_sync_app_place.dart' show syncBaseFile, syncImagesFile, syncSentFile;
 
 /// A refusal of a sync endpoint: the status and the `error` `docs/sync-protocol.md` states, and the rest of the
 /// answer ([detail]: the current generation of a `stale_generation`, the names of a `missing_objects`, the `limit` of
@@ -119,6 +134,21 @@ abstract interface class SyncServer {
 
   /// `POST /api/sync/root`; answers the new generation.
   Future<int> replaceRoot(int generation, String name, String text);
+
+  /// `GET /api/sync/settings`: the account's image form, `png`, `jpeg` or `none`.
+  Future<String> imageForm();
+
+  /// `PUT /api/sync/settings`: sets the account's image form to [form], `png`, `jpeg` or `none`.
+  Future<void> putImageForm(String form);
+
+  /// `POST /api/sync/held`, 1 to 1,000 names: those of [names] the account holds.
+  Future<Set<String>> held(List<String> names);
+
+  /// `PUT /api/sync/images/<name>`, [bytes] as a JPEG where [jpeg], else as a PNG.
+  Future<void> putImage(String name, Uint8List bytes, {required bool jpeg});
+
+  /// `GET /api/sync/images/<name>`: the bytes; null where the server answers `404 not_found`.
+  Future<Uint8List?> image(String name);
 }
 
 /// A list the round keeps: the base, or the sent list. [generation] is the generation the base is the list of, or the
@@ -223,6 +253,93 @@ class SyncKeptList {
   }
 }
 
+/// What the image step of a round keeps on the device ([SyncPlace.keepImages]): of each record of the device whose
+/// images a round worked on, what it left of them ([SyncImagesLeft]), by id — for the account [account]: a round of
+/// another account's reads it as none kept. Kept apart from the base, which a round writes at every step that moves it.
+class SyncKeptImages {
+  const SyncKeptImages({required this.account, this.records = const {}});
+
+  final String account;
+  final Map<String, SyncImagesLeft> records;
+
+  Uint8List toBytes() => utf8.encode(
+    jsonEncode({
+      'format': 1,
+      'account': account,
+      'records': {
+        for (final MapEntry(key: id, value: (:wants, :holds, :stored))
+            in records.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
+          id: {'wants': wants.toList()..sort(), 'holds': holds.toList()..sort(), 'stored': stored},
+      },
+    }),
+  );
+
+  static SyncKeptImages decode(Uint8List bytes) {
+    final json = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
+    if (json['format'] != 1) throw FormatException('Kept sync images of format ${json['format']}.');
+    return SyncKeptImages(
+      account: json['account'] as String,
+      records: {
+        for (final MapEntry(key: id, value: kept) in (json['records'] as Map<String, Object?>).entries)
+          id: switch (kept) {
+            {'wants': final List<Object?> wants, 'holds': final List<Object?> holds, 'stored': final bool stored} => (
+              wants: {...wants.cast<String>()},
+              holds: {...holds.cast<String>()},
+              stored: stored,
+            ),
+            _ => throw FormatException('Kept sync images of $id: $kept.'),
+          },
+      },
+    );
+  }
+}
+
+/// The account's image form as this device last set it ([form]), and how many times it set one ([sets]) — what a round
+/// that runs meanwhile follows from then on over the form it read of the server (S-09: "the device follows the form
+/// read as the round began, and where it changes the form on this device, from then on, even part way through a
+/// round"). The app's is [syncImageFormSettingProvider], which [RecordSync.setImageForm] sets.
+class SyncImageFormSetting {
+  String? _form;
+  var _sets = 0;
+
+  /// The form this device set last; null before it set one.
+  String? get form => _form;
+
+  /// How many times this device set the form.
+  int get sets => _sets;
+
+  /// This device sets the form to [form]: a round running follows it from now on.
+  void set(String form) {
+    _form = form;
+    _sets++;
+  }
+}
+
+/// The image form this device set ([SyncImageFormSetting]), which every round of the app's follows ([runSyncRound]).
+final syncImageFormSettingProvider = Provider<SyncImageFormSetting>((ref) => SyncImageFormSetting());
+
+/// Why the image step of a round left images undone ([SyncImagesUndone]), by the answer of the request that did not
+/// land (`docs/sync-protocol.md`).
+enum SyncImagesStop {
+  /// The server had no room for an image: `507` — `account_limit`, `hidden_limit`, `storage_full` or `database_full`
+  /// ([R7-4]: what cannot be put waits until it can).
+  room,
+
+  /// The server refused a request otherwise: `409 images_not_synced`, the account's form having become none, or any
+  /// other refusal.
+  refused,
+
+  /// A request got no answer: the connection dropped, or the server did not answer.
+  lost,
+}
+
+/// What the image step of a round left undone ([R7-1]: a refusal is not shown as a sync that succeeded): how many of the
+/// records it worked on it did not put or take every image of for a request that did not land — the request itself,
+/// and every one the step did not make after it ([syncImageWork]: a refused put ends the puts of the round) —, and why
+/// ([stops]). What is undone is in what the step kept ([SyncKeptImages]), and the next round goes on with it. Images
+/// the form none spares the device from putting are not undone (S-09).
+typedef SyncImagesUndone = ({int records, Set<SyncImagesStop> stops});
+
 /// How a round ended.
 enum SyncRoundEnd {
   /// The device and the server hold the same list.
@@ -266,6 +383,7 @@ class SyncRoundOutcome {
     this.added = 0,
     this.withheld = 0,
     this.longMemos = 0,
+    this.imagesUndone,
   });
 
   final SyncRoundEnd end;
@@ -294,10 +412,15 @@ class SyncRoundOutcome {
   /// shows as the reason no round runs (S-10), which is not a count of what the round did. None where it was not held.
   final int longMemos;
 
+  /// What the image step of the round left undone for want of the server's room or answer ([SyncImagesUndone]):
+  /// [end] tells of the list, and a round that ends [SyncRoundEnd.done] with images undone is not one whose images all
+  /// reached the server ([R7-1]). Null where the step left none undone, or the round ended before it.
+  final SyncImagesUndone? imagesUndone;
+
   @override
   String toString() =>
       'SyncRoundOutcome(${end.name}, replacements: $replacements, restored: $restored, splitOff: $splitOff, '
-      'added: $added, withheld: $withheld, longMemos: $longMemos)';
+      'added: $added, withheld: $withheld, longMemos: $longMemos, imagesUndone: $imagesUndone)';
 }
 
 /// The most characters (code points) a memo a round sends may hold (S-10).
@@ -337,7 +460,13 @@ Future<SyncRoundOutcome> runSyncRound(
   int bindingChunk = syncBindingChunk,
 }) async {
   final place = await AppSyncPlace.of(ref, effects: effects);
-  final outcome = await runSyncRoundOn(place, server, account: account, bindingChunk: bindingChunk);
+  final outcome = await runSyncRoundOn(
+    place,
+    server,
+    account: account,
+    bindingChunk: bindingChunk,
+    imageForm: ref.read(syncImageFormSettingProvider),
+  );
   if (place.changedRecords) {
     // A resolution that fails leaves the records as the round left them, only without the links it would have placed,
     // which the next resolution places: it does not turn the round into a failure.
@@ -353,16 +482,20 @@ Future<SyncRoundOutcome> runSyncRound(
 }
 
 /// Runs one sync round of the device [place], whose session is of [account], against [server]. [bindingChunk]: see
-/// [syncBindingChunk].
+/// [syncBindingChunk]. [imageForm]: the image form the device sets while the round runs, which its images follow from
+/// then on (S-09); none, and they follow the form the round read.
 Future<SyncRoundOutcome> runSyncRoundOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
   int bindingChunk = syncBindingChunk,
+  SyncImageFormSetting? imageForm,
 }) async {
   var (replacements, restored, splitOff, added) = (0, 0, 0, 0);
   // The records the round has tried to work out the binding of: one it could not is not tried again in this round.
   final tried = <String>{};
+  // What the image steps of the round's attempts share: one form read, and one end of the puts.
+  final images = _RoundImages(imageForm);
   var refusedAsStale = false;
   for (;;) {
     final (outcome, :stale, :more) = await _attempt(
@@ -371,6 +504,7 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       account: account,
       bindingChunk: bindingChunk,
       tried: tried,
+      images: images,
     );
     // An attempt refused as stale had put its result in place, so what it told stays told after the next one.
     replacements += outcome.replacements;
@@ -391,8 +525,36 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       added: added,
       withheld: outcome.withheld,
       longMemos: outcome.longMemos,
+      imagesUndone: outcome.imagesUndone,
     );
   }
+}
+
+/// What the image steps of one round share ([_syncImages]): the account's form, read once as the first of them begins
+/// (S-09: "the form read as the round began"), and followed from then on as this device sets it ([setting]); whether
+/// the round puts images still — one refused or lost ends its puts, in every attempt after it too ("a device refused
+/// sends none of the rest of the round's images"); and why requests did not land ([stops]).
+class _RoundImages {
+  _RoundImages(this.setting);
+
+  final SyncImageFormSetting? setting;
+  String? _read;
+  var _mark = 0;
+  var puts = true;
+  final stops = <SyncImagesStop>{};
+
+  /// Reads the form of [server] where the round has not read it yet.
+  Future<void> read(SyncServer server) async {
+    if (_read != null) return;
+    _mark = setting?.sets ?? 0;
+    _read = await server.imageForm();
+  }
+
+  /// The form the round follows now: the one this device set since the round read the server's, else that one.
+  String get form => switch (setting) {
+    SyncImageFormSetting(:final sets, form: final set?) when sets != _mark => set,
+    _ => _read!,
+  };
 }
 
 /// One attempt of a round: [stale] where the server refused its replacement as stale; [more] where it held records
@@ -407,6 +569,7 @@ Future<_Attempt> _attempt<C>(
   required String account,
   required int bindingChunk,
   required Set<String> tried,
+  required _RoundImages images,
 }) async {
   // 0. A base of another account is no base, nor is its sent list.
   var base = await place.readKept(SyncKept.base);
@@ -543,27 +706,41 @@ Future<_Attempt> _attempt<C>(
     };
     return _ended(_told(end, counts, local.list, placed: bodyNames.keys.toSet(), withheld: withheld));
   }
-  await place.keep(
-    SyncKept.base,
-    SyncKeptList(
-      account: account,
-      generation: head.generation,
-      list: there,
-      pending: pending,
-      held: held,
-      heldAgreed: heldAgreed,
-    ),
+  var agreedBase = SyncKeptList(
+    account: account,
+    generation: head.generation,
+    list: there,
+    pending: pending,
+    held: held,
+    heldAgreed: heldAgreed,
   );
+  await place.keep(SyncKept.base, agreedBase);
+  // The records whose files may have changed since the image step that kept what it left of their images: those the
+  // device changed since the base the round merged against, and those the round put in place.
+  final changed = agreed == null
+      ? null
+      : {
+          for (final id in {...local.list.rows.keys, ...agreed.rows.keys})
+            if (switch ((agreed.rows[id]?.record, local.list.rows[id]?.record)) {
+              (final was?, final now?) => !syncRecordsAgree(was, now),
+              _ => true,
+            })
+              id,
+          ...plan.keys,
+        };
 
   // 5–7. The list sent: the result, but for what is left as it is.
   final next = _listToSend(result, there, local.list, kept, bodyNames);
   var replacements = 0;
-  SyncRoundOutcome outcome(SyncRoundEnd end) =>
-      _told(end, counts, local.list, replacements: replacements, withheld: withheld);
+  SyncRoundOutcome outcome(SyncRoundEnd end, {SyncImagesUndone? imagesUndone}) =>
+      _told(end, counts, local.list, replacements: replacements, withheld: withheld, imagesUndone: imagesUndone);
   // The round goes on with the next part where it held records back and worked some out.
   final more = heldBack.isNotEmpty && worked > 0;
   final thereParts = syncListParts(there);
-  if (_sameParts(syncListParts(next), thereParts)) return (outcome(SyncRoundEnd.done), stale: false, more: more);
+  if (_sameParts(syncListParts(next), thereParts)) {
+    final undone = await _syncImages(place, server, agreedBase.list, kept, changed, account: account, round: images);
+    return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
+  }
   try {
     await _putBodies(place, server, next, there);
     final stored = {for (final text in thereParts.values) syncObjectName(utf8.encode(text))};
@@ -613,28 +790,414 @@ Future<_Attempt> _attempt<C>(
         return _ended(outcome(SyncRoundEnd.answerLost));
       }
       at = list;
-      await place.keep(
-        SyncKept.base,
-        SyncKeptList(
-          account: account,
-          generation: generation,
-          list: at,
-          pending: pending,
-          held: held,
-          heldAgreed: heldAgreed,
-        ),
-      );
+      agreedBase = agreedBase.copyWith(generation: generation, list: at);
+      await place.keep(SyncKept.base, agreedBase);
       await place.keep(SyncKept.sent, null);
       changes = [
         for (final change in changes)
           if (!replacement.contains(change)) change,
       ];
     }
-    return (outcome(SyncRoundEnd.done), stale: false, more: more);
   } catch (error, stackTrace) {
     logger.w('Sync could not put the list on the server.', error, stackTrace);
     return _ended(outcome(SyncRoundEnd.failed));
   }
+  final undone = await _syncImages(place, server, agreedBase.list, kept, changed, account: account, round: images);
+  return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
+}
+
+/// The image step of a round of [account] that ended with the device and the server holding one list, [list]: of each
+/// record it lists but those left as they are ([kept]), the images it wants ([syncImagesWanted]) put on the server and
+/// taken from it ([syncImageWork]).
+///
+/// What tells the step what is left to do of a record is what it kept of it ([SyncPlace.readKeptImages]), not whether
+/// the list moved — the images a row names may be put after the row ([R4-8] 5): nothing, and nothing asked of the
+/// server, where the record wants the images it wanted then, its directory held them, and the server held a form of
+/// each, or the account's form is none and the record owes no replacement ([syncImagesSettled]); else the step asks the
+/// server which it holds ([SyncServer.held]), and works on the record where that gives it work — reading its files only
+/// then, and only where what was kept of them cannot tell. What was kept is read only of a record whose files nothing
+/// changed since: not of one in [changed] — the device changed it since the base the round merged against, or the
+/// round put it in place —, nor of any where [changed] is null, the round having had no base, nor of one whose
+/// directory holds no longer every file kept as held, or holds a form without the geometry its body carries of it
+/// ([SyncPlace.imageFileNamesOf]: its names listed, none read; [recordGeometryLacking]) — what removed it, the storage
+/// view or another, the list does not tell. Such a geometry is written again from the body, as the images taken are
+/// placed ([SyncPlace.placeImages]). What the step leaves of each record is kept.
+///
+/// The puts follow the account's form as the round follows it ([_RoundImages.form]): read once, as the first image step
+/// of the round begins, and as this device sets it from then on, before each put (S-09). The reduced JPEG that replaces
+/// a PNG goes under every form ([syncImageWork]), the list that archives its record being the server's already; a
+/// record that owes it once its work is done is kept as nothing ([syncImagesOwed]), and so the form none settles every
+/// record kept, of which none owes it.
+///
+/// A record the device changed since the round read it is the next round's. A put that does not land ends the puts of
+/// the round, its attempts after this one included (S-09: "a device refused sends none of the rest of the round's
+/// images"), and an image taken that is not the one asked for is not placed; anything else thrown ends the step. None of
+/// it changes how the round ended, for the list is the server's; what a request that did not land left undone is
+/// answered ([SyncImagesUndone], [R7-1]; null where it left none), and nothing is kept of those records, so that the
+/// next round works them again whatever the form.
+Future<SyncImagesUndone?> _syncImages<C>(
+  SyncPlace<C> place,
+  SyncServer server,
+  SyncList list,
+  Set<String> kept,
+  Set<String>? changed, {
+  required String account,
+  required _RoundImages round,
+}) async {
+  final keptImages = await place.readKeptImages();
+  final was = keptImages == null || keptImages.account != account
+      ? const <String, SyncImagesLeft>{}
+      : keptImages.records;
+  final records = [
+    for (final row in list.rows.values)
+      if (!kept.contains(row.record.id)) row.record,
+  ]..sort((a, b) => a.id.compareTo(b.id));
+  final left = <String, SyncImagesLeft>{for (final id in kept) id: ?was[id]};
+  // What was kept of a record's images, where nothing changed its files since: none where the round has no base, and
+  // none where its directory holds no longer every file it held then, nor the geometry of each form it holds that its
+  // body carries — one removed apart from the list, as the storage view removes one, is taken or written again (S-11,
+  // D-65) —, or cannot be listed.
+  final still = <String, SyncImagesLeft>{};
+  // The records with images to want, and of each what was kept; settled without the form read first, then with it.
+  var open = <(SyncRecord, RecordBinding, Set<String>)>[];
+  for (final r in records) {
+    final wanted = syncImagesWanted(r.body.binding, r.stage.value, icon: r.body.icon);
+    final binding = r.body.binding;
+    if (wanted.isEmpty || binding == null) continue;
+    if (was[r.id] case final it? when changed != null && !changed.contains(r.id)) {
+      try {
+        final names = await place.imageFileNamesOf(r);
+        if (names.containsAll(it.holds) && recordGeometryLacking(r.body.geometry, names).isEmpty) still[r.id] = it;
+      } catch (error, stackTrace) {
+        logger.w('Sync reads the images of ${r.id} again: its directory cannot be listed.', error, stackTrace);
+      }
+    }
+    if (still[r.id] case final it?
+        when syncImagesSettled(binding, r.stage.value, it, wanted, form: null, icon: r.body.icon)) {
+      left[r.id] = it;
+    } else {
+      open.add((r, binding, wanted));
+    }
+  }
+  // The records the step left undone for a request that did not land ([SyncImagesUndone]).
+  final undone = <String>{};
+  if (open.isNotEmpty) {
+    try {
+      await round.read(server);
+      final work = <(SyncRecord, RecordBinding, Set<String>)>[];
+      for (final (r, binding, wanted) in open) {
+        if (still[r.id] case final it?
+            when syncImagesSettled(binding, r.stage.value, it, wanted, form: round.form, icon: r.body.icon)) {
+          left[r.id] = it;
+        } else {
+          work.add((r, binding, wanted));
+        }
+      }
+      open = work;
+      final names = {
+        for (final (r, binding, _) in work) ...[
+          for (final (:png, :jpeg) in recordBindingFields(binding).values) ...[?png, ?jpeg],
+          ?r.body.icon,
+        ],
+      }.toList()..sort();
+      final held = <String>{};
+      for (var i = 0; i < names.length; i += 1000) {
+        held.addAll(await server.held(names.sublist(i, min(i + 1000, names.length))));
+      }
+      // What the step leaves of a record once its work is done — but of one that owes the server a replacement the
+      // work did not put, which is kept as nothing, as one a request left undone is, so that the next round asks the
+      // server again whatever the form ([syncImagesOwed]).
+      void leave(SyncRecord r, RecordBinding binding, SyncImagesLeft it) {
+        if (!syncImagesOwed(binding, r.stage.value, held)) left[r.id] = it;
+      }
+
+      for (final (r, binding, wanted) in work) {
+        final stage = r.stage.value;
+        final icon = r.body.icon;
+        // What was kept of its files tells the work, where it is of the images the record wants now.
+        if (still[r.id] case (:final wants, :final holds, stored: _) when _sameNames(wants, wanted)) {
+          final w = syncImageWork(binding, stage, holds, held, form: round.form, icon: icon);
+          if (w.puts.isEmpty && w.takes.isEmpty) {
+            leave(r, binding, (wants: wanted, holds: holds, stored: w.stored));
+            continue;
+          }
+        }
+        final images = await place.imagesOf(r);
+        if (images == null) continue;
+        final before = images.bound;
+        var form = round.form;
+        var w = syncImageWork(binding, stage, images.bound, held, form: form, icon: icon);
+        var landed = true;
+        for (var i = 0; i < w.puts.length; i++) {
+          // A form this device set since the work was worked out decides the puts left: those of the images the server
+          // holds no form of yet.
+          if (round.form != form) {
+            form = round.form;
+            w = syncImageWork(binding, stage, images.bound, held, form: form, icon: icon);
+            i = -1;
+            continue;
+          }
+          final put = w.puts[i];
+          if (!round.puts) {
+            landed = false;
+            undone.add(r.id);
+            continue;
+          }
+          final file = images.files[put.file];
+          final bytes = file == null || !put.reduce ? file : archiveJpegOf(file);
+          // Of a file that is not the image named — the icon the device keeps of its own being another than the one
+          // its body names ([syncImageWork]) —, nothing is put, and the server's forms are not known.
+          if (bytes == null || syncObjectName(bytes) != put.name) {
+            landed = false;
+            continue;
+          }
+          try {
+            await server.putImage(put.name, bytes, jpeg: put.jpeg);
+            held.add(put.name);
+          } catch (error, stackTrace) {
+            logger.w('Sync put no more images in this round: ${put.name} did not land.', error, stackTrace);
+            round
+              ..puts = false
+              ..stops.add(_stopOf(error));
+            landed = false;
+            undone.add(r.id);
+          }
+        }
+        final taken = <String, Uint8List>{};
+        for (final take in w.takes) {
+          final bytes = await server.image(take.name);
+          if (bytes == null || syncObjectName(bytes) != take.name) {
+            landed = false;
+            continue;
+          }
+          taken[take.file] = bytes;
+        }
+        // The images taken go in place, and so does the geometry of a form the directory holds without it, which
+        // nothing is taken for (S-11).
+        final lacksGeometry = recordGeometryLacking(r.body.geometry, images.files.keys.toSet()).isNotEmpty;
+        if ((taken.isNotEmpty || lacksGeometry) && !await place.placeImages(r, taken)) landed = false;
+        // A record whose work did not all land is kept as its files were, the server's forms not known: the next round
+        // reads them again. Of one a request left undone nothing is kept, so that the next round works it whatever the
+        // form — a replacement goes under none too.
+        if (landed) {
+          leave(r, binding, (wants: wanted, holds: w.holds, stored: w.stored));
+        } else if (!undone.contains(r.id)) {
+          leave(r, binding, (wants: wanted, holds: before, stored: false));
+        }
+      }
+    } catch (error, stackTrace) {
+      logger.w('Sync could not put or take the images; the next round goes on with them.', error, stackTrace);
+      round.stops.add(_stopOf(error));
+      undone.addAll([
+        for (final (r, _, _) in open)
+          if (!left.containsKey(r.id)) r.id,
+      ]);
+    }
+  }
+  if (keptImages?.account != account ||
+      left.length != was.length ||
+      left.entries.any((e) => !_sameKept(was[e.key], e.value))) {
+    await place.keepImages(SyncKeptImages(account: account, records: left));
+  }
+  return undone.isEmpty ? null : (records: undone.length, stops: {...round.stops});
+}
+
+/// Why a request of the image step did not land ([SyncImagesStop]).
+SyncImagesStop _stopOf(Object error) => switch (error) {
+  SyncRefusal(status: 507) => SyncImagesStop.room,
+  SyncRefusal() => SyncImagesStop.refused,
+  _ => SyncImagesStop.lost,
+};
+
+bool _sameNames(Set<String>? a, Set<String> b) => a != null && a.length == b.length && a.containsAll(b);
+
+bool _sameKept(SyncImagesLeft? a, SyncImagesLeft b) =>
+    a != null && a.stored == b.stored && _sameNames(a.wants, b.wants) && _sameNames(a.holds, b.holds);
+
+/// What a round left of the images of a record ([SyncKeptImages]): the images it wanted then ([syncImagesWanted]);
+/// the image files of its directory its binding names once the round's work landed ([imagesBoundBy] — `<image>.png`,
+/// `<image>.jpg`), and `trainee.jpg` where it holds an icon ([holds]); and whether the server held of each image the
+/// binding names the form its stage has it reference, and the icon its body names ([stored] — [syncImageWork]). None
+/// is left of a record that owes the server a replacement ([syncImagesOwed]).
+typedef SyncImagesLeft = ({Set<String> wants, Set<String> holds, bool stored});
+
+/// Whether a record bound as [binding] in the archive stage [stage] (null: normal), which wants [wanted]
+/// ([syncImagesWanted]), has nothing left to do of its images by what a round kept of them, [kept], where the account's
+/// image form is [form] (null: not read): it wanted them then, its directory held of each the form it wants — a normal
+/// record its PNG, or its reduced JPEG where the binding knows no PNG of it; one archived with resized images its
+/// reduced JPEG, or its PNG where the binding knows no JPEG of it —, and the server held of each the form its stage has
+/// it reference ([syncImageWork]: stored), or the form is none, under which it has none to put (S-09). The one image
+/// put under every form, the reduced JPEG that replaces a PNG (S-11), is owed by no record kept: one the server held a
+/// PNG of and not its replacement when a round left it was kept as nothing ([syncImagesOwed]) — a device that took the
+/// PNGs and reduced them owes it as the device that archived it does —, and so was a record a request left undone. One
+/// archived with resized images the server held no form of an image of owes nothing under none, which sends it none.
+/// A normal record that held the reduced JPEG alone of an image whose PNG the binding knows has not: the PNG may reach
+/// the server later, from another device. Of a record whose body names an icon ([icon]), its directory held an icon
+/// too.
+bool syncImagesSettled(
+  RecordBinding binding,
+  ArchiveImageOption? stage,
+  SyncImagesLeft kept,
+  Set<String> wanted, {
+  required String? form,
+  required String? icon,
+}) =>
+    (kept.stored || form == 'none') &&
+    _sameNames(kept.wants, wanted) &&
+    (icon == null || kept.holds.contains(traineeIconFileName)) &&
+    recordBindingFields(binding).entries.every((e) {
+      final MapEntry(key: image, value: (:png, :jpeg)) = e;
+      if (png == null && jpeg == null) return true;
+      final (hasPng, hasJpeg) = (kept.holds.contains('$image.png'), kept.holds.contains('$image.jpg'));
+      return stage == null ? hasPng || (png == null && hasJpeg) : hasJpeg || (jpeg == null && hasPng);
+    });
+
+/// Whether a record bound as [binding] in the archive stage [stage] (null: normal) owes the server, which holds the
+/// images [held], a replacement (S-11's exception, [syncImageWork]): it is archived with resized images, and of an image
+/// the binding names the server holds the PNG and not the reduced JPEG that replaces it. Pure.
+bool syncImagesOwed(RecordBinding binding, ArchiveImageOption? stage, Set<String> held) =>
+    recordBindingFields(binding).values.any((f) => _replaces(stage, f, held));
+
+/// Whether, of an image whose forms a binding names [png] and [jpeg], a record in the archive stage [stage] owes the
+/// server holding [held] the replacement ([syncImagesOwed]).
+bool _replaces(ArchiveImageOption? stage, ({String? png, String? jpeg}) image, Set<String> held) =>
+    stage == ArchiveImageOption.resizedJpeg &&
+    image.png != null &&
+    held.contains(image.png) &&
+    image.jpeg != null &&
+    !held.contains(image.jpeg);
+
+/// The image names a record bound as [binding] in the archive stage [stage] (null: normal) wants its device to hold
+/// (S-11): of each image the binding names, the PNG where the record is normal and the binding knows the PNG, else the
+/// reduced JPEG; of a record archived with resized images, the reduced JPEG, else — the binding knowing no JPEG of a
+/// PNG that cannot be reduced — the PNG. And the icon its body names, [icon], in either stage: it has one form, and is
+/// not reduced (S-11). None of a record archived without images, nor where the binding is not worked out.
+Set<String> syncImagesWanted(RecordBinding? binding, ArchiveImageOption? stage, {required String? icon}) => {
+  if (binding != null && stage != ArchiveImageOption.none) ...{
+    for (final (:png, :jpeg) in recordBindingFields(binding).values) ?(stage == null ? png ?? jpeg : jpeg ?? png),
+    ?icon,
+  },
+};
+
+/// One image a round puts on the server ([syncImageWork]): [name], read from the device's file [file] — reduced to its
+/// JPEG first where [reduce] ([archiveJpegOf]) —, as a JPEG where [jpeg].
+typedef SyncImagePut = ({String name, String file, bool reduce, bool jpeg});
+
+/// One image a round takes from the server ([syncImageWork]): [name], written as the device's file [file].
+typedef SyncImageTake = ({String name, String file});
+
+/// What a round does of the images of one record ([syncImageWork]): the images it puts and takes, and once each
+/// lands, the image files of the record's directory the binding names, with its icon, and whether the server holds of
+/// each image the binding names the form the record's stage has it reference, and the icon its body names
+/// ([SyncImagesLeft]).
+typedef SyncImageWork = ({List<SyncImagePut> puts, List<SyncImageTake> takes, Set<String> holds, bool stored});
+
+/// What a round does of the images of a record bound as [binding] in the archive stage [stage] (null: normal), whose
+/// directory holds the files [bound] of those [binding] names ([imagesBoundBy]), where the server holds the images
+/// [held] and the account's image form is [form] (S-09, S-11, [R2-4], [R4-8] 5). Pure. Of each image [binding] names:
+///
+/// * **Put** where the server holds no form of it: under `png` the PNG, else the reduced JPEG, else the JPEG made of the
+///   PNG ([SyncImagePut.reduce]); under `jpeg` the reduced JPEG, else the one made of the PNG — always a form whose name
+///   [binding] knows. Under `none`, nothing. Where the server holds a form, it keeps the one put first, and no other
+///   form goes beside it (S-11), whatever the form — but for the replacement (S-11's exception): of a record archived
+///   with resized images whose PNG the server holds and whose reduced JPEG it does not, the reduced JPEG, under every
+///   form, `none` included, so that the server references it in place of the PNG (S-16). The server takes it under
+///   `none` once its list archives the record, so the round puts it after the list.
+/// * **Take** where the device does not hold the form the record wants: a normal record takes the PNG where the server
+///   holds it — one that holds the reduced JPEG alone takes it too, the most original form it can have —, and holding
+///   no form, else the reduced JPEG; a record archived with resized images takes the reduced JPEG, and holding no form,
+///   else the PNG, which its device reduces once it is in place as an archive does ([R2-4]).
+///
+/// It is stored where the server holds, of each image, the form its stage has it reference: of a normal record a form,
+/// of one archived with resized images the reduced JPEG, or the PNG where the binding knows no JPEG of it — one whose
+/// replacement is not made yet is not stored. A record archived without images, or whose binding is not worked out,
+/// does nothing, holds no image and has none to be stored.
+///
+/// Of the icon its body names, [icon] (null: none), in either stage, the record's `trainee.jpg` in [bound] being the
+/// icon its directory holds, whatever its name ([R4-8] 6: an icon the device keeps with the factor image is the
+/// record's): **put** where the server holds none of that name and the form is not `none` — as it is, a JPEG, under
+/// `png` and `jpeg` alike, and never as a replacement —, from the icon the device holds, which goes only where its
+/// bytes are the one named ([_syncImages]); **take** where the device holds no icon and the server holds the one named.
+/// The name is where a device that holds no icon takes one from, and no reason to let go of the one it keeps. It is
+/// stored where the server holds the one named.
+SyncImageWork syncImageWork(
+  RecordBinding? binding,
+  ArchiveImageOption? stage,
+  Set<String> bound,
+  Set<String> held, {
+  required String form,
+  required String? icon,
+}) {
+  final puts = <SyncImagePut>[];
+  final takes = <SyncImageTake>[];
+  final holds = <String>{};
+  var stored = true;
+  if (binding == null || stage == ArchiveImageOption.none) {
+    return (puts: puts, takes: takes, holds: holds, stored: true);
+  }
+  for (final MapEntry(key: image, value: (:png, :jpeg)) in recordBindingFields(binding).entries) {
+    if (png == null && jpeg == null) continue;
+    final (pngFile, jpegFile) = ('$image.png', '$image.jpg');
+    var (hasPng, hasJpeg) = (bound.contains(pngFile), bound.contains(jpegFile));
+    final pngThere = png != null && held.contains(png);
+    var jpegThere = jpeg != null && held.contains(jpeg);
+    final normal = stage == null;
+    final replaces = _replaces(stage, (png: png, jpeg: jpeg), held);
+    final put = replaces
+        ? [
+            if (jpeg != null && hasJpeg) (name: jpeg, file: jpegFile, reduce: false, jpeg: true),
+            if (jpeg != null && hasPng) (name: jpeg, file: pngFile, reduce: true, jpeg: true),
+          ].firstOrNull
+        : pngThere || jpegThere || form == 'none'
+        ? null
+        : [
+            if (form == 'png' && png != null && hasPng) (name: png, file: pngFile, reduce: false, jpeg: false),
+            if (jpeg != null && hasJpeg) (name: jpeg, file: jpegFile, reduce: false, jpeg: true),
+            if (jpeg != null && hasPng) (name: jpeg, file: pngFile, reduce: true, jpeg: true),
+          ].firstOrNull;
+    var pngPut = false;
+    if (put != null) {
+      puts.add(put);
+      if (put.jpeg) {
+        jpegThere = true;
+      } else {
+        pngPut = true;
+      }
+    }
+    // The form taken, where one is: for a normal record the PNG, else holding no form the JPEG; for one archived with
+    // resized images holding no form, the JPEG, else the PNG.
+    final lacks = normal ? !hasPng : !hasJpeg && !(jpeg == null && hasPng);
+    final take = !lacks
+        ? null
+        : normal
+        ? (pngThere ? (png, pngFile) : (!hasJpeg && jpegThere ? (jpeg, jpegFile) : null))
+        : (jpegThere ? (jpeg, jpegFile) : (pngThere ? (png, pngFile) : null));
+    if (take case (final String name, final file)) {
+      takes.add((name: name, file: file));
+      if (file == jpegFile) {
+        hasJpeg = true;
+      } else if (normal) {
+        hasPng = true;
+      } else {
+        // A PNG taken for a record archived with resized images is reduced once it is in place, where it reduces to
+        // a JPEG the binding knows.
+        (hasPng, hasJpeg) = (jpeg == null, jpeg != null);
+      }
+    }
+    holds.addAll([if (hasPng) pngFile, if (hasJpeg) jpegFile]);
+    final pngOn = pngThere || pngPut;
+    stored = stored && (normal ? pngOn || jpegThere : jpegThere || (jpeg == null && pngOn));
+  }
+  if (icon != null) {
+    final there = held.contains(icon);
+    final holdsIcon = bound.contains(traineeIconFileName);
+    final put = holdsIcon && !there && form != 'none';
+    if (put) puts.add((name: icon, file: traineeIconFileName, reduce: false, jpeg: true));
+    if (!holdsIcon && there) takes.add((name: icon, file: traineeIconFileName));
+    if (holdsIcon || there) holds.add(traineeIconFileName);
+    stored = stored && (there || put);
+  }
+  return (puts: puts, takes: takes, holds: holds, stored: stored);
 }
 
 /// The first of [changes], and each after it while the slots they change together are at most [slots].
@@ -812,6 +1375,7 @@ SyncRoundOutcome _told(
   Set<String>? placed,
   int replacements = 0,
   int withheld = 0,
+  SyncImagesUndone? imagesUndone,
 }) {
   int told(Iterable<String> ids) =>
       placed == null ? ids.length : ids.where((id) => placed.contains(id) && !local.rows.containsKey(id)).length;
@@ -822,6 +1386,7 @@ SyncRoundOutcome _told(
     splitOff: told(counts.splitOff),
     added: told(counts.added),
     withheld: withheld,
+    imagesUndone: imagesUndone,
   );
 }
 

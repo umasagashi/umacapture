@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_body.dart';
@@ -362,7 +363,7 @@ void main() {
       expect(result.committedIds, {id});
       expect(recordJsonWrites, hasLength(1));
       expect(await storedNames(), ['record.json', 'skill.png']);
-      expect(await storedRecordJson(), composeBodyWrite(null, recognized)!.toRecordJsonBytes());
+      expect(await storedRecordJson(), composeBodyWrite(null, recognized, icon: null)!.toRecordJsonBytes());
     });
 
     test('the publication still refuses a result that was not composed', () async {
@@ -374,19 +375,24 @@ void main() {
       expect(Directory((storageDir / 'chara_detail' / 'active' / id).path).existsSync(), isFalse);
     });
 
-    // A re-recognition: the worker hands back the stored record.json it was given, with its result beside it.
-    Future<RecordUpdateOutcome> regenerate(Uint8List stored, Uint8List result) =>
-        persistPlatformRecordUpdateToOpfs(id, storageDir, () async {
-          return [
-            (path: '$dir/record.json', bytes: stored),
-            (path: '$dir/record_20261021120000.json', bytes: result),
-            (path: '$dir/recognized.json', bytes: result),
-          ];
-        }, persistence: persistence);
+    // A re-recognition: the worker hands back the stored record.json it was given, with its result beside it, and
+    // the files the recognizer wrote with it ([beside], by name).
+    Future<RecordUpdateOutcome> regenerate(
+      Uint8List stored,
+      Uint8List result, {
+      Map<String, Uint8List> beside = const {},
+    }) => persistPlatformRecordUpdateToOpfs(id, storageDir, () async {
+      return [
+        (path: '$dir/record.json', bytes: stored),
+        (path: '$dir/record_20261021120000.json', bytes: result),
+        (path: '$dir/recognized.json', bytes: result),
+        for (final MapEntry(key: name, value: bytes) in beside.entries) (path: '$dir/$name', bytes: bytes),
+      ];
+    }, persistence: persistence);
 
     Future<Uint8List> storeWithPlacements() async {
       final placed = placeOnRecord(
-        composeBodyWrite(null, recognized)!,
+        composeBodyWrite(null, recognized, icon: null)!,
         parents: (parent1: 'parent-one', parent2: 'parent-two'),
         relationBonus: (value: 151),
       );
@@ -403,6 +409,87 @@ void main() {
       expect(recordJsonWrites, isEmpty);
       expect(await storedRecordJson(), stored);
       expect(await storedNames(), ['record.json']);
+    });
+
+    test('T-R5b: a re-recognition that read the same body but cut the icon into other bytes stores the new icon and '
+        'names it', () async {
+      final map = jsonDecode(utf8.decode(recognizedBytes)) as Map<String, dynamic>;
+      final oldIcon = Uint8List.fromList([5, 5, 5]);
+      final newIcon = Uint8List.fromList([7, 7, 7]);
+      (map['metadata'] as Map<String, dynamic>)
+        ..['binding'] = {'factor_png': '1' * 64}
+        ..['icon'] = sha256.convert(oldIcon).toString();
+      final stored = Uint8List.fromList(utf8.encode(jsonEncode(map)));
+      final directory = storageDir / 'chara_detail' / 'active' / id;
+      await directory.create(recursive: true);
+      await directory.filePath('record.json').writeAsBytes(stored);
+      await directory.filePath('trainee.jpg').writeAsBytes(oldIcon);
+
+      expect(await regenerate(stored, stored, beside: {'trainee.jpg': newIcon}), RecordUpdateOutcome.published);
+      expect(await directory.filePath('trainee.jpg').readAsBytes(), newIcon);
+      final metadata = (jsonDecode(utf8.decode(await storedRecordJson())) as Map)['metadata'] as Map;
+      expect(metadata['icon'], sha256.convert(newIcon).toString());
+    });
+
+    test('D-ICON (ii): a re-recognition over a record whose binding is worked out names the icon the recognizer left '
+        'beside its result, and keeps the geometry', () async {
+      final map = jsonDecode(utf8.decode(recognizedBytes)) as Map<String, dynamic>;
+      final binding = {'factor_png': '1' * 64};
+      final geometry = {
+        'factor_png': {
+          'top_left': {
+            'x': 3,
+            'y': 5,
+            'anchor': {'h': 'ScreenStart', 'v': 'ScreenStart'},
+          },
+          'bottom_right': {
+            'x': 11,
+            'y': 17,
+            'anchor': {'h': 'ScreenStart', 'v': 'ScreenEnd'},
+          },
+        },
+      };
+      (map['metadata'] as Map<String, dynamic>)
+        ..['binding'] = binding
+        ..['geometry'] = geometry
+        ..['icon'] = 'a' * 64;
+      final stored = Uint8List.fromList(utf8.encode(jsonEncode(map)));
+      await (storageDir / 'chara_detail' / 'active' / id).create(recursive: true);
+      await (storageDir / 'chara_detail' / 'active' / id).filePath('record.json').writeAsBytes(stored);
+      map['evaluation_value'] = recognized.evaluationValue + 1;
+      final icon = Uint8List.fromList([7, 7, 7]);
+
+      final outcome = await regenerate(
+        stored,
+        Uint8List.fromList(utf8.encode(jsonEncode(map))),
+        beside: {'trainee.jpg': icon},
+      );
+
+      expect(outcome, RecordUpdateOutcome.published);
+      final metadata = (jsonDecode(utf8.decode(await storedRecordJson())) as Map)['metadata'] as Map;
+      expect(
+        [metadata['geometry'], metadata['icon'], metadata['binding']],
+        [geometry, sha256.convert(icon).toString(), binding],
+      );
+    });
+
+    test('D-ICON-3b: a re-recognition whose recognizer cut no icon names the one the store holds, which stays beside '
+        'the result, as a desktop directory keeps its own', () async {
+      final map = jsonDecode(utf8.decode(recognizedBytes)) as Map<String, dynamic>;
+      (map['metadata'] as Map<String, dynamic>)
+        ..['binding'] = {'factor_png': '1' * 64}
+        ..['icon'] = 'a' * 64;
+      final stored = Uint8List.fromList(utf8.encode(jsonEncode(map)));
+      final held = Uint8List.fromList([5, 5, 5]);
+      await (storageDir / 'chara_detail' / 'active' / id).create(recursive: true);
+      await (storageDir / 'chara_detail' / 'active' / id).filePath('record.json').writeAsBytes(stored);
+      await (storageDir / 'chara_detail' / 'active' / id).filePath('trainee.jpg').writeAsBytes(held);
+      map['evaluation_value'] = recognized.evaluationValue + 1;
+
+      expect(await regenerate(stored, Uint8List.fromList(utf8.encode(jsonEncode(map)))), RecordUpdateOutcome.published);
+      final metadata = (jsonDecode(utf8.decode(await storedRecordJson())) as Map)['metadata'] as Map;
+      expect(metadata['icon'], sha256.convert(held).toString());
+      expect(await storedNames(), contains('trainee.jpg'));
     });
 
     test('a re-recognition that read another body publishes once and keeps what was placed', () async {

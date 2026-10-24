@@ -155,17 +155,34 @@ Set<String> syncShelfDeletesForgotten(Set<String> deleted, {required Set<String>
 /// The body a recognizer's reading [read] writes over the body the record holds, [held] — none where there is no
 /// record yet (a capture) — or null, no write, where the record holds what [read] shows already.
 ///
-/// What a body shows is its content ([SyncBody.content]), and the decision of whether and when it is written is that
-/// of an edit of the content ([syncEdit]): the content of [read] at [writeAt] over the time [held] carries. A body
-/// written over a held one keeps the held body's binding and parents — a re-recognition reads the images the held
-/// body was read from, and the parents go with the record — and only its content is [read]'s. With no held body, the
-/// body is [read] as it was read. The time [read] and the held body carry is not read; [held]'s time is.
+/// What a body shows is its content ([SyncBody.content]) and its icon ([SyncBody.icon]), and the decision of whether
+/// and when it is written is that of an edit of the two ([syncEdit]): the content and icon of [read] at [writeAt] over
+/// the time [held] carries. So a re-recognition that read the same content but cut the icon into other bytes writes
+/// the body, naming the new icon; the binding and geometry it keeps are worked out, and carry no time ([R5-3]). A body
+/// written over a held one keeps the held body's binding, geometry and parents — a re-recognition reads the images the
+/// held body was read from, which it does not move the screen on, and the parents go with the record — and its content
+/// is [read]'s, and so is its icon where the held body's binding is worked out: the recognizer cut the icon again from
+/// those images. Where the binding is not worked out, the icon stays the held body's, to be worked out with the binding
+/// ([R4-9]). With no held body, the body is [read] as it was read, but for its icon: a capture names none, as it names
+/// no binding. The time [read] and the held body carry is not read; [held]'s time is.
 SyncBody? syncBodyWrite(SyncHeldValue<SyncBody> held, SyncBody read, {required SyncWriteTime writeAt}) {
   final stored = held.value;
-  final written = syncEdit<String>((value: stored?.content, time: held.time), read.content, writeAt: writeAt);
+  final icon = stored == null ? null : (stored.binding == null ? stored.icon : read.icon);
+  final written = syncEdit<(String, String?)>(
+    (value: stored == null ? null : (stored.content, stored.icon), time: held.time),
+    (read.content, icon),
+    writeAt: writeAt,
+  );
   if (written == null) return null;
   final from = stored ?? read;
-  return SyncBody(read.content, binding: from.binding, parents: from.parents, time: written.time);
+  return SyncBody(
+    read.content,
+    binding: from.binding,
+    geometry: from.geometry,
+    icon: icon,
+    parents: from.parents,
+    time: written.time,
+  );
 }
 
 /// The archive state a record in [held] takes when archived with [option]: [option] at [writeAt] over the time of
@@ -179,14 +196,14 @@ SyncValue<ArchiveImageOption>? syncArchive(
   return written == null ? null : SyncValue(option, written.time);
 }
 
-/// What a zip carries of a record that an import decides on ([R4-6]): its body — content, binding and parents; the
-/// time it carries is not read —, its archive state (null: normal) and whether it carries any image. A zip carries
+/// What a zip carries of a record that an import decides on ([R4-6]): its body — content, binding, geometry, icon and
+/// parents; the time it carries is not read —, its archive state (null: normal) and whether it carries any image. A zip carries
 /// nothing of a time an import reads, nor a relation bonus, which only the device that resolved it holds. The ids it
 /// absorbed go with it as they are.
 typedef SyncZip = ({SyncBody body, ArchiveImageOption? stage, bool carriesImages});
 
 /// What an import writes of a record ([syncImport]): the [body] it shows — written where [writesBody], else the one it
-/// held, with the zip's parents placed on it and the two bindings merged —, the archive state written ([stage]; null
+/// held, with the zip's parents placed on it and the two bindings, geometries and icons merged —, the archive state written ([stage]; null
 /// where none is) and where its images come from.
 typedef SyncImportPlan = ({
   SyncBody body,
@@ -256,8 +273,12 @@ SyncValue<ArchiveImageOption?>? syncImportStage(
 /// null where it holds no record of the id. Each held with the time it carries.
 ///
 /// * **The body**: where the device's record shows what the zip's does ([SyncBody.sameAs]), it stays, its time
-///   included, with the zip's parents placed on it (S-13) and the two bindings merged ([RecordBinding.mergedWith]);
-///   else it is the zip's, written at [writeAt] over the time the held one carries.
+///   included, with the zip's parents placed on it (S-13) and the two bindings merged ([RecordBinding.mergedWith]),
+///   and so the two geometries ([RecordGeometry.mergedWith]) and the two icons: the zip's where it carries the images,
+///   whose `trainee.jpg` is then the record's, else the device's, each standing where both know one. An icon other
+///   than the one the device's body names is a write of the body, as a re-recognition that cuts the icon again is
+///   ([syncBodyWrite]): at [writeAt] over the time the held one carries. Else the body is the zip's, written at
+///   [writeAt] over that time, with the zip's binding, geometry and icon.
 /// * **The archive state** is the zip's ([syncImportStage]).
 /// * **The images** are the zip's where it carries any ([SyncImagesCarried]) — none of the record's own then, nor of
 ///   another record, also where the zip carries only some. Where it carries none, the record keeps its own where it
@@ -277,16 +298,30 @@ SyncImportPlan syncImport(
   final kept = mine != null && mine.sameAs(z) ? mine : null;
   final (b, zb) = (kept?.binding, z.binding);
   final sources = syncImageSources(id, mine, z, others);
+  final (g, zg) = (kept?.geometry, z.geometry);
+  // The icon of a body kept is the zip's where the zip carries the images, its `trainee.jpg` being the one placed then;
+  // else the device's. A name the body knows no other of gives it one, and is not written.
+  final icon = kept == null ? z.icon : (zip.carriesImages ? z.icon ?? kept.icon : kept.icon ?? z.icon);
+  final writes = kept == null || (kept.icon != null && icon != kept.icon);
   return (
     body: kept == null
-        ? SyncBody(z.content, binding: zb, parents: z.parents, time: writeAt(body.time))
+        ? SyncBody(
+            z.content,
+            binding: zb,
+            geometry: z.geometry,
+            icon: icon,
+            parents: z.parents,
+            time: writeAt(body.time),
+          )
         : SyncBody(
             kept.content,
             binding: b == null ? zb : (zb == null ? b : b.mergedWith(zb)),
+            geometry: g == null ? zg : (zg == null ? g : g.mergedWith(zg)),
+            icon: icon,
             parents: z.parents,
-            time: kept.time,
+            time: writes ? writeAt(body.time) : kept.time,
           ),
-    writesBody: kept == null,
+    writesBody: writes,
     stage: syncImportStage(stage, zip.stage, writeAt: writeAt),
     images: zip.carriesImages
         ? const SyncImagesCarried()
@@ -336,11 +371,13 @@ typedef SyncMergePlan = ({
 
 /// The body a merge leaves under the older record's id, which showed [older] ([older]'s time is the one held; the time
 /// its body carries is not read), keeping the body [content] — the older record's own, or the one merged into it —
-/// of a merge of the records [merging]: [content]'s content and binding, with its parents but one that names either of
-/// [merging] — a record is never its own parent; a slot it leaves empty stays empty, and the resolution that follows
-/// the merge fills it. Written at [writeAt] over [older]'s time where [content] shows another than [older]
-/// ([SyncBody.sameAs] — a binding not worked out says nothing of it); else [older]'s time stays. The time of [content]'s
-/// own record is never carried.
+/// of a merge of the records [merging]: [content]'s content, binding, geometry and icon, with its parents but one that
+/// names either of [merging] — a record is never its own parent; a slot it leaves empty stays empty, and the resolution
+/// that follows the merge fills it. Written at [writeAt] over [older]'s time where [content] shows another than [older]
+/// ([SyncBody.sameAs] — a binding not worked out says nothing of it), or names another icon than the one [older] names
+/// — a merge that keeps the same content cut into another icon writes the body, as a re-recognition and an import do;
+/// an icon not known on either side is worked out with the binding ([R4-9]) and is no write —; else [older]'s time
+/// stays. The time of [content]'s own record is never carried.
 ({SyncBody body, bool writesBody}) syncMergeBody(
   SyncHeldValue<SyncBody> older,
   SyncBody content, {
@@ -348,11 +385,16 @@ typedef SyncMergePlan = ({
   required SyncWriteTime writeAt,
 }) {
   final shown = older.value;
-  final writes = shown == null || !shown.sameAs(content);
+  final writes =
+      shown == null ||
+      !shown.sameAs(content) ||
+      (shown.icon != null && content.icon != null && shown.icon != content.icon);
   return (
     body: SyncBody(
       content.content,
       binding: content.binding,
+      geometry: content.geometry,
+      icon: content.icon,
       parents: {
         for (final MapEntry(key: slot, value: parent) in content.parents.entries)
           if (!merging.contains(parent)) slot: parent,

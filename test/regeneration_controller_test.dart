@@ -417,7 +417,7 @@ void main() {
     test('a result with another body keeps the binding placed on the stored record', () async {
       const binding = RecordBinding(skillPng: 'skill-png', factorJpeg: 'factor-jpeg');
       final record = CharaDetailRecord.fromRecordJson(recognizedJson);
-      final stored = placeOnRecord(record, binding: binding).toRecordJsonBytes();
+      final stored = placeOnRecord(record, images: (binding: binding, geometry: null, icon: null)).toRecordJsonBytes();
       final recognized = recognizedWith((map) => map['fans'] = (map['fans'] as int) + 1);
 
       final outcome = await regenerate(record.id, stored: stored, recognized: recognized);

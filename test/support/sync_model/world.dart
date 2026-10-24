@@ -141,7 +141,8 @@ class World extends SyncWorld {
     EditMemo(:final column, :final value) => column == memoColumn && !overMemoLimit(value),
     EditRating() || Title() || DeleteColumnStore() || Dismiss() || DeleteDismissalFile() || Link() => false,
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
-    SetStorageFull() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() || Resume() => false,
+    SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() => false,
+    Resume() => false,
     ShelfOp() => false,
     _ => true,
   };
@@ -155,6 +156,7 @@ class World extends SyncWorld {
           OldApp() ||
           Upgrade() ||
           SetStorageFull() ||
+          SetDatabaseRoom() ||
           SetDailyRows() ||
           SetDailyReads() ||
           PushCut() ||

@@ -40,8 +40,12 @@ const archiveJpegQuality = 75;
 
 /// The reduced JPEG an archive makes of the PNG [png] — the same bytes [convertPngBatch] writes — or null where the
 /// PNG cannot be decoded. Pure, FS-free and isolate-safe.
-Uint8List? archiveJpegOf(Uint8List png) =>
-    _encodeJpegFromPng(png, maxWidth: archiveJpegMaxWidth, quality: archiveJpegQuality)?.bytes;
+Uint8List? archiveJpegOf(Uint8List png) => archiveJpegConversionOf(png)?.bytes;
+
+/// The reduced JPEG an archive makes of the PNG [png] ([archiveJpegOf]) with its dimensions, or null where the PNG
+/// cannot be decoded. Pure, FS-free and isolate-safe.
+({Uint8List bytes, ImageConvertResult result})? archiveJpegConversionOf(Uint8List png) =>
+    _encodeJpegFromPng(png, maxWidth: archiveJpegMaxWidth, quality: archiveJpegQuality);
 
 /// Pixel dimensions of one converted image, paired by index with the inputs of
 /// [convertPngBatch].
@@ -220,6 +224,22 @@ Future<void> scaleIntersectionJsonAsync(FilePath jsonFile, {required int newWidt
   }
 }
 
+/// The `intersection` rect of a geometry json ([scaleIntersectionJson]) decoded as [decoded], as the json holds it, or
+/// null where it holds none with both of its corners, `top_left` and `bottom_right`. Pure.
+Map<String, dynamic>? geometryIntersectionOf(Object? decoded) {
+  if (decoded is! Map) {
+    return null;
+  }
+  final intersection = decoded["intersection"];
+  if (intersection is! Map<String, dynamic>) {
+    return null;
+  }
+  if (intersection["top_left"] is! Map || intersection["bottom_right"] is! Map) {
+    return null;
+  }
+  return intersection;
+}
+
 /// Pure, FS-free core shared by [scaleIntersectionJson] and
 /// [scaleIntersectionJsonAsync]: parses the geometry json [contents] and rewrites
 /// its `intersection` rect for an image of [newWidth] x [newHeight] pixels.
@@ -229,26 +249,49 @@ Future<void> scaleIntersectionJsonAsync(FilePath jsonFile, {required int newWidt
 /// early returns). See [scaleIntersectionJson] for the scaling rule.
 String? _rescaleIntersectionString(String contents, {required int newWidth, required int newHeight}) {
   final decoded = jsonDecode(contents);
-  if (decoded is! Map) {
+  final intersection = geometryIntersectionOf(decoded);
+  if (intersection == null) {
     return null;
   }
-  final intersection = decoded["intersection"];
-  if (intersection is! Map) {
+  final rescaled = rescaledIntersection(intersection, newWidth: newWidth, newHeight: newHeight);
+  if (rescaled == null) {
     return null;
   }
-  final topLeft = intersection["top_left"];
-  final bottomRight = intersection["bottom_right"];
-  if (topLeft is! Map || bottomRight is! Map) {
-    return null;
-  }
+  (decoded as Map)["intersection"] = rescaled;
+  return _geometryJsonEncoder.convert(decoded);
+}
+
+/// The `intersection` rect [intersection] of a geometry json ([geometryIntersectionOf]) for an image of [newWidth] x
+/// [newHeight] pixels, by the rule [scaleIntersectionJson] states: every coordinate scaled by `newWidth / oldWidth`
+/// and rounded, and `bottom_right` pinned to `top_left + (newWidth, newHeight)`; every other field as it is. Null where
+/// the rect has no width. Pure: [intersection] is left as it is.
+///
+/// The one rule an archive rescales an image's geometry file by and a record's body works out the geometry of the
+/// reduced JPEG it binds by, so that the two hold the same rect.
+Map<String, dynamic>? rescaledIntersection(
+  Map<String, dynamic> intersection, {
+  required int newWidth,
+  required int newHeight,
+}) {
+  final topLeft = intersection["top_left"] as Map;
+  final bottomRight = intersection["bottom_right"] as Map;
   final oldWidth = (bottomRight["x"] as num) - (topLeft["x"] as num);
   if (oldWidth <= 0) {
     return null;
   }
   final scale = newWidth / oldWidth;
-  topLeft["x"] = ((topLeft["x"] as num) * scale).round();
-  topLeft["y"] = ((topLeft["y"] as num) * scale).round();
-  bottomRight["x"] = (topLeft["x"] as int) + newWidth;
-  bottomRight["y"] = (topLeft["y"] as int) + newHeight;
-  return const JsonEncoder.withIndent('    ').convert(decoded);
+  final x = ((topLeft["x"] as num) * scale).round();
+  final y = ((topLeft["y"] as num) * scale).round();
+  return {
+    ...intersection,
+    "top_left": {...topLeft, "x": x, "y": y},
+    "bottom_right": {...bottomRight, "x": x + newWidth, "y": y + newHeight},
+  };
 }
+
+/// The bytes of the geometry file `<image>.json` of an image whose game screen falls on [intersection]
+/// ([geometryIntersectionOf]), laid out as the files this module rewrites are.
+Uint8List geometryFileBytesOf(Map<String, dynamic> intersection) =>
+    utf8.encode(_geometryJsonEncoder.convert({"intersection": intersection}));
+
+const _geometryJsonEncoder = JsonEncoder.withIndent('    ');

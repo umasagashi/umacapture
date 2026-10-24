@@ -616,9 +616,8 @@ List<Op> beforeTheUpgradeStart(String option) => [
 /// Outside every universe of this kind: B's operations, and records from before the upgrade on B; a binding worked out
 /// earlier between two rounds, or past a round that stops; a zip exported by the app of these rules ([R4-9] (iv) — the
 /// draws export none); a zip that carries no image and a binding that names one, whose import takes images from the
-/// device's other records, bound or not yet ([R4-9] (ii), [R4-8] 5); the files of an archive with resized JPEGs, which
-/// the model's image does not tell from the original, so that [R4-9] (iii) is read of an archive without images, a
-/// merge and a delete; images sent or taken; and what [RunUniverse] leaves out besides.
+/// device's other records, bound or not yet ([R4-9] (ii), [R4-8] 5); images sent or taken; and what [RunUniverse]
+/// leaves out besides. [R4-9] (iii) is read of both archives, a merge and a delete.
 class BindingUniverse extends Universe<BoundEarlier> {
   const BindingUniverse(
     super.name, {
@@ -1452,7 +1451,258 @@ final ciUniverses = <Universe<PropertyInput>>[
     b: const MixedOps([0, 1], merges: false),
     properties: [syncOffEndsAsNotSyncing],
   ),
+  // 188 inputs. The images of a record ([R4-8], [R4-9], [R2-4], S-09, S-11, S-16), from [imageStart] — B yet to sync —
+  // in an account whose form is none: A does one of [_imagesOnA], B one of [_imagesOnB], either first, then A's round
+  // and B's, or B's and A's.
+  // Of its inputs only those that set png end where received-images-are-usable reads, late in their order, so each of
+  // its controls runs most of the universe before it turns red: I2p and the universes outside CI hold it.
+  _imageUniverse('I1', imageStart('none'), _imagesOnB, without: {receivedImagesAreUsable}),
+  // 222 inputs. The same from [_imagesAgreedStart] — the devices agreed — in an account whose form is png, B also
+  // splitting R1 off ([_imagesOnBAgreed]).
+  // Its start sends every image under png, and nothing of it captures under none: no round under none meets an image
+  // the server lacks. A record split off takes from the server what a place that carries none dropped
+  // ([imagesStayWithTheirBodyWhereTheServerHoldsThem]).
+  _imageUniverse(
+    'I2p',
+    _imagesAgreedStart('png'),
+    _imagesOnBAgreed,
+    without: {noneSendsOnlyTheReplacement},
+    instead: _whereTheServerHoldsThem,
+  ),
+  // 67 inputs. The room ([_roomUniverse]) with the account's storage full: what A does to R1 and R2 — 検査 2 among it —
+  // beside what B does to R3, either first, then A's rounds and B's.
+  _roomUniverse('C1', const SetStorageFull('A', full: true), const SetStorageFull('A', full: false)),
+  // 18 inputs. With the database's room down to the reserve, of fewer operations: a delete, and the change that waits
+  // beside it or alone.
+  _roomUniverse(
+    'C1r',
+    const SetDatabaseRoom('A', DatabaseRoom.reserveOnly),
+    const SetDatabaseRoom('A', DatabaseRoom.room),
+    a: _fewOnR1R2WithoutRoom,
+    b: _fewOnR3WithoutRoom,
+  ),
+  // 18 inputs. The same with no room in the database, until the operator makes some: every change waits, whatever
+  // room it needs. Only the server could tell what goes while it has none, so the universe lists what goes once it has
+  // some.
+  _roomUniverse(
+    'C1n',
+    const SetDatabaseRoom('A', DatabaseRoom.none),
+    const SetDatabaseRoom('A', DatabaseRoom.room),
+    a: _fewOnR1R2WithoutRoom,
+    b: _fewOnR3WithoutRoom,
+    properties: [whatWaitedGoesOnceThereIsRoom],
+  ),
 ];
+
+/// A universe of the room ([R7-4], L319): from [attachedStart], the server's room used up as [noRoom] says; A does one
+/// of [a] (else of [_onR1R2WithoutRoom]) and B one of [b] (else of [_onR3WithoutRoom]), either first; two passes of A's round and B's — or of B's
+/// and A's, of [rounds] — while the room stays used up; then [roomBack] gives it back, and the world is driven to rest.
+/// Every round is the app's, run without the room it lacks ([OfTheModelsRound.room]): it meets a refusal for room as a
+/// refusal.
+///
+/// Outside every universe of it: the two devices changing one record, or records one merge joins (each changes records
+/// the other does not, so that no merge of the two sides decides an end); a memo, an archive or another change to a
+/// record that waits for room besides the change that makes it wait — whether such a change waits with the record is
+/// not stated ([R7-4] states the record and its merge); dismissed pairs; images (the account's form is none) and what
+/// waits for room of them; the account's records cap (`account_limit` `"records"`), its hidden bytes and the service's
+/// budget, which the app meets as it meets the account's cap; the room used up or given back between two rounds of
+/// [rounds], or by a round's own puts; and what [RunUniverse] leaves out besides.
+RunUniverse _roomUniverse(
+  String name,
+  Op noRoom,
+  Op roomBack, {
+  List<List<Op>> rounds = const [_roundsWithoutRoom],
+  Draw? a,
+  Draw? b,
+  List<SyncProperty<WorldRun>>? properties,
+}) => RunUniverse(
+  name,
+  start: [...attachedStart, noRoom],
+  ids: _attachedIds,
+  a: a ?? _onR1R2WithoutRoom,
+  b: b ?? _onR3WithoutRoom,
+  rounds: [
+    for (final passes in rounds) [...passes, roomBack],
+  ],
+  lacking: const {OfTheModelsRound.room},
+  properties: properties ?? _room,
+);
+
+/// The K2 properties of the room.
+final _room = [aWaitingMergeTakesNothingAway, whatNeedsNoRoomGoes, whatWaitedGoesOnceThereIsRoom];
+
+/// Two passes of A's round and B's: at rest by the second, whichever device sends first.
+const _roundsWithoutRoom = [SyncRound('A'), SyncRound('B'), SyncRound('A'), SyncRound('B')];
+const _roundsWithoutRoomEither = [
+  _roundsWithoutRoom,
+  [SyncRound('B'), SyncRound('A'), SyncRound('B'), SyncRound('A')],
+];
+
+/// What A does to R1 and R2 of [attachedStart] while the room is used up: R2 recognised again and merged into R1 keeping
+/// R2's content (検査 2), R2 recognised again and R1 deleted or archived without images, R2 recognised again alone —
+/// first, so that a control turns red early —; nothing; R1 deleted, archived without images, or given a memo; R2 merged
+/// into R1 keeping R1's content, which writes no body; R5 captured and a memo on R1.
+final _onR1R2WithoutRoom = OneOf(
+  [
+    [(d) => Rerecognize(d, 'R2', 2), (d) => Merge(d, 'R1', 'R2', contentFrom: 'R2')],
+    [(d) => Rerecognize(d, 'R2', 2), (d) => Delete(d, 'R1')],
+    [(d) => Rerecognize(d, 'R2', 2), (d) => Archive(d, 'R1', 'none')],
+    [(d) => Rerecognize(d, 'R2', 2)],
+    [],
+    [(d) => Delete(d, 'R1')],
+    [(d) => Archive(d, 'R1', 'none')],
+    [(d) => EditMemo(d, 'R1', 'a')],
+    [(d) => Merge(d, 'R1', 'R2', contentFrom: 'R1')],
+    [(d) => Capture(d, 'R5', 5), (d) => EditMemo(d, 'R1', 'a')],
+  ],
+  'R2 recognised again and merged into R1 keeping R2 (検査 2), or beside R1 deleted or archived, or alone; nothing; R1 '
+  'deleted, archived without images or given a memo; R2 merged into R1 keeping R1; R5 captured beside a memo on R1',
+);
+
+/// What B does to R3 of [attachedStart] while the room is used up: nothing; R3 deleted, recognised again, or archived
+/// without images.
+final _onR3WithoutRoom = OneOf([
+  [],
+  [(d) => Delete(d, 'R3')],
+  [(d) => Rerecognize(d, 'R3', 2)],
+  [(d) => Archive(d, 'R3', 'none')],
+], 'nothing, R3 deleted, recognised again or archived without images');
+
+/// Of [_onR1R2WithoutRoom]: 検査 2, R2 recognised again beside R1 deleted, R1 deleted, and nothing.
+final _fewOnR1R2WithoutRoom = OneOf([
+  for (final i in const [0, 1, 5, 4]) _onR1R2WithoutRoom.lists[i],
+], 'R2 recognised again and merged into R1 keeping R2 (検査 2), or beside R1 deleted; R1 deleted; nothing');
+
+/// Of [_onR3WithoutRoom]: nothing, R3 deleted or recognised again.
+final _fewOnR3WithoutRoom = OneOf([
+  for (final i in const [0, 1, 2]) _onR3WithoutRoom.lists[i],
+], 'nothing, R3 deleted or recognised again');
+
+/// A universe of the images of a record from [start]: A does one of [_imagesOnA] (or what [a] draws), B one of [b],
+/// either first, then A's round and B's, or B's and A's, and the world is driven to rest, on the app's round.
+///
+/// Outside every universe of it: one or two of a capture's three images without the others, partial images — the
+/// model holds a capture's three together, so [N15-10] (c) is not read —; an image file deleted on its own in the
+/// storage view; the icon an archive without images of the app from before the upgrade left; a reduced JPEG made
+/// another way than the app's, which no binding of the same PNG names ([R4-8] 5, §4-34's mismatch); a third capture's
+/// images over a record's directory; a zip that carries part of a record's images; the server's retention, its room
+/// and the day's limits; a put or a get of an image cut ([SwapCut] cuts a swap); the form set to jpeg; a form changed
+/// more than once; and what [RunUniverse] leaves out besides.
+///
+/// [without] are properties of [_images] the universe does not reach — no input of it tells a right end from a wrong
+/// one —, which it does not list; [instead], properties it lists in place of one of [_images].
+RunUniverse _imageUniverse(
+  String name,
+  List<Op> start,
+  Draw b, {
+  Draw? a,
+  Set<SyncProperty<WorldRun>> without = const {},
+  Map<SyncProperty<WorldRun>, SyncProperty<WorldRun>> instead = const {},
+}) => RunUniverse(
+  name,
+  start: start,
+  ids: _imageIds,
+  a: a ?? _imagesOnA,
+  b: b,
+  rounds: _eitherRound,
+  properties: [
+    for (final p in _images)
+      if (!without.contains(p)) instead[p] ?? p,
+  ],
+);
+
+/// The properties a universe whose start sends every image under png lists in place of one of [_images].
+final _whereTheServerHoldsThem = {imagesStayWithTheirBody: imagesStayWithTheirBodyWhereTheServerHoldsThem};
+
+/// The K2 properties of images.
+final _images = [
+  imagesAreOfTheBody,
+  imagesStayWithTheirBody,
+  stageShapesTheImages,
+  bindingGoesWithTheBody,
+  imagesReachEveryDevice,
+  receivedImagesAreUsable,
+  resizedReplacesThePng,
+  noneSendsOnlyTheReplacement,
+];
+
+const _imageIds = ['R1', 'R3', 'R4', 'R5', 'R6'];
+
+/// The start of the universes of images, in an account whose image form is [form]. The app from before the upgrade, on
+/// A: R3 captured with its images and zipped (z3); R4 captured, zipped with its PNGs (z4) and archived with resized
+/// images, so that its directory holds the reduced JPEGs alone; R5 captured without images; R6 captured, zipped with its
+/// PNGs (z6p), archived with resized images, zipped again — that zip holds the reduced JPEGs alone and, being of that
+/// app, no stage (z6j) — and taken back from z6p, active with its PNGs — none of them bound, and all of them, their zips
+/// included, of no time. On B, that app takes z3, z4 and z6j in: B's R3 and R4 hold the PNGs and R6 the reduced JPEGs
+/// alone, all active and unbound. Then A runs the app of these rules: the form is set, A captures R1 with its images,
+/// zips it (z1, which carries its binding and its images) and runs its first round, which works out every binding A's
+/// records lack — R3's and R6's of their PNGs, R4's of its reduced JPEGs alone, R5's of none — and sends them. B has run
+/// no round of these rules. Records R1, R3, R4, R5 and R6 are left.
+List<Op> imageStart(String form) => [
+  const Capture('A', 'R3', 3, beforeTheUpgrade: true),
+  const Capture('A', 'R4', 4, beforeTheUpgrade: true),
+  const ExportZip('A', 'R3', 'z3', beforeTheUpgrade: true),
+  const ExportZip('A', 'R4', 'z4', beforeTheUpgrade: true),
+  const Archive('A', 'R4', 'resized_jpeg', untracked: Untracked.legacyApp),
+  const Capture('A', 'R5', 5, withImages: false, beforeTheUpgrade: true),
+  const Capture('A', 'R6', 6, beforeTheUpgrade: true),
+  const ExportZip('A', 'R6', 'z6p', beforeTheUpgrade: true),
+  const Archive('A', 'R6', 'resized_jpeg', untracked: Untracked.legacyApp),
+  const ExportZip('A', 'R6', 'z6j', beforeTheUpgrade: true),
+  const ImportZip('A', 'z6p', beforeTheUpgrade: true),
+  const ImportZip('B', 'z3', beforeTheUpgrade: true),
+  const ImportZip('B', 'z4', beforeTheUpgrade: true),
+  const ImportZip('B', 'z6j', beforeTheUpgrade: true),
+  if (form != 'none') SetImageForm('A', form),
+  const Capture('A', 'R1', 1),
+  const ExportZip('A', 'R1', 'z1'),
+  const SyncRound('A'),
+];
+
+/// [imageStart], then B's round and A's: the devices agree on the records, and B holds the images of R3 and R4 alone,
+/// since no round sends or takes any.
+List<Op> _imagesAgreedStart(String form) => [...imageStart(form), const SyncRound('B'), const SyncRound('A')];
+
+/// What A does in the universes of images: nothing; R1 archived with resized images or without images; R1 archived
+/// with resized images and taken back active from z1; R3 recognised again; R3 merged into R1 keeping either content;
+/// the account's form set to png, or to none.
+final _imagesOnA = OneOf(
+  [
+    [],
+    [(d) => Archive(d, 'R1', 'resized_jpeg')],
+    [(d) => Archive(d, 'R1', 'none')],
+    [(d) => Archive(d, 'R1', 'resized_jpeg'), (d) => ImportZip(d, 'z1')],
+    [(d) => Rerecognize(d, 'R3', 2)],
+    [(d) => Merge(d, 'R1', 'R3', contentFrom: 'R1')],
+    [(d) => Merge(d, 'R1', 'R3', contentFrom: 'R3')],
+    [(d) => SetImageForm(d, 'png')],
+    [(d) => SetImageForm(d, 'none')],
+  ],
+  'nothing, R1 archived either way or with resized images and taken back by zip, R3 recognised again, R3 merged into '
+  'R1 keeping either, the form set to png or to none',
+);
+
+/// What B does in [imageStart]: nothing; z1 taken in; R3 archived without images; R3 recognised again; R4 merged into
+/// R3 keeping R4's content; R4 archived with resized images.
+final _imagesOnB = OneOf(
+  [
+    [],
+    [(d) => ImportZip(d, 'z1')],
+    [(d) => Archive(d, 'R3', 'none')],
+    [(d) => Rerecognize(d, 'R3', 2)],
+    [(d) => Merge(d, 'R3', 'R4', contentFrom: 'R4')],
+    [(d) => Archive(d, 'R4', 'resized_jpeg')],
+  ],
+  'nothing, z1 taken in, R3 archived without images or recognised again, R4 merged into R3 keeping R4, R4 archived '
+  'with resized images',
+);
+
+/// What B does in [_imagesAgreedStart]: what it does in [imageStart], and z1 taken in with R4 merged into R1 keeping
+/// R1's content — a merge of R1 apart from A's, which splits R1 off where A merged R3 into it.
+final _imagesOnBAgreed = OneOf([
+  for (final ops in _imagesOnB.lists) ops,
+  [(d) => ImportZip(d, 'z1'), (d) => Merge(d, 'R1', 'R4', contentFrom: 'R1')],
+], '${_imagesOnB.summary}, z1 taken in and R4 merged into R1 keeping R1');
 
 /// The K2 properties of what a round tells ([R3-5]).
 final _told = [
@@ -1528,6 +1778,10 @@ const _onUnbound = EveryOp([1], zips: {'z1': 'R3'});
 /// claim of no counterexample is skipped, in CI (test/sync_properties_test.dart) and outside it
 /// (tool/sync_model_exhaustive.dart) alike; every other claim of it is checked.
 const standingCounterexamples = <String, String>{
+  'C1/what-needs-no-room-goes': _noWaitForRoomYet,
+  'C1r/what-needs-no-room-goes': _noWaitForRoomYet,
+  'C1x/what-needs-no-room-goes': _noWaitForRoomYet,
+  'C1rx/what-needs-no-room-goes': _noWaitForRoomYet,
   'Q3z/release-ends-as-held-changes-sent-late':
       'Two inputs: A dismisses R2+R3, B merges R1+R2 keeping either, R3 goes onto A\'s shelf, and once B\'s merge '
       'reached the server A runs a round. The round keeps the pair as A holds it, for it names R3, which is kept; but '
@@ -1535,6 +1789,15 @@ const standingCounterexamples = <String, String>{
       '([syncForget]). So the pair that the world sending A\'s operations late re-keys to R1+R3 is on no side once R3 '
       'is put back. Putting R3 back is a repair the app does not make, and the pair can be dismissed again.',
 };
+
+/// Why [whatNeedsNoRoomGoes] has counterexamples where the server has no room for new bytes and takes the rest: the
+/// app's round holds nothing back for room.
+const _noWaitForRoomYet =
+    'The app\'s round does not wait for room yet (T2b-6b turns this green). A round whose put of a body the server '
+    'refuses for room — 507 account_limit, or database_full past the reserve — ends as failed and sends no list, so a '
+    'change that needs no room in the same round, a delete or an archive, waits with the record that needs some. Every '
+    'counterexample is one such: a device that changed a record whose body the server lacks and, beside it, one that '
+    'needs no room.';
 
 /// Property → why its claim of no counterexample is not one of the app's: a property of a part of the app the app has
 /// not yet, which the model alone does, and which holds there however the app's rounds run. Its claim is skipped, in CI
@@ -1817,4 +2080,73 @@ final outsideCi = <Universe<PropertyInput>>[
     b: const MixedOps([0, 1]),
     properties: [syncOffEndsAsNotSyncing],
   ),
+  // The universes of images ([_imageUniverse]) of the starts CI does not run: B yet to sync in an account whose form
+  // is png, and the devices agreed in one whose form is none.
+  _imageUniverse('I1p', imageStart('png'), _imagesOnB),
+  // Its form is none until A sets png, and A then archives nothing: no PNG of an archive with resized images reaches
+  // its server. No image is new past its start but a reduced JPEG that replaces a PNG, which a round under none
+  // puts: a round that puts every image under none puts them in the start's rounds, which no property reads.
+  _imageUniverse(
+    'I2',
+    _imagesAgreedStart('none'),
+    _imagesOnBAgreed,
+    without: {resizedReplacesThePng, noneSendsOnlyTheReplacement},
+  ),
+  // I1 and I2p with two of A's operations in turn. I2px leaves out what I2p does.
+  _imageUniverse('I1x', imageStart('none'), _imagesOnB, a: Twice(_imagesOnA)),
+  _imageUniverse(
+    'I2px',
+    _imagesAgreedStart('png'),
+    _imagesOnBAgreed,
+    a: Twice(_imagesOnA),
+    without: {noneSendsOnlyTheReplacement},
+    instead: _whereTheServerHoldsThem,
+  ),
+  // 134 inputs each. The universes of the room ([_roomUniverse]) with B's rounds first as well.
+  _roomUniverse(
+    'C1x',
+    const SetStorageFull('A', full: true),
+    const SetStorageFull('A', full: false),
+    rounds: _roundsWithoutRoomEither,
+  ),
+  _roomUniverse(
+    'C1rx',
+    const SetDatabaseRoom('A', DatabaseRoom.reserveOnly),
+    const SetDatabaseRoom('A', DatabaseRoom.room),
+    rounds: _roundsWithoutRoomEither,
+  ),
+  _roomUniverse(
+    'C1nx',
+    const SetDatabaseRoom('A', DatabaseRoom.none),
+    const SetDatabaseRoom('A', DatabaseRoom.room),
+    rounds: _roundsWithoutRoomEither,
+    properties: [whatWaitedGoesOnceThereIsRoom],
+  ),
 ];
+
+/// Two of [draw]'s lists in turn, neither empty, the second naming no record the first merged away.
+final class Twice extends Draw {
+  const Twice(this.draw);
+  final OneOf draw;
+
+  @override
+  Iterable<List<Op>> on(String device, List<String> ids, Set<String> present) sync* {
+    for (final first in draw.on(device, ids, present).where((ops) => ops.isNotEmpty)) {
+      final gone = {
+        for (final op in first)
+          if (op is Merge) op.b,
+      };
+      bool names(Op op) => switch (op) {
+        Merge(:final a, :final b) => gone.contains(a) || gone.contains(b),
+        Archive(:final id) || Rerecognize(:final id) || Delete(:final id) => gone.contains(id),
+        _ => false,
+      };
+      for (final second in draw.on(device, ids, present).where((ops) => ops.isNotEmpty)) {
+        if (!second.any(names)) yield [...first, ...second];
+      }
+    }
+  }
+
+  @override
+  String get summary => 'two in turn of ${draw.summary}';
+}

@@ -10,6 +10,8 @@
 // Pure functions over the decoded model, run on any isolate and on both platforms: the desktop store calls them on
 // the files the recognizer leaves in the record directory, and the web harvest on the files the worker hands over.
 
+import 'dart:typed_data';
+
 import 'package:crypto/crypto.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -22,8 +24,8 @@ import '/src/chara_detail/value_write_time.dart';
 ///
 /// The body is the recognised content and the recognizer's metadata (region, trainer id, recognizer version, stage,
 /// strategy, record type). It leaves out the record's id and capture date, which belong to the record rather than to
-/// what was read; the inheritance parents, the relation bonus and the binding, which are placed on the record
-/// ([placeOnRecord]); the time the body was written, which is when the value was written and not the value; and the
+/// what was read; the inheritance parents, the relation bonus, and the binding with the geometry and the icon worked
+/// out with it, which are placed on the record ([placeOnRecord]); the time the body was written, which is when the value was written and not the value; and the
 /// format version, because the key is taken over the record upgraded to the current format,
 /// so two files that differ only in how they spell the same values have one key.
 ///
@@ -46,6 +48,8 @@ String recognizedContentKey(CharaDetailRecord record) {
       m.recordType,
       null,
       null,
+      null,
+      null,
     ),
     r.trainee,
     r.evaluationValue,
@@ -63,35 +67,53 @@ String recognizedContentKey(CharaDetailRecord record) {
   return sha256.convert(body.toRecordJsonBytes()).toString();
 }
 
-/// The body of [record] as sync carries it: the name of its content ([recognizedContentKey]), its binding and its
-/// inheritance parents, at the time it was written (0 where it carries none).
+/// The body of [record] as sync carries it: the name of its content ([recognizedContentKey]), its binding, geometry
+/// and icon, and its inheritance parents, at the time it was written (0 where it carries none).
 SyncBody syncBodyOf(CharaDetailRecord record) {
-  final ids = record.metadata.recordId;
+  final m = record.metadata;
   return SyncBody(
     recognizedContentKey(record),
-    binding: record.metadata.binding,
-    parents: {'parent1': ?ids.parent1, 'parent2': ?ids.parent2},
-    time: record.metadata.bodyWrittenAt ?? 0,
+    binding: m.binding,
+    geometry: m.geometry,
+    icon: m.icon,
+    parents: {'parent1': ?m.recordId.parent1, 'parent2': ?m.recordId.parent2},
+    time: m.bodyWrittenAt ?? 0,
   );
 }
 
+/// The name of a record's icon ([Metadata.icon]) whose `trainee.jpg` holds [bytes]: their SHA-256, as an image's name
+/// is. Null where there is no `trainee.jpg` ([bytes] null).
+String? recordIconName(Uint8List? bytes) => bytes == null ? null : sha256.convert(bytes).toString();
+
 /// The record to write when the recognizer's result [recognized] lands on the stored record [stored], or null when
-/// nothing is to be written.
+/// nothing is to be written. [icon] is the name ([recordIconName]) of the `trainee.jpg` the record directory holds
+/// beside the result, null where it holds none.
 ///
 /// Whether and when the body is written is [syncBodyWrite]'s decision, by [valueWriteTime] over the stored body's
 /// time, and the record written carries that time as its body's, in the same `record.json` as the body. With no
 /// stored record (a capture), the record is [recognized] as the recognizer wrote it. Over a stored record (a
 /// re-recognition), the body comes from [recognized] and is written in the current format, and the record's own
 /// fields stay the stored record's: its id and capture date, its inheritance parents, its relation bonus, and its
-/// binding — a re-recognition reads the images the stored body was read from, so the binding is the stored one, or
-/// still not worked out. A capture writes no binding: nothing here reads an image. A result whose body is the stored
-/// one ([recognizedContentKey]) writes nothing, so a re-recognition that read the same leaves the stored
-/// `record.json` as it was, its body's time included, whatever has been placed on it.
-CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord recognized) {
+/// binding and geometry — a re-recognition reads the images the stored body was read from, so the binding is the
+/// stored one, or still not worked out, and so is where the screen falls on them. The icon is [icon] where the binding
+/// is worked out: the recognizer cut it again. A capture writes no binding, geometry or icon: they are worked out
+/// together the first time the record needs them ([placeOnRecord]). A result whose content is the stored one
+/// ([recognizedContentKey]) and whose icon is the one the stored body names writes nothing, so a re-recognition that
+/// read the same leaves the stored `record.json` as it was, its body's time included, whatever has been placed on it;
+/// one that read the same but cut the icon into other bytes writes the body, naming the new icon.
+CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord recognized, {required String? icon}) {
   final r = recognized.upgradeFormat();
+  final read = syncBodyOf(r);
   final body = syncBodyWrite(
     (value: stored == null ? null : syncBodyOf(stored), time: stored?.metadata.bodyWrittenAt),
-    syncBodyOf(r),
+    SyncBody(
+      read.content,
+      binding: read.binding,
+      geometry: read.geometry,
+      icon: icon,
+      parents: read.parents,
+      time: read.time,
+    ),
     writeAt: valueWriteTime,
   );
   if (body == null) return null;
@@ -110,6 +132,8 @@ CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord
       own.relationBonus,
       m.recordType,
       body.binding,
+      body.geometry,
+      body.icon,
       body.time,
     ),
     r.trainee,
@@ -131,8 +155,9 @@ CharaDetailRecord? composeBodyWrite(CharaDetailRecord? stored, CharaDetailRecord
 /// where it holds none, or holds one it cannot read), its body the one [syncImport] decided on, [body], written where
 /// [writes].
 ///
-/// Where the body is not written, the stored record stays, its body's time included, with [body]'s parents and binding
-/// placed on it. Else the body is the imported one, with [body]'s parents, binding and time, in the current format.
+/// Where the body is not written, the stored record stays, its body's time included, with [body]'s parents, and its
+/// binding, geometry and icon, placed on it. Else the body is the imported one, with [body]'s parents, binding,
+/// geometry, icon and time, in the current format.
 /// Either way the record keeps what only this device holds: the stored record's relation bonus, none where there is no
 /// stored record. Nothing the import carries of a time or a relation bonus is read.
 CharaDetailRecord composeBodyImport(
@@ -144,7 +169,11 @@ CharaDetailRecord composeBodyImport(
   final parents = (parent1: body.parents['parent1'], parent2: body.parents['parent2']);
   if (!writes) {
     final held = stored ?? (throw ArgumentError('An import keeps the body of a record the device holds.'));
-    return placeOnRecord(held, parents: parents, binding: body.binding);
+    return placeOnRecord(
+      held,
+      parents: parents,
+      images: (binding: body.binding, geometry: body.geometry, icon: body.icon),
+    );
   }
   final i = imported.upgradeFormat();
   final m = i.metadata;
@@ -161,6 +190,8 @@ CharaDetailRecord composeBodyImport(
       stored?.metadata.relationBonus,
       m.recordType,
       body.binding,
+      body.geometry,
+      body.icon,
       body.time,
     ),
     i.trainee,
@@ -181,16 +212,23 @@ CharaDetailRecord composeBodyImport(
 /// A record's two inheritance parent slots.
 typedef RecordParents = ({String? parent1, String? parent2});
 
+/// What a record's body carries of the images it was read from: which they are ([Metadata.binding]), where the game
+/// screen falls on each ([Metadata.geometry]) and the name of the icon cut from the factor image ([Metadata.icon]).
+/// One value, because the three are worked out together, from one directory's files, and placed in one write
+/// ([R4-9]): a record whose binding is worked out holds the geometry and the icon worked out with it.
+typedef RecordBodyImages = ({RecordBinding? binding, RecordGeometry? geometry, String? icon});
+
 /// [record] with the given values placed on it, and its body untouched.
 ///
 /// [parents] replaces both parent slots, [relationBonus] the relation bonus (its `value` may be null, which clears
-/// it), and [binding] the binding; a value left out stays as it is. The body and its time are not among the
-/// parameters, so nothing placed through here can change [recognizedContentKey] or move the body's time.
+/// it), and [images] the binding, geometry and icon, the three together; a value left out stays as it is. The body
+/// and its time are not among the parameters, so nothing placed through here can change [recognizedContentKey] or
+/// move the body's time.
 CharaDetailRecord placeOnRecord(
   CharaDetailRecord record, {
   RecordParents? parents,
   ({int? value})? relationBonus,
-  RecordBinding? binding,
+  RecordBodyImages? images,
 }) {
   final m = record.metadata;
   return CharaDetailRecord(
@@ -205,7 +243,9 @@ CharaDetailRecord placeOnRecord(
       m.strategy,
       relationBonus == null ? m.relationBonus : relationBonus.value,
       m.recordType,
-      binding ?? m.binding,
+      images == null ? m.binding : images.binding,
+      images == null ? m.geometry : images.geometry,
+      images == null ? m.icon : images.icon,
       m.bodyWrittenAt,
     ),
     record.trainee,

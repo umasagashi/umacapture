@@ -37,10 +37,21 @@ class SyncValue<T> {
   String toString() => '$value@$time';
 }
 
-/// What a record shows: its recognised content, its binding to the images it was read from, and the inheritance
-/// parents, which go with the content wherever it goes. [time] is when the content was written.
+/// What a record shows: its recognised content, its binding to the images it was read from with their geometry and
+/// the icon cut from them, and the inheritance parents, which go with the content wherever it goes. [time] is when the
+/// content was written.
+///
+/// The binding, geometry and icon are required of every construction, so a body made anywhere decides what it
+/// carries of each: none is left behind by a construction that did not name it.
 class SyncBody {
-  const SyncBody(this.content, {this.binding, this.parents = const {}, this.time = 0});
+  const SyncBody(
+    this.content, {
+    required this.binding,
+    required this.geometry,
+    required this.icon,
+    this.parents = const {},
+    this.time = 0,
+  });
 
   /// The name of the recognised content (`recognizedContentKey`): equal exactly when the bodies are, whatever is
   /// placed on them.
@@ -48,6 +59,14 @@ class SyncBody {
 
   /// The images the content was read from (`metadata.binding`); null where it is not worked out yet.
   final RecordBinding? binding;
+
+  /// Where the game screen falls on each form of those images (`metadata.geometry`); null where it is not worked out
+  /// yet. No part of whether two bodies are the same ([sameAs]).
+  final RecordGeometry? geometry;
+
+  /// The name of the record's icon (`metadata.icon`); null where it has none, or it is not worked out yet. No part of
+  /// whether two bodies are the same ([sameAs]).
+  final String? icon;
 
   /// Slot ([recordSyncParentSlots]) → record id.
   final Map<String, String> parents;
@@ -63,11 +82,19 @@ class SyncBody {
 
   bool sameParents(SyncBody other) => recordSyncParentSlots.every((slot) => parents[slot] == other.parents[slot]);
 
-  SyncBody _with({RecordBinding? binding, Map<String, String>? parents}) =>
-      SyncBody(content, binding: binding ?? this.binding, parents: parents ?? this.parents, time: time);
+  SyncBody _with({RecordBinding? binding, RecordGeometry? geometry, String? icon, Map<String, String>? parents}) =>
+      SyncBody(
+        content,
+        binding: binding ?? this.binding,
+        geometry: geometry ?? this.geometry,
+        icon: icon ?? this.icon,
+        parents: parents ?? this.parents,
+        time: time,
+      );
 
   @override
-  String toString() => '$content#$binding^$time/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}';
+  String toString() =>
+      '$content#$binding%$geometry~$icon^$time/${parents.entries.map((e) => '${e.key}:${e.value}').join(',')}';
 }
 
 /// A record as sync carries it.
@@ -429,10 +456,16 @@ SyncRecord _fields(SyncRecord w, SyncRecord o, {required bool oStandsOnATie}) {
       ? o.body
       : w.body;
   // The binding is of the content: of one content, each side knows the fields it worked out, and the record knows
-  // what either does.
+  // what either does. So are the geometry and the icon, which are worked out with it; of two that disagree, the value
+  // of the body that stands.
   for (final side in [o.body, w.body]) {
-    final known = side.binding;
-    if (known != null && body.sameAs(side)) body = body._with(binding: body.binding?.mergedWith(known) ?? known);
+    if (!body.sameAs(side)) continue;
+    final (binding, geometry) = (side.binding, side.geometry);
+    body = body._with(
+      binding: binding == null ? null : body.binding?.mergedWith(binding) ?? binding,
+      geometry: geometry == null ? null : body.geometry?.mergedWith(geometry) ?? geometry,
+      icon: body.icon ?? side.icon,
+    );
   }
   final stage = _later(w.stage, w.stage.time, o.stage, o.stage.time, oStandsOnATie: oStandsOnATie, same: _equal)
       ? o.stage

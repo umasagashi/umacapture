@@ -55,6 +55,8 @@ CharaDetailRecord makeRecord({
     recordType,
     null,
     null,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

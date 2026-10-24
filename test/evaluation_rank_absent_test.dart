@@ -43,6 +43,8 @@ CharaDetailRecord _record({required RecordType type, required int evaluationValu
     type,
     null,
     null,
+    null,
+    null,
   );
   return CharaDetailRecord(
     metadata,

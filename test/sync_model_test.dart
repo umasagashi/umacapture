@@ -973,7 +973,7 @@ void main() {
         Map<String, String> parents = const {},
       }) => SyncRecord(
         id,
-        body: SyncBody('$id@$time', parents: parents, time: time),
+        body: SyncBody('$id@$time', binding: null, geometry: null, icon: null, parents: parents, time: time),
         absorbed: absorbed,
       );
       SyncSide side(
@@ -991,6 +991,8 @@ void main() {
               body: SyncBody(
                 r.body.content,
                 binding: r.body.binding,
+                geometry: r.body.geometry,
+                icon: r.body.icon,
                 parents: backwards(r.body.parents),
                 time: r.body.time,
               ),
@@ -1057,19 +1059,27 @@ void main() {
       // R from before the binding, on two devices: each worked its binding out of its own directory, after A had
       // let go of campaign.png and B of skill.png. Neither body carries a time.
       SyncSide holding(RecordBinding? binding) => SyncSide(
-        records: {'R': SyncRecord('R', body: SyncBody('content', binding: binding))},
+        records: {'R': SyncRecord('R', body: SyncBody('content', binding: binding, geometry: null, icon: null))},
       );
       const a = RecordBinding(skillPng: 'skill', factorPng: 'factor');
       const b = RecordBinding(factorPng: 'factor', campaignPng: 'campaign');
 
       final agreed = mergeRecordSync(holding(null), holding(a), holding(b)).result.records['R']!.body;
-      expect(agreed.sameAs(SyncBody('content', binding: b)), isTrue);
+      expect(agreed.sameAs(SyncBody('content', binding: b, geometry: null, icon: null)), isTrue);
       expect(agreed.binding, const RecordBinding(skillPng: 'skill', factorPng: 'factor', campaignPng: 'campaign'));
 
       // A field both know with two values: two bodies, of one time, and the server's stands.
       const other = RecordBinding(factorPng: 'another factor', campaignPng: 'campaign');
       final disagreed = mergeRecordSync(holding(null), holding(a), holding(other)).result.records['R']!.body;
-      expect(SyncBody('content', binding: a).sameAs(SyncBody('content', binding: other)), isFalse);
+      expect(
+        SyncBody(
+          'content',
+          binding: a,
+          geometry: null,
+          icon: null,
+        ).sameAs(SyncBody('content', binding: other, geometry: null, icon: null)),
+        isFalse,
+      );
       expect(disagreed.binding, other);
     });
   });
