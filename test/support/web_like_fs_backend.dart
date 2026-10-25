@@ -14,7 +14,7 @@
 // exception type a failure throws, what `list` answers for a missing path (the
 // real `WebVfs` is unverified on exactly that point), whether `rename` is atomic
 // or even supported, how a partial write is left, and what a quota refusal looks
-// like. A suite passing here therefore proves "no shared code path reaches the
+// like (but where a test refuses a write as the quota does, `refuseWrite`). A suite passing here therefore proves "no shared code path reaches the
 // sync API", not "this behaves the same on web" — a change that turns on OPFS's
 // async behaviour still needs a browser run.
 import 'dart:typed_data';
@@ -66,6 +66,15 @@ class WebLikeFsBackend implements FsBackend {
   /// choice of primitive is observable only as which one was called.
   final List<int> readHeadBounds = [];
 
+  /// What a write whose path it answers for throws in place of landing — a file written, a directory made, a file
+  /// renamed or copied into place —, as the browser rejects a write where the origin's storage quota is spent
+  /// ([QuotaExceededError]); null lets the write through. The one place a failure is not left at io's.
+  Object? Function(String path)? refuseWrite;
+
+  Future<void> _refused(String path) async {
+    if (refuseWrite?.call(path) case final error?) throw error;
+  }
+
   /// Zeroes the counters, so a test can exclude its own fixture setup.
   void resetCallCounts() {
     lengthCalls = 0;
@@ -104,11 +113,16 @@ class WebLikeFsBackend implements FsBackend {
   }
 
   @override
-  Future<void> writeString(String path, String contents) => inner.writeString(path, contents);
+  Future<void> writeString(String path, String contents) async {
+    await _refused(path);
+    await inner.writeString(path, contents);
+  }
 
   @override
-  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) =>
-      inner.writeBytes(path, bytes, flush: flush);
+  Future<void> writeBytes(String path, List<int> bytes, {bool flush = false}) async {
+    await _refused(path);
+    await inner.writeBytes(path, bytes, flush: flush);
+  }
 
   @override
   Future<List<FsEntry>> list(
@@ -134,7 +148,10 @@ class WebLikeFsBackend implements FsBackend {
   Future<void> delete(String path, {bool recursive = false}) => inner.delete(path, recursive: recursive);
 
   @override
-  Future<void> rename(String source, String destination) => inner.rename(source, destination);
+  Future<void> rename(String source, String destination) async {
+    await _refused(destination);
+    await inner.rename(source, destination);
+  }
 
   /// `WebFsBackend`'s answer, not [inner]'s: a shared path that chooses how to replace a file by this
   /// flag takes the web choice here, which is the one a suite on this backend exists to run.
@@ -142,10 +159,16 @@ class WebLikeFsBackend implements FsBackend {
   bool get renameReplacesFileAtomically => false;
 
   @override
-  Future<void> createDir(String path, {bool recursive = false}) => inner.createDir(path, recursive: recursive);
+  Future<void> createDir(String path, {bool recursive = false}) async {
+    await _refused(path);
+    await inner.createDir(path, recursive: recursive);
+  }
 
   @override
-  Future<void> copyFile(String source, String destination) => inner.copyFile(source, destination);
+  Future<void> copyFile(String source, String destination) async {
+    await _refused(destination);
+    await inner.copyFile(source, destination);
+  }
 
   @override
   Future<int> length(String path) {
@@ -210,4 +233,15 @@ class WebLikeFsBackend implements FsBackend {
   UnsupportedError _sync(String method) {
     return UnsupportedError('FsBackend.$method is unavailable on this (web-like) backend.');
   }
+}
+
+/// The browser's rejection of a write where the origin's storage quota is spent: a `DOMException` named
+/// `QuotaExceededError`, which reaches Dart as no [Exception] — only a catch of everything catches it.
+class QuotaExceededError {
+  const QuotaExceededError();
+
+  String get name => 'QuotaExceededError';
+
+  @override
+  String toString() => 'QuotaExceededError';
 }

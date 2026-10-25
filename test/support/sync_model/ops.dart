@@ -16,10 +16,17 @@ final class Capture extends Op {
     this.withImages = true,
     this.beforeTheUpgrade = false,
     this.parents = const {},
+    this.uma,
   });
   final String id;
   final int captured;
   final bool withImages;
+
+  /// The uma the captured screens show, where another capture shows it too; null where none does — the capture's own.
+  /// A fact of the capture, and so of every content read from its images: two records of one uma under two ids are
+  /// "the same content" the app's entries refuse ([N10-02] (b)) and sync does not ([R3-6]). No operation of the model
+  /// reads it — its capture and its import refuse nothing —; the properties of sync read it.
+  final String? uma;
 
   /// A record the app captured before it bound what a record shows to its images: under the rules of file
   /// sync, a record that carries no binding until the device works it out from its directory. No other
@@ -33,7 +40,8 @@ final class Capture extends Op {
   final Map<int, String> parents;
   @override
   String toString() =>
-      '$device: capture $id@$captured${withImages ? '' : ' (no images)'}${beforeTheUpgrade ? ' (before the upgrade)' : ''}'
+      '$device: capture $id@$captured${uma == null ? '' : ' of uma $uma'}${withImages ? '' : ' (no images)'}'
+      '${beforeTheUpgrade ? ' (before the upgrade)' : ''}'
       '${parents.isEmpty ? '' : ' (parents ${[for (final e in parents.entries) '${e.key}=${e.value}'].join(',')})'}';
 }
 
@@ -470,6 +478,36 @@ final class RepairQuarantined extends ShelfOp {
   final String id;
   @override
   String toString() => '$device: repair $id on the quarantine shelf';
+}
+
+/// An operation on a merge the device started and has not finished: only the rules of file sync, on the app's round,
+/// have the mark of one (the app's `merges_in_progress.json`). The other rule sets, and the model's own round, have no
+/// path for any.
+sealed class MergeInProgressOp extends Op {
+  const MergeInProgressOp(super.device);
+}
+
+/// The user's merge of [a] and [b], keeping [contentFrom]'s content, stops before it retires the record it merges away:
+/// the app published the end under the older id with the ids it absorbed and the mark of a merge in progress, made the
+/// other records' parents and the dismissed pairs name that id, settled the ratings and memos of the two, and stopped —
+/// the app closed, or the delete of the retired record failed — so the retired record is a record still ([R6-3],
+/// [N9-11], [N15-02]).
+final class MergeStops extends MergeInProgressOp {
+  const MergeStops(super.device, this.a, this.b, {required this.contentFrom});
+  final String a;
+  final String b;
+  final String contentFrom;
+  @override
+  String toString() => '$device: merge $a+$b keep $contentFrom, stopped before it retires';
+}
+
+/// The user presses Merge again on each pair whose merge [MergeStops] left unfinished on the device: the app takes the
+/// end it published, retires the record and removes the mark ([N9-11]). The app does not finish a merge on its own,
+/// a restart included. A device with no merge unfinished does nothing.
+final class FinishMerges extends MergeInProgressOp {
+  const FinishMerges(super.device);
+  @override
+  String toString() => '$device: finish the merges left unfinished';
 }
 
 /// The app starts again: the record stores scan again, and each record on the quarantine shelf whose `record.json`

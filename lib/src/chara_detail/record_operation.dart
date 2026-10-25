@@ -65,16 +65,29 @@ SyncValue<T?>? syncEdit<T>(SyncHeldValue<T> held, T? next, {required SyncWriteTi
   },
 );
 
+/// The ids a merge this device started into a record and has not finished holds back from a sync round ([R6-3],
+/// [N15-02]), by the ids its merges in progress retire ([retired]: the retired ids of the record's
+/// `merges_in_progress.json`, none where it has none, null where it cannot be read): none where none of them is a
+/// record still ([isRecord]) — the record is settled —; else every one of them, which waits with the record until the
+/// merge is finished. Null where they cannot be read: what the merges would retire is unknown, and the record is one the
+/// device cannot read.
+Set<String>? syncMergeWaiting(Iterable<String>? retired, {required bool Function(String id) isRecord}) {
+  if (retired == null) return null;
+  return retired.any(isRecord) ? {...retired} : const {};
+}
+
 /// The ids a sync round keeps as the server lists them, in the list it sends and on the device, for the records the
 /// device holds and cannot read ([R7-3], [N15-20], [N15-26]) — those on its quarantine shelf ([shelf] by the ids their
-/// notes name, and [unnamed] of them whose note names none), and those it could not open or read ([unread]): none where
-/// it holds none; else every id of [unread], and of the ids the device
-/// holds no record of ([held]: each record it read, with the ids it absorbed), every id on the shelf, and every id the
-/// device last agreed on with the server ([agreed]) but one a record it read absorbed and one its user deleted from the
-/// shelf ([deleted]). An id the device holds a record of is that record's, whatever the shelf holds of it: a record
-/// taken again from a zip while the one it was is on the shelf. Each of those ids keeps with it every id of its unit
-/// ([syncUnitsOf] of the round's [records] — the device's, the server's and the result's — and of the records split off
-/// ([splitFrom]), over their ids and the ids they absorbed).
+/// notes name, and [unnamed] of them whose note names none), and those it could not open or read ([unread]) —, and for
+/// the merges it started and has not finished ([R6-3], [N15-02]: [merging], the ends of those merges with the ids they
+/// retire ([syncMergeWaiting])): none where it holds none of either; else every id of [unread] and of [merging], and,
+/// where it holds a record it cannot read, of the ids the device holds no record of ([held]: each record it read, with
+/// the ids it absorbed), every id on the shelf, and every id the device last agreed on with the server ([agreed]) but
+/// one a record it read absorbed and one its user deleted from the shelf ([deleted]). An id the device holds a record
+/// of is that record's, whatever the shelf holds of it: a record taken again from a zip while the one it was is on the
+/// shelf. Each of those ids keeps with it every id of its unit ([syncUnitsOf] of the round's [records] — the device's,
+/// the server's and the result's — and of the records split off ([splitFrom]), over their ids and the ids they
+/// absorbed).
 ///
 /// What a record the device cannot read absorbed cannot be read either, so of an id gone from the device it cannot be
 /// told whether that record absorbed it or the user deleted it, and every such id is read on the wide side: kept, until
@@ -84,6 +97,9 @@ SyncValue<T?>? syncEdit<T>(SyncHeldValue<T> held, T? next, {required SyncWriteTi
 /// directory is on it, not whether a note names one. A shelf that could not be read ([shelf] null) is read as one that
 /// holds a record.
 ///
+/// A merge left half way is no record the device cannot read: what it retires is told by its mark, so it holds back
+/// what it left half way and nothing more. A delete beside it goes.
+///
 /// What the server's list joins to a kept id cannot be put in place without it either, on receiving as on sending
 /// ([N15-26]): a record the server's record of a kept id absorbed, which would go, and a record of the server's that
 /// absorbed a kept id, which would take its images from a record the device cannot read ([R4-8] 5). So the unit goes
@@ -92,20 +108,24 @@ Set<String> syncUnreadHeld({
   required Set<String>? shelf,
   required int unnamed,
   required Set<String> unread,
+  required Set<String> merging,
   required Set<String> deleted,
   required Set<String> agreed,
   required Map<String, Set<String>> held,
   required Iterable<SyncRecord> records,
   required Map<String, String> splitFrom,
 }) {
-  if (shelf != null && shelf.isEmpty && unnamed == 0 && unread.isEmpty) return const {};
+  final wide = shelf == null || shelf.isNotEmpty || unnamed > 0 || unread.isNotEmpty;
+  if (!wide && merging.isEmpty) return const {};
   final absorbed = {for (final ids in held.values) ...ids};
   final kept = {
     ...unread,
-    for (final id in {...?shelf, ...agreed})
-      if (!held.containsKey(id) &&
-          ((shelf?.contains(id) ?? false) || (!absorbed.contains(id) && !deleted.contains(id))))
-        id,
+    ...merging,
+    if (wide)
+      for (final id in {...?shelf, ...agreed})
+        if (!held.containsKey(id) &&
+            ((shelf?.contains(id) ?? false) || (!absorbed.contains(id) && !deleted.contains(id))))
+          id,
   };
   // An id on the shelf is no record's id: it joins the records only by what absorbed it.
   final ids = {for (final r in records) ...r.absorbed, for (final r in records) r.id};

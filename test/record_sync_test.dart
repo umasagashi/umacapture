@@ -1,5 +1,6 @@
 // The device's side of sync: what the reader makes of a real data directory, the list it is carried in and read back
-// from, the records a round reads again after each entry that changes them, and rounds between two devices.
+// from, the records a round reads again after each entry that changes them, rounds between two devices, and the
+// server's endpoints over HTTP as the app reads their answers.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_sync_test.dart
 import 'dart:async';
@@ -10,12 +11,14 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:umacapture/src/addon/trigger_catalog.dart' show appExitRequestsProvider;
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
@@ -23,10 +26,12 @@ import 'package:umacapture/src/chara_detail/image_converter.dart';
 import 'package:umacapture/src/chara_detail/record_archive_state.dart';
 import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/record_quarantine_ledger.dart';
+import 'package:umacapture/src/chara_detail/record_share_session.dart';
 import 'package:umacapture/src/chara_detail/record_sync.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
+import 'package:umacapture/src/chara_detail/record_sync_server.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/memo.dart';
@@ -63,6 +68,7 @@ import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
 import 'support/storage_delete_claim.dart';
+import 'support/sync_http_face.dart';
 import 'support/web_like_fs_backend.dart';
 
 String _hex(int fill) => fill.toRadixString(16).padLeft(2, '0') * 32;
@@ -729,6 +735,68 @@ void main() {
       a.close();
       expect((await a.round(server)).end, SyncRoundEnd.done);
       expect(onServer().rows['R1']!.record.absorbed, {'R2'});
+    });
+
+    group('[R6-3], [N15-02]: a merge stopped before it retired the record it merges away', () {
+      /// R1 to R3 on A, R1 and R2 with a memo each, sent and taken in by B; then a merge of R2 into R1 that published
+      /// R1 — absorbing R2, with the mark — and moved R2's memo onto R1, and stopped before it retired R2.
+      Future<void> stopMerge() async {
+        for (final id in ['R1', 'R2', 'R3']) {
+          a.seedRecord(id, binding: _binding, bodyWrittenAt: 1767225600100);
+        }
+        a.seedColumn(
+          'memo',
+          'm1',
+          title: 'Note',
+          data: {'R1': 'm1', 'R2': 'm2'},
+          writtenAt: {'R1': 1767225600200, 'R2': 1767225600300},
+        );
+        await a.round(server);
+        await b.round(server);
+        final r1 = a.charaDetail / 'active' / 'R1';
+        File(r1.filePath(mergedIdsFileName).path).writeAsBytesSync(mergedIdsBytes(['R2']));
+        File(r1.filePath(mergesInProgressFileName).path).writeAsBytesSync(
+          mergesInProgressBytes({
+            'R2': (
+              route: EnhancementMergeRoute.values.first,
+              identical: false,
+              contentFromOlder: true,
+              enhancedIsOlder: false,
+            ),
+          }),
+        );
+        a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'm2'}, writtenAt: {'R1': 1767225600900});
+        a.close();
+      }
+
+      test(
+        'the record it retires waits with its end: the memo the merge moved off it stays on the server and the other '
+        'device',
+        () async {
+          await stopMerge();
+
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          for (final list in [onServer(), await listOf(b)]) {
+            expect(list.rows['R1']!.record.absorbed, isEmpty);
+            expect(list.rows.keys.toSet(), {'R1', 'R2', 'R3'});
+            expect(list.cells[('memo/m1', 'R2')]?.value, jsonEncode('m2'));
+            expect(list.cells[('memo/m1', 'R1')]?.value, jsonEncode('m1'));
+          }
+        },
+      );
+
+      test('[R7-3]: a record deleted from the list beside it goes', () async {
+        await stopMerge();
+        await deleteRecords(a, {'R3'});
+
+        final outcome = await a.round(server);
+        expect((outcome.end, outcome.withheld), (SyncRoundEnd.done, 0));
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+        for (final list in [onServer(), await listOf(b)]) {
+          expect(list.rows.keys.toSet(), {'R1', 'R2'});
+        }
+      });
     });
 
     test('a record is read under its lock: a write half done is waited for, and read whole', () async {
@@ -1775,6 +1843,139 @@ void main() {
       expect(_describe(onServer()), before);
       expect(_describe(await listOf(b)), before);
       expect(outcome.withheld, 1, reason: 'R2, which R1 may hold');
+    });
+
+    // [R7-4]: what the server has no room for waits until it has some — a merge's end with the record it absorbed —,
+    // and what needs no room goes in the same round. The decision is the shared round's: one backend.
+    group('room ([R7-4])', () {
+      Future<void> recognizeAgain(SyncTestDevice device, String id) =>
+          device.recognizeAgain(id, (result) => result['fans'] = 7);
+
+      test('check 2: a merge whose end the server has no room for waits with the record it absorbed, the other device '
+          'sees both as they were, and both go once there is room and the user syncs now', () async {
+        await a.setSyncOn(true);
+        seedUmas(a, ['R1', 'R2', 'R3']);
+        await a.round(server);
+        await b.round(server);
+        final before = _describe(onServer());
+        server.noRoom = 'account_limit';
+        clockAt(hour(9));
+        // The merge's end shows a body the server does not hold: recognised again once merged, as the merge refuses a
+        // record recognised again before it.
+        await a.merge('R1', 'R2', keep: 'R2');
+        await recognizeAgain(a, 'R1');
+        final merged = (await listOf(a)).rows['R1']!.record;
+
+        final waited = await a.round(server);
+        expect((waited.end, waited.waitingForRoom), (SyncRoundEnd.done, 2), reason: 'R1, and R2 its merge absorbed');
+        expect((await b.round(server)).end, SyncRoundEnd.done);
+        expect(_describe(onServer()), before);
+        expect(_describe(await listOf(b)), before, reason: 'B sees R1 and R2 as they were before the merge');
+        expect((await listOf(a)).rows['R1']?.record.absorbed, {'R2'}, reason: 'A holds its merge');
+
+        server.noRoom = null;
+        final stopped = await a.round(server);
+        expect((stopped.end, stopped.waitingForRoom), (SyncRoundEnd.done, 2), reason: 'A is stopped for room');
+        final sent = await a.syncNow(server);
+        expect((sent.end, sent.waitingForRoom), (SyncRoundEnd.done, 0));
+        await b.round(server);
+        for (final list in await allLists()) {
+          expect(list.rows.keys.toSet(), {'R1', 'R3'});
+          expect(list.rows['R1']!.record.absorbed, {'R2'});
+          expect(list.rows['R1']!.record.body.content, merged.body.content);
+        }
+      });
+
+      test(
+        'what needs no room goes in the round a body waits for room: the delete and the archive of other records',
+        () async {
+          await a.setSyncOn(true);
+          seedUmas(a, ['R1', 'R2', 'R3']);
+          await a.round(server);
+          await b.round(server);
+          final r2 = onServer().rows['R2']!.bodyName;
+          server.noRoom = 'account_limit';
+          clockAt(hour(9));
+          await recognizeAgain(a, 'R2');
+          await deleteRecords(a, {'R1'});
+          final container = await a.open();
+          await container
+              .read(charaArchiveControllerProvider.notifier)
+              .archive(['R3'], ArchiveImageOption.none, effects: archiveEffects(container));
+
+          final waited = await a.round(server);
+          expect((waited.end, waited.waitingForRoom), (SyncRoundEnd.done, 1), reason: 'R2');
+          await b.round(server);
+          for (final list in [onServer(), await listOf(b)]) {
+            expect(list.rows.keys.toSet(), {'R2', 'R3'}, reason: 'the delete of R1 went');
+            expect(list.rows['R3']!.record.stage.value, ArchiveImageOption.none, reason: 'the archive of R3 went');
+            expect(list.rows['R2']!.bodyName, r2, reason: 'R2 waits');
+          }
+
+          server.noRoom = null;
+          await a.syncNow(server);
+          await b.round(server);
+          final recognized = (await listOf(a)).rows['R2']!.bodyName;
+          expect(recognized, isNot(r2));
+          for (final list in await allLists()) {
+            expect(list.rows['R2']!.bodyName, recognized);
+          }
+        },
+      );
+
+      test('[N1-15]: a body the server refused for the day waits, the delete of another record goes that day, and a '
+          'round of the next day sends the body with nothing on the device changed', () async {
+        seedUmas(a, ['R1', 'R2', 'R3']);
+        await a.round(server);
+        await b.round(server);
+        final r2 = onServer().rows['R2']!.bodyName;
+        clockAt(hour(9));
+        server.limitTheDay(0);
+        await recognizeAgain(a, 'R2');
+        await deleteRecords(a, {'R1'});
+
+        final waited = await a.round(server);
+        expect((waited.end, waited.waitingForTheDay, waited.waitingForRoom), (SyncRoundEnd.done, 1, 0));
+        expect(onServer().rows.keys.toSet(), {'R2', 'R3'}, reason: 'the delete of R1 went');
+        expect(onServer().rows['R2']!.bodyName, r2, reason: 'R2 waits for the day');
+
+        clockAt(hour(24 + 9));
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        final recognized = (await listOf(a)).rows['R2']!.bodyName;
+        expect(recognized, isNot(r2));
+        expect(onServer().rows['R2']!.bodyName, recognized);
+      });
+
+      test(
+        'a memo of a record that waits for room waits with it, and a memo of another record goes ([N1-17] (C1))',
+        () async {
+          await a.setSyncOn(true);
+          seedUmas(a, ['R1', 'R2']);
+          a.seedColumn('memo', 'm1', title: 'Note');
+          await a.round(server);
+          await b.round(server);
+          server.noRoom = 'account_limit';
+          clockAt(hour(9));
+          await recognizeAgain(a, 'R2');
+          await writeMemo(a, 'R2', 'waits');
+          await writeMemo(a, 'R1', 'goes');
+
+          final waited = await a.round(server);
+          expect((waited.end, waited.waitingForRoom), (SyncRoundEnd.done, 1), reason: 'R2');
+          await b.round(server);
+          for (final list in [onServer(), await listOf(b)]) {
+            expect(list.cells[('memo/m1', 'R1')]?.value, jsonEncode('goes'));
+            expect(list.cells[('memo/m1', 'R2')], isNull, reason: 'the memo waits with R2');
+          }
+
+          server.noRoom = null;
+          await a.syncNow(server);
+          await b.round(server);
+          for (final list in await allLists()) {
+            expect(list.cells[('memo/m1', 'R2')]?.value, jsonEncode('waits'));
+          }
+        },
+      );
     });
 
     test("E-9: an inheritance resolution that read a record before the round puts the other device's body in its "
@@ -3680,6 +3881,191 @@ void main() {
           expect(filesIn(b, 'R1'), takenOf(1));
         });
 
+        // T2b-8: the app's server over HTTP ([HttpSyncServer]) means to a round what the fake means. The same rounds,
+        // the same expectations, against the fake and through the Worker's HTTP face over it ([SyncHttpFace]).
+        if (!webLike) {
+          for (final overHttp in [false, true]) {
+            test(
+              'T2b-8 (C1): every endpoint a round calls, a replacement refused as stale and for its slots, an image put '
+              'whose connection drops, a body held back, and a body refused for room and for the day, mean the same '
+              '${overHttp ? 'over HTTP' : 'from the fake'}',
+              () async {
+                final faces = <SyncHttpFace>[];
+                if (overHttp) {
+                  for (final device in [a, b]) {
+                    final face = SyncHttpFace(server);
+                    faces.add(face);
+                    device.syncHttp = face;
+                  }
+                }
+                Future<SyncServer> to(SyncTestDevice device) async => overHttp ? device.overHttp() : server;
+                seedShot(a, 'R1', 1);
+                seedShot(a, 'R2', 2);
+                expect(syncRecordPartOf('R1'), isNot(syncRecordPartOf('R2')), reason: 'two slots of the root');
+                await a.setImageForm(await to(a), 'png');
+                expect(server.form, 'png');
+
+                server.refuseAsStale = 1;
+                server.partsLimit = 1;
+                var drops = 1;
+                server.beforeImagePut = (_) async {
+                  if (drops-- > 0) throw const _Dropped();
+                };
+                final first = await a.round(await to(a));
+                expect(first.end, SyncRoundEnd.done);
+                expect(server.refuseAsStale, 0, reason: 'refused as stale once');
+                expect(server.slotsChanged, [1, 1], reason: 'then refused for its slots, and made one slot at a time');
+                expect(first.imagesUndone?.stops, {
+                  SyncImagesStop.lost,
+                }, reason: 'an image put whose connection dropped');
+                expect((await a.round(await to(a))).imagesUndone, isNull);
+                expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1), ...pngNames(2), iconOfShot(2)});
+
+                server.beforeBodies = (names) async {
+                  server.beforeBodies = null;
+                  return names.toSet();
+                };
+                expect(
+                  (await b.round(await to(b))).end,
+                  SyncRoundEnd.bodiesMissing,
+                  reason: 'the server held them back',
+                );
+                expect((await b.round(await to(b))).end, SyncRoundEnd.done);
+                expect(filesIn(b, 'R1'), takenOf(1));
+                expect(filesIn(b, 'R2'), takenOf(2));
+
+                a.close();
+                seedShot(a, 'R3', 3);
+                server.noRoom = 'database_full';
+                final room = await a.round(await to(a));
+                expect((room.end, room.waitingForRoom, server.refusedForRoom), (SyncRoundEnd.done, 1, 1));
+                server.noRoom = null;
+                server.limitTheDay(0);
+                await a.setSyncOn(true);
+                final day = await a.syncNow(await to(a));
+                expect((day.end, day.waitingForTheDay, server.refusedForTheDay), (SyncRoundEnd.done, 1, 1));
+                expect(server.storedBodies.length, 2, reason: 'R3\'s body waits');
+
+                for (final face in faces) {
+                  expect(face.malformed, isEmpty, reason: 'every request as the protocol states it');
+                }
+                if (overHttp) {
+                  expect(
+                    {for (final face in faces) ...face.asked},
+                    {
+                      for (final path in ['generation', 'roots/<name>', 'parts/<name>', 'settings', 'images/<name>'])
+                        'GET /api/sync/$path',
+                      for (final path in ['bodies/get', 'bodies', 'parts', 'root', 'held']) 'POST /api/sync/$path',
+                      for (final path in ['settings', 'images/<name>']) 'PUT /api/sync/$path',
+                    },
+                    reason: 'every endpoint a round calls, and the image form the user sets',
+                  );
+                }
+              },
+            );
+
+            // T3a1, D2-5: what the device tells its user stopped sync — the account's room, or the service's stop —
+            // is the round's to say, through the same refusals over HTTP as from the fake.
+            test(
+              'T3a1 (C1 i, ii): a round tells a refusal for the account\'s room apart from one for the service\'s, a '
+              'round the mark holds back tells the room that raised it, and sync switched off is the service\'s stop '
+              '${overHttp ? 'over HTTP' : 'from the fake'}',
+              () async {
+                if (overHttp) a.syncHttp = SyncHttpFace(server);
+                Future<SyncServer> to() async => overHttp ? a.overHttp() : server;
+                seedUmas(a, ['R1']);
+                await a.setSyncOn(true);
+
+                server.noRoom = 'account_limit';
+                final account = await a.syncNow(await to());
+                expect(
+                  (account.end, account.waitingForRoom, account.serverStop),
+                  (SyncRoundEnd.done, 1, SyncServerStop.accountRoom),
+                );
+                final held = await a.roundAsAsked(await to());
+                expect(
+                  (held?.waitingForRoom, held?.serverStop, server.refusedForRoom),
+                  (1, SyncServerStop.accountRoom, 1),
+                  reason: 'the mark the refusal raised asks for no room, and says whose room it was',
+                );
+
+                server.noRoom = 'storage_full';
+                final service = await a.syncNow(await to());
+                expect(
+                  (service.end, service.waitingForRoom, service.serverStop),
+                  (SyncRoundEnd.done, 1, SyncServerStop.service),
+                );
+
+                server
+                  ..noRoom = null
+                  ..paused = true;
+                final paused = await a.syncNow(await to());
+                expect((paused.end, paused.serverStop), (SyncRoundEnd.failed, SyncServerStop.service));
+
+                server.paused = false;
+                final sent = await a.syncNow(await to());
+                expect((sent.end, sent.waitingForRoom, sent.serverStop), (SyncRoundEnd.done, 0, null));
+                expect(onServer().rows.keys.toSet(), {'R1'});
+              },
+            );
+
+            // T3a2 (L-6, V2; S-10): the screen that turns sync on shows, before any round, what the first would send and
+            // take in, and the memos that would hold it back. And (N8) whose daily limit stopped a round.
+            test(
+              'T3a2 (C1 iii, iv): before sync is on, the device reads what a round would send and take in, by the '
+              'round\'s merge, and its long memos, with no round run and nothing kept or changed; a round stopped for '
+              'the day tells the account\'s limit apart from the service\'s ${overHttp ? 'over HTTP' : 'from the fake'}',
+              () async {
+                if (overHttp) a.syncHttp = SyncHttpFace(server);
+                Future<SyncServer> to() async => overHttp ? a.overHttp() : server;
+                Future<RecordSync> sync() async => (await a.open()).read(recordSyncProvider.notifier);
+                seedUmas(b, ['R2', 'R3']);
+                await b.round(server);
+                seedUmas(a, ['R2']);
+                a.seedRecord('R1', binding: own('R1'), bodyWrittenAt: 1767225600150, fans: 1500);
+                a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * (syncMemoLimit + 1)});
+                final (generation, device) = (server.generation, _describe(await listOf(a)));
+
+                expect(
+                  await (await sync()).countsBeforeOn(await to()),
+                  (toSend: 1, toReceive: 1),
+                  reason: 'R1, which the device alone holds, and R3, which the server alone lists; R2 is on both',
+                );
+                expect(await (await sync()).longMemos(), 1);
+                expect(server.generation, generation, reason: 'no round ran');
+                expect(File(syncBaseFile(a.info).path).existsSync(), isFalse, reason: 'no list was kept');
+                expect(_describe(await listOf(a)), device, reason: 'nothing of the device changed');
+
+                a.close();
+                a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'short'});
+                await a.setSyncOn(true);
+                expect((await a.syncNow(await to())).end, SyncRoundEnd.done);
+                await deleteRecords(a, {'R2'});
+                b.close();
+                seedUmas(b, ['R4']);
+                await b.round(server);
+                expect(onServer().rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4'});
+                expect(
+                  await (await sync()).countsBeforeOn(await to()),
+                  (toSend: 0, toReceive: 1),
+                  reason: 'R4; R2, which the device removed since its base, is not taken in again',
+                );
+
+                for (final scope in ['account', 'service']) {
+                  a.close();
+                  a.seedRecord('S-$scope', binding: own('S-$scope'), bodyWrittenAt: 1767225600200, fans: 2000);
+                  server.limitTheDay(0, scope: scope);
+                  final day = await a.syncNow(await to());
+                  expect(
+                    (day.waitingForTheDay > 0, day.serverStop),
+                    (true, scope == 'account' ? SyncServerStop.accountDay : SyncServerStop.serviceDay),
+                  );
+                }
+              },
+            );
+          }
+        }
+
         // D-ICON-3b, L374, [R4-8] 6: the name a body gives its icon is where a device that holds no icon takes one
         // from; a device that keeps one of its own with the factor image keeps it. Which icon goes and comes is the
         // shared round's decision; both backends take it through the C3 cases above.
@@ -3881,8 +4267,9 @@ void main() {
           });
 
           test(
-            'S-09: a replacement the server refused while the form is none is put again in the next round',
+            'S-09: a replacement the server refused while the form is none is put again once the user syncs now',
             () async {
+              await a.setSyncOn(true);
               server.form = 'png';
               seedShot(a, 'R1', 1);
               await a.round(server);
@@ -3891,7 +4278,7 @@ void main() {
               server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit');
               expect((await a.round(server)).imagesUndone?.records, 1);
               server.beforeImagePut = null;
-              expect((await a.round(server)).end, SyncRoundEnd.done);
+              expect((await a.syncNow(server)).end, SyncRoundEnd.done);
               expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1), ...jpegNames(1)});
             },
           );
@@ -3998,7 +4385,8 @@ void main() {
           );
 
           test('[R7-1] (vi): a round whose image puts the server has no room for ends telling the images it left '
-              'undone, and the next round, with room, puts them', () async {
+              'undone, the device stops for room, and the user syncing now with room puts them', () async {
+            await a.setSyncOn(true);
             server.form = 'png';
             seedShot(a, 'R1', 1);
             server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit', 'bytes');
@@ -4008,10 +4396,39 @@ void main() {
             expect(outcome.imagesUndone?.records, 1);
             expect(outcome.imagesUndone?.stops, {SyncImagesStop.room});
             server.beforeImagePut = null;
-            final next = await a.round(server);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            final stopped = await a.round(server);
+            expect(asked, isEmpty, reason: 'a round of a device stopped for room asks to put no image ([N1-15])');
+            expect(stopped.imagesUndone?.stops, {SyncImagesStop.room});
+            final next = await a.syncNow(server);
             expect(next.imagesUndone, isNull);
             expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
           });
+
+          test(
+            '[N1-15], [R7-1]: an image put the server refused for the day is put by a round of the next day, nothing '
+            'on the device changed and the list where it was',
+            () async {
+              server.form = 'png';
+              clockAt(hour(9));
+              server.limitTheDay(1);
+              seedShot(a, 'R1', 1);
+              final refused = await a.round(server);
+              expect(refused.end, SyncRoundEnd.done, reason: 'the body went, and the list');
+              expect(refused.imagesUndone?.records, 1);
+              expect(refused.imagesUndone?.stops, {SyncImagesStop.dailyLimit});
+              expect(server.images, isEmpty);
+              final generation = server.generation;
+              expect((await a.round(server)).imagesUndone?.records, 1, reason: 'the same day refuses them still');
+
+              clockAt(hour(24 + 9));
+              final next = await a.round(server);
+              expect(next.imagesUndone, isNull);
+              expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+              expect(server.generation, generation, reason: 'no round replaced the root');
+            },
+          );
 
           test('[R7-1] (vi): a round whose image put a dropped connection cut short ends telling the images it left '
               'undone', () async {
@@ -4779,6 +5196,259 @@ void main() {
       expect(generations, 3, reason: 'no round was left queued behind the one that answered');
     });
 
+    test('T2b-8 (C1 iii): a request over HTTP that never answers fails at its deadline as one whose answer did not '
+        'arrive, and the round asked for behind its round runs', () async {
+      seedUmas(a, ['R1']);
+      final face = SyncHttpFace(server);
+      final entered = Completer<void>();
+      face.beforeAnswer = (request) async {
+        if (request.uri.path != '/api/sync/generation' || entered.isCompleted) return;
+        entered.complete();
+        await Completer<void>().future;
+      };
+      // The deadline is a quarter of an hour in the app ([syncRequestTimeoutProvider]); what is asserted here is that
+      // a request held past whatever deadline the server is given fails, not how long the deadline is.
+      a
+        ..syncHttp = face
+        ..syncRequestTimeout = const Duration(milliseconds: 250);
+      await a.setSyncOn(true);
+      final http = await a.overHttp();
+      final first = a.roundAsAsked(http);
+      await entered.future;
+      final behind = a.roundAsAsked(http);
+      expect((await first)?.end, SyncRoundEnd.failed, reason: 'the generation never came');
+      expect((await behind)?.end, SyncRoundEnd.done);
+      expect(onServer().rows.keys.toSet(), {'R1'});
+    });
+
+    // T3a1: what the screen reads of the rounds — whether one runs, which keeps the user from syncing now meanwhile,
+    // and when the device last synced (N8).
+    test('T3a1 (C1 iii, iv): the device shows a round running from when it is asked for until the one asked for '
+        'behind it ends, and its last sync moves with a round that synced alone', () async {
+      final time = HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9);
+      a.syncTime = time.time;
+      seedUmas(a, ['R1']);
+      await a.setSyncOn(true);
+      final app = await a.open();
+      RecordSyncState state() => app.read(recordSyncProvider);
+      expect((state().running, state().lastSynced), (false, null), reason: 'no round has run');
+
+      final entered = Completer<void>();
+      final answer = Completer<void>();
+      final held = _CountedServer(
+        server,
+        beforeGeneration: () async {
+          if (entered.isCompleted) return;
+          entered.complete();
+          await answer.future;
+        },
+      );
+      final first = a.roundAsAsked(held);
+      await entered.future;
+      expect(state().running, isTrue, reason: 'a round runs');
+      final behind = a.roundAsAsked(held);
+      time.now = DateTime.utc(2030, 1, 1, 10);
+      answer.complete();
+      expect((await first)?.end, SyncRoundEnd.done);
+      expect(state().running, isTrue, reason: 'the round asked for behind it is still to run');
+      expect((await behind)?.end, SyncRoundEnd.done);
+      expect((state().running, state().lastSynced), (false, DateTime.utc(2030, 1, 1, 10)));
+
+      server.paused = true;
+      time.now = DateTime.utc(2030, 1, 1, 11);
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.failed);
+      expect(
+        (state().running, state().lastSynced),
+        (false, DateTime.utc(2030, 1, 1, 10)),
+        reason: 'the round did not sync',
+      );
+      server.paused = false;
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+      expect(state().lastSynced, DateTime.utc(2030, 1, 1, 11));
+    });
+
+    // T2b-7a: the moments a round runs at (U5), each from the entry the app has for it: the app's start reads the
+    // moments as the app does ([SyncTestDevice.startTriggers]), the user turns sync on, rates and syncs now, and the
+    // platform says the app came back to the foreground. Each round goes over HTTP ([SyncHttpFace]), so a round asked
+    // for with no session or deleting has no server. The clock and the timer are the test's ([HeldSyncTime]): what is
+    // asserted is which moment asks, and that the quiet after an edit is five seconds — not how long a test waits.
+    group('T2b-7a: the moments a round runs at', () {
+      late SyncHttpFace face;
+      late HeldSyncTime time;
+      // The rounds the server was asked for: each asks the generation first.
+      late int asked;
+
+      setUp(() {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        asked = 0;
+        face = SyncHttpFace(server)
+          ..beforeAnswer = (request) async {
+            if (request.uri.path == '/api/sync/generation') asked++;
+          };
+        time = HeldSyncTime();
+        a
+          ..syncHttp = face
+          ..syncTime = time.time;
+      });
+
+      /// What the next round [app] runs tells, once it has ended.
+      Future<SyncRoundOutcome> told(ProviderContainer app) {
+        final ended = Completer<SyncRoundOutcome>();
+        final listening = app.listen(recordSyncProvider.select((s) => s.told), (_, told) {
+          if (told != null && !ended.isCompleted) ended.complete(told);
+        });
+        return ended.future.whenComplete(listening.close);
+      }
+
+      /// The platform says the app went to the background and came back to the foreground.
+      void cameToTheForeground() => TestWidgetsFlutterBinding.instance
+        ..handleAppLifecycleStateChanged(AppLifecycleState.inactive)
+        ..handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+      test('T2b-7a (C1 i): the app\'s start runs a round, and what it takes in is no edit', () async {
+        seedUmas(a, ['R1']);
+        seedUmas(b, ['R2']);
+        b.seedColumn('rating', 'r1', title: 'Score', data: {'R2': 5.0}, writtenAt: {'R2': 1767225600400});
+        await b.round(server);
+        await a.setSyncOn(true);
+        final ran = told(await a.open());
+        await a.startTriggers();
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(asked, 1);
+        expect(onServer().rows.keys.toSet(), {'R1', 'R2'});
+        expect((await listOf(a)).cells[('rating/r1', 'R2')]?.value, '5.0');
+        expect(time.timers, isEmpty, reason: 'the record and the rating the round put in place ask for no round');
+      });
+
+      test('T2b-7a (C1 i): turning sync on runs a round; the app\'s start with sync off ran none', () async {
+        seedUmas(a, ['R1']);
+        await a.startTriggers();
+        final ran = told(await a.open());
+        await a.setSyncOn(true);
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(asked, 1);
+        expect(onServer().rows.keys.toSet(), {'R1'});
+      });
+
+      test('T2b-7a (C1 i): the user syncing now runs a round', () async {
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        expect((await (await a.open()).read(recordSyncProvider.notifier).syncNow())?.end, SyncRoundEnd.done);
+        expect(asked, 1);
+        expect(onServer().rows.keys.toSet(), {'R1'});
+      });
+
+      test('T2b-7a (C1 i): an edit runs a round five seconds after it', () async {
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        var ran = told(app);
+        await a.startTriggers();
+        await ran;
+        ran = told(app);
+        await rate(a, 'R1', 3);
+        expect(time.timers.single.duration, const Duration(seconds: 5));
+        expect(asked, 1, reason: 'no round before the quiet ends');
+        time.timers.single.fire();
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(asked, 2);
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
+      });
+
+      test('T2b-7a (C1 iii): edits closer together than five seconds are sent by one round', () async {
+        seedUmas(a, ['R1', 'R2']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        var ran = told(app);
+        await a.startTriggers();
+        await ran;
+        ran = told(app);
+        await rate(a, 'R1', 3);
+        await rate(a, 'R2', 4);
+        expect([for (final timer in time.timers) timer.isActive], [false, true], reason: 'the second edit restarts it');
+        time.timers.last.fire();
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(asked, 2, reason: 'the start, and one round for both edits');
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
+        expect(onServer().cells[('rating/r1', 'R2')]?.value, '4.0');
+      });
+
+      test('T2b-7a (C1 i): coming back to the foreground runs a round ten minutes or more after the last was asked '
+          'for, and none sooner', () async {
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        final sync = app.read(recordSyncProvider.notifier);
+        var ran = told(app);
+        final start = time.now;
+        await a.startTriggers();
+        await ran;
+        time.now = start.add(const Duration(minutes: 9, seconds: 59));
+        cameToTheForeground();
+        // Rounds run one after another: one the foreground had started would run before this one, and be asked.
+        expect((await sync.syncNow())?.end, SyncRoundEnd.done);
+        expect(asked, 2, reason: 'the start and syncing now; not the foreground before ten minutes');
+        time.now = time.now.add(const Duration(minutes: 10));
+        ran = told(app);
+        cameToTheForeground();
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(asked, 3);
+      });
+
+      test('T2b-7a (C1 iv): after a round whose connection dropped once the server had replaced the list, the round '
+          'the next moment runs ends as an uncut one: one list on the server and both devices', () async {
+        seedUmas(a, ['R1', 'R2']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        var ran = told(app);
+        server.loseAnswer = true;
+        await a.startTriggers();
+        expect((await ran).end, SyncRoundEnd.answerLost);
+        ran = told(app);
+        await rate(a, 'R1', 3);
+        time.timers.single.fire();
+        expect((await ran).end, SyncRoundEnd.done);
+        expect(File(syncSentFile(a.info).path).existsSync(), isFalse, reason: 'the base is the server\'s list again');
+        await b.round(server);
+        final lists = [onServer(), await listOf(a), await listOf(b)].map(_describe).toList();
+        expect(lists[1], lists[0]);
+        expect(lists[2], lists[0]);
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
+      });
+
+      test(
+        'T2b-7a (C1 ii): logged out, sync on for the account it was turned on under, no moment runs a round',
+        () async {
+          a.auth = FakeShareAuth();
+          seedUmas(a, ['R1']);
+          await a.login(syncTestAccount);
+          await a.setSyncOn(true);
+          await a.logout();
+          final sync = (await a.open()).read(recordSyncProvider.notifier);
+          await a.startTriggers();
+          await rate(a, 'R1', 3);
+          time.timers.single.fire();
+          time.now = time.now.add(syncForegroundInterval);
+          cameToTheForeground();
+          // Asked last, and run after any round asked before it.
+          expect(await sync.syncNow(), isNull);
+          expect(asked, 0);
+        },
+      );
+
+      test('T2b-7a (C1 ii): with sync off, no moment runs a round', () async {
+        seedUmas(a, ['R1']);
+        final sync = (await a.open()).read(recordSyncProvider.notifier);
+        await a.startTriggers();
+        await rate(a, 'R1', 3);
+        time.timers.single.fire();
+        time.now = time.now.add(syncForegroundInterval);
+        cameToTheForeground();
+        expect(await sync.syncNow(), isNull);
+        expect(asked, 0);
+      });
+    });
+
     test('[R6-4]: with sync off, the device keeps the lists its rounds keep and writes the times of what its user '
         'does; turned on again, that reaches the server and the other device as it would have with sync on', () async {
       seedUmas(a, ['R1', 'R2']);
@@ -4809,6 +5479,297 @@ void main() {
         final memo = list.cells[('memo/m1', 'R1')];
         expect((memo?.value, memo?.time), (jsonEncode('off'), hour(9)));
       }
+    });
+
+    // R-LIB8: a merge left unfinished on a record whose row is as the base lists it ([N15-02]); a close that opens
+    // while the first round prepares its place (G311, A106); a waiting record whose body the server holds already
+    // (G371).
+    test('an unfinished merge into a record whose row is as the base lists it holds back the memo it moves', () async {
+      a.seedRecord('R1', binding: _binding, bodyWrittenAt: 1767225600100, absorbed: {'R2'});
+      a.seedRecord('R2', binding: _binding, bodyWrittenAt: 1767225600100, capturedDate: '2026-01-02T00:00:00');
+      a.seedColumn(
+        'memo',
+        'm1',
+        title: 'Note',
+        data: {'R1': 'm1', 'R2': 'm2'},
+        writtenAt: {'R1': 1767225600200, 'R2': 1767225600300},
+      );
+      await a.round(server);
+      await b.round(server);
+      final before = (await a.read()).list.rows['R1']!.record;
+      final c = await a.open();
+      final candidate = candidatesIn(c).singleWhere((x) => x.olderId == 'R1' && x.newerId == 'R2');
+      final originalBackend = fsBackend;
+      final stop = SyncStopFsBackend(originalBackend, markOf: SyncStopFsBackend.recordsOf({'R2'}));
+      fsBackend = stop;
+      final merging = c
+          .read(enhancementMergeProvider)
+          .merge(
+            candidate,
+            keptContentId: 'R1',
+            choices: const EnhancementMergeChoices(memo: {'m1': 'm2'}),
+            effects: mergeEffects(c),
+          );
+      await stop.held;
+      stop.stop();
+      final result = await merging;
+      fsBackend = originalBackend;
+      expect(result.outcome, EnhancementMergeOutcome.failedDelete);
+      final held = syncHeldRecordsOf(c.read(containerRefProvider))!.records['R1']!;
+      expect(syncRecordsAgree(held, before), isTrue, reason: 'the merge leaves the row of R1 as the base lists it');
+      expect((await a.read()).mergesInProgress.keys, contains('R1'));
+
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      await b.round(server);
+      for (final list in [onServer(), await listOf(b)]) {
+        expect(list.cells[('memo/m1', 'R2')]?.value, jsonEncode('m2'), reason: 'the memo of R2 waits for the merge');
+        expect(list.cells[('memo/m1', 'R1')]?.value, jsonEncode('m1'));
+      }
+    });
+
+    test('a close that opens while the first round prepares its place puts nothing in place', () async {
+      seedUmas(b, ['R2']);
+      await b.round(server);
+      final c = await a.open();
+      final ref = c.read(containerRefProvider);
+      final run = runSyncRound(ref, server, account: syncTestAccount, effects: recordImportEffects(ref));
+      final tasks = Completer<void>();
+      final requests = c.read(appExitRequestsProvider.notifier);
+      final exit = requests.request(onHeld: () => c.read(appExitRequestsProvider)!.hold(tasks.future));
+      final outcome = await run;
+      tasks.complete();
+      await exit;
+      expect(outcome.end, SyncRoundEnd.closing);
+      expect((await listOf(a)).rows, isEmpty);
+    });
+
+    test('a waiting record whose body the server holds unlisted is not listed with its waiting memo', () async {
+      seedUmas(a, ['R1']);
+      await a.round(server);
+      a.close();
+      a.seedRecord('R2', binding: _binding, bodyWrittenAt: 1767225600200, fans: 2000);
+      a.seedColumn('memo', 'm1', title: 'Note', data: {'R2': 'waits'}, writtenAt: {'R2': 1767225600300});
+      server.noRoom = 'account_limit';
+      expect((await a.round(server)).waitingForRoom, 1);
+      server.noRoom = null;
+      final body = a.bodyOf('R2');
+      await server.putBodies([(name: syncObjectName(utf8.encode(body)), body: body)]);
+      final outcome = await a.round(server);
+      expect(outcome.end, SyncRoundEnd.done);
+      expect(outcome.waitingForRoom, 1);
+      expect(onServer().rows.keys, isNot(contains('R2')));
+      expect(onServer().cells[('memo/m1', 'R2')], isNull);
+    });
+
+    // T2b-7b: what a round of the device keeps is of the account it ran as, and the switch of sync is turned on for one
+    // (S-08, [N1-22]); a write the storage quota refuses (C2); and the close of the desktop app (G311, A106).
+    group('the account, the storage quota and the close of the app', () {
+      late FakeSyncServer other;
+
+      setUp(() {
+        other = FakeSyncServer();
+        a.auth = FakeShareAuth();
+      });
+
+      test('[N1-22] (D-30): logged out and in to another account, the device meets it as an account it holds no base '
+          'of — the base of the account before is not read, and its mark of being stopped for room is down', () async {
+        await a.login(syncTestAccount);
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+        a.close();
+        a.seedRecord('R2', binding: own('R2'), bodyWrittenAt: 1767225600200, fans: 2000);
+        server.noRoom = 'account_limit';
+        expect((await a.roundAsAsked(server))?.waitingForRoom, 1, reason: 'R2 waits for room, and the mark is up');
+
+        await a.logout();
+        await a.login('account-2');
+        await a.setSyncOn(true);
+        final met = await a.roundAsAsked(other);
+        expect(
+          (met?.end, met?.added, met?.waitingForRoom),
+          (SyncRoundEnd.done, 2, 0),
+          reason: 'R1 and R2, which only the device held, are kept as a round with no base keeps them, and R2 is put',
+        );
+        expect(syncListOfParts(other.currentParts()).rows.keys.toSet(), {'R1', 'R2'});
+        expect((await listOf(a)).rows.keys.toSet(), {'R1', 'R2'});
+      });
+
+      test(
+        'S-08 (G323): the switch of sync is on for the account it was turned on under: logged in to another, the '
+        'device runs no round until the user turns sync on for it; logged in to that account again, it runs',
+        () async {
+          await a.login(syncTestAccount);
+          seedUmas(a, ['R1']);
+          await a.setSyncOn(true);
+          expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+
+          await a.logout();
+          await a.login('account-2');
+          final counted = _CountedServer(other);
+          expect(
+            await a.roundAsAsked(counted),
+            isNull,
+            reason: 'no screen told the user of a first round of account-2',
+          );
+          expect(counted.calls, 0);
+
+          await a.logout();
+          await a.login(syncTestAccount);
+          expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done, reason: 'sync was turned on for this account');
+        },
+      );
+
+      // T3a2 (L-4, V4): the counts a round tells ([R3-5]) stay where the device shows them (S-08) through the rounds that
+      // tell none, for the account they are of.
+      test('T3a2 (C1 i): a round that tells no counts leaves the counts the one before told, which are shown for their '
+          'account alone and go once sync is turned on for another', () async {
+        seedUmas(b, ['R2']);
+        await b.round(server);
+        await a.login(syncTestAccount);
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        RecordSyncState state() => app.read(recordSyncProvider);
+        const counts = SyncToldCounts(account: syncTestAccount, restored: 0, splitOff: 0, added: 2);
+
+        expect((await a.roundAsAsked(server))?.added, 2, reason: 'R1 and R2, which one side alone held');
+        final none = await a.roundAsAsked(server);
+        expect((none?.end, none?.added), (SyncRoundEnd.done, 0));
+        expect(state().countsFor(syncTestAccount), counts, reason: 'a round that told none');
+
+        await a.logout();
+        await a.login('account-2');
+        expect(state().countsFor('account-2'), isNull, reason: 'sync is not on for account-2');
+        await a.logout();
+        await a.login(syncTestAccount);
+        expect(state().countsFor(syncTestAccount), counts, reason: 'the switch is on for this account still (V1)');
+
+        await a.logout();
+        await a.login('account-2');
+        await a.setSyncOn(true);
+        expect(state().counts, isNull, reason: 'sync is on for another account');
+      });
+
+      // T-S401: the owner of the session is [RecordShareSession]; a sync request's 401 and 409 account_deleting reach
+      // it as a sharing request's do.
+      ResponseBody refused(int status, String error) => ResponseBody.fromString(
+        jsonEncode({'error': error}),
+        status,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+
+      test('T-S401 (i): a sync request answered 401 drops the session, and the device holds no sync server until '
+          'the user logs in again', () async {
+        a.syncHttp = _Canned(() => refused(401, 'session_required'));
+        await a.login(syncTestAccount);
+        await a.round(await a.overHttp());
+        final app = await a.open();
+        expect(app.read(recordShareSessionProvider), isNull);
+        expect(app.read(syncServerProvider), isNull);
+        expect(app.read(recordShareSessionDroppedProvider), isTrue, reason: 'T3a2 (C1 ii): the server dropped it');
+      });
+
+      test('T-S401 (ii): a sync request answered 409 account_deleting marks the session as deleting', () async {
+        a.syncHttp = _Canned(() => refused(409, 'account_deleting'));
+        await a.login(syncTestAccount);
+        await a.round(await a.overHttp());
+        final app = await a.open();
+        expect(app.read(recordShareSessionProvider)?.deleting, isTrue);
+        expect(app.read(syncServerProvider), isNull, reason: 'a deleting session syncs nothing');
+      });
+
+      test('T-S401 (iii): a 401 under the token of a session before logging in again leaves the new session', () async {
+        final gate = Completer<void>();
+        a.syncHttp = _Canned(() => refused(401, 'session_required'), gate: gate.future);
+        await a.login(syncTestAccount);
+        final pending = a.round(await a.overHttp());
+        await a.logout();
+        await a.login('account-2');
+        gate.complete();
+        await pending;
+        expect((await a.open()).read(recordShareSessionProvider)?.token, 'token-account-2');
+      });
+
+      test('C2 (web): a write of the result that the storage quota refuses ends the round with the base where it was, '
+          'and the next round puts the result in place', () async {
+        final original = fsBackend;
+        final web = WebLikeFsBackend(original);
+        fsBackend = web;
+        addTearDown(() => fsBackend = original);
+        seedUmas(a, ['R1']);
+        await a.round(server);
+        seedUmas(b, ['R2']);
+        await b.round(server);
+        final baseFile = File(syncBaseFile(a.info).path);
+        final before = baseFile.readAsBytesSync();
+
+        final ofR2 = SyncStopFsBackend.recordsOf({'R2'});
+        web.refuseWrite = (path) => ofR2(path) == null ? null : const QuotaExceededError();
+        final refused = await a.round(server);
+        expect(refused.end, SyncRoundEnd.failed);
+        expect(baseFile.readAsBytesSync(), before, reason: 'the base does not move past what was not put in place');
+        expect((await listOf(a)).rows.keys.toSet(), {'R1'});
+
+        web.refuseWrite = null;
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        expect((await listOf(a)).rows.keys.toSet(), {'R1', 'R2'});
+        expect(baseFile.readAsBytesSync(), isNot(before));
+      });
+
+      test('G311 (A106): the close of the desktop app waits until the round running has put its result in place and '
+          'kept its base, and not for the list it sends after; once the app closes, no round puts a result in '
+          'place', () async {
+        seedUmas(a, ['R1']);
+        a.seedColumn('memo', 'm1', title: 'Note');
+        await a.round(server);
+        seedUmas(b, ['R2']);
+        await b.round(server);
+        await writeMemo(a, 'R1', 'mine');
+        final baseFile = File(syncBaseFile(a.info).path);
+        final before = baseFile.readAsBytesSync();
+        final generation = server.generation;
+
+        // A's round is held at the first write of R2, which it puts in place, and then at the replacement it makes.
+        final replacing = Completer<void>();
+        final replace = Completer<void>();
+        addTearDown(() => replace.isCompleted ? null : replace.complete());
+        server.beforeReplace = () async {
+          server.beforeReplace = null;
+          replacing.complete();
+          await replace.future;
+        };
+        final original = fsBackend;
+        final hold = SyncStopFsBackend(original, markOf: SyncStopFsBackend.recordsOf({'R2'}));
+        fsBackend = hold;
+        addTearDown(() => fsBackend = original);
+        final round = a.round(server);
+        await hold.held;
+        final exit = (await a.open()).read(appExitRequestsProvider.notifier).request();
+        final atExit = exit.then((_) => (base: baseFile.readAsBytesSync(), generation: server.generation));
+        hold.go();
+        final first = await Future.any([
+          atExit.then((_) => 'the close'),
+          replacing.future.then((_) => 'the replacement'),
+        ]);
+        expect(first, 'the close', reason: 'the close does not wait for the list the round sends after its base');
+        final (:base, generation: replaced) = await atExit;
+        expect(base, isNot(before), reason: 'the close waited until the round kept its base');
+        expect(replaced, generation);
+        replace.complete();
+        expect((await round).end, SyncRoundEnd.done);
+        expect((await listOf(a)).rows.keys.toSet(), {'R1', 'R2'});
+
+        await deleteRecords(b, {'R2'});
+        await b.round(server);
+        final kept = baseFile.readAsBytesSync();
+        final closing = await a.round(server);
+        expect(closing.end, SyncRoundEnd.closing);
+        expect((await listOf(a)).rows.keys.toSet(), {'R1', 'R2'}, reason: 'the delete of B is not put in place');
+        expect(baseFile.readAsBytesSync(), kept);
+      });
     });
 
     test('S-13 (G249): after a round that puts a record in place, the resolution runs once and places the parent of a '
@@ -5173,6 +6134,203 @@ void main() {
       });
     });
   });
+
+  // T2b-8 (C1 ii): what each answer of a sync endpoint other than a success means as the app's server over HTTP
+  // ([HttpSyncServer]) reads it — the refusals as the fake throws them (the seconds of a day's limit, the generation of
+  // a stale replacement, the slots of a replacement that changes too many), and an answer that does not tell whether
+  // the server acted as one whose answer did not arrive, as the fake's dropped connection is.
+  group('the server over HTTP', () {
+    HttpSyncServer answering(ResponseBody Function() answer) => HttpSyncServer(
+      Dio()..httpClientAdapter = _Canned(answer),
+      origin: 'https://umacapture.com',
+      token: 'token',
+      timeout: const Duration(minutes: 15),
+      onAnswer: (_, _, _) async {},
+    );
+    ResponseBody json(int status, Map<String, Object?> body, [Map<String, String> headers = const {}]) =>
+        ResponseBody.fromString(
+          jsonEncode(body),
+          status,
+          headers: {
+            Headers.contentTypeHeader: ['application/json; charset=utf-8'],
+            for (final MapEntry(:key, :value) in headers.entries) key: [value],
+          },
+        );
+    TypeMatcher<SyncRefusal> refusal(int status, String error, [Object? detail]) => isA<SyncRefusal>()
+        .having((r) => r.status, 'status', status)
+        .having((r) => r.error, 'error', error)
+        .having((r) => r.detail, 'detail', detail);
+    final name = _hex(1);
+    final lost = isA<SyncAnswerLost>();
+
+    test('each refusal is the refusal the fake throws, and an answer that does not tell whether the server acted is '
+        'one whose answer did not arrive', () async {
+      final body = [(name: name, body: '{}')];
+      final png = Uint8List.fromList([1, 2, 3]);
+      final cases = <(String, Future<Object?> Function(HttpSyncServer), ResponseBody Function(), Matcher)>[
+        (
+          'a body put refused for the account\'s bytes',
+          (s) => s.putBodies(body),
+          () => json(507, {'error': 'account_limit', 'limit': 'bytes'}),
+          refusal(507, 'account_limit', 'bytes'),
+        ),
+        (
+          'a body put refused for the database\'s room',
+          (s) => s.putBodies(body),
+          () => json(507, {'error': 'database_full'}),
+          refusal(507, 'database_full'),
+        ),
+        (
+          'a body put refused for the day',
+          (s) => s.putBodies(body),
+          () => json(429, {'error': 'daily_limit', 'scope': 'account'}, {'retry-after': '3600'}),
+          refusal(429, 'daily_limit', 3600),
+        ),
+        (
+          'a replacement refused as stale',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(409, {'error': 'stale_generation', 'generation': 7}),
+          refusal(409, 'stale_generation', 7).having((r) => r.isStaleGeneration, 'stale', isTrue),
+        ),
+        (
+          'a replacement refused for its slots',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(400, {'error': 'too_many_parts', 'limit': 4}),
+          isA<SyncRefusal>().having((r) => r.partsLimit, 'slots', 4),
+        ),
+        (
+          'a replacement refused for the requests to the bucket',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(409, {'error': 'too_many_objects'}),
+          isA<SyncRefusal>().having((r) => r.isTooManyObjects, 'too many objects', isTrue),
+        ),
+        (
+          'a replacement naming parts the account does not hold',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(409, {
+            'error': 'missing_objects',
+            'names': [name],
+          }),
+          refusal(409, 'missing_objects', [name]),
+        ),
+        (
+          'a replacement stopped after its commit (503)',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(503, {'error': 'temporarily_unavailable'}),
+          lost,
+        ),
+        (
+          'a replacement stopped after its commit (502)',
+          (s) => s.replaceRoot(3, name, '{}'),
+          () => json(502, {'error': 'storage_unavailable'}),
+          lost,
+        ),
+        (
+          'bodies the server does not hold',
+          (s) => s.bodies([name]),
+          () => json(404, {
+            'error': 'not_found',
+            'names': [name],
+          }),
+          refusal(404, 'not_found', [name]),
+        ),
+        (
+          'a root the server does not hold',
+          (s) => s.root(name),
+          () => json(404, {'error': 'not_found'}),
+          refusal(404, 'not_found'),
+        ),
+        (
+          'a malformed part',
+          (s) => s.putPart(name, '{}'),
+          () => json(400, {'error': 'invalid_payload', 'field': 'part.records[0].id'}),
+          refusal(400, 'invalid_payload', 'part.records[0].id'),
+        ),
+        (
+          'no session',
+          (s) => s.readGeneration(),
+          () => json(401, {'error': 'session_required'}),
+          refusal(401, 'session_required'),
+        ),
+        (
+          'an account being deleted',
+          (s) => s.readGeneration(),
+          () => json(409, {'error': 'account_deleting'}),
+          refusal(409, 'account_deleting'),
+        ),
+        (
+          'sync switched off',
+          (s) => s.imageForm(),
+          () => json(503, {'error': 'sync_paused'}),
+          refusal(503, 'sync_paused'),
+        ),
+        (
+          'an image the form refuses',
+          (s) => s.putImage(name, png, jpeg: false),
+          () => json(409, {'error': 'images_not_synced'}),
+          refusal(409, 'images_not_synced'),
+        ),
+        (
+          'an image the bucket refuses',
+          (s) => s.putImage(name, png, jpeg: false),
+          () => json(502, {'error': 'storage_refused'}),
+          refusal(502, 'storage_refused'),
+        ),
+        (
+          'an image refused for the hidden bytes',
+          (s) => s.putImage(name, png, jpeg: true),
+          () => json(507, {'error': 'hidden_limit'}, {'retry-after': '60'}),
+          refusal(507, 'hidden_limit', 60),
+        ),
+        (
+          'a proxy\'s answer',
+          (s) => s.readGeneration(),
+          () => ResponseBody.fromString('<html>bad gateway</html>', 502),
+          lost,
+        ),
+        (
+          'a success the app cannot read',
+          (s) => s.held([name]),
+          () => ResponseBody.fromString('{"held": 1}', 200),
+          lost,
+        ),
+        (
+          'a connection that drops',
+          (s) => s.readGeneration(),
+          () => throw const SocketException('dropped'),
+          isA<DioException>(),
+        ),
+      ];
+      for (final (what, call, answer, matcher) in cases) {
+        await expectLater(call(answering(answer)), throwsA(matcher), reason: what);
+      }
+      expect(await answering(() => json(404, {'error': 'not_found'})).image(name), isNull, reason: 'an image not held');
+    });
+  });
+}
+
+/// An HTTP adapter answering every request with what [answer] makes, or failing as it throws.
+class _Canned implements HttpClientAdapter {
+  _Canned(this.answer, {this.gate});
+
+  final ResponseBody Function() answer;
+
+  /// Awaited before each answer: a gate the test holds.
+  final Future<void>? gate;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    await requestStream?.drain<void>();
+    await gate;
+    return answer();
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 /// One side of a second pair the merge offers, shaped as [preRecord] and [postRecord] are, on a card no other record

@@ -1492,18 +1492,98 @@ final ciUniverses = <Universe<PropertyInput>>[
     b: _fewOnR3WithoutRoom,
     properties: [whatWaitedGoesOnceThereIsRoom],
   ),
+  // 24 inputs. The merges in progress ([_mergeInProgressUniverse]): a merge of A's stopped half way, beside a delete,
+  // a zip of a record the start merged away, and captures of one uma on both devices; A's rounds and B's, then A
+  // finishes.
+  _mergeInProgressUniverse('M1'),
 ];
+
+/// A universe of the merges in progress ([R6-3], [N15-02], [R3-6], G310): from [mergeStart], A does one of
+/// [_onAMergeInProgress] and B one of [_onBMergeInProgress], either first; the rounds of each of [rounds] — two passes of
+/// A's round and B's where it is not given —; then A finishes the merges it left unfinished ([FinishMerges]), and the
+/// world is driven to rest. Every round is the app's, which reads a record a merge of the device's own has not finished
+/// into as a merge in progress, with the ids it retires.
+///
+/// The four scenes, each with an input of it: a merge started and not finished while rounds run — `A: merge R1+R2 keep
+/// R2, stopped before it retires`; an import that stopped part way — `A: take in z3`, the first of two zips taken in,
+/// the second never reached (an import writes each record whole, so the record it was writing when it stopped is the
+/// write's recovery's, which the model has no path for); a record of one uma that reaches the device under another id
+/// — `A: capture R6@6 of uma X` with `B: capture R5@5 of uma X`; and G310 — `A: merge R1+R2 keep R2, stopped before it
+/// retires; A: delete R3`.
+///
+/// Outside every universe of it: a merge that stops before it settles the ratings and memos, or before it rewrites the
+/// other records' parents; two merges unfinished on one device, or one on each; the other device changing a record a
+/// merge left half way, or one the device changes; a merge finished before the rounds that sent part of it — the app
+/// sends nothing of it until it is finished —; a record the device writes to while its merge stops (a memo on the
+/// retired record); the retired record deleted or merged by the user rather than finished; a capture or a zip the
+/// entries refuse — of an uma the device lists under another id ([N10-02] (b)): the model's capture and import refuse
+/// nothing, so no such operation is drawn —; the quarantine shelf, the room, the day's limits, images and their form;
+/// and what [RunUniverse] leaves out besides.
+RunUniverse _mergeInProgressUniverse(String name, {List<List<Op>> rounds = const [_twoPasses]}) => RunUniverse(
+  name,
+  start: mergeStart,
+  ids: _attachedIds,
+  a: _onAMergeInProgress,
+  b: _onBMergeInProgress,
+  rounds: [
+    for (final passes in rounds) [...passes, const FinishMerges('A')],
+  ],
+  properties: _mergeInProgress,
+);
+
+/// The properties of the merges in progress and of the same uma under two ids.
+final _mergeInProgress = [onlyAMergeInProgressWaits, aFinishedMergeGoes, syncTakesInTheSameUmaUnderAnotherId];
+
+/// Two passes of A's round and B's.
+const _twoPasses = [SyncRound('A'), SyncRound('B'), SyncRound('A'), SyncRound('B')];
+
+/// The start of the merges in progress: A captures R1–R4, makes a zip of R4 (z3), merges R4 into R3 keeping R3's own
+/// content, writes a memo on R1, R2 and R3, and A, B and A run a round — both devices and the server hold R1, R2 and
+/// R3, which absorbed R4, and their base.
+final mergeStart = <Op>[
+  for (final (i, id) in ['R1', 'R2', 'R3', 'R4'].indexed) Capture('A', id, i + 1),
+  const ExportZip('A', 'R4', 'z3'),
+  const Merge('A', 'R3', 'R4', contentFrom: 'R3'),
+  for (final id in ['R1', 'R2', 'R3']) EditMemo('A', id, 'm'),
+  const SyncRound('A'),
+  const SyncRound('B'),
+  const SyncRound('A'),
+];
+
+/// What A does from [mergeStart]: R2 merged into R1, keeping either content, stopped before it retires R2 — alone,
+/// beside a delete of R3, finished before the rounds, or beside z3 taken in —; z3 taken in, which leaves R4 beside R3,
+/// which absorbed it — the two a zip leaves, no merge of A's —; R3 deleted; R6 captured, of uma X.
+final _onAMergeInProgress = OneOf(
+  [
+    [(d) => MergeStops(d, 'R1', 'R2', contentFrom: 'R2')],
+    [(d) => MergeStops(d, 'R1', 'R2', contentFrom: 'R1')],
+    [(d) => MergeStops(d, 'R1', 'R2', contentFrom: 'R2'), (d) => Delete(d, 'R3')],
+    [(d) => MergeStops(d, 'R1', 'R2', contentFrom: 'R2'), FinishMerges.new],
+    [(d) => ImportZip(d, 'z3')],
+    [(d) => MergeStops(d, 'R1', 'R2', contentFrom: 'R2'), (d) => ImportZip(d, 'z3')],
+    [(d) => Delete(d, 'R3')],
+    [(d) => Capture(d, 'R6', 6, uma: 'X')],
+  ],
+  'R2 merged into R1 keeping either, stopped before it retires R2, alone, beside R3 deleted (G310), finished, or '
+  'beside z3 taken in; z3 taken in; R3 deleted; R6 captured of uma X',
+);
+
+/// What B does from [mergeStart]: nothing, or R5 captured, of uma X.
+final _onBMergeInProgress = OneOf([
+  [],
+  [(d) => Capture(d, 'R5', 5, uma: 'X')],
+], 'nothing, or R5 captured of uma X');
 
 /// A universe of the room ([R7-4], L319): from [attachedStart], the server's room used up as [noRoom] says; A does one
 /// of [a] (else of [_onR1R2WithoutRoom]) and B one of [b] (else of [_onR3WithoutRoom]), either first; two passes of A's round and B's — or of B's
-/// and A's, of [rounds] — while the room stays used up; then [roomBack] gives it back, and the world is driven to rest.
-/// Every round is the app's, run without the room it lacks ([OfTheModelsRound.room]): it meets a refusal for room as a
-/// refusal.
+/// and A's, of [rounds] — while the room stays used up; then [roomBack] gives it back, the user of each device syncs now
+/// ([Resume] — a device stopped for room stays so until the user lowers the mark, [N1-22]), and the world is driven to
+/// rest. Every round is the app's, which waits for room ([syncWaitingForRoom]).
 ///
 /// Outside every universe of it: the two devices changing one record, or records one merge joins (each changes records
 /// the other does not, so that no merge of the two sides decides an end); a memo, an archive or another change to a
-/// record that waits for room besides the change that makes it wait — whether such a change waits with the record is
-/// not stated ([R7-4] states the record and its merge); dismissed pairs; images (the account's form is none) and what
+/// record that waits for room besides the change that makes it wait — such a change waits with the record ([N1-17]
+/// (C1)), which the properties here do not state and `test/record_sync_test.dart` checks of a memo; dismissed pairs; images (the account's form is none) and what
 /// waits for room of them; the account's records cap (`account_limit` `"records"`), its hidden bytes and the service's
 /// budget, which the app meets as it meets the account's cap; the room used up or given back between two rounds of
 /// [rounds], or by a round's own puts; and what [RunUniverse] leaves out besides.
@@ -1522,9 +1602,8 @@ RunUniverse _roomUniverse(
   a: a ?? _onR1R2WithoutRoom,
   b: b ?? _onR3WithoutRoom,
   rounds: [
-    for (final passes in rounds) [...passes, roomBack],
+    for (final passes in rounds) [...passes, roomBack, const Resume('A'), const Resume('B')],
   ],
-  lacking: const {OfTheModelsRound.room},
   properties: properties ?? _room,
 );
 
@@ -1778,10 +1857,6 @@ const _onUnbound = EveryOp([1], zips: {'z1': 'R3'});
 /// claim of no counterexample is skipped, in CI (test/sync_properties_test.dart) and outside it
 /// (tool/sync_model_exhaustive.dart) alike; every other claim of it is checked.
 const standingCounterexamples = <String, String>{
-  'C1/what-needs-no-room-goes': _noWaitForRoomYet,
-  'C1r/what-needs-no-room-goes': _noWaitForRoomYet,
-  'C1x/what-needs-no-room-goes': _noWaitForRoomYet,
-  'C1rx/what-needs-no-room-goes': _noWaitForRoomYet,
   'Q3z/release-ends-as-held-changes-sent-late':
       'Two inputs: A dismisses R2+R3, B merges R1+R2 keeping either, R3 goes onto A\'s shelf, and once B\'s merge '
       'reached the server A runs a round. The round keeps the pair as A holds it, for it names R3, which is kept; but '
@@ -1790,20 +1865,17 @@ const standingCounterexamples = <String, String>{
       'is put back. Putting R3 back is a repair the app does not make, and the pair can be dismissed again.',
 };
 
-/// Why [whatNeedsNoRoomGoes] has counterexamples where the server has no room for new bytes and takes the rest: the
-/// app's round holds nothing back for room.
-const _noWaitForRoomYet =
-    'The app\'s round does not wait for room yet (T2b-6b turns this green). A round whose put of a body the server '
-    'refuses for room — 507 account_limit, or database_full past the reserve — ends as failed and sends no list, so a '
-    'change that needs no room in the same round, a delete or an archive, waits with the record that needs some. Every '
-    'counterexample is one such: a device that changed a record whose body the server lacks and, beside it, one that '
-    'needs no room.';
-
 /// Property → why its claim of no counterexample is not one of the app's: a property of a part of the app the app has
 /// not yet, which the model alone does, and which holds there however the app's rounds run. Its claim is skipped, in CI
 /// and outside it, so that a green that checks no code of the app's is not counted; its controls and its decisive parts
 /// are checked.
-const notOfTheApp = <String, String>{};
+const notOfTheApp = <String, String>{
+  'sync-takes-in-the-same-uma-under-another-id':
+      "The refusal it rules out would be the place's, as the app's entries refuse (`duplicateCharaIdIn`): the app's "
+      'place (`AppSyncPlace.publish`) writes what the round gives it and calls no such check, but the model drives its '
+      "own place, which refuses nothing, and the app's round knows no uma. So no round of the app's could fail it here "
+      "however the app's place ran.",
+};
 
 /// G241's shape: A moves R1 onto its quarantine shelf, B merges R2 into R1 keeping R2's content and sends it, and A's
 /// round keeps R1 as the server lists it — a removal of A's the merge undoes (S4) that A cannot read, and no removal
@@ -2121,6 +2193,16 @@ final outsideCi = <Universe<PropertyInput>>[
     const SetDatabaseRoom('A', DatabaseRoom.room),
     rounds: _roundsWithoutRoomEither,
     properties: [whatWaitedGoesOnceThereIsRoom],
+  ),
+  // 72 inputs. The merges in progress ([_mergeInProgressUniverse]) with B's rounds first as well, and with A's app
+  // started again after its first round: the mark of a merge in progress outlives a restart.
+  _mergeInProgressUniverse(
+    'M1x',
+    rounds: const [
+      _twoPasses,
+      [SyncRound('B'), SyncRound('A'), SyncRound('B'), SyncRound('A')],
+      [SyncRound('A'), Restart('A'), SyncRound('B'), SyncRound('A'), SyncRound('B')],
+    ],
   ),
 ];
 

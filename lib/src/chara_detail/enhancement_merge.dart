@@ -13,6 +13,7 @@ import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_body.dart';
 import '/src/chara_detail/record_notes.dart';
 import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_list.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -353,13 +354,20 @@ Uint8List mergesInProgressBytes(Map<String, MergeDefaults> merges) {
 Future<bool> isRecordMergeSettled(
   DirectoryPath recordDir, {
   required FutureOr<bool> Function(String id) isRecord,
+}) async => (await recordMergeWaiting(recordDir, isRecord: isRecord))?.isEmpty ?? false;
+
+/// The ids the merges this device started into [recordDir]'s record and has not finished hold back from a sync round,
+/// by its merges in progress ([syncMergeWaiting]): none where it is settled, null where the file cannot be read.
+Future<Set<String>?> recordMergeWaiting(
+  DirectoryPath recordDir, {
+  required FutureOr<bool> Function(String id) isRecord,
 }) async {
-  final merges = await readMergesInProgress(recordDir);
-  if (merges == null) return false;
-  for (final retired in merges.keys) {
-    if (await isRecord(retired)) return false;
-  }
-  return true;
+  final retired = (await readMergesInProgress(recordDir))?.keys;
+  final records = {
+    for (final id in retired ?? const <String>[])
+      if (await isRecord(id)) id,
+  };
+  return syncMergeWaiting(retired, isRecord: records.contains);
 }
 
 // ===========================================================================
@@ -576,6 +584,7 @@ final class EnhancementDismissalStore {
     await info.charaDetailMetadataDir.create(recursive: true);
     await file.writeAsString(dismissedPairsJson({...current, candidate.pair}));
     _ref.invalidate(enhancementDismissedPairsProvider);
+    _ref.read(syncLocalEditsProvider.notifier).edited();
     return EnhancementDismissOutcome.dismissed;
   }
 }
@@ -992,7 +1001,14 @@ final class EnhancementMerge {
     EnhancementMergeChoices choices = const EnhancementMergeChoices(),
     required RecordWriteEffects effects,
   }) {
-    return _ref.read(enhancementMergeFrameProvider).run(body: (_) => _run(candidate, keptContentId, choices, effects));
+    final merging = _ref
+        .read(enhancementMergeFrameProvider)
+        .run(body: (_) => _run(candidate, keptContentId, choices, effects));
+    return merging.then((result) {
+      // A merge that wrote anything — every step, or a stop after the survey — is an edit of what sync carries.
+      if (result.needsReload && _ref.mounted) _ref.read(syncLocalEditsProvider.notifier).edited();
+      return result;
+    });
   }
 
   Future<EnhancementMergeResult> _run(

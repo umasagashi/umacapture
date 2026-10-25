@@ -11,6 +11,7 @@ import '/const.dart';
 import '/src/addon/addon_dispatcher.dart';
 import '/src/app/pages.dart';
 import '/src/app/route.dart';
+import '/src/chara_detail/record_sync.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
@@ -405,6 +406,10 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
     // Also, start up loaders here.
     ref.read(charaDetailInitialDataLoader);
+
+    // The moments a sync round runs at, the app's start among them: the round there waits for the record stores on its
+    // own, and nothing here waits for it.
+    ref.read(recordSyncTriggersProvider);
 
     // Rebuild this widget when requested.
     ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));

@@ -17,6 +17,8 @@ import '/src/chara_detail/inheritance.dart';
 import '/src/chara_detail/record_archive_state.dart';
 import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_notes.dart';
+import '/src/chara_detail/record_sync_edits.dart';
+import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/fs/record_mutation_lock.dart';
@@ -405,16 +407,27 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     if (!ref.mounted) {
       return;
     }
+    // A re-recognition writes the record's body anew: an edit of what sync carries.
+    ref.read(syncLocalEditsProvider.notifier).edited();
+    // Read before [_count], which can complete the batch: the record that
+    // completes it belongs to it. `isCompleted` is also what [_count] reads to
+    // tell a batch from none.
+    final outsideBatch = state.isCompleted;
     if (pathInfo != null) {
-      // Read before [_count], which can complete the batch: the record that
-      // completes it belongs to it. `isCompleted` is also what [_count] reads to
-      // tell a batch from none.
-      if (state.isCompleted) {
+      if (outsideBatch) {
         effects.totals.apply(TotalsScope.recordRoot(pathInfo));
       } else {
         _pendingTotals.add(effects.totals);
         _pendingTotalsInfo = pathInfo;
       }
+    }
+    // The reload only buffers the record; a batch publishes the buffer in
+    // [_finish]. No batch end will come for an announcement outside one, so it
+    // publishes at once -- otherwise the buffer stays until a restart, and the
+    // merge refuses the store as incomplete all that time.
+    final store = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    if (outsideBatch && store.hasPendingRecords) {
+      store.forceRebuild();
     }
     _count(id, failed: false);
   }
@@ -1661,6 +1674,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
                 return;
               }
               await _addAsync(record, notes: notes, notifyDuplicate: notifyDuplicate);
+              // A capture's or a video import's record is an edit of what sync carries; a round of sync puts the
+              // records it takes in through its own place, not here.
+              if (ref.mounted) ref.read(syncLocalEditsProvider.notifier).edited();
             },
           );
       }
@@ -3285,6 +3301,12 @@ class CharaArchiveController extends Notifier<Progress> {
         ),
       );
       effects.totals.apply(TotalsScope.recordRoot(pathInfo));
+    }
+    // An archive the user made lowers the device's mark of being stopped for room ([N1-22]), and is an edit of what
+    // sync carries; a round of sync archives through its own place, not here.
+    if (archived.isNotEmpty && ref.mounted) {
+      ref.read(syncRoomStopProvider).lower();
+      ref.read(syncLocalEditsProvider.notifier).edited();
     }
     if (archived.isNotEmpty) {
       Toaster.show(

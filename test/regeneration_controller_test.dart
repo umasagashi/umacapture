@@ -35,6 +35,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
@@ -44,6 +45,8 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
+import 'support/enhancement_merge_scratch.dart';
+import 'support/record_sync_harness.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
@@ -475,6 +478,87 @@ void main() {
       expect(outcome.recordJson, stored);
       expect(outcome.recognizedLeft, isFalse);
       expect((outcome.successes, outcome.failures), (1, 0));
+    });
+  });
+
+  group('a re-recognition and the merge of the same uma', () {
+    late SyncTestDevice device;
+    setUp(() {
+      device = SyncTestDevice('regen_merge');
+      device.seedRecord('R1', capturedDate: '2026-01-01T00:00:00');
+      device.seedRecord('R2', capturedDate: '2026-01-02T00:00:00');
+    });
+    tearDown(() => device.dispose());
+
+    // Leaves a result for R2 that recognizes the same uma as the seeded records, with other fans, and announces it
+    // the way native does.
+    Future<ProviderContainer> announceRegeneratedR2() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(PlatformChannel.channel, (call) async => null);
+      addTearDown(() => messenger.setMockMethodCallHandler(PlatformChannel.channel, null));
+      final container = await device.open();
+      final seeded = (jsonDecode(File('test/fixtures/chara_detail_record.json').readAsStringSync()) as Map)
+          .cast<String, dynamic>();
+      final result = (jsonDecode(File('test/fixtures/recognized.json').readAsStringSync()) as Map)
+          .cast<String, dynamic>();
+      for (final key in seeded.keys) {
+        if (key != 'metadata') result[key] = seeded[key];
+      }
+      (result['metadata'] as Map)['record_id'] = {'self': 'R2'};
+      result['fans'] = 8;
+      File('${device.info.charaDetailActiveDir.path}/R2/recognized.json').writeAsStringSync(jsonEncode(result));
+      return container;
+    }
+
+    void handOver(ProviderContainer container) {
+      final controller = PlatformController(container.read(_refProvider), const {});
+      addTearDown(controller.dispose);
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailUpdated', 'id': 'R2'}));
+    }
+
+    Future<EnhancementMergeOutcome> merge(ProviderContainer container) async {
+      final candidate = candidatesIn(container).singleWhere((c) => c.olderId == 'R1' && c.newerId == 'R2');
+      final result = await container
+          .read(enhancementMergeProvider)
+          .merge(
+            candidate,
+            keptContentId: 'R2',
+            choices: const EnhancementMergeChoices(),
+            effects: mergeEffects(container),
+          );
+      return result.outcome;
+    }
+
+    int fansOfR2(ProviderContainer container) =>
+        container.read(charaDetailRecordStorageLoaderProvider).requireValue.singleWhere((r) => r.id == 'R2').fans;
+
+    test('a result announced outside a batch is shown at once, and the merge is not refused', () async {
+      final container = await announceRegeneratedR2();
+      expect(container.read(charaDetailRecordRegenerationControllerProvider).isCompleted, isTrue);
+      final store = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+
+      handOver(container);
+      await waitUntil(() => store.hasPendingRecords || fansOfR2(container) == 8, describe: 'the reload of R2 to land');
+
+      expect(store.hasPendingRecords, isFalse, reason: 'no batch end will publish the buffer');
+      expect(fansOfR2(container), 8);
+      expect(await merge(container), EnhancementMergeOutcome.merged);
+    });
+
+    test('a result announced inside a batch is held until the batch ends', () async {
+      final container = await announceRegeneratedR2();
+      final regeneration = container.read(charaDetailRecordRegenerationControllerProvider.notifier)..beginBatch(2);
+      final store = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+
+      handOver(container);
+      await waitUntil(() => regeneration.successCount == 1, describe: 'the re-recognition of R2 to be counted');
+      expect(store.hasPendingRecords, isTrue);
+      expect(fansOfR2(container), isNot(8));
+
+      regeneration.fail('R1');
+      await waitUntil(() => !store.hasPendingRecords, describe: 'the batch end to publish the buffer');
+      expect(fansOfR2(container), 8);
     });
   });
 }

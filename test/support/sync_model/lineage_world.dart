@@ -70,7 +70,7 @@ class LineageWorld extends SyncWorld {
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() => false,
     Resume() => false,
-    ShelfOp() => false,
+    ShelfOp() || MergeInProgressOp() => false,
     _ => true,
   };
 
@@ -103,7 +103,7 @@ class LineageWorld extends SyncWorld {
       case DeleteAccount() || Elapse() || OldApp() || Upgrade():
       case SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut():
       case Resume():
-      case ShelfOp():
+      case ShelfOp() || MergeInProgressOp():
         throw UnsupportedError('these rules have no path for $op');
       case ExportZip(:final id, :final slot):
         zips[slot] = d.exportZip(id);

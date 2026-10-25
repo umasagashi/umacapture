@@ -36,6 +36,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/src/chara_detail/record_sync_edits.dart';
+import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/core/app_restart.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
@@ -684,6 +686,20 @@ Future<StorageDeleteReport> _deleteAndForget(
     ),
     StorageDeleteSettingsRequest() => await ref.read(settingsStoreDeleteProvider)(claim),
   };
+  // Records the user deleted here lower the device's mark of being stopped for
+  // room ([N1-22]), as a delete from the record table does.
+  if (group.id case StorageGroupId.activeRecords || StorageGroupId.archivedRecords when report.deleted.isNotEmpty) {
+    ref.read(syncRoomStopProvider).lower();
+  }
+  // What the user deleted here of what sync carries — records, the quarantine shelf's records ([N15-22]), ratings and
+  // memos — is an edit of it.
+  if (group.id
+      case StorageGroupId.activeRecords ||
+          StorageGroupId.archivedRecords ||
+          StorageGroupId.quarantine ||
+          StorageGroupId.metadata when report.deleted.isNotEmpty) {
+    ref.read(syncLocalEditsProvider.notifier).edited();
+  }
   switch (request) {
     case StorageDeletePathsRequest(:final targets):
       // Resolved once and handed to every derivation below. They are projections

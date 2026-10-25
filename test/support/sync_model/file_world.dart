@@ -109,7 +109,10 @@ class FServer {
   FServer({this.mutation});
   final FileMutation? mutation;
 
-  int account = 1;
+  /// The account the world begins with, which every device's sync is on for ([FDevice.sync]).
+  static const firstAccount = 1;
+
+  int account = firstAccount;
   int generation = 0;
   FState list = FState();
   final Set<String> bodies = {};
@@ -127,8 +130,8 @@ class FServer {
   DatabaseRoom database = DatabaseRoom.room;
 
   /// A control of the properties breaks the room the endpoints keep: where true, once they refused a put of new bytes
-  /// for room in a round, they refuse every write after it in that round as a database with no room does
-  /// ([DatabaseRoom.none]).
+  /// for room in a round — or the device is stopped for room by an earlier one ([FDevice.roomStop]), and asks for no
+  /// room —, they refuse every write after it in that round as a database with no room does ([DatabaseRoom.none]).
   bool roomRefusalEndsTheRound = false;
   int? dailyRows;
   int? dailyReads;
@@ -304,8 +307,26 @@ class FShelved {
 
 typedef FBase = ({int account, int generation, FState list});
 
+/// How a round's place reads the merges a device has in progress ([FDevice.mergesInProgress]): as the app does, or one
+/// of the readings the controls of the properties break it into.
+enum MergeReading {
+  /// As the app reads them: a record a merge of the device's into it has not finished is a merge in progress, by the
+  /// app's decision over the mark ([syncMergeWaiting]).
+  asTheApp,
+
+  /// Every record as settled: a merge stopped half way is read as the record it published.
+  settled,
+
+  /// By the ids absorbed alone: a record that absorbed another the device lists is read as a merge in progress, a pair
+  /// a round or a zip left included ([R6-3] and [N9-09] tell the two apart).
+  everyAbsorbedPair,
+
+  /// For good: a record a merge of the device's ever stopped into is read as a merge in progress, finished or not.
+  everStopped,
+}
+
 class FDevice {
-  FDevice(this.name, this.clock, {this.mutation, this.inheritance = const {}});
+  FDevice(this.name, this.clock, {this.mutation, this.inheritance = const {}, this.umas = const {}});
   final String name;
   final int Function() clock;
   final FileMutation? mutation;
@@ -313,6 +334,14 @@ class FDevice {
   /// Capture → what its screens show of the inheritance ([Capture.parents]): what the resolver reads off a
   /// content recognised from that capture's images. The world's, the same on every device.
   final Map<String, Map<int, String>> inheritance;
+
+  /// Capture → the uma its screens show where another capture shows it too ([Capture.uma]): the uma of a content
+  /// recognised from that capture's images ([umaOf]). The world's, the same on every device. The model's capture and
+  /// import read none of it — they refuse nothing —; a control of the properties does.
+  final Map<String, String> umas;
+
+  /// The uma [r] shows: of the capture its content was recognised from.
+  String umaOf(FRec r) => umas[r.recognisedFrom] ?? r.recognisedFrom;
 
   /// What the device holds of what sync carries.
   FState store = FState();
@@ -381,13 +410,21 @@ class FDevice {
   bool get unanswered => _sent != null || keptSent != null;
 
   /// The device's switch of sync, as the app keeps it ([RecordSyncState]): whether its rounds run is the app's switch's
-  /// to say ([syncRuns]), and turning it on or off goes through the app's ([RecordSyncState.withOn]).
-  RecordSyncState sync = const RecordSyncState(on: true);
+  /// to say ([syncRuns]), and turning it on or off goes through the app's ([RecordSyncState.withOn]). On, as the world
+  /// begins, for the account it begins with.
+  RecordSyncState sync = const RecordSyncState(account: '${FServer.firstAccount}');
 
   /// Whether a round of this device runs against [server]: as the app's switch says, for the server's account.
   bool syncRuns(FServer server) => sync.roundAccount('${server.account}') != null;
 
-  bool paused = false;
+  /// The device's mark of being stopped for room, the app's ([SyncRoomStop]): raised by a refusal for room in either
+  /// round, and lowered as the app lowers it ([N1-22]) — by [Resume], the user syncing now; by [restart], starting
+  /// the app; by [delete] and [archive]; and by a round with no base of its account ([loseStateFile], another
+  /// account's base), which the app's round lowers it at itself.
+  final roomStop = SyncRoomStop();
+
+  /// Whether the device is stopped for room ([roomStop]).
+  bool get paused => roomStop.up;
 
   /// The device runs the app of these rules: it ran an operation of it ([FileWorld.execute]). Until then it
   /// runs the app from before the upgrade, and only that app's operations reach it; none does since.
@@ -500,6 +537,42 @@ class FDevice {
   /// files of the device's record it is split off: where true, the place's round carries none.
   bool carriesNoFiles = false;
 
+  /// The merges this device started and has not finished ([MergeStops]): the id of the end each published → the ids of
+  /// the records it merges away. The app's `merges_in_progress.json` beside the end's `record.json`
+  /// ([mergesInProgressFileName]): on the disk, so a restart reads it again as it was. Only this device holds it — no
+  /// round sends it and no zip carries it ([R6-3], [N9-11]) —, and an entry goes once its record is retired
+  /// ([finishMerges]).
+  final Map<String, Set<String>> mergesInProgress = {};
+
+  /// The ids of every end a merge of this device stopped before retiring: read only where a control makes the place
+  /// read a merge as in progress for good ([MergeReading.everStopped]).
+  final Set<String> mergesEverStopped = {};
+
+  /// How the round's place reads the merges in progress: as the app does, or, where a control of the properties makes
+  /// it, otherwise ([MergeReading]).
+  MergeReading mergesReadAs = MergeReading.asTheApp;
+
+  /// Whether no merge of this device into the record [id] is unfinished: none of its merges in progress names a retired
+  /// id that is a record still. The model's own account, which the properties observe (`RunStep.unfinishedMerges`);
+  /// the round's place reads the mark through the app's decision instead ([syncMergeWaiting]), so that a property
+  /// does not judge that decision by itself.
+  bool mergeSettled(String id) => !(mergesInProgress[id] ?? const <String>{}).any(store.records.containsKey);
+
+  /// The user presses Merge again on each pair whose merge stopped ([FinishMerges]): the app reuses the end it published
+  /// and retires the record it merges away — its directory goes, and its ratings and memos, settled by the merge
+  /// already, with it ([syncMergeCell]) —, then removes the entry of the mark. A record retired already leaves the entry
+  /// naming no record, which the app reads as settled, and removes it here as the next merge into the end does.
+  void finishMerges() {
+    for (final MapEntry(key: end, value: retired) in [...mergesInProgress.entries]) {
+      for (final id in retired) {
+        if (!store.records.containsKey(id)) continue;
+        removedHere.add(id);
+        _letGo(id);
+      }
+      mergesInProgress.remove(end);
+    }
+  }
+
   /// Whether a round runs, told for the round that asks: no round runs while the device holds a memo
   /// over the send limit. The round reads what the gate read: nothing runs between the two.
   bool _gate() {
@@ -589,20 +662,37 @@ class FDevice {
   /// [FileMutation.mergeKeepsNewerId] keeps the newer record's id instead, [FileMutation.mergeKeepsSurvivorsStage]
   /// leaves the images of an older record without them out, and [FileMutation.mergeLeavesDismissals] leaves the pairs
   /// as they were.
-  void merge(String a, String b, {required String contentFrom, bool beforeTheUpgrade = false}) {
+  ///
+  /// [stopsBeforeRetiring]: the merge stops before it retires the record it merges away ([MergeStops]) — that record
+  /// stays as it is, and the end carries the mark of a merge in progress ([mergesInProgress]) until [finishMerges].
+  void merge(
+    String a,
+    String b, {
+    required String contentFrom,
+    bool beforeTheUpgrade = false,
+    bool stopsBeforeRetiring = false,
+  }) {
     final ra = _rec(a);
     final rb = _rec(b);
     final aIsOlder = syncCompareAge(_ageOf(ra), _ageOf(rb)) <= 0;
     final sv = aIsOlder != (mutation == FileMutation.mergeKeepsNewerId) ? ra : rb;
     final rv = identical(sv, ra) ? rb : ra;
+    // A pair whose merge stopped is finished, not merged again: the app takes the end it published ([finishMerges]).
+    if (mergesInProgress[sv.id]?.contains(rv.id) ?? false) throw StateError('$name merges $a+$b, a merge unfinished');
     final kept = _rec(contentFrom);
     final time = clock();
     final (merged, settledBonus) = beforeTheUpgrade
         ? _mergedBeforeTheUpgrade(sv, rv, kept, time)
         : _merged(sv, rv, kept, time);
     final image = mutation == FileMutation.mergeKeepsSurvivorsStage && sv.stage == FStage.none ? null : images[kept.id];
-    removedHere.add(rv.id);
+    if (stopsBeforeRetiring) {
+      (mergesInProgress[sv.id] ??= {}).add(rv.id);
+      mergesEverStopped.add(sv.id);
+    } else {
+      removedHere.add(rv.id);
+    }
     for (final id in [a, b]) {
+      if (stopsBeforeRetiring && id == rv.id) continue;
       store.records.remove(id);
       images.remove(id);
       bonus.remove(id);
@@ -787,7 +877,7 @@ class FDevice {
       };
     }
     _letGo(id);
-    paused = false;
+    roomStop.lower();
   }
 
   /// What a delete of today does to the record [id]: its directory goes, and its annotations and dismissals with it
@@ -827,7 +917,7 @@ class FDevice {
         ..stageTime = written.time;
     }
     _shape(id);
-    paused = false;
+    roomStop.lower();
   }
 
   /// The image files of [id]'s record in the form its stage holds them in, as an archive leaves them: the app's plan
@@ -1184,6 +1274,8 @@ class FDevice {
   /// unreadable, one whose id a store holds again, or one with no note, which names no id to put it back as, stays on
   /// the shelf.
   void restart() {
+    // The app keeps the mark of being stopped for room in memory: starting it lowers the mark ([N1-22]).
+    roomStop.lower();
     for (final MapEntry(key: id, value: s) in [...shelf.entries]) {
       if (!s.noted || !s.readable || store.records.containsKey(id)) continue;
       shelf.remove(id);
@@ -1201,7 +1293,7 @@ class FDevice {
     keptBase = null;
     keptSent = null;
     keptImages = null;
-    paused = false;
+    roomStop.lower();
   }
 
   // --- one round of sync ---------------------------------------------------------------------------
@@ -1227,7 +1319,7 @@ class FDevice {
       baseGap = Unbased.accountRemade;
       base = null;
       _sent = null;
-      paused = false;
+      roomStop.lower();
       resets++;
       onReset?.call();
     }
@@ -1389,15 +1481,14 @@ class FDevice {
   }
 
   /// A round of the app's own ([runSyncRoundOn]), with this device as its place and [server] as the endpoints
-  /// (`file_place.dart`). It sends and takes images through the endpoints as the Worker answers them; it has none of
-  /// the rest of what only the model's round does: neither the server's room nor the day's rows and reads hold it
-  /// back. A world that has any of those is refused here, not run without them ([OfTheModelsRound]), but those of
-  /// [appRoundLacking].
+  /// (`file_place.dart`). It sends and takes images through the endpoints as the Worker answers them, and the
+  /// endpoints refuse for room as the Worker does, the account's storage and the database's alike; it has none of the
+  /// rest of what only the model's round does: the day's rows and reads do not hold it back. A world that has any of
+  /// those is refused here, not run without them ([OfTheModelsRound]), but those of [appRoundLacking].
   /// [placeWrites]: the place lands that many writes of the result and fails the rest ([PlaceCut]). [swapCut]: the
   /// endpoints answer that many swaps and not the next ([SwapCut]).
   void appSyncRound(FServer server, {int? placeWrites, SwapCut? swapCut}) {
     final missing = {
-      if (server.full || server.database != DatabaseRoom.room || paused) OfTheModelsRound.room,
       if (server.dailyRows != null || server.dailyReads != null) OfTheModelsRound.dailyLimits,
       if (cellsLeftBehind.isNotEmpty) OfTheModelsRound.cellsLeftBehind,
     }.difference(appRoundLacking);
@@ -1409,7 +1500,7 @@ class FDevice {
     _beginTold();
     final listedBefore = {...server.list.records.keys};
     final based = _basedForAppRound(server);
-    final endpoints = _FileSyncServer(server, name, cut: swapCut);
+    final endpoints = _FileSyncServer(server, name, cut: swapCut, stopped: roomStop);
     SyncRoundOutcome? outcome;
     Object? failure;
     // Neither the place nor the server waits on anything: the round ends once its microtasks have run.
@@ -1418,6 +1509,7 @@ class FDevice {
         _FilePlace(this, server, writesLanding: placeWrites),
         endpoints,
         account: '${server.account}',
+        roomStop: roomStop,
       ).then((o) => outcome = o, onError: (Object e, StackTrace _) => failure = e);
       async.flushMicrotasks();
     });
@@ -1432,7 +1524,8 @@ class FDevice {
       SyncRoundEnd.bodiesMissing,
       SyncRoundEnd.heldByLongMemos,
     }.contains(o.end);
-    publishedAll = o.end == SyncRoundEnd.done;
+    // A round that left records waiting for room ended with the server holding them as it did, not as the device does.
+    publishedAll = o.end == SyncRoundEnd.done && o.waitingForRoom == 0;
     _tellAppRound(listedBefore, based);
     if (o.end == SyncRoundEnd.operationTooLarge || (o.end == SyncRoundEnd.refused && endpoints.refusedAsTooLarge)) {
       server.splitRefused++;
@@ -1832,7 +1925,8 @@ class FDevice {
       if (lost(() => server.putBody(name, r.body))) return false;
       switch (server.putBody(name, r.body)) {
         case FAnswer.noRoom:
-          paused = true;
+          // A full storage is the account's cap, as the server of the app's round refuses it ([_FileSyncServer]).
+          roomStop.raise(SyncServerStop.accountRoom);
           waits.add(r.id);
         case FAnswer.busy:
           if (mutation == FileMutation.rowLimitEndsTheRound) return true;
@@ -1850,7 +1944,7 @@ class FDevice {
       if (lost(() => server.putImage(name, image))) return false;
       switch (server.putImage(name, image)) {
         case FAnswer.noRoom:
-          paused = true;
+          roomStop.raise(SyncServerStop.accountRoom);
         case FAnswer.busy:
           if (mutation == FileMutation.rowLimitEndsTheRound) return true;
           busy = true;
@@ -1863,20 +1957,24 @@ class FDevice {
     // that the device lists no more and no other record absorbed — neither one the server lists, the
     // waiting record's own there included, nor one the device sends now. Such a record carries the
     // removal of that id whether or not the waiting one arrives.
+    // Which ids wait is the app's decision ([syncWaitingForRoom]), the one its round makes; a mutation of C1 or C2
+    // widens or narrows what it answers.
     final next = store.copy();
-    bool absorbedElsewhere(String id, String into) => mutation == FileMutation.heldBackHoldsWhatAnotherRecordAbsorbed
-        ? head.list.records[into]?.absorbed.contains(id) ?? false
-        : head.list.records.values.any((r) => r.absorbed.contains(id)) ||
-              store.records.values.any((r) => !waits.contains(r.id) && r.absorbed.contains(id));
-    bool retired(String id, String into) =>
-        mutation == FileMutation.heldBackHoldsEveryIdAbsorbed ||
-        (!store.records.containsKey(id) && !absorbedElsewhere(id, into));
-    final kept = {
-      for (final id in waits) ...[
-        id,
-        if (mutation != FileMutation.retiredLeavesBeforeSurvivor)
-          ...store.records[id]!.absorbed.where((x) => retired(x, id)),
-      ],
+    final waiting = syncWaitingForRoom(
+      waits,
+      held: {for (final r in store.records.values) r.id: r.absorbed},
+      listed: [for (final r in head.list.records.values) r.absorbed],
+    );
+    final kept = switch (mutation) {
+      FileMutation.retiredLeavesBeforeSurvivor => waits,
+      FileMutation.heldBackHoldsEveryIdAbsorbed => {...waiting, for (final id in waits) ...store.records[id]!.absorbed},
+      FileMutation.heldBackHoldsWhatAnotherRecordAbsorbed => {
+        ...waiting,
+        for (final id in waits)
+          for (final x in store.records[id]!.absorbed)
+            if (!store.records.containsKey(x) && !(head.list.records[id]?.absorbed.contains(x) ?? false)) x,
+      },
+      _ => waiting,
     };
     heldBack.addAll(kept);
     for (final id in kept) {
@@ -1970,12 +2068,6 @@ enum OfTheModelsRound {
   /// Leaves when the judge reads the two forms; most named sequences need it.
   images,
 
-  /// The server's room — the account's storage ([SetStorageFull]) and, of the app's endpoints alone, the database's
-  /// ([SetDatabaseRoom]) —, and a device a full storage holds back. The app's round meets a refusal for room as it
-  /// meets any refusal: it holds nothing back for room ([R7-4]), and sends nothing of a round whose bodies were refused.
-  /// Leaves when the app's round waits for room.
-  room,
-
   /// The day's rows and reads ([SetDailyRows], [SetDailyReads]). Leaves when the app's round keeps to them.
   dailyLimits,
 
@@ -2003,8 +2095,6 @@ Set<OfTheModelsRound> ofTheModelsRound(Iterable<Op> ops) {
     switch (op) {
       case SetImageForm(:final form) when form != 'none':
         needs.add(OfTheModelsRound.images);
-      case SetStorageFull(full: true):
-        needs.add(OfTheModelsRound.room);
       case SetDailyRows(rows: _?) || SetDailyReads(reads: _?):
         needs.add(OfTheModelsRound.dailyLimits);
       case EditAnnotation(:final device, :final id):
@@ -2038,12 +2128,17 @@ class FileWorld extends SyncWorld {
       // The devices read one clock, the world's. [clockAhead]: a device whose own runs that much ahead,
       // for the sequences that show what edit times of two clocks give.
       final ahead = clockAhead[n];
-      devices[n] = FDevice(n, ahead == null ? tick : () => tick() + ahead, mutation: mutation, inheritance: inheritance)
-        ..appRoundLacking = appRoundLacking;
+      devices[n] = FDevice(
+        n,
+        ahead == null ? tick : () => tick() + ahead,
+        mutation: mutation,
+        inheritance: inheritance,
+        umas: umas,
+      )..appRoundLacking = appRoundLacking;
     }
     for (final n in bystanders) {
       var clock = 0;
-      this.bystanders[n] = FDevice(n, () => ++clock, mutation: mutation, inheritance: inheritance);
+      this.bystanders[n] = FDevice(n, () => ++clock, mutation: mutation, inheritance: inheritance, umas: umas);
     }
     judge
       ..serverKeepsReleases = true
@@ -2082,6 +2177,10 @@ class FileWorld extends SyncWorld {
   /// Capture → what its screens show of the inheritance, as each [Capture] made it ([FDevice.inheritance]).
   final Map<String, Map<int, String>> inheritance = {};
 
+  /// Capture → the uma its screens show where another capture shows it too, as each [Capture] made it
+  /// ([FDevice.umas]).
+  final Map<String, String> umas = {};
+
   /// Devices that are none of the account's: each never syncs, and only takes zips in.
   final Map<String, FDevice> bystanders = {};
   final Map<String, Column> _columns = {};
@@ -2101,7 +2200,7 @@ class FileWorld extends SyncWorld {
   int versionOf(String device, String id) => _holder(device).store.records[id]!.r;
 
   @override
-  bool syncEnabled(String device) => _holder(device).sync.on;
+  bool syncEnabled(String device) => _holder(device).sync.onFor('${server.account}');
 
   /// As the app of today: a merge takes an archived record as it takes an active one.
   @override
@@ -2125,6 +2224,8 @@ class FileWorld extends SyncWorld {
     OldApp() || Upgrade() => false,
     // Only the app's round reads the shelf; the model's own does not, and a record goes onto it on no other.
     Quarantine() => round == FileRound.app,
+    // Only the app's round reads the mark of a merge in progress ([FDevice.mergesInProgress]); the model's own does not.
+    MergeInProgressOp() => round == FileRound.app,
     // Only the app's endpoints have a database ([FServer.database]).
     SetDatabaseRoom() => round == FileRound.app,
     _ => true,
@@ -2191,8 +2292,9 @@ class FileWorld extends SyncWorld {
       d.upgraded = true;
     }
     switch (op) {
-      case Capture(:final id, :final captured, :final withImages, :final beforeTheUpgrade, :final parents):
+      case Capture(:final id, :final captured, :final withImages, :final beforeTheUpgrade, :final parents, :final uma):
         inheritance[id] ??= parents;
+        if (uma != null) umas[id] ??= uma;
         d.capture(id, captured, withImages: withImages, beforeTheUpgrade: beforeTheUpgrade);
       case Merge(:final a, :final b, :final contentFrom, :final untracked):
         d.merge(a, b, contentFrom: contentFrom, beforeTheUpgrade: untracked == Untracked.legacyApp);
@@ -2252,11 +2354,18 @@ class FileWorld extends SyncWorld {
       case ReceiveCut(:final received):
         if (d.syncRuns(server)) d.round(server, send: false, imageStep: false, applyOnly: received, onReset: reset);
       case SetSyncEnabled(:final enabled):
-        d.sync = d.sync.withOn(enabled);
+        d.sync = d.sync.withOn(enabled ? '${server.account}' : null);
       case LoseStateFile():
         d.loseStateFile();
       case DeleteAccount():
+        // The account made again is one every device logs in to, and turns sync on for again through the screen that
+        // tells of a first round there (S-08): a device whose sync was on goes on for it, one whose sync was off stays
+        // off.
+        final was = '${server.account}';
         server.deleteAccount();
+        for (final each in devices.values) {
+          if (each.sync.onFor(was)) each.sync = each.sync.withOn('${server.account}');
+        }
       case Elapse(:final days):
         server.elapse(days);
       case SetStorageFull(:final full):
@@ -2270,7 +2379,7 @@ class FileWorld extends SyncWorld {
       case SetDailyReads(:final reads):
         server.dailyReads = reads;
       case Resume():
-        d.paused = false;
+        d.roomStop.lower();
       case Quarantine() when round == FileRound.model:
         throw UnsupportedError('the model\'s round reads no quarantine shelf: $op');
       case Quarantine(:final id, :final noted):
@@ -2281,6 +2390,12 @@ class FileWorld extends SyncWorld {
         d.repairQuarantined(id);
       case Restart():
         d.restart();
+      case MergeInProgressOp() when round == FileRound.model:
+        throw UnsupportedError('the model\'s round reads no mark of a merge in progress: $op');
+      case MergeStops(:final a, :final b, :final contentFrom):
+        d.merge(a, b, contentFrom: contentFrom, stopsBeforeRetiring: true);
+      case FinishMerges():
+        d.finishMerges();
       case OldApp() || Upgrade():
         throw UnsupportedError('these rules have no path for $op');
     }
@@ -2297,7 +2412,7 @@ class FileWorld extends SyncWorld {
   List<Violation> finish() {
     final first = devices.keys.first;
     if (server.full || server.dailyRows != null || server.dailyReads != null) {
-      for (final d in devices.values.where((d) => !d.sync.on).toList()) {
+      for (final d in devices.values.where((d) => !d.sync.onFor('${server.account}')).toList()) {
         apply(SetSyncEnabled(d.name, enabled: true));
       }
       for (var day = 0; day < maxDaysHeldBack; day++) {

@@ -810,6 +810,30 @@ void main() {
       expect(container.read(recordSharesProvider).keys, [note.keyHash]);
     });
 
+    // T3a2 (L-5): the screen tells a session the server dropped apart from the user's logout.
+    test("T3a2 (C1 ii): a 401 tells the device the server dropped the session, a logout does not — not even one the "
+        'server answers 401 —, and the next login lowers it', () async {
+      await storeSession();
+      container = containerFor([
+        _json(401, {"error": "session_required"}),
+        _json(200, _claimed()),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+        _json(401, {"error": "session_required"}),
+      ]);
+      bool dropped() => container.read(recordShareSessionDroppedProvider);
+      expect(dropped(), isFalse);
+
+      await session().send("GET", "/api/me");
+      expect((container.read(recordShareSessionProvider), dropped()), (null, true));
+
+      final attempt = await session().beginLogin();
+      expect(await attempt.claim(), LoginOutcome.signedIn);
+      expect(dropped(), isFalse, reason: 'logged in again');
+
+      expect(await session().logout(), isTrue);
+      expect((container.read(recordShareSessionProvider), dropped()), (null, false), reason: 'the user logged out');
+    });
+
     test('logging out drops the session and the share notes', () async {
       await storeSession();
       await storeNote();

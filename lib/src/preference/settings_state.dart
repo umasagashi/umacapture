@@ -27,7 +27,8 @@ enum SettingsEntryKey {
   sentryReportLastMonth,
   sentryReportTotalCount,
   capturePreview,
-  recordSync,
+  // The account sync is on for (`RecordSync`).
+  recordSyncAccount,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {
