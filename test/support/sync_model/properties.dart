@@ -12,11 +12,14 @@
 // out here from the rules' sentences ([R1-5], S-14 and the like) and not from the merge: the two are separate on
 // purpose, so that the property can tell the app's merge wrong.
 
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart' show CharaDetailRecord;
 import 'package:umacapture/src/chara_detail/record_sync.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
+import 'package:umacapture/src/chara_detail/storage.dart' show duplicateCharaIdIn;
 
+import '../records.dart' show makeRecord;
 import 'file_core.dart';
 import 'file_mutations.dart';
 import 'file_world.dart';
@@ -1236,6 +1239,7 @@ class RunStep {
     required this.imageForm,
     required this.room,
     required this.bodiesTheServerLacks,
+    required this.unfinishedMerges,
   });
   final Op op;
   final int time;
@@ -1273,6 +1277,10 @@ class RunStep {
   /// Of a step at which the server has no room for new bytes ([room]): device → the ids of the records it lists whose
   /// body the server does not hold ([FServer.holdsBody]) — those a round of it cannot put. Empty of any other step.
   final Map<String, Set<String>> bodiesTheServerLacks;
+
+  /// Device → the merges it started and has not finished ([FDevice.mergesInProgress]): the id of the end each
+  /// published → the ids of the records it merges away that are records still. Only the devices that hold one.
+  final Map<String, Map<String, Set<String>>> unfinishedMerges;
 
   /// Whether the server has no room for new bytes: a body or an image it does not hold is refused.
   bool get noRoomForNewBytes => room.storageFull || room.database != DatabaseRoom.room;
@@ -1433,6 +1441,14 @@ class WorldRun implements PropertyInput, OfTheAppsRounds<WorldRun> {
                     },
                 }
               : const {},
+          unfinishedMerges: {
+            for (final d in w.devices.values)
+              if (d.mergesInProgress.isNotEmpty)
+                d.name: {
+                  for (final MapEntry(key: end, value: retired) in d.mergesInProgress.entries)
+                    if (!d.mergeSettled(end)) end: {...retired.where(d.store.records.containsKey)},
+                },
+          },
         ),
       );
     }
@@ -3291,17 +3307,20 @@ final class BrokenSyncSwitch extends Breaking<SwitchedRun> {
 
 /// A switch whose rounds run with sync off as with it on.
 class _RunsWhileOff extends RecordSyncState {
-  const _RunsWhileOff({required super.on});
+  const _RunsWhileOff({super.account});
 
   @override
-  String? roundAccount(String? account) => account;
+  String? roundAccount(String? session) => session;
 
   @override
-  RecordSyncState withOn(bool on) => _RunsWhileOff(on: on);
+  RecordSyncState withOn(String? account) => _RunsWhileOff(account: account);
 }
 
 /// A world whose app's switch runs rounds with sync off.
-const _switchRunsWhileOff = BrokenSyncSwitch("the app's switch runs rounds with sync off", _RunsWhileOff(on: true));
+const _switchRunsWhileOff = BrokenSyncSwitch(
+  "the app's switch runs rounds with sync off",
+  _RunsWhileOff(account: '${FServer.firstAccount}'),
+);
 
 /// sync-off-ends-as-not-syncing ([R6-1], [R6-4]): with sync off a device does as with sync on, but run rounds.
 final syncOffEndsAsNotSyncing = SyncProperty<SwitchedRun>(
@@ -4042,13 +4061,14 @@ final _sendsTheRemovalsOfAWaitingMerge = RoundBreak(
   },
 );
 
-/// A round its server refused for room that puts the server's list in place of what its device holds: what the
+/// A round its server refused for room — one that did not end done, or that left records waiting for room
+/// ([SyncRoundOutcome.waitingForRoom]) — that puts the server's list in place of what its device holds: what the
 /// device's user changed is gone from it, and no later round sends it ([R7-1]).
 final _dropsWhatTheRoomRefused = RoundBreak(
   "a round refused for room puts the server's list in place of the device's",
   (d, _, server) {
-    final end = d.told?.end;
-    if (end == null || end == SyncRoundEnd.done) return;
+    final told = d.told;
+    if (told == null || (told.end == SyncRoundEnd.done && told.waitingForRoom == 0)) return;
     if (!server.full && server.database == DatabaseRoom.room) return;
     final there = server.list.copy();
     d.store
@@ -4205,4 +4225,208 @@ final whatWaitedGoesOnceThereIsRoom = SyncProperty<WorldRun>(
     return Verdict(checks: checks, failures: failures, decisive: decisive);
   },
   controls: [BrokenRound(_dropsWhatTheRoomRefused)],
+);
+
+/// The index in [WorldRun.ops] of the step at rest before the devices finish the merges they left unfinished: the one
+/// before the first [FinishMerges] past the users' operations; null where none is.
+int? _atRestBeforeFinishing(WorldRun run) {
+  for (var i = (run.users.lastOrNull ?? run.shared - 1) + 1; i < run.ops.length; i++) {
+    if (run.ops[i] is FinishMerges) return i - 1;
+  }
+  return null;
+}
+
+/// Of [device] at [s], the ids a merge of its own it has not finished holds back ([R6-3], [N15-02]): of each end of
+/// such a merge, its id and every id it absorbed — the records the merge left half way, and nothing else.
+Set<String> _heldForAMergeInProgress(RunStep s, String device) => {
+  for (final end in s.unfinishedMerges[device]?.keys ?? const <String>[])
+    if (s.sides[device]!.records[end] case final r?) ...{r.id, ...r.absorbed},
+};
+
+/// A round whose place reads a merge stopped half way as the record it published ([MergeReading.settled]): what the
+/// merge left half way is sent.
+final _readsAMergeInProgressAsSettled = RoundBreak(
+  'a round reads a merge stopped half way as the record it published',
+  (d, _, _) => d.mergesReadAs = MergeReading.asTheApp,
+  before: (d, _) => d.mergesReadAs = MergeReading.settled,
+);
+
+/// A round whose place reads a record that absorbed another the device lists as a merge in progress, by the ids
+/// absorbed alone ([MergeReading.everyAbsorbedPair]): a pair a zip left is held back as if the device's own merge had
+/// stopped.
+final _readsEveryAbsorbedPairAsInProgress = RoundBreak(
+  'a round reads a record that absorbed another the device lists as a merge in progress',
+  (d, _, _) => d.mergesReadAs = MergeReading.asTheApp,
+  before: (d, _) => d.mergesReadAs = MergeReading.everyAbsorbedPair,
+);
+
+/// A round whose place reads a merge in progress as one for good, finished or not ([MergeReading.everStopped]).
+final _readsAMergeInProgressForGood = RoundBreak(
+  'a round reads a merge that stopped as in progress for good, finished or not',
+  (d, _, _) => d.mergesReadAs = MergeReading.asTheApp,
+  before: (d, _) => d.mergesReadAs = MergeReading.everStopped,
+);
+
+/// only-a-merge-in-progress-waits ([R6-3], [N15-02], [R7-3]): what a merge the device left half way holds waits for the
+/// merge to be finished, and nothing else does.
+final onlyAMergeInProgressWaits = SyncProperty<WorldRun>(
+  'only-a-merge-in-progress-waits',
+  'At rest before the devices finish the merges they left unfinished — after two passes of rounds, by which a change '
+      'that goes in one device\'s round reaches the other\'s —: of each id a device changed as the rounds began — its '
+      'record or its cells —, where the device lists the end of a merge of its own it has not finished, and that end is '
+      'the id or absorbed it, the id waits: the server and the other device hold it as the server did as the rounds '
+      'began, and the device holds it as it did; else the server and the other device hold it as the device does — a '
+      'record that absorbed another the device lists, with no merge of the device\'s unfinished into it, is an '
+      'ordinary record, and a delete, a capture and a zip taken in go.',
+  (run) {
+    final at = _atRestBeforeFinishing(run);
+    if (at == null) return const Verdict();
+    final (began, s) = (run.beforeRounds, run.steps[at]);
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final d in const ['A', 'B']) {
+      final other = d == 'A' ? 'B' : 'A';
+      final held = _heldForAMergeInProgress(s, d);
+      for (final id in _changedBy(run, d).toList()..sort()) {
+        checks++;
+        final waits = held.contains(id);
+        final made = _sentOf(began.sides[d]!, id);
+        final asBefore = _sentOf(began.sides['server']!, id);
+        final owed = {'server': waits ? asBefore : made, other: waits ? asBefore : made, d: made};
+        // An end in which the id went where it waits, or stayed where it goes, is the wrong one.
+        if (!_sameParts(made, asBefore)) decisive++;
+        final rows = [
+          for (final MapEntry(key: side, value: want) in owed.entries)
+            if (!_sameParts(_sentOf(s.sides[side]!, id), want))
+              [side, _partsText(_sentOf(s.sides[side]!, id)), _partsText(want)],
+        ];
+        if (rows.isEmpty) continue;
+        failures.add(
+          Failure('$id, which $d changed, ${waits ? 'held by a merge it left half way' : 'held by none'}', [
+            ['side', 'held at rest', 'owed'],
+            ...rows,
+          ]),
+        );
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_readsAMergeInProgressAsSettled), BrokenRound(_readsEveryAbsorbedPairAsInProgress)],
+);
+
+/// a-finished-merge-goes ([N15-02], [N9-11]): once the user finishes a merge that stopped, it goes as a merge does.
+final aFinishedMergeGoes = SyncProperty<WorldRun>(
+  'a-finished-merge-goes',
+  'At rest once the devices have finished the merges they left unfinished: of each id a device changed as the rounds '
+      'began, and each id a merge it then finished took away, every side holds it as that device does.',
+  (run) {
+    final at = _atRestBeforeFinishing(run);
+    if (at == null) return const Verdict();
+    final (s, end) = (run.steps[at], run.end);
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final d in const ['A', 'B']) {
+      final ids = {
+        ..._changedBy(run, d),
+        for (final retired in s.unfinishedMerges[d]?.values ?? const <Set<String>>[]) ...retired,
+      };
+      for (final id in ids.toList()..sort()) {
+        checks++;
+        final owed = _sentOf(end.sides[d]!, id);
+        // It had waited: an end in which it never goes is the wrong one.
+        if (!_sameParts(_sentOf(s.sides['server']!, id), owed)) decisive++;
+        final rows = [
+          for (final side in _sides)
+            if (!_sameParts(_sentOf(end.sides[side]!, id), owed))
+              [side, _partsText(_sentOf(end.sides[side]!, id)), _partsText(owed)],
+        ];
+        if (rows.isEmpty) continue;
+        failures.add(
+          Failure('$id, which $d changed or finished a merge of, at rest once finished', [
+            ['side', 'held at rest', 'owed'],
+            ...rows,
+          ]),
+        );
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_readsAMergeInProgressForGood)],
+);
+
+/// The uma of each capture another capture shows too ([Capture.uma]), as the operations of [run] made them.
+Map<String, String> _umasOf(WorldRun run) => {
+  for (final op in run.ops)
+    if (op case Capture(:final id, :final uma?)) id: uma,
+};
+
+/// A round whose place refuses, as the entry does, a record it takes in that shows the uma of a record the device
+/// lists under another id: the app's decision of the entry ([duplicateCharaIdIn]) over the records as their umas
+/// make them ([makeRecord]).
+final _refusesTheSameUmaAsTheEntryDoes = RoundBreak(
+  'a round refuses a record it takes in of an uma the device lists under another id, as the entry does',
+  (d, was, _) {
+    final cards = <String, int>{};
+    CharaDetailRecord asTheApp(FRec r) => makeRecord(id: r.id, card: cards.putIfAbsent(d.umaOf(r), () => cards.length));
+    final listed = [
+      for (final r in d.store.records.values)
+        if (was.records.containsKey(r.id)) asTheApp(r),
+    ];
+    for (final r in [...d.store.records.values]) {
+      if (was.records.containsKey(r.id)) continue;
+      if (duplicateCharaIdIn(listed, asTheApp(r)) != null) d.store.records.remove(r.id);
+    }
+  },
+);
+
+/// sync-takes-in-the-same-uma-under-another-id ([R3-6], [N10-06]): a round takes in a record whatever uma it shows.
+final syncTakesInTheSameUmaUnderAnotherId = SyncProperty<WorldRun>(
+  'sync-takes-in-the-same-uma-under-another-id',
+  'At rest, of each record a user captured, and no user\'s operation took away, every side lists it — one that shows '
+      'an uma another record of another id shows included: the entries\' refusal of the same content under another id '
+      'is not a round\'s, and two records of one uma stand side by side.',
+  (run) {
+    final umas = _umasOf(run);
+    final users = [for (final i in run.users) run.ops[i]];
+    final takenAway = {
+      for (final op in users)
+        ...switch (op) {
+          Delete(:final id) => {id},
+          Merge(:final a, :final b) || MergeStops(:final a, :final b) => {a, b},
+          _ => const <String>{},
+        },
+    };
+    final captured = {
+      for (final op in users)
+        if (op case Capture(:final id) when !takenAway.contains(id)) id,
+    };
+    final end = run.end;
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final id in captured.toList()..sort()) {
+      final uma = umas[id] ?? id;
+      final same = {
+        for (final side in _sides)
+          for (final r in end.sides[side]!.records.values)
+            if (r.id != id && (umas[r.recognisedFrom] ?? r.recognisedFrom) == uma) r.id,
+      }.toList()..sort();
+      for (final side in _sides) {
+        checks++;
+        // A round that refused it as the entry does would leave it out.
+        if (same.isNotEmpty) decisive++;
+        if (end.sides[side]!.records.containsKey(id)) continue;
+        failures.add(
+          Failure(
+            '$id, captured of the uma of ${same.isEmpty ? 'no other record' : same.join(', ')}, at rest on $side',
+            [
+              ['side', 'lists $id'],
+              for (final s in _sides) [s, end.sides[s]!.records.containsKey(id) ? 'yes' : 'no'],
+            ],
+          ),
+        );
+      }
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [BrokenRound(_refusesTheSameUmaAsTheEntryDoes)],
 );

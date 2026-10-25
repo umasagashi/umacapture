@@ -11,6 +11,7 @@ import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_operation.dart';
+import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/item_cell.dart';
@@ -810,25 +811,32 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> with M
     save();
   }
 
+  /// Writes what the user made of this storage: an edit of what sync carries ([SyncLocalEdits.edited]).
   void save() {
+    if (_write()) ref.read(syncLocalEditsProvider.notifier).edited();
+  }
+
+  /// Writes what this controller holds, behind every write already issued; false, writing nothing, while it loads.
+  bool _write() {
     final data = _dataFor("a save");
     if (data == null) {
-      return;
+      return false;
     }
     final contents = data.copyWith(data: {...data.data}, writtenAt: {...data.writtenAt}).toJson();
     enqueueWrite(() => _writeFile(path, contents));
+    return true;
   }
 
   /// Puts in place what a sync round took in for this storage: [apply] over what this controller holds now, written
-  /// behind every write already issued, through the chain an edit writes through — so neither can land over the other.
-  /// Answers false, changing nothing, while the storage is still loading.
+  /// behind every write already issued, through the chain an edit writes through — so neither can land over the other —
+  /// but no edit of the user's. Answers false, changing nothing, while the storage is still loading.
   bool takeSynced(RatingData Function(RatingData held) apply) {
     final data = _dataFor("values a sync round took in");
     if (data == null) {
       return false;
     }
     state = AsyncData(apply(data));
-    save();
+    _write();
     return true;
   }
 }
@@ -1028,13 +1036,19 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
     _save();
   }
 
+  /// As [CharaDetailRecordRatingController.save].
   void _save() {
+    if (_write()) ref.read(syncLocalEditsProvider.notifier).edited();
+  }
+
+  bool _write() {
     final data = _dataFor("a save");
     if (data == null) {
-      return;
+      return false;
     }
     final contents = data.copyWith(data: {...data.data}, writtenAt: {...data.writtenAt}).toJson();
     enqueueWrite(() => _writeFile(path, contents));
+    return true;
   }
 
   /// As [CharaDetailRecordRatingController.takeSynced].
@@ -1044,7 +1058,7 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with Metad
       return false;
     }
     state = AsyncData(apply(data));
-    _save();
+    _write();
     return true;
   }
 

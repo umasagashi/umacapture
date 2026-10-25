@@ -200,6 +200,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
 
   Future<void> _keep(ShareSession? session) async {
     state = session;
+    if (session != null) ref.read(recordShareSessionDroppedProvider.notifier)._set(false);
     if (session == null) {
       await _box.delete(shareSessionKey);
     } else {
@@ -300,13 +301,26 @@ class RecordShareSession extends Notifier<ShareSession?> {
       data: data,
       bearer: session.token,
     );
-    if (answer.status == 401 && state?.token == session.token) {
-      logger.i("The sharing server no longer knows the session; it is dropped");
-      await _keep(null);
-    } else if (answer.status == 409 && answer.body?["error"] == "account_deleting") {
-      await _markDeleting(session);
-    }
+    await answered(session.token, answer.status, answer.body?["error"]);
     return answer;
+  }
+
+  /// Hears the server's answer to a request sent under [token], by [send] or by a request made elsewhere under the
+  /// session (a sync request): a 401 means the server no longer knows the session, which is dropped; a
+  /// `409 account_deleting` marks it as deleting. An answer under a token that is no longer the session's, as one sent
+  /// before logging in again, changes nothing.
+  Future<void> answered(String token, int status, Object? error) async {
+    final current = state;
+    if (current == null || current.token != token) {
+      return;
+    }
+    if (status == 401) {
+      logger.i("The sharing server no longer knows the session; it is dropped");
+      ref.read(recordShareSessionDroppedProvider.notifier)._set(true);
+      await _keep(null);
+    } else if (status == 409 && error == "account_deleting") {
+      await _markDeleting(current);
+    }
   }
 
   /// Records that [session]'s account is being deleted, so a restart continues the deletion with the same token.
@@ -378,18 +392,29 @@ class RecordShareSession extends Notifier<ShareSession?> {
 
   /// Ends the session on the server and drops it with the share notes. Returns false when the server did not
   /// answer, which leaves both as they were.
+  ///
+  /// The logout hears its own 401: the server no longer knowing the session is the logout done, which the user asked
+  /// for, and not a session the server dropped ([recordShareSessionDroppedProvider]). Any other answer is heard as
+  /// [send] hears it.
   Future<bool> logout() async {
-    if (state == null) {
+    final session = state;
+    if (session == null) {
       await _forgetAll();
       return true;
     }
     final ShareAnswer answer;
     try {
-      answer = await send("POST", "/api/auth/logout");
+      answer = await sendShareRequest(
+        ref.read(recordShareDioProvider),
+        "POST",
+        "/api/auth/logout",
+        bearer: session.token,
+      );
     } on DioException {
       return false;
     }
     if (answer.status != 204 && answer.status != 401) {
+      await answered(session.token, answer.status, answer.body?["error"]);
       return false;
     }
     await _forgetAll();
@@ -397,8 +422,9 @@ class RecordShareSession extends Notifier<ShareSession?> {
   }
 
   /// Drops the session and every share note: the notes index this account's shares, and another account logging
-  /// in next must not see them as its own.
+  /// in next must not see them as its own. The user ended the session, or the account; the server did not drop it.
   Future<void> _forgetAll() async {
+    ref.read(recordShareSessionDroppedProvider.notifier)._set(false);
     state = null;
     for (final (:key, value: _) in _box.entries().toList()) {
       await _box.delete(key);
@@ -408,3 +434,18 @@ class RecordShareSession extends Notifier<ShareSession?> {
 }
 
 final recordShareSessionProvider = NotifierProvider<RecordShareSession, ShareSession?>(RecordShareSession.new);
+
+/// Whether the device holds no session because the server dropped it: a sharing or a sync request answered 401
+/// ([RecordShareSession.answered]), and the user has not logged in since. False where the user logged out, deleted the
+/// account, or never logged in, so the screen tells the two apart. Only [RecordShareSession] sets it, and it is kept in
+/// memory and not on disk: starting the app again shows the device logged out.
+class RecordShareSessionDropped extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void _set(bool dropped) => state = dropped;
+}
+
+final recordShareSessionDroppedProvider = NotifierProvider<RecordShareSessionDropped, bool>(
+  RecordShareSessionDropped.new,
+);

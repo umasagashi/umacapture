@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/chara_detail/record_sync_edits.dart';
+import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
@@ -159,6 +161,8 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
+    final roomStop = ref.read(syncRoomStopProvider);
+    final edits = ref.read(syncLocalEditsProvider.notifier);
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
@@ -169,7 +173,14 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     exitSelection(ref);
     var notStarted = false;
     try {
-      await storage.deleteAllAsync(widget.recordIds, effects: effects);
+      final deleted = await storage.deleteAllAsync(widget.recordIds, effects: effects);
+      // A delete the user made lowers the device's mark of being stopped for
+      // room ([N1-22]), and is an edit of what sync carries; a round of sync
+      // deletes through the store, not here.
+      if (deleted.succeeded.isNotEmpty) {
+        roomStop.lower();
+        edits.edited();
+      }
     } on LongReadNotStartedException catch (exception) {
       // Nothing was removed: the question this dialog asked is still open, so it
       // stays up and says why, and [build]'s refusal takes over from here. An
@@ -292,13 +303,20 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
+    final roomStop = ref.read(syncRoomStopProvider);
+    final edits = ref.read(syncLocalEditsProvider.notifier);
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     var notStarted = false;
     try {
-      await storage.deleteAsync(widget.recordId, effects: effects);
+      final deleted = await storage.deleteAsync(widget.recordId, effects: effects);
+      // Lowers the mark of being stopped for room, and is an edit, as the bulk delete does.
+      if (deleted.succeeded.isNotEmpty) {
+        roomStop.lower();
+        edits.edited();
+      }
     } on LongReadNotStartedException catch (exception) {
       notStarted = exception.heldBy != null;
       announceLongReadNotStarted(exception, operation: 'A record delete');

@@ -474,6 +474,7 @@ class LocalSyncRead {
     this.quarantineUnnamed = 0,
     this.quarantineDeleted = const {},
     this.unreadable = const {},
+    this.mergesInProgress = const {},
   });
 
   /// What the device holds.
@@ -489,10 +490,15 @@ class LocalSyncRead {
   /// The ids of the records the user deleted from the quarantine shelf ([quarantineUserDeletedName]).
   final Set<String> quarantineDeleted;
 
-  /// The units that could not be read, and the records a merge this device started has not finished ([N15-02]: a
-  /// round merges a record only once the merge that writes it is done). The list holds what an earlier read found of
-  /// them, where there was one, and nothing of them otherwise: a unit here is not read as removed.
+  /// The units that could not be read. The list holds what an earlier read found of them, where there was one, and
+  /// nothing of them otherwise: a unit here is not read as removed.
   final Set<SyncUnit> unreadable;
+
+  /// The records a merge this device started has not finished, each with the ids its merges retire
+  /// ([recordMergeWaiting]) ([R6-3], [N15-02]: a round merges a record only once the merge that writes it is done). The
+  /// list holds what an earlier read found of each record, where there was one, and nothing of it otherwise: a record
+  /// here is not read as removed.
+  final Map<String, Set<String>> mergesInProgress;
 }
 
 /// A record's body object: its `record.json` without what only this device holds.
@@ -518,6 +524,11 @@ Future<LocalSyncRead> readLocalSyncList(
       for (final unit in previous.unreadable)
         if (unit is SyncRecordUnit && !records.contains(unit.id)) unit,
   };
+  final mergesInProgress = <String, Set<String>>{
+    if (!whole)
+      for (final MapEntry(key: id, value: retired) in previous.mergesInProgress.entries)
+        if (!records.contains(id)) id: retired,
+  };
 
   for (final id in whole ? await _everyRecordId(info) : records) {
     try {
@@ -532,9 +543,11 @@ Future<LocalSyncRead> readLocalSyncList(
       } else {
         rows[id] = row;
       }
-    } on _UnsettledMerge {
-      logger.i('Sync leaves the record $id as it was: a merge into it has not finished.');
-      unreadable.add(SyncUnit.record(id));
+    } on _UnsettledMerge catch (merge) {
+      logger.i(
+        'Sync leaves the record $id, and what its merge retires, as they were: a merge into it has not finished.',
+      );
+      mergesInProgress[id] = merge.waiting;
     } catch (error, stackTrace) {
       logger.w('Sync could not read the record $id.', error, stackTrace);
       unreadable.add(SyncUnit.record(id));
@@ -588,6 +601,7 @@ Future<LocalSyncRead> readLocalSyncList(
     quarantineUnnamed: quarantineUnnamed,
     quarantineDeleted: quarantineDeleted,
     unreadable: unreadable,
+    mergesInProgress: mergesInProgress,
   );
 }
 
@@ -608,14 +622,16 @@ Future<List<(String, String)>> _everyColumn(PathInfo info) async => [
 
 const _oneRecord = LongReadDeclaration.none(reason: 'reads one small record.json and two notes beside it');
 
-/// A record a merge this device started has not finished ([isRecordMergeSettled]).
+/// A record a merge this device started has not finished ([recordMergeWaiting]), with the ids the merge retires.
 class _UnsettledMerge implements Exception {
-  const _UnsettledMerge();
+  const _UnsettledMerge(this.waiting);
+
+  final Set<String> waiting;
 }
 
-/// The record [id] as the list holds it, or null where neither store holds it. Throws where it cannot be read, or
-/// both stores hold it (a move between them not finished yet: a later read finds one), or a merge into it has not
-/// finished ([_UnsettledMerge]). The caller holds the record's lock.
+/// The record [id] as the list holds it, or null where neither store holds it. Throws where it cannot be read — its
+/// merges in progress included —, or both stores hold it (a move between them not finished yet: a later read finds
+/// one), or a merge into it has not finished ([_UnsettledMerge]). The caller holds the record's lock.
 Future<SyncListRow?> readSyncRecordRowUnlocked(PathInfo info, String id) async {
   final held = [
     for (final store in [info.charaDetailActiveDir, info.charaDetailArchiveDir])
@@ -632,7 +648,13 @@ Future<SyncListRow?> readSyncRecordRowUnlocked(PathInfo info, String id) async {
     return false;
   }
 
-  if (!await isRecordMergeSettled(dir, isRecord: isRecord)) throw const _UnsettledMerge();
+  switch (await recordMergeWaiting(dir, isRecord: isRecord)) {
+    case null:
+      throw StateError('The merges in progress into $id cannot be read.');
+    case final waiting when waiting.isNotEmpty:
+      throw _UnsettledMerge(waiting);
+    case _:
+  }
   final record = syncRecordOf(
     CharaDetailRecord.fromRecordJson(utf8.decode(bytes)),
     await readRecordNotes(dir),
@@ -721,15 +743,22 @@ SyncHeldRecords? syncHeldRecordsOf(RefBase ref) {
 
 /// The ids of the records whose rows in [previous] may not be what the device holds now, by what the stores [held]
 /// hold: each record they hold that [previous] lists otherwise, or not at all, or that they could not read whole;
-/// each record [previous] lists, or could not read, that they hold no longer. A record a store could not open is
-/// none of these — it is on disk still, and its row stays as it was. Every other record is left unread.
+/// each record whose merge may not have finished, which can leave its row as [previous] lists it — one that absorbed a
+/// record still on disk ([recordMergeWaiting] waits only for those), or one [previous] read as merging; each record
+/// [previous] lists, or could not read, that they hold no longer. A record a store could not open is none of these —
+/// it is on disk still, and its row stays as it was. Every other record is left unread.
 Set<String> syncRecordsChangedSince(LocalSyncRead previous, SyncHeldRecords held) => {
   for (final MapEntry(key: id, value: record) in held.records.entries)
-    if (record == null || !syncRecordsAgree(record, previous.list.rows[id]?.record)) id,
+    if (record == null ||
+        record.absorbed.any((x) => held.records.containsKey(x) || held.unavailable.contains(x)) ||
+        previous.mergesInProgress.containsKey(id) ||
+        !syncRecordsAgree(record, previous.list.rows[id]?.record))
+      id,
   for (final id in {
     ...previous.list.rows.keys,
     for (final unit in previous.unreadable)
       if (unit is SyncRecordUnit) unit.id,
+    ...previous.mergesInProgress.keys,
   })
     if (!held.records.containsKey(id) && !held.unavailable.contains(id)) id,
 };

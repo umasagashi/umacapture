@@ -143,7 +143,7 @@ class World extends SyncWorld {
     DeleteAccount() || Elapse() || OldApp() || Upgrade() => false,
     SetStorageFull() || SetDatabaseRoom() || SetDailyRows() || SetDailyReads() || PushCut() || ReceiveCut() => false,
     Resume() => false,
-    ShelfOp() => false,
+    ShelfOp() || MergeInProgressOp() => false,
     _ => true,
   };
 
@@ -162,7 +162,8 @@ class World extends SyncWorld {
           PushCut() ||
           ReceiveCut() ||
           Resume() ||
-          ShelfOp():
+          ShelfOp() ||
+          MergeInProgressOp():
         throw UnsupportedError('these rules have no path for $op');
       case Capture(:final id, :final captured, :final withImages):
         d.capture(id, captured, withImages: withImages);

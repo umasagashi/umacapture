@@ -448,16 +448,48 @@ class _FilePlace implements SyncPlace<_Carried> {
   @override
   Future<void> workOutBinding(SyncUnbound record) async => d._bind(record.id);
 
+  /// As the app's ([readLocalSyncList]): a record a merge of the device's into it has not finished is a merge in
+  /// progress, with the ids it retires, by the app's decision over the mark ([syncMergeWaiting] of
+  /// [FDevice.mergesInProgress]); and the list holds of it what [previous] — the base's list — does, or nothing where
+  /// there is none, as the app's read of the records changed since the base leaves it.
   @override
   Future<SyncLocal?> read({LocalSyncRead? previous}) async {
     final s = d.store;
     final shelf = d.shelfAsRead ?? d.shelfRead;
+    Set<String> waiting(FRec r) => switch (d.mergesReadAs) {
+      MergeReading.asTheApp =>
+        syncMergeWaiting(d.mergesInProgress[r.id] ?? const {}, isRecord: s.records.containsKey) ?? const {},
+      MergeReading.settled => const {},
+      MergeReading.everyAbsorbedPair => {
+        for (final id in r.absorbed)
+          if (id != r.id && s.records.containsKey(id)) id,
+      },
+      MergeReading.everStopped when d.mergesEverStopped.contains(r.id) => {
+        ...?d.mergesInProgress[r.id],
+        for (final id in r.absorbed)
+          if (id != r.id) id,
+      },
+      MergeReading.everStopped => const {},
+    };
+    final unsettled = {
+      for (final r in s.records.values)
+        if (waiting(r) case final retired when retired.isNotEmpty) r.id: retired,
+    };
+    final list = _listOf(s);
+    final rows = {
+      for (final MapEntry(key: id, value: row) in list.rows.entries)
+        if (!unsettled.containsKey(id)) id: row,
+      for (final id in unsettled.keys) id: ?previous?.list.rows[id],
+    };
     return (
       local: LocalSyncRead(
-        _listOf(s),
+        unsettled.isEmpty
+            ? list
+            : SyncList(rows: rows, cells: list.cells, titles: list.titles, dismissed: list.dismissed),
         quarantined: shelf.named,
         quarantineUnnamed: shelf.unnamed,
         quarantineDeleted: {...d.shelfDeleted},
+        mergesInProgress: unsettled,
       ),
       unavailable: const <String>{},
     );
@@ -665,10 +697,14 @@ class _FilePlace implements SyncPlace<_Carried> {
 /// all, as the Worker does, the database's room ([_admitWrite]). [cut]: the swap
 /// past the ones it answers gets no answer, as a connection that drops ([SwapCut]).
 class _FileSyncServer implements SyncServer {
-  _FileSyncServer(this.s, this.device, {this.cut});
+  _FileSyncServer(this.s, this.device, {this.cut, this.stopped});
   final FServer s;
   final String device;
   final SwapCut? cut;
+
+  /// The device's mark of being stopped for room ([FDevice.roomStop]), which a control reads
+  /// ([FServer.roomRefusalEndsTheRound]).
+  final SyncRoomStop? stopped;
 
   /// Thrown where a swap gets no answer: not a refusal of the server's, so the app's round reads it as no answer
   /// ([SyncRoundEnd.answerLost]).
@@ -741,7 +777,8 @@ class _FileSyncServer implements SyncServer {
   /// The room a write that stores a part or replaces the root needs: the database's, the reserve included. The account's
   /// cap weighs no part ([SetStorageFull]).
   void _admitWrite() {
-    if (s.database == DatabaseRoom.none || (s.roomRefusalEndsTheRound && _refusedForRoom)) {
+    final refusedForRoom = _refusedForRoom || (stopped?.up ?? false);
+    if (s.database == DatabaseRoom.none || (s.roomRefusalEndsTheRound && refusedForRoom)) {
       _refuse(const SyncRefusal(507, 'database_full'));
     }
   }
@@ -770,10 +807,9 @@ class _FileSyncServer implements SyncServer {
   /// As the Worker: bytes that do not hash to the name are refused as the bucket refuses them, an image the server
   /// holds is there already, and under the form `none` a new one is refused but the reduced JPEG an archive puts in
   /// place of a PNG the server holds, which a row of its list archived with resized images names with it; a new one
-  /// that is taken needs room for new bytes ([_admitNewBytes]). What the app's round does not keep to — the day's rows,
-  /// and the room where the world does not run it without that ([FDevice.appRoundLacking]) — refuses the world before
-  /// the round runs ([OfTheModelsRound]); the server stores the image as a put of the model's round does
-  /// ([FServer.putImage]).
+  /// that is taken needs room for new bytes ([_admitNewBytes]). What the app's round does not keep to — the day's rows
+  /// — refuses the world before the round runs ([OfTheModelsRound]); the server stores the image as a put of the
+  /// model's round does ([FServer.putImage]).
   @override
   Future<void> putImage(String name, Uint8List bytes, {required bool jpeg}) async {
     if (syncObjectName(bytes) != name) throw const SyncRefusal(502, 'storage_refused');

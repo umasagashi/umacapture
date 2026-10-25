@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_zip.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
@@ -327,6 +328,8 @@ class CharaDetailImportButton extends ConsumerWidget {
           writtenIds: importedIds,
           effects: effects,
         );
+        // The records a zip put in are an edit of what sync carries.
+        if (importedIds.isNotEmpty) container.read(syncLocalEditsProvider.notifier).edited();
       }
       if (failures == 0) {
         if (importedIds.isEmpty && refusals.isEmpty) {

@@ -10,8 +10,9 @@
 // is what it makes of a real data directory. A device runs rounds through the app's own container
 // ([SyncTestDevice.open]), which a test closes and opens again to restart the app — or, logged in to
 // [syncTestAccount], asks for one as the app does, through its switch of sync ([SyncTestDevice.roundAsAsked]); the
-// server answers every endpoint a round calls ([SyncServer]), and a test turns a replacement through
-// [FakeSyncServer.beforeReplace],
+// server answers every endpoint a round calls ([SyncServer]) — directly, or over HTTP through the device's own sync
+// server ([SyncTestDevice.overHttp]) and the Worker's face over it (`sync_http_face.dart`) —, and a test turns a
+// replacement through [FakeSyncServer.beforeReplace],
 // [FakeSyncServer.refuseAsStale] and [FakeSyncServer.loseAnswer], and holds a request for bodies through
 // [FakeSyncServer.beforeBodies]; a device's rating and memo writes are held or failed through
 // [SyncTestDevice.beforeMetadataWrite]; the work on a record's binding is held through [SyncBindingGateFsBackend]. A
@@ -25,6 +26,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
@@ -38,9 +40,11 @@ import 'package:umacapture/src/chara_detail/record_share_session.dart';
 import 'package:umacapture/src/chara_detail/record_sync.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
+import 'package:umacapture/src/chara_detail/record_sync_server.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/fs_backend_io.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
@@ -66,7 +70,7 @@ import 'settling.dart';
 const syncTestAccount = 'account-1';
 
 /// The key the switch of sync is kept under in the settings store.
-final recordSyncKey = SettingsEntryKey.recordSync.name;
+final recordSyncKey = SettingsEntryKey.recordSyncAccount.name;
 
 /// A session of [syncTestAccount].
 class _LoggedIn extends RecordShareSession {
@@ -110,10 +114,35 @@ class SyncTestDevice {
   /// The app over this data directory as it starts, before its stores have loaded: opened where it is not open.
   ProviderContainer start() => _container ??= makeMergeContainer(info: info, overrides: _overrides);
 
-  /// The device is logged in to [syncTestAccount].
+  /// The sharing server's side of this device's logins, where set before [open]: the device's session is then the
+  /// app's own, which [login] and [logout] change as the user does, and none until the first [login]. Where unset, the
+  /// device is logged in to [syncTestAccount] for good.
+  FakeShareAuth? auth;
+
+  /// The HTTP face of the sync server the device's own sync server ([syncServerProvider], [overHttp]) speaks to, and
+  /// the deadline of each of its requests where it is not the app's ([syncRequestTimeoutProvider]); set before [open].
+  HttpClientAdapter? syncHttp;
+  Duration? syncRequestTimeout;
+
+  /// The time the moments of a round tell ([syncMomentTimeProvider]) where it is not the app's; set before [open].
+  SyncMomentTime? syncTime;
+
+  /// The device's own sync server ([syncServerProvider]), under its session, speaking to [syncHttp].
+  Future<SyncServer> overHttp() async =>
+      (await open()).read<SyncServer?>(syncServerProvider) ?? fail('the device holds no session');
+
+  /// The device is logged in to [syncTestAccount], or as [auth] says.
   List<Override> get _overrides => [
     pathLayoutLoader.overrideWith((ref) async => info),
-    recordShareSessionProvider.overrideWith(_LoggedIn.new),
+    recordSyncDioProvider.overrideWithValue(Dio()..httpClientAdapter = syncHttp ?? const _NoNetwork()),
+    if (syncRequestTimeout case final timeout?) syncRequestTimeoutProvider.overrideWithValue(timeout),
+    if (syncTime case final time?) syncMomentTimeProvider.overrideWithValue(time),
+    if (auth case final auth?) ...[
+      recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = auth),
+      loginPageOpenerProvider.overrideWithValue((_) async => true),
+      loginListenerBinderProvider.overrideWithValue(({required String h}) async => null),
+    ] else
+      recordShareSessionProvider.overrideWith(_LoggedIn.new),
     if (beforeMetadataWrite case final before?)
       metadataFileWriterProvider.overrideWithValue((path, contents) async {
         await before(path);
@@ -142,7 +171,9 @@ class SyncTestDevice {
   /// Turns this device's sync on or off, as the user does ([RecordSync.setOn]). The switch is kept in the settings
   /// store, which every device of a test shares: a test that turns it on turns it off again when it ends.
   Future<void> setSyncOn(bool on) async {
-    if (on) addTearDown(() => StorageEntry<bool>(box: StorageBox(StorageBoxKey.settings), key: recordSyncKey).delete());
+    if (on) {
+      addTearDown(() => StorageEntry<String>(box: StorageBox(StorageBoxKey.settings), key: recordSyncKey).delete());
+    }
     await (await open()).read(recordSyncProvider.notifier).setOn(on);
   }
 
@@ -150,9 +181,33 @@ class SyncTestDevice {
   Future<void> setImageForm(SyncServer server, String form) async =>
       (await open()).read(recordSyncProvider.notifier).setImageForm(server, form);
 
+  /// The app's moments of a round, alive from now on ([recordSyncTriggersProvider]), as the app reads them at its
+  /// start — which asks for the round of the start.
+  Future<void> startTriggers() async => (await open()).read(recordSyncTriggersProvider);
+
   /// One sync round against [server], asked for as the app asks for one ([RecordSync.round]); null where none runs.
   Future<SyncRoundOutcome?> roundAsAsked(SyncServer server) async =>
       (await open()).read(recordSyncProvider.notifier).round(server);
+
+  /// The user syncs now against [server] ([RecordSync.syncNow]): the device's mark of being stopped for room comes
+  /// down, and a round runs as [roundAsAsked] runs one; with sync on ([setSyncOn]) it is the round's outcome.
+  Future<SyncRoundOutcome> syncNow(SyncServer server) async =>
+      (await (await open()).read(recordSyncProvider.notifier).syncNow(server)) ??
+      (fail('no round ran: is sync on on this device?'));
+
+  /// The user logs in to [account] through the app's login ([RecordShareSession.beginLogin], [LoginAttempt.claim]),
+  /// against [auth]. The session is kept in the settings store, which every device of a test shares: the test's end
+  /// drops it.
+  Future<void> login(String account) async {
+    addTearDown(() => StorageBox(StorageBoxKey.recordShares).delete(shareSessionKey));
+    auth!.account = account;
+    final attempt = await (await open()).read(recordShareSessionProvider.notifier).beginLogin();
+    expect(await attempt.claim(), LoginOutcome.signedIn);
+  }
+
+  /// The user logs out through the app's logout ([RecordShareSession.logout]), against [auth].
+  Future<void> logout() async =>
+      expect(await (await open()).read(recordShareSessionProvider.notifier).logout(), isTrue);
 
   void dispose() {
     close();
@@ -395,6 +450,100 @@ class SyncTestDevice {
   }
 }
 
+/// The network a device of the tests reaches where its sync server is not given one ([SyncTestDevice.syncHttp]):
+/// none.
+class _NoNetwork implements HttpClientAdapter {
+  const _NoNetwork();
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? requestStream, Future<void>? cancelFuture) =>
+      throw StateError('a device of the tests reaches no network: ${options.method} ${options.uri}');
+
+  @override
+  void close({bool force = false}) {}
+}
+
+/// The time the moments of a round tell ([SyncMomentTime]), held by the test: the clock it sets ([now]), and each
+/// timer started ([timers]), which it fires ([HeldTimer.fire]).
+class HeldSyncTime {
+  DateTime now = DateTime.utc(2030);
+
+  /// Every timer started, the first first.
+  final timers = <HeldTimer>[];
+
+  SyncMomentTime get time => SyncMomentTime(
+    now: () => now,
+    timer: (duration, callback) {
+      final timer = HeldTimer(duration, callback);
+      timers.add(timer);
+      return timer;
+    },
+  );
+}
+
+/// A timer of [HeldSyncTime]: it runs [_callback] when the test fires it, where it was not cancelled.
+class HeldTimer implements Timer {
+  HeldTimer(this.duration, this._callback);
+
+  /// The time it was started for.
+  final Duration duration;
+  final void Function() _callback;
+  var _active = true;
+
+  /// Runs it, as its time coming does.
+  void fire() {
+    expect(_active, isTrue, reason: 'a timer that was cancelled, or has run, does not run');
+    _active = false;
+    _callback();
+  }
+
+  @override
+  void cancel() => _active = false;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  int get tick => _active ? 0 : 1;
+}
+
+/// The sharing server's answers to a device's logins and logouts, as the Worker gives them: a claim signs in to
+/// [account], a trainer id is registered, a logout ends the session.
+class FakeShareAuth implements HttpClientAdapter {
+  /// The account the next claim signs in to.
+  String account = syncTestAccount;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    await requestStream?.drain<void>();
+    ResponseBody json(Map<String, Object?> body) => ResponseBody.fromString(
+      jsonEncode(body),
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+    );
+    return switch (options.uri.path) {
+      '/api/auth/claim' => json({
+        'token': 'token-$account',
+        'expires_at': 4102444800000,
+        'account_id': account,
+        'deleting': false,
+      }),
+      '/api/me/trainers' => json({}),
+      '/api/auth/logout' => ResponseBody.fromString('', 204),
+      final path => throw StateError('the sharing server of the test answers no $path'),
+    };
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 /// A request whose answer did not arrive.
 class FakeSyncAnswerLost implements Exception {
   @override
@@ -436,6 +585,40 @@ class FakeSyncServer implements SyncServer {
   /// The slots each replacement made changed, in order.
   final slotsChanged = <int>[];
 
+  /// The `error` the server refuses a put of new bytes with for want of room (`507`), as the Worker refuses it: a put of
+  /// bodies that names one the server does not hold is refused whole, and stores none of them. Null where it has room.
+  String? noRoom;
+
+  /// How many puts of bodies the server refused for room ([noRoom]).
+  int refusedForRoom = 0;
+
+  /// The UTC day of the clock the app writes by ([valueWriteClock]) whose daily limit is all but used up
+  /// ([limitTheDay]), and how many puts of new bytes it takes still; none where no day is limited.
+  ({int day, int left, String scope})? _limited;
+
+  /// How many puts the server refused for the day ([limitTheDay]).
+  int refusedForTheDay = 0;
+
+  /// Of the UTC day the clock is in now, the server takes [puts] more puts of new bytes — a put of bodies that names
+  /// one it does not hold, a put of an image it does not hold —, and refuses each after them `429 daily_limit` of the
+  /// limit [scope] names (`account` or `service`), with the seconds to the next UTC day, as the Worker refuses them once
+  /// what is left of a daily limit is the reserve. A refused put counts against none; the next day has room.
+  void limitTheDay(int puts, {String scope = 'account'}) =>
+      _limited = (day: valueWriteClock() ~/ Duration.millisecondsPerDay, left: puts, scope: scope);
+
+  /// Counts a put of new bytes against the day's limit ([limitTheDay]), or refuses it.
+  void _countPut() {
+    final now = valueWriteClock();
+    final day = now ~/ Duration.millisecondsPerDay;
+    final limited = _limited;
+    if (limited == null || limited.day != day) return;
+    if (limited.left <= 0) {
+      refusedForTheDay++;
+      throw SyncRefusal.dailyLimit(((day + 1) * Duration.millisecondsPerDay - now) ~/ 1000, scope: limited.scope);
+    }
+    _limited = (day: day, left: limited.left - 1, scope: limited.scope);
+  }
+
   final _bodies = <String, String>{};
   final _bodyBindings = <String, Map<String, Object?>>{};
   final _bodyIcons = <String, String?>{};
@@ -463,8 +646,15 @@ class FakeSyncServer implements SyncServer {
     return {for (final key in _bindingKeys) key: json[key]};
   }
 
+  /// Whether the operator switched sync off (`SYNC_ENABLED=false`): the Worker then refuses every sync request
+  /// `503 sync_paused`, and the fake refuses the one a round asks first, the generation.
+  bool paused = false;
+
   @override
-  Future<({int generation, String? root})> readGeneration() async => (generation: generation, root: rootName);
+  Future<({int generation, String? root})> readGeneration() async {
+    if (paused) throw const SyncRefusal(503, 'sync_paused');
+    return (generation: generation, root: rootName);
+  }
 
   /// How many times a root was read: a round reads the list only where the generation moved from its base's.
   int rootsRead = 0;
@@ -503,6 +693,13 @@ class FakeSyncServer implements SyncServer {
       if (identical(_icon((decoded as Map)['metadata']['icon']), _notAnIcon)) {
         throw SyncRefusal(400, 'invalid_payload', 'bodies[$i].body');
       }
+    }
+    if (bodies.any((body) => !_bodies.containsKey(body.name))) {
+      if (noRoom case final error?) {
+        refusedForRoom++;
+        throw SyncRefusal(507, error);
+      }
+      _countPut();
     }
     return [for (final body in bodies) _storeBody(body.name, body.body)];
   }
@@ -662,6 +859,7 @@ class FakeSyncServer implements SyncServer {
       if (form == 'none' && !(jpeg && _replacements().contains(name))) {
         throw const SyncRefusal(409, 'images_not_synced');
       }
+      _countPut();
       images[name] = bytes;
     }
     await afterImagePut?.call(name);
@@ -721,7 +919,8 @@ class FakeSyncServer implements SyncServer {
 
 /// The filesystem as the app writes through it, stopping the app at one write: the first write that reaches the
 /// [stopAt]th of the marks [markOf] names is held until the test lets it go ([stop]), and then fails, as does every write
-/// after it — the app stops there, as a crash stops it, and nothing after it reaches the disk. Reads go through.
+/// after it — the app stops there, as a crash stops it, and nothing after it reaches the disk. Reads go through. Let go
+/// with [go] instead, the held write and every one after it land: a write held as long as the test wants.
 class SyncStopFsBackend implements FsBackend {
   SyncStopFsBackend(this.inner, {required this.markOf, this.stopAt = 1});
 
@@ -749,7 +948,16 @@ class SyncStopFsBackend implements FsBackend {
   /// Lets the held write go, failing.
   void stop() => _go.complete();
 
+  /// Lets the held write go on, landing, and every write after it.
+  void go() {
+    _through = true;
+    _go.complete();
+  }
+
+  var _through = false;
+
   bool _stops(List<String> paths) {
+    if (_through) return false;
     if (_stopped) return true;
     final marks = {for (final path in paths) ?markOf(path)};
     _reached.addAll(marks);
@@ -762,6 +970,7 @@ class SyncStopFsBackend implements FsBackend {
   Future<void> _write(List<String> paths) async {
     if (!_stops(paths)) return;
     await _go.future;
+    if (_through) return;
     throw const FileSystemException('the app stopped');
   }
 

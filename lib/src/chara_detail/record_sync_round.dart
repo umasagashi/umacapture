@@ -24,10 +24,10 @@
 // on either side reads as the whole round would; a pair does not: stopped before the server's record is in place, a
 // pair of the base that names the id, which the device took out, is read as the device's again and goes in on the
 // record split off.
-// A record a merge on this device has not finished, and a record that cannot be read, is left as it is on the device
-// and as the server lists it ([N15-01], [N15-02]). So is a record on the quarantine shelf, every id the device cannot
-// tell such a record did not absorb, and every id joined to one of those by what a record absorbed or split off
-// ([syncUnreadHeld]); the base goes on holding those as it agreed on them ([SyncKeptList.held]), so the round after the
+// A record a merge on this device has not finished, with the ids the merge retires, and a record that cannot be read,
+// is left as it is on the device and as the server lists it ([N15-01], [N15-02]). So is a record on the quarantine
+// shelf, every id the device cannot tell such a record (not a merge, whose mark tells what it retires) did not absorb,
+// and every id joined to one of those by what a record absorbed or split off ([syncUnreadHeld]); the base goes on holding those as it agreed on them ([SyncKeptList.held]), so the round after the
 // device reads them again, or the shelf lets them go, merges them as where they were never kept.
 //
 // The list goes to the server in replacements of at most as many slots of the root as the server states it takes in one
@@ -40,6 +40,33 @@
 // neither removes nor cuts — holds every round of its device back (S-10): the round counts them in the very list it
 // read to merge and send, and where there is one it ends there ([SyncRoundEnd.heldByLongMemos]), the device's records,
 // cells and pairs as they were and the server not asked to change.
+//
+// A body the server has no room for (`507`) waits until it has some, and the round puts no body after it ([R7-4],
+// [N1-15]): the records whose bodies wait, and the records their merges retired ([syncWaitingForRoom]), go in the list
+// sent as the server lists them, their cells, archive states and pairs included ([N1-17]); the rest of the list goes in
+// the same round — a delete, an archive, a rating or a memo of another record needs no room. The device holds them as
+// it does, and the base is the server's list, so the round after merges them as changes of the device's again and puts
+// their bodies. The round says what waits ([SyncRoundOutcome.waitingForRoom], [R7-1]). Where the database has no room
+// at all, the server refuses the parts and the replacement too, and the round ends as it ends at any request refused.
+// Whose room it was — the account's, or the service's, which also stops a round as sync switched off does — the round
+// tells apart ([SyncRoundOutcome.serverStop], D2-5).
+// A put of new bytes the server has no room for, a body's or an image's, raises the device's mark of being stopped for
+// room ([SyncRoomStop]), and while it is up no round asks to put a new body or an image ([N1-15]): the records whose
+// bodies the server does not list wait as they would at a refusal, and the images wait. What lowers it is the user's
+// — syncing now, starting the app, deleting a record, archiving one ([N1-22]) —, and a round that has no base of its
+// account; not the server's room, which the device does not watch.
+// A put of bodies the day's limit refuses (`429 daily_limit`) is waited for as one the room refuses, but for that
+// round alone ([SyncRoundOutcome.waitingForTheDay], [N1-15]): what waits, and the round's images, go in the first round
+// that asks once the server takes them again, with nothing of the user's — the device and its base say what is left,
+// as they do of any change of the device's, and a refused request counts against no limit (`docs/sync-protocol.md`),
+// so the device keeps no time of its own to wait for.
+//
+// The close of the desktop app waits while a round puts its result in place, up to the base it keeps after
+// ([SyncPlacing]): a round stopped between the two leaves, of a record it split off, pairs the user did not make (A106),
+// and the base, kept once the result is in place, is what closes that span. It waits for nothing else of the round —
+// not the requests before, nor the list sent and the images after, each of which a round stopped part way leaves as the
+// next round reads it. Once the app closes, a round that has not begun to put its result in place does not begin
+// ([SyncRoundEnd.closing]). A browser gives a closing tab no such wait.
 //
 // What the round kept on the side that keeps more ([R3-5]) the device that ran it tells, each once: by the round after
 // which no round meets it again ([_told]).
@@ -68,12 +95,14 @@
 // ([SyncPlace]), which applies what the round hands it at the point and under the lock the contract states. The app's
 // place is [AppSyncPlace] ([runSyncRound]).
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/addon/trigger_catalog.dart' show AppExitRequest, appExitRequestsProvider;
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/record_binding.dart';
@@ -94,11 +123,18 @@ export '/src/chara_detail/record_sync_app_place.dart' show syncBaseFile, syncIma
 /// answer ([detail]: the current generation of a `stale_generation`, the names of a `missing_objects`, the `limit` of
 /// a `too_many_parts`, …).
 class SyncRefusal implements Exception {
-  const SyncRefusal(this.status, this.error, [this.detail]);
+  const SyncRefusal(this.status, this.error, [this.detail]) : scope = null;
+
+  /// `429 daily_limit`: [detail] the seconds its `Retry-After` names, and [scope] the limit's.
+  const SyncRefusal.dailyLimit(this.detail, {required this.scope}) : status = 429, error = 'daily_limit';
 
   final int status;
   final String error;
   final Object? detail;
+
+  /// Whose daily limit a `daily_limit` was, as the answer names it — `account` or `service`; null for any other
+  /// refusal.
+  final String? scope;
 
   bool get isStaleGeneration => status == 409 && error == 'stale_generation';
 
@@ -108,7 +144,7 @@ class SyncRefusal implements Exception {
   bool get isTooManyObjects => status == 409 && error == 'too_many_objects';
 
   @override
-  String toString() => 'SyncRefusal($status $error $detail)';
+  String toString() => 'SyncRefusal($status $error $detail${scope == null ? '' : ' $scope'})';
 }
 
 /// The sync endpoints a round calls, as `docs/sync-protocol.md` states them. A refusal is thrown as [SyncRefusal];
@@ -318,12 +354,117 @@ class SyncImageFormSetting {
 /// The image form this device set ([SyncImageFormSetting]), which every round of the app's follows ([runSyncRound]).
 final syncImageFormSettingProvider = Provider<SyncImageFormSetting>((ref) => SyncImageFormSetting());
 
+/// What of the server's stopped what a round sent, by the answer of the request it refused (`docs/sync-protocol.md`):
+/// whose limit it was — the user's account's, or the service's — and whether it was room or a day's. The device tells
+/// its user which (D2-5: the account's room apart from the service's stop; N8: the service's limit apart from the
+/// account's).
+enum SyncServerStop {
+  /// The account's own caps: `507 account_limit`, `507 hidden_limit`.
+  accountRoom,
+
+  /// The service's, which nothing the user does changes: its budget or its database used up (`507 storage_full`,
+  /// `507 database_full`, and any other `507`, which names no cap of the account's), or sync switched off by its
+  /// operator (`503 sync_paused`). How much stopped is the round's end to tell: one that ends [SyncRoundEnd.done] sent
+  /// what needs no room.
+  service,
+
+  /// The account's daily limit: `429 daily_limit` of the scope `account`.
+  accountDay,
+
+  /// The service's daily limit, over every account: `429 daily_limit` of the scope `service`, or of a scope the answer
+  /// does not name as the account's.
+  serviceDay;
+
+  /// Whether it is a daily limit, which stops the puts of the round alone ([SyncRoundOutcome.waitingForTheDay]).
+  bool get forTheDay => this == accountDay || this == serviceDay;
+}
+
+/// The [SyncServerStop] the refusal [error] is; null for any other error, a refusal or not.
+SyncServerStop? syncServerStopOf(Object error) => switch (error) {
+  SyncRefusal(status: 507, error: 'account_limit' || 'hidden_limit') => SyncServerStop.accountRoom,
+  SyncRefusal(status: 507) || SyncRefusal(status: 503, error: 'sync_paused') => SyncServerStop.service,
+  SyncRefusal(status: 429, error: 'daily_limit', scope: 'account') => SyncServerStop.accountDay,
+  SyncRefusal(status: 429, error: 'daily_limit') => SyncServerStop.serviceDay,
+  _ => null,
+};
+
+/// The device's mark of being stopped for room ([N1-15], [N1-22]): up once the server refused a put of new bytes — a
+/// body's or an image's — for want of room (`507`), and from then on no round asks to put a new body or an image, until
+/// the user lowers it ([lower]): syncing now (`RecordSync.syncNow`), deleting a record, archiving one. It is kept in
+/// memory and not on disk, so starting the app lowers it as well; and a round that finds no base of its account — lost,
+/// or of another account — lowers it, the refusal having been of that base's server. Rooms are not watched: what the
+/// server frees, or the operator, tells the device nothing, so a round asks nothing to tell whether to lower it.
+class SyncRoomStop {
+  SyncServerStop? _stop;
+
+  /// Whether the device is stopped for room.
+  bool get up => _stop != null;
+
+  /// Whose room the refusal that raised the mark named ([SyncServerStop.accountRoom] or [SyncServerStop.service]),
+  /// which a round the mark holds back tells as what stopped it ([SyncRoundOutcome.serverStop]); null while it is down.
+  SyncServerStop? get stop => _stop;
+
+  /// The server refused a put of new bytes for want of room, as [stop] says whose.
+  void raise(SyncServerStop stop) => _stop = stop;
+
+  /// The user did what lowers the mark ([N1-22]).
+  void lower() => _stop = null;
+}
+
+/// The mark of this device's being stopped for room ([SyncRoomStop]), which every round of the app's reads and raises
+/// ([runSyncRound]).
+final syncRoomStopProvider = Provider<SyncRoomStop>((ref) => SyncRoomStop());
+
+/// What holds the close of the desktop app while a round puts its result in place and keeps its base after
+/// ([AppExitRequest.hold], A106): the close waits for that span of the round running, and no round begins one once the
+/// app closes.
+class SyncPlacing {
+  Completer<void>? _span;
+  var _closing = false;
+
+  /// A round begins to put its result in place: false where the app closes, and the round puts nothing in place.
+  bool begin() {
+    if (_closing) return false;
+    _span = Completer<void>();
+    return true;
+  }
+
+  /// The round kept its base after the result, or stopped putting it in place.
+  void end() {
+    _span?.complete();
+    _span = null;
+  }
+
+  /// The app closes: done once the round putting its result in place has kept its base, or at once where none does.
+  Future<void> close() {
+    _closing = true;
+    return _span?.future ?? Future.value();
+  }
+}
+
+/// The span of this device's rounds that the close of the desktop app waits for ([SyncPlacing]), which every round of
+/// the app's goes through ([runSyncRound]).
+final syncPlacingProvider = Provider<SyncPlacing>((ref) {
+  final placing = SyncPlacing();
+  // A close already open when the first round reads this closes it as well: the round may start, or first read this
+  // after its first await, once the close has begun.
+  ref.listen<AppExitRequest?>(
+    appExitRequestsProvider,
+    (_, request) => request?.hold(placing.close()),
+    fireImmediately: true,
+  );
+  return placing;
+});
+
 /// Why the image step of a round left images undone ([SyncImagesUndone]), by the answer of the request that did not
 /// land (`docs/sync-protocol.md`).
 enum SyncImagesStop {
   /// The server had no room for an image: `507` — `account_limit`, `hidden_limit`, `storage_full` or `database_full`
-  /// ([R7-4]: what cannot be put waits until it can).
+  /// ([R7-4]: what cannot be put waits until it can), whose room the round tells ([SyncRoundOutcome.serverStop]).
   room,
+
+  /// The day's limit refused a request: `429 daily_limit` ([N1-15]: the rest of the round's images wait for the day).
+  dailyLimit,
 
   /// The server refused a request otherwise: `409 images_not_synced`, the account's form having become none, or any
   /// other refusal.
@@ -371,6 +512,9 @@ enum SyncRoundEnd {
   /// The device holds a memo longer than a round sends ([syncLongMemos], S-10): the round merged nothing, put nothing
   /// in place and sent nothing.
   heldByLongMemos,
+
+  /// The desktop app closes ([SyncPlacing]): the round put nothing in place, and the base did not move.
+  closing,
 }
 
 /// What a round did, and what the device that ran it tells the user ([R3-5]).
@@ -383,7 +527,10 @@ class SyncRoundOutcome {
     this.added = 0,
     this.withheld = 0,
     this.longMemos = 0,
+    this.waitingForRoom = 0,
+    this.waitingForTheDay = 0,
     this.imagesUndone,
+    this.serverStop,
   });
 
   final SyncRoundEnd end;
@@ -412,15 +559,35 @@ class SyncRoundOutcome {
   /// shows as the reason no round runs (S-10), which is not a count of what the round did. None where it was not held.
   final int longMemos;
 
+  /// The ids the list sent left as the server lists them for want of room ([syncWaitingForRoom], [R7-4]): the records
+  /// whose bodies the server had no room for, with the records their merges retired. They wait on the device as they
+  /// are, and a round once the server has room sends them. [end] tells of the rest of the list, which went: a round
+  /// that ends [SyncRoundEnd.done] with ids waiting is not one that sent every change of the device's ([R7-1]). As the
+  /// last attempt of the round put bodies, or held them back for the device's mark of being stopped for room
+  /// ([SyncRoomStop]); none where the server had room for every body, or the round ended before.
+  final int waitingForRoom;
+
+  /// The ids the list sent left as the server lists them for the day's limit (`429 daily_limit`, [N1-15]): as
+  /// [waitingForRoom] does for room, but of this round alone — a round once the server takes puts again sends them,
+  /// with nothing of the user's. None where the day's limit refused no body, or the round ended before.
+  final int waitingForTheDay;
+
   /// What the image step of the round left undone for want of the server's room or answer ([SyncImagesUndone]):
   /// [end] tells of the list, and a round that ends [SyncRoundEnd.done] with images undone is not one whose images all
   /// reached the server ([R7-1]). Null where the step left none undone, or the round ended before it.
   final SyncImagesUndone? imagesUndone;
 
+  /// What of the server's stopped the round, or a part of it ([SyncServerStop]): the refusal the round ended at, where
+  /// it is one; else the one its bodies wait for ([waitingForRoom], [waitingForTheDay]) or its image step stopped for
+  /// ([imagesUndone]) — a refusal of this round's, or the device's mark of being stopped for room that held its puts back
+  /// ([SyncRoomStop.stop]). As the last attempt of the round ended; null where nothing of the server's stopped it.
+  final SyncServerStop? serverStop;
+
   @override
   String toString() =>
       'SyncRoundOutcome(${end.name}, replacements: $replacements, restored: $restored, splitOff: $splitOff, '
-      'added: $added, withheld: $withheld, longMemos: $longMemos, imagesUndone: $imagesUndone)';
+      'added: $added, withheld: $withheld, longMemos: $longMemos, waitingForRoom: $waitingForRoom, '
+      'waitingForTheDay: $waitingForTheDay, imagesUndone: $imagesUndone, serverStop: ${serverStop?.name})';
 }
 
 /// The most characters (code points) a memo a round sends may hold (S-10).
@@ -438,6 +605,56 @@ int syncLongMemos(SyncList list) => list.cells.entries.where((e) {
     _ => false,
   };
 }).length;
+
+/// S-10: how many memos longer than [syncMemoLimit] hold the rounds of the device [place] back, counted as a round
+/// counts them ([syncLongMemos]) in what the device holds — which the screen that turns sync on shows before any round
+/// runs. Reads the device alone, and writes nothing; null where a store has not loaded.
+Future<int?> syncLongMemosOf<C>(SyncPlace<C> place) async {
+  await place.loaded();
+  return switch (await place.read()) {
+    final read? => syncLongMemos(read.local.list),
+    null => null,
+  };
+}
+
+/// N11 (S-08, ruling V2): what a round of [account] would leave changed of the records, as the screen that turns sync
+/// on shows it before: the records the server would list that it does not list as they are now ([toSend]), and the
+/// records the device would hold that it does not hold as they are now ([toReceive]). Counted by the round's own merge
+/// ([mergeRecordSync]) of what the device holds with the server's list, against the base the device keeps of
+/// [account] — read again where a replacement's answer was lost, as a round reads it ([R7-5]) — or none: so a first
+/// round counts every record one side alone holds, and a record the device removed since its base is not one the
+/// server sends back. A record the merge splits off goes to the server under its new id, and is the device's: it is
+/// sent, not taken in. Every record the round sends in parts counts, the ones it works the binding out for first
+/// included.
+///
+/// Reads the server's list once — its generation, and its root and parts where the base is not of that generation —
+/// and runs no round: nothing of the device is written, no list is kept, and the server is asked to change nothing.
+/// Null where a store has not loaded. A request that fails throws, as a round's does.
+Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
+  SyncPlace<C> place,
+  SyncServer server, {
+  required String account,
+}) async {
+  final kept = await place.readKept(SyncKept.base);
+  var base = kept?.account == account ? kept : null;
+  final head = await server.readGeneration();
+  final moved = base == null || base.generation != head.generation;
+  final there = moved ? await _readServerList(server, head.root) : base.list;
+  if (moved && base != null) {
+    if (await place.readKept(SyncKept.sent) case final sent?) base = _baseReadAgain(base, sent, there);
+  }
+  await place.loaded();
+  final read = await place.read();
+  if (read == null) return null;
+  final local = read.local.list;
+  final merged = mergeRecordSync(base?.agreed.side, local.side, there.side);
+  final splitOff = merged.moved.values.toSet();
+  final result = merged.result.records.values;
+  return (
+    toSend: result.where((r) => !syncRecordsAgree(r, there.rows[r.id]?.record)).length,
+    toReceive: result.where((r) => !splitOff.contains(r.id) && !syncRecordsAgree(r, local.rows[r.id]?.record)).length,
+  );
+}
 
 /// How many records without a binding a round works the binding out for before it sends, where the device holds fewer
 /// with one: a round works out as many as this or as the device holds bound, whichever is more, and the rest of the
@@ -466,6 +683,8 @@ Future<SyncRoundOutcome> runSyncRound(
     account: account,
     bindingChunk: bindingChunk,
     imageForm: ref.read(syncImageFormSettingProvider),
+    roomStop: ref.read(syncRoomStopProvider),
+    placing: ref.read(syncPlacingProvider),
   );
   if (place.changedRecords) {
     // A resolution that fails leaves the records as the round left them, only without the links it would have placed,
@@ -483,19 +702,24 @@ Future<SyncRoundOutcome> runSyncRound(
 
 /// Runs one sync round of the device [place], whose session is of [account], against [server]. [bindingChunk]: see
 /// [syncBindingChunk]. [imageForm]: the image form the device sets while the round runs, which its images follow from
-/// then on (S-09); none, and they follow the form the round read.
+/// then on (S-09); none, and they follow the form the round read. [roomStop]: the device's mark of being stopped for
+/// room, which the round reads and raises ([SyncRoomStop]); none, and the round keeps no mark from one round to the next.
+/// [placing]: what the close of the desktop app waits for ([SyncPlacing]); none, and nothing waits for the round.
 Future<SyncRoundOutcome> runSyncRoundOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
   int bindingChunk = syncBindingChunk,
   SyncImageFormSetting? imageForm,
+  SyncRoomStop? roomStop,
+  SyncPlacing? placing,
 }) async {
   var (replacements, restored, splitOff, added) = (0, 0, 0, 0);
   // The records the round has tried to work out the binding of: one it could not is not tried again in this round.
   final tried = <String>{};
   // What the image steps of the round's attempts share: one form read, and one end of the puts.
-  final images = _RoundImages(imageForm);
+  final images = _RoundImages(imageForm, roomStop ?? SyncRoomStop());
+  final placed = placing ?? SyncPlacing();
   var refusedAsStale = false;
   for (;;) {
     final (outcome, :stale, :more) = await _attempt(
@@ -505,6 +729,7 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       bindingChunk: bindingChunk,
       tried: tried,
       images: images,
+      placing: placed,
     );
     // An attempt refused as stale had put its result in place, so what it told stays told after the next one.
     replacements += outcome.replacements;
@@ -525,7 +750,10 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       added: added,
       withheld: outcome.withheld,
       longMemos: outcome.longMemos,
+      waitingForRoom: outcome.waitingForRoom,
+      waitingForTheDay: outcome.waitingForTheDay,
       imagesUndone: outcome.imagesUndone,
+      serverStop: outcome.serverStop,
     );
   }
 }
@@ -533,15 +761,41 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
 /// What the image steps of one round share ([_syncImages]): the account's form, read once as the first of them begins
 /// (S-09: "the form read as the round began"), and followed from then on as this device sets it ([setting]); whether
 /// the round puts images still — one refused or lost ends its puts, in every attempt after it too ("a device refused
-/// sends none of the rest of the round's images"); and why requests did not land ([stops]).
+/// sends none of the rest of the round's images"), and so does the device's mark of being stopped for room ([room]),
+/// up as the round begins or raised in it ([N1-15]); and why requests did not land, or were not made ([stops]), and what
+/// of the server's that was ([serverStop]).
 class _RoundImages {
-  _RoundImages(this.setting);
+  _RoundImages(this.setting, this.room);
 
   final SyncImageFormSetting? setting;
+  final SyncRoomStop room;
   String? _read;
   var _mark = 0;
-  var puts = true;
+  var _ended = false;
   final stops = <SyncImagesStop>{};
+
+  /// What of the server's stopped the round's images, the last that did ([SyncServerStop]); null where none did.
+  SyncServerStop? serverStop;
+
+  /// Whether the round puts images still.
+  bool get puts => !_ended && !room.up;
+
+  /// The round puts no more images, for [stop], which [by] of the server's is where it is one.
+  void stopFor(SyncImagesStop stop, SyncServerStop? by) {
+    _ended = true;
+    note(stop, by);
+  }
+
+  /// A request that did not land, or was not made, for [stop], which [by] of the server's is where it is one.
+  void note(SyncImagesStop stop, SyncServerStop? by) {
+    stops.add(stop);
+    serverStop = by ?? serverStop;
+  }
+
+  /// A put the round does not make: why, where the mark of being stopped for room holds it back.
+  void heldBack() {
+    if (room.stop case final by?) note(SyncImagesStop.room, by);
+  }
 
   /// Reads the form of [server] where the round has not read it yet.
   Future<void> read(SyncServer server) async {
@@ -570,8 +824,11 @@ Future<_Attempt> _attempt<C>(
   required int bindingChunk,
   required Set<String> tried,
   required _RoundImages images,
+  required SyncPlacing placing,
 }) async {
-  // 0. A base of another account is no base, nor is its sent list.
+  // 0. A base of another account is no base, nor is its sent list. A device with no base of this account — one that
+  // lost it, or meets another account — is not stopped for room ([N1-22]): the refusal that stopped it was of the
+  // server that base was of.
   var base = await place.readKept(SyncKept.base);
   var sent = await place.readKept(SyncKept.sent);
   if (base != null && base.account != account) {
@@ -580,6 +837,7 @@ Future<_Attempt> _attempt<C>(
     base = null;
     sent = null;
   }
+  if (base == null) images.room.lower();
 
   // 1–2. The generation, and the server's list where it moved from the base's.
   final ({int generation, String? root}) head;
@@ -590,15 +848,14 @@ Future<_Attempt> _attempt<C>(
     there = news ? await _readServerList(server, head.root) : base.list;
   } catch (error, stackTrace) {
     logger.w('Sync could not read the server list.', error, stackTrace);
-    return _ended(const SyncRoundOutcome(SyncRoundEnd.failed));
+    return _ended(SyncRoundOutcome(SyncRoundEnd.failed, serverStop: syncServerStopOf(error)));
   }
 
   // A replacement the device does not know the answer to: not made where the generation is the base's; else the base
   // is read again against it ([R7-5]), and keeps what it could not confirm.
   if (sent != null) {
     if (base != null && base.generation != head.generation) {
-      final (list, unknown) = rereadSyncBase(base.list, sent.list, there);
-      base = base.copyWith(list: list, unconfirmed: {...base.unconfirmed, ...unknown});
+      base = _baseReadAgain(base, sent, there);
       await place.keep(SyncKept.base, base);
     }
     await place.keep(SyncKept.sent, null);
@@ -627,9 +884,10 @@ Future<_Attempt> _attempt<C>(
   // stay so: the part of the round that reaches them merges them as a round with no base does.
   final heldBack = _heldBack(unbound, merged, local.list, there);
   // A record the device cannot read — on the quarantine shelf, one a store could not open, one that could not be read —
-  // every id the device cannot tell it did not absorb, and every id joined to those, is kept as the server lists it; the
-  // base goes on holding them as it agreed on them. The list holds of a record that could not be read what an earlier
-  // read found, which is not what it absorbed now.
+  // every id the device cannot tell it did not absorb, and every id joined to those, is kept as the server lists it; so
+  // is a merge this device has not finished, the ids it retires, and every id joined to those. The base goes on holding
+  // them as it agreed on them. The list holds of a record that could not be read, and of the end of a merge not
+  // finished, what an earlier read found, which is not what it absorbed now.
   final unread = {
     ...read.unavailable,
     for (final unit in local.unreadable)
@@ -640,11 +898,15 @@ Future<_Attempt> _attempt<C>(
     shelf: local.unreadable.contains(SyncUnit.quarantine) ? null : local.quarantined,
     unnamed: local.quarantineUnnamed,
     unread: unread,
+    merging: {
+      for (final MapEntry(key: end, value: retired) in local.mergesInProgress.entries) ...{end, ...retired},
+    },
     deleted: local.quarantineDeleted,
     agreed: {...?agreed?.rows.keys},
     held: {
       for (final row in local.list.rows.values)
-        if (!unread.contains(row.record.id)) row.record.id: row.record.absorbed,
+        if (!unread.contains(row.record.id) && !local.mergesInProgress.containsKey(row.record.id))
+          row.record.id: row.record.absorbed,
     },
     records: records,
     splitFrom: splitFrom,
@@ -670,8 +932,9 @@ Future<_Attempt> _attempt<C>(
       )
       .length;
   // What is left as it is: on the device, and in the list sent, as the server lists it — one held back, and one kept
-  // for a record the device cannot read: a record a store could not open, one that could not be read, one a merge has
-  // not finished, one on the quarantine shelf, and every id such a record may have absorbed.
+  // for a record the device cannot read: a record a store could not open, one that could not be read, one on the
+  // quarantine shelf, and every id such a record may have absorbed; and one a merge has not finished, with the ids it
+  // retires.
   final kept = {...heldBack, ...unreadHeld};
 
   // 3. Every body the result shows, at hand before anything is put in place.
@@ -694,18 +957,19 @@ Future<_Attempt> _attempt<C>(
     }
   } catch (error, stackTrace) {
     logger.w('Sync applies nothing: the bodies the result shows could not be read.', error, stackTrace);
-    return _ended(_told(SyncRoundEnd.bodiesMissing, counts, local.list, placed: const {}, withheld: withheld));
+    return _ended(
+      _told(
+        SyncRoundEnd.bodiesMissing,
+        counts,
+        local.list,
+        placed: const {},
+        withheld: withheld,
+        serverStop: syncServerStopOf(error),
+      ),
+    );
   }
 
-  // 4. The result in place, then the base at the server's list.
-  final (written: bodyNames, :stop) = await _apply(place, merged, local, base?.agreed, plan, fetched, kept);
-  if (stop != null) {
-    final end = switch (stop) {
-      SyncWriteStop.changed => SyncRoundEnd.changedMeanwhile,
-      SyncWriteStop.failed => SyncRoundEnd.failed,
-    };
-    return _ended(_told(end, counts, local.list, placed: bodyNames.keys.toSet(), withheld: withheld));
-  }
+  // 4. The result in place, then the base at the server's list: the span the close of the desktop app waits for.
   var agreedBase = SyncKeptList(
     account: account,
     generation: head.generation,
@@ -714,7 +978,24 @@ Future<_Attempt> _attempt<C>(
     held: held,
     heldAgreed: heldAgreed,
   );
-  await place.keep(SyncKept.base, agreedBase);
+  if (!placing.begin()) {
+    return _ended(_told(SyncRoundEnd.closing, counts, local.list, placed: const {}, withheld: withheld));
+  }
+  final ({Map<String, String> written, SyncWriteStop? stop}) applied;
+  try {
+    applied = await _apply(place, merged, local, base?.agreed, plan, fetched, kept);
+    if (applied.stop == null) await place.keep(SyncKept.base, agreedBase);
+  } finally {
+    placing.end();
+  }
+  final (written: bodyNames, :stop) = applied;
+  if (stop != null) {
+    final end = switch (stop) {
+      SyncWriteStop.changed => SyncRoundEnd.changedMeanwhile,
+      SyncWriteStop.failed => SyncRoundEnd.failed,
+    };
+    return _ended(_told(end, counts, local.list, placed: bodyNames.keys.toSet(), withheld: withheld));
+  }
   // The records whose files may have changed since the image step that kept what it left of their images: those the
   // device changed since the base the round merged against, and those the round put in place.
   final changed = agreed == null
@@ -729,11 +1010,31 @@ Future<_Attempt> _attempt<C>(
           ...plan.keys,
         };
 
-  // 5–7. The list sent: the result, but for what is left as it is.
-  final next = _listToSend(result, there, local.list, kept, bodyNames);
+  // 5–7. The list sent: the result, but for what is left as it is — and, once the server has no room for a body or the
+  // day's limit refuses one, or the device is stopped for room, for what waits with it ([syncWaitingForRoom]), which the
+  // list sent then holds as the server does.
+  var next = _listToSend(result, there, local.list, kept, bodyNames);
+  var waiting = const <String>{};
+  // What of the server's the bodies that wait wait for.
+  SyncServerStop? waitingFor;
   var replacements = 0;
-  SyncRoundOutcome outcome(SyncRoundEnd end, {SyncImagesUndone? imagesUndone}) =>
-      _told(end, counts, local.list, replacements: replacements, withheld: withheld, imagesUndone: imagesUndone);
+  // What of the server's stopped the round: [stop], what the request it ended at was refused for, where it was; else
+  // what its bodies wait for; else what its images stopped for, where they left something undone.
+  SyncRoundOutcome outcome(SyncRoundEnd end, {SyncImagesUndone? imagesUndone, SyncServerStop? stop}) {
+    final forTheDay = waitingFor?.forTheDay ?? false;
+    return _told(
+      end,
+      counts,
+      local.list,
+      replacements: replacements,
+      withheld: withheld,
+      waitingForRoom: forTheDay ? 0 : waiting.length,
+      waitingForTheDay: forTheDay ? waiting.length : 0,
+      imagesUndone: imagesUndone,
+      serverStop: stop ?? waitingFor ?? (imagesUndone == null ? null : images.serverStop),
+    );
+  }
+
   // The round goes on with the next part where it held records back and worked some out.
   final more = heldBack.isNotEmpty && worked > 0;
   final thereParts = syncListParts(there);
@@ -742,7 +1043,23 @@ Future<_Attempt> _attempt<C>(
     return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
   }
   try {
-    await _putBodies(place, server, next, there);
+    final unput = await _putBodies(place, server, next, there, stopped: images.room.stop);
+    if (unput.waitFor case final stop?) {
+      // [N1-15]: the rest of the round's images wait with them; a refusal for room is the device's to remember.
+      if (stop.forTheDay) {
+        images.stopFor(SyncImagesStop.dailyLimit, stop);
+      } else {
+        images.room.raise(stop);
+        images.stopFor(SyncImagesStop.room, stop);
+      }
+      waitingFor = stop;
+      waiting = syncWaitingForRoom(
+        unput.ids,
+        held: {for (final row in next.rows.values) row.record.id: row.record.absorbed},
+        listed: [for (final row in there.rows.values) row.record.absorbed],
+      );
+      next = _listToSend(result, there, local.list, {...kept, ...waiting}, bodyNames);
+    }
     final stored = {for (final text in thereParts.values) syncObjectName(utf8.encode(text))};
     var (at, generation) = (there, head.generation);
     var changes = syncListChanges(there, next);
@@ -784,7 +1101,7 @@ Future<_Attempt> _attempt<C>(
           continue;
         }
         logger.w('Sync: the server refused the replacement ($refusal).');
-        return _ended(outcome(SyncRoundEnd.refused), stale: refusal.isStaleGeneration);
+        return _ended(outcome(SyncRoundEnd.refused, stop: syncServerStopOf(refusal)), stale: refusal.isStaleGeneration);
       } catch (error, stackTrace) {
         logger.w('Sync: the replacement got no answer; the next round reads the base again.', error, stackTrace);
         return _ended(outcome(SyncRoundEnd.answerLost));
@@ -800,9 +1117,19 @@ Future<_Attempt> _attempt<C>(
     }
   } catch (error, stackTrace) {
     logger.w('Sync could not put the list on the server.', error, stackTrace);
-    return _ended(outcome(SyncRoundEnd.failed));
+    return _ended(outcome(SyncRoundEnd.failed, stop: syncServerStopOf(error)));
   }
-  final undone = await _syncImages(place, server, agreedBase.list, kept, changed, account: account, round: images);
+  // A record that waits, for room or for the day, is not one whose images go ([N1-16]): the list sent holds it as the
+  // server does.
+  final undone = await _syncImages(
+    place,
+    server,
+    agreedBase.list,
+    {...kept, ...waiting},
+    changed,
+    account: account,
+    round: images,
+  );
   return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
 }
 
@@ -939,6 +1266,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
           }
           final put = w.puts[i];
           if (!round.puts) {
+            round.heldBack();
             landed = false;
             undone.add(r.id);
             continue;
@@ -956,9 +1284,10 @@ Future<SyncImagesUndone?> _syncImages<C>(
             held.add(put.name);
           } catch (error, stackTrace) {
             logger.w('Sync put no more images in this round: ${put.name} did not land.', error, stackTrace);
-            round
-              ..puts = false
-              ..stops.add(_stopOf(error));
+            final stop = _stopOf(error);
+            final by = syncServerStopOf(error);
+            if (stop == SyncImagesStop.room && by != null) round.room.raise(by);
+            round.stopFor(stop, by);
             landed = false;
             undone.add(r.id);
           }
@@ -987,7 +1316,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
       }
     } catch (error, stackTrace) {
       logger.w('Sync could not put or take the images; the next round goes on with them.', error, stackTrace);
-      round.stops.add(_stopOf(error));
+      round.note(_stopOf(error), syncServerStopOf(error));
       undone.addAll([
         for (final (r, _, _) in open)
           if (!left.containsKey(r.id)) r.id,
@@ -1005,6 +1334,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
 /// Why a request of the image step did not land ([SyncImagesStop]).
 SyncImagesStop _stopOf(Object error) => switch (error) {
   SyncRefusal(status: 507) => SyncImagesStop.room,
+  SyncRefusal(status: 429, error: 'daily_limit') => SyncImagesStop.dailyLimit,
   SyncRefusal() => SyncImagesStop.refused,
   _ => SyncImagesStop.lost,
 };
@@ -1241,6 +1571,13 @@ Set<String> _heldBack(Set<String> unbound, RecordSyncOutcome merged, SyncList lo
 bool _sameParts(Map<String, String> a, Map<String, String> b) =>
     a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
 
+/// The base [base] read again against the server's list [there], after a replacement whose answer was lost ([sent]):
+/// [rereadSyncBase], keeping the ids it could not confirm.
+SyncKeptList _baseReadAgain(SyncKeptList base, SyncKeptList sent, SyncList there) {
+  final (list, unknown) = rereadSyncBase(base.list, sent.list, there);
+  return base.copyWith(list: list, unconfirmed: {...base.unconfirmed, ...unknown});
+}
+
 Future<SyncList> _readServerList(SyncServer server, String? rootName) async {
   if (rootName == null) return const SyncList();
   final root = jsonDecode(await server.root(rootName)) as Map<String, Object?>;
@@ -1375,7 +1712,10 @@ SyncRoundOutcome _told(
   Set<String>? placed,
   int replacements = 0,
   int withheld = 0,
+  int waitingForRoom = 0,
+  int waitingForTheDay = 0,
   SyncImagesUndone? imagesUndone,
+  SyncServerStop? serverStop,
 }) {
   int told(Iterable<String> ids) =>
       placed == null ? ids.length : ids.where((id) => placed.contains(id) && !local.rows.containsKey(id)).length;
@@ -1386,7 +1726,10 @@ SyncRoundOutcome _told(
     splitOff: told(counts.splitOff),
     added: told(counts.added),
     withheld: withheld,
+    waitingForRoom: waitingForRoom,
+    waitingForTheDay: waitingForTheDay,
     imagesUndone: imagesUndone,
+    serverStop: serverStop,
   );
 }
 
@@ -1815,19 +2158,85 @@ SyncList _listToSend(SyncSide result, SyncList there, SyncList local, Set<String
 }
 
 /// Puts the body of each record of [next] the server does not list yet ([there]): the device's, read under its lock
-/// just before it goes ([SyncPlace.bodyOf]), where it still is the body [next] names.
-Future<void> _putBodies<C>(SyncPlace<C> place, SyncServer server, SyncList next, SyncList there) async {
+/// just before it goes ([SyncPlace.bodyOf]), where it still is the body [next] names. Answers the ids of the records
+/// whose bodies wait ([R7-4], [N1-15]): from the first put the server refused for room (`507` — `account_limit`,
+/// `hidden_limit`, `storage_full` or `database_full`) or for the day's limit (`429 daily_limit`), every body the round
+/// had still to put, none of which the server holds, for the round puts no more ("while held, no new body is sent");
+/// and where the device is [stopped] for room ([SyncRoomStop.stop]), every record whose body the server does not list,
+/// none asked. None where every body went. [waitFor]: what of the server's those wait for — the refusal's, or the
+/// mark's —; null where none waits.
+Future<({Set<String> ids, SyncServerStop? waitFor})> _putBodies<C>(
+  SyncPlace<C> place,
+  SyncServer server,
+  SyncList next,
+  SyncList there, {
+  required SyncServerStop? stopped,
+}) async {
   final listed = {for (final row in there.rows.values) row.bodyName};
   final bodies = <({String name, String body})>[];
+  // The records of each body put, by its name: two records may show one body.
+  final records = <String, List<String>>{};
+  // The device stopped for room asks to put none ([SyncRoomStop]): every record whose body the server does not list
+  // waits.
+  if (stopped != null) {
+    final ids = {
+      for (final row in next.rows.values)
+        if (!listed.contains(row.bodyName)) row.record.id,
+    };
+    return (ids: ids, waitFor: ids.isEmpty ? null : stopped);
+  }
   for (final row in next.rows.values.toList()..sort((a, b) => a.record.id.compareTo(b.record.id))) {
-    if (listed.contains(row.bodyName) || bodies.any((b) => b.name == row.bodyName)) continue;
+    if (listed.contains(row.bodyName)) continue;
+    if (records[row.bodyName] case final ids?) {
+      ids.add(row.record.id);
+      continue;
+    }
     final body = await place.bodyOf(row.record);
     if (body == null) continue;
     // A record changed since it was read is the next round's to send.
     if (syncObjectName(body) != row.bodyName) continue;
     bodies.add((name: row.bodyName, body: utf8.decode(body)));
+    records[row.bodyName] = [row.record.id];
   }
   for (var i = 0; i < bodies.length; i += 10) {
-    await server.putBodies(bodies.sublist(i, i + 10 > bodies.length ? bodies.length : i + 10));
+    try {
+      await server.putBodies(bodies.sublist(i, i + 10 > bodies.length ? bodies.length : i + 10));
+    } on SyncRefusal catch (refusal) {
+      final stop = syncServerStopOf(refusal);
+      if (refusal.status != 507 && !(stop?.forTheDay ?? false)) rethrow;
+      logger.i('Sync: the server refused a body ($refusal); ${bodies.length - i} wait.');
+      return (ids: {for (final body in bodies.skip(i)) ...records[body.name]!}, waitFor: stop);
+    }
   }
+  return (ids: const <String>{}, waitFor: null);
+}
+
+/// [R7-4], [N1-17]: the ids a round leaves as the server lists them for want of room — in the list it sends, its rows,
+/// cells and pairs — of the records [waiting], whose bodies the server had no room for: each of those, and each id one
+/// of them absorbed that is a record its merge retired ([N1-17] (C2)) — one the device holds no record of ([held]: the
+/// records of the list the round sends, each with the ids it absorbed), and no other record absorbed: none the server
+/// lists ([listed]: the ids each of its records absorbed, those of its record of the waiting id included), nor one of
+/// [held] that does not wait. A merge whose end waits so takes away no record it absorbed while its end is not on the
+/// server ("the merge's result and the records it removed wait together", ruling (h)). An id another record absorbed
+/// goes with that record, which carries its removal whether or not the waiting one arrives; and what needs no room —
+/// another record's delete, archive, rating or memo — goes in the same round. A memo, a rating or an archive of a
+/// waiting record waits with it: its row is the server's ([N1-17] (C1)).
+Set<String> syncWaitingForRoom(
+  Set<String> waiting, {
+  required Map<String, Set<String>> held,
+  required Iterable<Set<String>> listed,
+}) {
+  if (waiting.isEmpty) return const {};
+  final elsewhere = {
+    for (final ids in listed) ...ids,
+    for (final MapEntry(key: id, value: ids) in held.entries)
+      if (!waiting.contains(id)) ...ids,
+  };
+  return {
+    for (final id in waiting) ...[
+      id,
+      for (final absorbed in held[id] ?? const <String>{})
+        if (!held.containsKey(absorbed) && !elsewhere.contains(absorbed)) absorbed,
+    ],
+  };
 }
