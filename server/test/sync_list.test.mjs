@@ -6,7 +6,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
-import { newRecord, part, PARTS, recordPart, root, sha256, syncClient as listClient } from "./support/sync_fixtures.mjs";
+import { bodyOf, newRecord, part, PARTS, recordPart, root, sha256, syncClient as listClient } from "./support/sync_fixtures.mjs";
 import { startWorker } from "./support/worker_harness.mjs";
 
 describe("sync list", () => {
@@ -129,6 +129,25 @@ describe("sync list", () => {
     const missing = await client.putPart(bodiless);
     assert.deepEqual([missing.status, missing.body], [409, { error: "missing_objects", names: [unstored.body.name] }]);
     assert.equal(await objectRow(id, bodiless.name), null);
+  });
+
+  test("a part whose row's icon is not its body's is 400 and not stored, and a body whose icon is not a name is 400", async () => {
+    const { id, client } = await account("list-icon");
+    const icon = sha256("list-icon");
+    const withIcon = newRecord(6, { icon });
+    const without = newRecord(6);
+    assert.equal((await client.putBodies([withIcon.body, without.body])).status, 200);
+    for (const row of [{ ...withIcon.row, icon: sha256("other") }, { ...withIcon.row, icon: undefined }, { ...without.row, icon }]) {
+      const wrong = recordPart(6, [row]);
+      const res = await client.putPart(wrong);
+      assert.deepEqual([res.status, res.body], [400, { error: "invalid_payload", field: "part.records[0].icon" }]);
+      assert.equal(await objectRow(id, wrong.name), null);
+    }
+    assert.equal((await client.putPart(recordPart(6, [withIcon.row, without.row]))).status, 200);
+
+    const bad = bodyOf({}, "not a name");
+    const res = await client.putBodies([bad]);
+    assert.deepEqual([res.status, res.body], [400, { error: "invalid_payload", field: "bodies[0].body" }]);
   });
 
   test("a part holding an id of another part, or one id twice, is 400 and not stored, and a root may name a part only in its own slot", async () => {

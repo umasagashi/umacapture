@@ -59,11 +59,12 @@ puts what the form lets it put from then on.
 A body is a record's text. It must be a JSON object carrying the record's image binding at
 `metadata.binding`: an object whose keys are among `campaign_png`, `campaign_jpeg`, `factor_png`,
 `factor_jpeg`, `skill_png`, `skill_jpeg`, each an image name or `null`. A missing key means the
-same as `null` (unknown). The server reads the binding when the body is put and keeps it; a list row
-must copy it (see `image` below).
+same as `null` (unknown). It may carry the record's icon (`trainee.jpg`, a JPEG) at `metadata.icon`:
+an image name, or missing (or `null`) when the record has none. The server reads the binding and the
+icon when the body is put and keeps them; a list row must copy them (see `image` and `icon` below).
 
-**Fields the app defines.** The server reads nothing of a body but `metadata.binding`; the rest is
-the app's:
+**Fields the app defines.** The server reads nothing of a body but `metadata.binding` and
+`metadata.icon`; the rest is the app's:
 
 - A body is the record's `record.json` without the fields only the device holds,
   `metadata.body_written_at` (when the body was written) and `metadata.relation_bonus`, as
@@ -75,8 +76,8 @@ the app's:
 
 - `POST /api/sync/bodies` `{bodies: [{name, body}]}`, 1 to 10 bodies, each at most 256 KiB of
   UTF-8 → `200 {results: [{name, status}]}`, status `"stored"` or `"exists"`. A body whose `name` is
-  not the SHA-256 of its UTF-8 bytes, or that carries no valid binding, refuses the whole request
-  with 400 (`field` `bodies[i].name` / `bodies[i].body`) and stores nothing.
+  not the SHA-256 of its UTF-8 bytes, or that carries no valid binding or an icon that is not an
+  image name, refuses the whole request with 400 (`field` `bodies[i].name` / `bodies[i].body`) and stores nothing.
 - `POST /api/sync/bodies/get` `{names}`, 1 to 10 names → `200 {bodies: [{name, body}]}` in the
   order asked, or `404 not_found {names}` listing the names the account does not hold.
 
@@ -148,7 +149,9 @@ n = sha256(utf8(id)).readUInt16BE(0) % 128
   - `archive.state`: `"normal"`, `"jpeg"` or `"none"`.
   - `image`: the record's image binding, with the same keys and meaning as a body's
     `metadata.binding`. It must equal the binding of the body `body.name` names (a missing key and
-    `null` are equal).
+    `null` are equal); otherwise 400, `field` `part.records[i].image`.
+  - `icon`: the record's icon, an image name, or missing (or `null`) when it has none. It must equal
+    the `metadata.icon` of the body `body.name` names; otherwise 400, `field` `part.records[i].icon`.
 - **Opaque fields**: every other key of a row (`body.written_at`, `archive.written_at`, ratings,
   memos, …), and every other key inside `body` and `archive`, is stored and returned byte for byte
   and never read by the server. The app defines them here (to be added by the client stage).
@@ -194,6 +197,7 @@ A record row:
 | `body.parents` | The inheritance parents, `parent1` and `parent2`, each left out when empty; the whole key left out when both are |
 | `archive.state`, `archive.written_at` | The archive state and its time, from the record's `archive.json` and the store it is in |
 | `image` | The body's `metadata.binding`, `{}` where it is not worked out |
+| `icon` | The body's `metadata.icon`; left out when the body has none |
 | `absorbed` | The ids the record absorbed in merges (`merged_ids.json`), sorted; left out when none |
 | `split_from` | The id a round split the record off, where it did |
 | `cells` | The record's rating and memo cells, by column: `<storage>/<key>`, `storage` `rating` or `memo` and `key` the column storage's. `value` is the rating (a number) or the memo (a string); left out when none |
@@ -278,8 +282,13 @@ rows written, per account and over every account, from 00:00 UTC (`server/src/li
   replacement that changes more than one reserve's worth (taking many records away) may still be
   refused near the end of a day; it goes through the next.
 - **Held names.** A put of a name the account holds answers `"exists"` whatever the limits and caps.
-- **What a long sync does.** A first sync of a large account can take more than one day's rows: it is
-  refused part-way and goes on the next day where it stopped, with the same result.
+- **What a long sync does.** A first sync of a large account can take more than one day's rows or
+  requests: it is refused part-way and goes on the next day where it stopped, with the same result.
+  Every device of the account counts against the same limits. The bodies and the list of a first
+  sync of `ACCOUNT_SYNC_RECORDS_CAP` records fit in a day; its images may not: about 2,000 records
+  with three reduced JPEGs and an icon each are about 8,000 puts on the device that sends them and as
+  many fetches on each device that receives them, against `ACCOUNT_SYNC_REQUESTS_PER_DAY` (8,000), so
+  they take two to three days (the estimate is on that constant in `server/src/limits.mjs`).
 
 Capacity (`ACCOUNT_SYNC_BYTES_CAP`, `ACCOUNT_SYNC_RECORDS_CAP`, `ACCOUNT_SYNC_HIDDEN_BYTES_CAP`,
 `SYNC_BUDGET`, and the server's database, `DATABASE_BUDGET`) is checked only by what makes the
@@ -352,11 +361,15 @@ derives the references itself from the root and the parts it names.
 - **What the current root references**: the root itself, every part it names, and for each row of
   those parts:
   - its body;
-  - archive state `"normal"`: every image its `image` names;
+  - archive state `"normal"`: every image its `image` names, and its `icon`;
   - archive state `"jpeg"`: each image's reduced JPEG, and that image's PNG only while the account
     has not stored the JPEG — once the JPEG is stored, the row references the JPEG alone, whether
-    it was stored before or after the replacement;
-  - archive state `"none"`: no image.
+    it was stored before or after the replacement; and its `icon`;
+  - archive state `"none"`: no image and no icon.
+
+  An icon is an image like the others: it is put and fetched under `/api/sync/images/` as
+  `image/jpeg`, refused under the image form `"none"`, and counts as the account's bytes while
+  referenced.
 
   A name stays referenced while any row of any part of the current root references it: a PNG one
   row stops referencing because its JPEG arrived stays fetchable while another row (a `"normal"`

@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
 import { usage } from "../src/sync_quota.mjs";
 import { named, STATEMENT, tidyLeftoversOf } from "../src/sync_refs.mjs";
-import { newImage, newRecord, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
+import { archived, newImage, newRecord, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
 import { startWorker } from "./support/worker_harness.mjs";
 
 /** A hide's first statement (`settle`'s intent), by its name: failing it cuts a request off before it hides. */
@@ -237,6 +237,34 @@ describe("sync retention", () => {
     assert.equal(await getStatus(a.client, "image", png.name), 404);
     assert.equal(a.versions(png.name).at(-1), "m");
     assert.equal(await getStatus(a.client, "image", jpeg.name), 200);
+  });
+
+  test("a record's icon is referenced as a JPEG by a normal and a reduced-JPEG row, counts as the account's bytes, and is hidden only when the last row naming it goes", async () => {
+    const a = await account("retention-icon");
+    const icon = newImage();
+    const normal = newRecord(0, { icon: icon.name });
+    const reduced = newRecord(1, { state: "jpeg", icon: icon.name });
+    const p0 = await putPart(a.client, 0, [normal]);
+    const p1 = await putPart(a.client, 1, [reduced]);
+    await a.replace({ 0: p0, 1: p1 });
+    const stored = async () => (await usage(worker.db, a.id, await worker.now())).stored;
+    const before = await stored();
+    assert.equal((await a.client.putImage(icon.name, icon.bytes, "image/jpeg")).body.status, "stored");
+    assert.equal(await stored(), before + icon.bytes.length, "the referenced icon is the account's bytes");
+    const got = await a.client.getImage(icon.name);
+    assert.deepEqual([got.status, got.type, got.bytes.equals(icon.bytes)], [200, "image/jpeg", true]);
+
+    await a.replace({ 1: p1 });
+    assert.equal(await getStatus(a.client, "image", icon.name), 200, "the reduced-JPEG row still names it");
+    assert.equal(a.versions(icon.name).at(-1), "v");
+
+    const none = await putPart(a.client, 1, [{ body: reduced.body, row: archived(reduced.row, "none") }]);
+    await a.replace({ 1: none });
+    assert.equal(await getStatus(a.client, "image", icon.name), 404, "archived without images");
+    assert.equal(a.versions(icon.name).at(-1), "m");
+
+    await a.replace({ 0: p0 });
+    assert.equal(await getStatus(a.client, "image", icon.name), 200, "referenced again before the boundary");
   });
 
   test("a replacement that stops referencing more objects than one request may make B2 requests hides every one of them before it answers", async () => {

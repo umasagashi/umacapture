@@ -17,20 +17,20 @@ export function idIn(n) {
   }
 }
 
-/** A body text carrying image binding `binding`, as `{name, body}`. */
-export function bodyOf(binding) {
-  const body = JSON.stringify({ metadata: { binding }, nonce: randomBytes(8).toString("hex") });
+/** A body text carrying image binding `binding` and, unless undefined, icon `icon`, as `{name, body}`. */
+export function bodyOf(binding, icon) {
+  const body = JSON.stringify({ metadata: { binding, icon }, nonce: randomBytes(8).toString("hex") });
   return { name: sha256(Buffer.from(body, "utf8")), body };
 }
 
 /**
  * A fresh record in part `n` (archive state `state`, image binding `binding`, by default two fresh
- * PNG names): its body (`{name, body}`) and its list row.
+ * PNG names, and icon `icon`, by default none): its body (`{name, body}`) and its list row.
  */
-export function newRecord(n, { state = "normal", binding } = {}) {
+export function newRecord(n, { state = "normal", binding, icon } = {}) {
   const image = binding ?? { skill_png: sha256(randomBytes(8)), skill_jpeg: null, factor_png: sha256(randomBytes(8)) };
-  const body = bodyOf(image);
-  const row = { id: idIn(n), body: { name: body.name, written_at: 1 }, archive: { state, written_at: 1 }, image, ratings: {} };
+  const body = bodyOf(image, icon);
+  const row = { id: idIn(n), body: { name: body.name, written_at: 1 }, archive: { state, written_at: 1 }, image, icon, ratings: {} };
   return { body, row };
 }
 

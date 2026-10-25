@@ -5,8 +5,8 @@
 // bytes and stored once per account: a put of a name the account already holds answers "exists"
 // without reaching B2.
 //
-// A body's name is checked here (the Worker parses the body to read its image binding anyway), and a
-// mismatch is 400. An image's is not: the Worker streams the image to B2 signed with its claimed name,
+// A body's name is checked here (the Worker parses the body to read the images it names anyway), and a
+// mismatch is 400. An image's is not: the Worker passes the image to B2 signed with its claimed name,
 // and B2 refuses bytes that do not hash to it. B2 answers that refusal with the same 403 as a wrong
 // key, so it is answered 502 storage_refused rather than 400.
 //
@@ -89,7 +89,8 @@ export async function heldNames(db, accountId, names, at) {
 }
 
 /**
- * The statement that records objects now stored in B2 (`{name, kind, size}` and, by kind, `binding`,
+ * The statement that records objects now stored in B2 (`{name, kind, size}` and, by kind, `binding`
+ * (a body's `canonicalImages`),
  * `slot`, `record_count` and `refs`): a new row, the stored state of a row the list made for an
  * image before it was stored, or a row gone past the boundary at `at` stored anew, shown, its old
  * versions left to B2's lifecycle. A row another request stored first is kept. Its rows are the names
@@ -121,14 +122,14 @@ export async function storeObjects(db, accountId, by, rows, at) {
 }
 
 /**
- * Puts `objects` (`{name, body, length}`, the body bytes or a stream) of account `accountId` for
+ * Puts `objects` (`{name, bytes}`) of account `accountId` for
  * request `by`, after recording that it is about to (`writing`). Returns whether B2 stored every one.
  * When it stored none, the records are cleared; when it stored some, they stay, for whoever takes them
  * to delete what it stored. A put that throws leaves them too: B2 may have stored it.
  */
 export async function putAll(db, bucket, accountId, by, objects, at) {
   await d1(() => writing(db, accountId, by, objects.map((x) => x.name), at).run());
-  const stored = await Promise.all(objects.map((x) => bucket.put(objectKey(accountId, x.name), x.body, x.name, x.length)));
+  const stored = await Promise.all(objects.map((x) => bucket.put(objectKey(accountId, x.name), x.bytes, x.name)));
   if (stored.every((s) => !s)) await d1(() => written(db, accountId, by).run());
   return !stored.includes(false);
 }
@@ -160,35 +161,43 @@ export async function getGeneration(request, env, now) {
   return json(200, { generation: row?.generation ?? 0, root: row?.root_name ?? null });
 }
 
-/** The image binding of body text `text` as canonical JSON, or null when the text is not a body. */
-function bindingOf(text) {
+/**
+ * The images body text `text` names (its `metadata.binding` and `metadata.icon`) as canonical JSON,
+ * or null when the text is not a body.
+ */
+function imagesOf(text) {
   let body;
   try {
     body = JSON.parse(text);
   } catch {
     return null;
   }
-  return canonicalBinding(body?.metadata?.binding);
+  return canonicalImages(body?.metadata?.binding, body?.metadata?.icon);
 }
 
 /**
- * Image binding `binding` (a body's `metadata.binding`, or a list row's `image`) as canonical JSON:
- * every field in a fixed order, a missing one as null. Null when it is not a binding.
+ * The images a record names, image binding `binding` (a body's `metadata.binding`, or a list row's
+ * `image`) and icon `icon` (a body's `metadata.icon`, or a list row's `icon`), as canonical JSON:
+ * every binding field in a fixed order, a missing one as null, then `icon` when there is one. Null
+ * when `binding` is not a binding or `icon` is neither missing, null nor an image name.
  */
-export function canonicalBinding(binding) {
+export function canonicalImages(binding, icon) {
   if (binding === null || typeof binding !== "object" || Array.isArray(binding)) return null;
   for (const [key, value] of Object.entries(binding)) {
     if (!BINDING_FIELDS.includes(key)) return null;
     if (value !== null && (typeof value !== "string" || !NAME.test(value))) return null;
   }
-  return JSON.stringify(Object.fromEntries(BINDING_FIELDS.map((f) => [f, binding[f] ?? null])));
+  if (icon !== undefined && icon !== null && (typeof icon !== "string" || !NAME.test(icon))) return null;
+  const images = Object.fromEntries(BINDING_FIELDS.map((f) => [f, binding[f] ?? null]));
+  return JSON.stringify(icon == null ? images : { ...images, icon });
 }
 
 /**
  * POST /api/sync/bodies `{bodies: [{name, body}]}`, 1 to MAX_SYNC_BODIES_PER_REQUEST of them: stores
  * each body text under its name. Answers `{results: [{name, status}]}`, status "stored" or "exists"
  * (the account held it already). A body whose name is not the SHA-256 of its UTF-8 bytes, or that
- * carries no image binding, refuses the whole request with 400 and stores nothing.
+ * carries no image binding or an icon that is not an image name, refuses the whole request with 400
+ * and stores nothing.
  */
 export const putBodies = (request, env, now) =>
   syncWrite(request, env, now, async (session, bucket, clk) => {
@@ -204,9 +213,9 @@ export const putBodies = (request, env, now) =>
       const bytes = new TextEncoder().encode(body);
       if (bytes.length > limits.MAX_SYNC_BODY) throw new InvalidPayload(`bodies[${i}].body`);
       if ((await sha256Hex(bytes)) !== name) throw new InvalidPayload(`bodies[${i}].name`);
-      const binding = bindingOf(body);
-      if (binding === null) throw new InvalidPayload(`bodies[${i}].body`);
-      if (!items.some((other) => other.name === name)) items.push({ name, bytes, binding });
+      const images = imagesOf(body);
+      if (images === null) throw new InvalidPayload(`bodies[${i}].body`);
+      if (!items.some((other) => other.name === name)) items.push({ name, bytes, images });
     }
     const held = await heldNames(env.DB, session.accountId, items.map((x) => x.name), at);
     const fresh = items.filter((x) => !held.has(x.name));
@@ -218,10 +227,10 @@ export const putBodies = (request, env, now) =>
     }
     if (fresh.length > 0) {
       const by = crypto.randomUUID();
-      const objects = fresh.map((x) => ({ name: x.name, body: x.bytes, length: x.bytes.length }));
+      const objects = fresh.map((x) => ({ name: x.name, bytes: x.bytes }));
       // The Worker hashed every body itself, so a refusal here is B2 refusing the key, not the bytes.
       if (!(await putAll(env.DB, bucket, session.accountId, by, objects, at))) return fail(502, "storage_refused");
-      const rows = fresh.map((x) => ({ name: x.name, kind: "body", size: x.bytes.length, binding: x.binding }));
+      const rows = fresh.map((x) => ({ name: x.name, kind: "body", size: x.bytes.length, binding: x.images }));
       await storeObjects(env.DB, session.accountId, by, rows, at);
     }
     return json(200, { results: items.map((x) => ({ name: x.name, status: held.has(x.name) ? "exists" : "stored" })) });
@@ -326,9 +335,9 @@ export async function putSettings(request, env, now) {
 
 /**
  * PUT /api/sync/images/<name> with the image's bytes as the body, Content-Type image/png or
- * image/jpeg and a Content-Length of at most MAX_SYNC_IMAGE: streams the bytes to B2 signed with
- * `name`. 200 `{name, status}`, status "stored" or "exists". B2's refusal (the bytes do not hash to
- * the name, or B2 refused the key) is 502 storage_refused, and nothing is stored. A new image the
+ * image/jpeg and a Content-Length of at most MAX_SYNC_IMAGE: puts the bytes to B2 unhashed, signed
+ * with `name`. 200 `{name, status}`, status "stored" or "exists". B2's refusal (the bytes do not hash
+ * to the name, or B2 refused the key) is 502 storage_refused, and nothing is stored. A new image the
  * account's form does not take (`imageAccepted`) is 409 images_not_synced, before anything reaches B2.
  */
 export const putImage = (request, env, name, now) =>
@@ -358,9 +367,12 @@ export const putImage = (request, env, name, now) =>
       await request.body?.cancel();
       throw error;
     }
+    // Read whole, so that a PUT B2 fails for a moment can send the bytes again (`Bucket.put`).
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.length !== length) throw new InvalidPayload("content-length");
     const db = env.DB;
     const by = crypto.randomUUID();
-    if (!(await putAll(db, bucket, session.accountId, by, [{ name, body: request.body, length }], at))) return fail(502, "storage_refused");
+    if (!(await putAll(db, bucket, session.accountId, by, [{ name, bytes }], at))) return fail(502, "storage_refused");
     // Stored, and in the same batch, when it is a reduced JPEG the list references in place of a PNG,
     // those references taken off the PNG: from now on the list references the JPEG alone.
     const [, pending] = await d1(() =>
@@ -371,8 +383,8 @@ export const putImage = (request, env, name, now) =>
       ]),
     );
     // The PNGs whose references it took, at most SYNC_PNGS_PER_JPEG (replaceRoot keeps a root within
-    // it), so they fit in one DeleteObjects: 1 + hideRequests(999) = 3 B2 requests. The image itself
-    // stays shown: a JPEG that took them is referenced, and any other is a put's hide to do.
+    // it), so they fit in one DeleteObjects: B2_ATTEMPTS + hideRequests(999) = 5 B2 requests. The image
+    // itself stays shown: a JPEG that took them is referenced, and any other is a put's hide to do.
     const pngs = Object.entries(JSON.parse(pending.results[0]?.pending ?? "{}"))
       .filter(([, count]) => count > 0)
       .map(([png]) => png);

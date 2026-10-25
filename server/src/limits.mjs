@@ -181,6 +181,31 @@ export const MAX_SYNC_ROOT_REQUEST = 2 * MAX_SYNC_ROOT + 256;
 export const B2_REQUESTS_PER_INVOCATION = 50;
 
 /**
+ * Times the Worker sends one PUT or GET to B2 at most: once, and again while B2 answers it 429 or 5xx
+ * (`503 SlowDown` when it is busy), which Backblaze's documentation asks a client to retry with
+ * exponential backoff. Every endpoint counts a PUT or GET as this many of B2_REQUESTS_PER_INVOCATION
+ * before it changes anything: a bundle of MAX_SYNC_BODIES_PER_REQUEST takes 30 at most. Three
+ * attempts take a bundle of ten through PUTs that fail one in a hundred, independently, all but once
+ * in about 10^5 bundles; a failure that lasts longer is the next sync's to retry.
+ */
+export const B2_ATTEMPTS = 3;
+
+/**
+ * Seconds the Worker waits before its first retry when B2 names no wait (Retry-After): the 1 s
+ * Backblaze's integration checklist starts its exponential backoff at. Each retry after waits twice the
+ * one before, so the attempts of B2_ATTEMPTS wait 1 + 2 = 3 s in all.
+ */
+export const B2_RETRY_FIRST_WAIT = 1;
+
+/**
+ * Seconds of Retry-After the Worker still waits for. A longer one ends the attempts there: the request
+ * answers 502 storage_unavailable at once instead of retrying earlier than B2 asked. So a request
+ * waits for B2 at most (B2_ATTEMPTS - 1) * 4 = 8 s on top of its attempts; the Worker's CPU time does not
+ * count the wait.
+ */
+export const B2_RETRY_WAIT_MAX = 4;
+
+/**
  * PNGs one reduced JPEG stands in for at most, across the rows of an account's root. Storing the JPEG
  * takes the references off all of them and hides those left unreferenced together with the JPEG,
  * which this keeps to one DeleteObjects. A JPEG reduces one PNG, so a root that pairs it with more
@@ -296,15 +321,25 @@ export const SYNC_DAILY_ROWS = 600_000;
  */
 export const SYNC_DAILY_DELETE_ROWS = SYNC_DAILY_ROWS / 2;
 
-// The per-account limits let a first sync of ACCOUNT_SYNC_RECORDS_CAP records go through in one day
-// where the rows allow it. Measured on the local D1, not on the real platform, for 5,000 records over
-// 128 parts, each body binding six image names and no image put: 672 requests reading 306,725 rows and
-// writing 99,213. Images put as reduced JPEG (at most about 2,000 records, ACCOUNT_SYNC_BYTES_CAP)
-// add a request for each image put.
+// The per-account limits let the bodies and the list of a first sync of ACCOUNT_SYNC_RECORDS_CAP
+// records go through in one day where the rows allow it; its images may take more days. Measured on the
+// local D1, not on the real platform, for 5,000 records over 128 parts, each body binding six image
+// names and no image put: 672 requests reading 306,725 rows and writing 99,213.
 
 /**
- * Sync requests of one account in one UTC day: the 672 requests of a first sync and the image puts of
- * about 2,000 records with reduced JPEGs (about 6,000), with SYNC_REPLACE_RESERVE.requests.
+ * Sync requests of one account in one UTC day. Every request of every device of the account counts.
+ * Estimated, not measured, for a first sync of R = 5,000 records of which I, about 2,000, have images
+ * (as many as ACCOUNT_SYNC_BYTES_CAP holds as reduced JPEGs), each with three images and an icon:
+ * - the device that sends: the 672 measured above, plus held queries for the icons,
+ *   ceil(7R / MAX_SYNC_HELD_NAMES) - ceil(6R / MAX_SYNC_HELD_NAMES) = 5, plus a put of each image and
+ *   icon, 4I = 8,000: about 8,677;
+ * - a device that receives: a fetch of each body bundle, R / MAX_SYNC_BODIES_PER_REQUEST = 500, of each
+ *   of the 128 parts and of the root, held queries ceil(7R / MAX_SYNC_HELD_NAMES) = 35, and a fetch of
+ *   each image and icon, 4I = 8,000: about 8,664.
+ * About 17,300 in all, before retries. With SYNC_REPLACE_RESERVE.requests kept back, a day takes about
+ * 7,995 of the requests other than part puts and replacements, so such a sync takes three UTC days:
+ * each request past the limit is refused 429 daily_limit with Retry-After to the next UTC day, and the
+ * sync goes on from where it stopped with the same result.
  */
 export const ACCOUNT_SYNC_REQUESTS_PER_DAY = 8_000;
 

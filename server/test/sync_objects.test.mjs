@@ -106,9 +106,60 @@ describe("sync objects", () => {
     const claimed = sha256(randomBytes(2048));
     const refused = await client.putImage(claimed, randomBytes(2048), "image/jpeg");
     assert.deepEqual([refused.status, refused.body], [502, { error: "storage_refused" }]);
+    assert.equal(worker.b2.count("PUT", `a/${account}/${claimed}`), 1, "a 403 is not retried");
     assert.equal(worker.b2.visible(`a/${account}/${claimed}`), null);
     assert.ok(!(await rows(worker, account)).some((r) => r.startsWith(claimed)));
     assert.equal((await client.getImage(claimed)).status, 404);
+  });
+
+  test("an image put B2 answers 503 SlowDown once is stored by the Worker's retry", async () => {
+    const { name, bytes } = newImage();
+    // No Retry-After: the Worker waits B2_RETRY_FIRST_WAIT before the retry.
+    worker.b2.failPuts(`a/${account}/${name}`, [{ status: 503, code: "SlowDown" }]);
+    const put = await client.putImage(name, bytes);
+    assert.deepEqual([put.status, put.body], [200, { name, status: "stored" }]);
+    assert.equal(worker.b2.count("PUT", `a/${account}/${name}`), 2);
+    assert.deepEqual(Buffer.from(worker.b2.visible(`a/${account}/${name}`)), bytes);
+  });
+
+  test("an image put whose 503 is cut off while its error arrives is stored by the Worker's retry, and the log says the error went unread", async () => {
+    const { name, bytes } = newImage();
+    worker.b2.failPuts(`a/${account}/${name}`, [{ status: 503, cut: true }]);
+    const put = await client.putImage(name, bytes);
+    assert.deepEqual([put.status, put.body], [200, { name, status: "stored" }]);
+    assert.equal(worker.b2.count("PUT", `a/${account}/${name}`), 2);
+    assert.deepEqual(Buffer.from(worker.b2.visible(`a/${account}/${name}`)), bytes);
+    const line = `B2 PUT answered 503 (error unread), attempt 1 of ${limits.B2_ATTEMPTS}, retrying in`;
+    const deadline = Date.now() + 5_000;
+    while (!worker.logs().includes(line) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(worker.logs().includes(line), worker.logs());
+  });
+
+  test("a body put B2 answers 503 on every attempt fails its whole request 502 storage_unavailable, and the log names B2's answer and nothing of the account", async () => {
+    const bodies = Array.from({ length: limits.MAX_SYNC_BODIES_PER_REQUEST }, newBody);
+    const key = `a/${account}/${bodies[3].name}`;
+    worker.b2.failPuts(key, Array(limits.B2_ATTEMPTS).fill({ status: 503, code: "SlowDown", retryAfter: "0" }));
+    const put = await client.putBodies(bodies);
+    assert.deepEqual([put.status, put.body], [502, { error: "storage_unavailable" }]);
+    assert.equal(worker.b2.count("PUT", key), limits.B2_ATTEMPTS);
+    const stored = await rows(worker, account);
+    assert.ok(bodies.every(({ name }) => !stored.some((r) => r.startsWith(name))), "no body of the request recorded");
+
+    const line = `B2 PUT answered 503 SlowDown (Retry-After "0"), attempt ${limits.B2_ATTEMPTS} of ${limits.B2_ATTEMPTS}`;
+    const deadline = Date.now() + 5_000;
+    while (!worker.logs().includes(line) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const logs = worker.logs();
+    assert.ok(logs.includes(line), logs);
+    assert.ok(!logs.includes(account) && !logs.includes(bodies[3].name), "neither the account id nor a name");
+  });
+
+  test("a put B2 asks to wait longer than B2_RETRY_WAIT_MAX is not retried", async () => {
+    const body = newBody();
+    const key = `a/${account}/${body.name}`;
+    worker.b2.failPuts(key, [{ status: 503, code: "SlowDown", retryAfter: String(limits.B2_RETRY_WAIT_MAX + 1) }]);
+    const put = await client.putBodies([body]);
+    assert.deepEqual([put.status, put.body], [502, { error: "storage_unavailable" }]);
+    assert.equal(worker.b2.count("PUT", key), 1);
   });
 
   test("a name the account holds answers exists, and no PUT reaches B2", async () => {
@@ -260,6 +311,14 @@ describe("sync image form", () => {
     const bad = await a.client.setImageForm("webp");
     assert.deepEqual([bad.status, bad.body], [400, { error: "invalid_payload", field: "image_form" }]);
     assert.deepEqual((await a.client.settings()).body, { image_form: "jpeg" });
+  });
+
+  test("under none, a record's icon is refused though the root references it", async () => {
+    const a = await account("form-icon");
+    const icon = newImage();
+    await a.replace({ 0: await putPart(a.client, 0, [newRecord(0, { icon: icon.name })]) });
+    refused(await a.client.putImage(icon.name, icon.bytes, "image/jpeg"));
+    assert.deepEqual(worker.b2.versions(a.key(icon.name)), []);
   });
 
   test("under none, an archive's reduced JPEG is refused while only its part is put, and taken once the root names that part, the PNG's references moving to it", async () => {

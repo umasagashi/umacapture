@@ -6,9 +6,9 @@
 // falls in that number (`partNumber`). Slots "columns" and "dismissed" hold the column titles and the
 // dismissed pairs, whose content the server does not read. A part is checked once, when it is put:
 // every row's id falls in the part's number, no id appears twice, and the body each row names is
-// stored with the image binding the row's `image` copies. A replacement uses only parts stored that
-// way, so it reads no row: it moves the reference counts (sync_refs.mjs) by what the parts it swaps
-// in and out reference, shows what it starts to reference and hides what it stops referencing, the
+// stored with the image binding and icon the row's `image` and `icon` copy. A replacement uses only
+// parts stored that way, so it reads no row: it moves the reference counts (sync_refs.mjs) by what the
+// parts it swaps in and out reference, shows what it starts to reference and hides what it stops referencing, the
 // replaced root included. A part, body or root hidden past the boundary B2's lifecycle sets is gone
 // (sync_refs.mjs): a replacement does not take it, and one that showed what it references commits
 // only while the Worker's clock, read after B2 answered, is still inside the boundary. The wire format
@@ -20,7 +20,7 @@ import { Bucket, objectKey, sha256Hex } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { Unavailable } from "./store.mjs";
-import { canonicalBinding, d1, heldNames, insertObjects, NAME, putAll, storeObjects, syncWrite } from "./sync.mjs";
+import { canonicalImages, d1, heldNames, insertObjects, NAME, putAll, storeObjects, syncWrite } from "./sync.mjs";
 import { admit, admitDatabase, countFor, recordsRefusal } from "./sync_quota.mjs";
 import {
   claimHidden,
@@ -77,8 +77,9 @@ export async function partNumber(id) {
 
 /**
  * Part text `text` checked for everything that needs no stored state: `{slot, rows, refs}`, rows
- * `{field, body, image}` (the body's name and the canonical binding the row copies) and refs the
- * names the rows reference (every body, and the images of rows whose archive state is not "none").
+ * `{field, body, images, icon, state}` (the body's name, the canonical images, binding and icon, the
+ * row copies from it, and the icon's name or null) and refs the names the rows reference (every body,
+ * and the images and icon of rows whose archive state is not "none").
  */
 async function readPart(text) {
   let part;
@@ -101,17 +102,18 @@ async function readPart(text) {
   for (const [i, row] of part.records.entries()) {
     const field = `part.records[${i}]`;
     if (!isObject(row)) throw new InvalidPayload(field);
-    const { id, body, archive, image } = row;
+    const { id, body, archive, image, icon } = row;
     if (typeof id !== "string" || id === "" || id.length > MAX_RECORD_ID) throw new InvalidPayload(`${field}.id`);
     if (ids.has(id) || (await partNumber(id)) !== part.part) throw new InvalidPayload(`${field}.id`);
     ids.add(id);
     if (!isObject(body) || typeof body.name !== "string" || !NAME.test(body.name)) throw new InvalidPayload(`${field}.body`);
     if (!isObject(archive) || !ARCHIVE_STATES.includes(archive.state)) throw new InvalidPayload(`${field}.archive`);
-    const binding = canonicalBinding(image);
-    if (binding === null) throw new InvalidPayload(`${field}.image`);
-    rows.push({ field, body: body.name, image: binding, state: archive.state });
+    if (canonicalImages(image) === null) throw new InvalidPayload(`${field}.image`);
+    const images = canonicalImages(image, icon);
+    if (images === null) throw new InvalidPayload(`${field}.icon`);
+    rows.push({ field, body: body.name, images, icon: icon ?? null, state: archive.state });
   }
-  const refs = referencesOf(rows.map((r) => ({ body: r.body, state: r.state, binding: JSON.parse(r.image) })));
+  const refs = referencesOf(rows.map((r) => ({ body: r.body, state: r.state, images: JSON.parse(r.images) })));
   return { slot: String(part.part), rows, refs };
 }
 
@@ -164,15 +166,17 @@ export const putPart = (request, env, now) =>
         .bind(session.accountId, distinctJson(bodies), goneBy(at))
         .all(),
     );
-    const bindings = new Map(stored.results.map((r) => [r.name, r.binding]));
+    const images = new Map(stored.results.map((r) => [r.name, r.binding]));
     for (const row of rows) {
-      if (bindings.has(row.body) && bindings.get(row.body) !== row.image) throw new InvalidPayload(`${row.field}.image`);
+      const theirs = images.get(row.body);
+      if (theirs === undefined || theirs === row.images) continue;
+      throw new InvalidPayload(`${row.field}.${(JSON.parse(theirs).icon ?? null) === row.icon ? "image" : "icon"}`);
     }
-    const missing = bodies.filter((b) => !bindings.has(b));
+    const missing = bodies.filter((b) => !images.has(b));
     if (missing.length > 0) return fail(409, "missing_objects", { names: missing });
 
     const by = crypto.randomUUID();
-    if (!(await putAll(env.DB, bucket, session.accountId, by, [{ name, body: bytes, length: bytes.length }], at))) {
+    if (!(await putAll(env.DB, bucket, session.accountId, by, [{ name, bytes }], at))) {
       return fail(502, "storage_refused");
     }
     const row = { name, kind: "part", size: bytes.length, slot, record_count: rows.length, refs: JSON.stringify(refs) };
@@ -302,7 +306,7 @@ export const replaceRoot = (request, env, now) =>
     const rehide = hidden.filter((r) => pairPngs.has(r.name)).map((r) => r.name);
     const rest = (targets) =>
       replaceRequests({
-        put: stored.has(name) ? 0 : 1,
+        put: stored.has(name) ? 0 : limits.B2_ATTEMPTS,
         targets,
         rising: change.rising().length,
         falling: change.falling().length + rehide.length,
@@ -338,7 +342,7 @@ export const replaceRoot = (request, env, now) =>
       return fail(409, "too_many_objects");
     }
 
-    if (!stored.has(name) && !(await putAll(db, bucket, accountId, by, [{ name, body: bytes, length: bytes.length }], at))) {
+    if (!stored.has(name) && !(await putAll(db, bucket, accountId, by, [{ name, bytes }], at))) {
       await releaseClaim(db, accountId, by, undone);
       return fail(502, "storage_refused");
     }
@@ -395,12 +399,12 @@ export const replaceRoot = (request, env, now) =>
   });
 
 /**
- * The B2 requests a replacement takes after it has listed the markers no hide recorded: `put` (1 when
- * it stores its root), the DeleteObjects that show the `targets` markers before the commit, and then
- * the larger of what follows a commit — showing what a hide recorded among the `rising` names after
+ * The B2 requests a replacement takes after it has listed the markers no hide recorded: `put`
+ * (B2_ATTEMPTS when it stores its root), the DeleteObjects that show the `targets` markers before
+ * the commit, and then the larger of what follows a commit — showing what a hide recorded among the `rising` names after
  * the look, and hiding among the `falling` names — and what follows a rollback: hiding the `shown`
  * names again. One slot of parts within MAX_SYNC_PART names at most 7,943 objects (64 hex
- * digits and two quotes each), which takes at most 1 + 8 + 8 + 2 × 12 = 41.
+ * digits and two quotes each), which takes at most 3 + 8 + 8 + 2 × 12 = 43.
  */
 function replaceRequests({ put, targets, rising, falling, shown }) {
   return put + deleteBatches(targets) + Math.max(deleteBatches(rising) + hideRequests(falling), hideRequests(shown));
