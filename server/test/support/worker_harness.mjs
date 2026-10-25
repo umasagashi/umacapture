@@ -62,7 +62,7 @@ const unXml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp
  *
  * `hold` stops one operation on one key before it takes effect, so a test can order B2's side of
  * two requests apart from their D1 side (whose batches the batch gate orders). `fail` makes B2 fail
- * one DeleteObjects, and `failTarget` one target of one.
+ * one DeleteObjects, `failTarget` one target of one, and `failPuts` the next PUTs of one key.
  *
  * The bucket's lifecycle rule (`daysFromHidingToDeleting`) runs only when a test runs it, in its two
  * steps apart: `pickExpired` picks every version hidden that many days on the Worker's clock (`now`,
@@ -82,6 +82,7 @@ export class FakeB2 {
   #holds = [];
   #fails = [];
   #failsOne = [];
+  #failedPuts = [];
   /** `{key, versionId}` the lifecycle picked and has not deleted yet. */
   #picked = [];
 
@@ -106,6 +107,16 @@ export class FakeB2 {
   /** Answers the next DeleteObjects one of whose targets is `key` 500, as B2 failing does, before it takes effect. */
   fail(key) {
     this.#fails.push(key);
+  }
+
+  /**
+   * Answers the next PUTs of `key`, one each, with `answers` in turn (`{status, code, retryAfter}`, the
+   * Retry-After header when given) before they take effect, as B2 failing does: `503` `SlowDown` when
+   * it is busy. The error names the key, as B2's does. With `cut`, the connection drops after the
+   * headers and the start of the error, before the rest of it arrives.
+   */
+  failPuts(key, answers) {
+    this.#failedPuts.push(...answers.map((a) => ({ key, ...a })));
   }
 
   /** Reports the next DeleteObjects target naming `key` as an error, as B2 may for one object of many, and leaves it. */
@@ -210,6 +221,21 @@ export class FakeB2 {
       return xml("<Error><Code>AccessDenied</Code><Message>Signature validation failed</Message></Error>", 403);
     }
     if (method === "PUT" && key !== "") {
+      const failed = this.#failedPuts.findIndex((f) => f.key === key);
+      if (failed !== -1) {
+        const [{ status, code, retryAfter, cut }] = this.#failedPuts.splice(failed, 1);
+        const res = cut
+          ? new MfResponse(
+              new ReadableStream({
+                start: (c) => c.enqueue(new TextEncoder().encode("<Error>")),
+                pull: (c) => c.error(new Error("connection reset")),
+              }),
+              { status, headers: { "Content-Type": "application/xml", "Content-Length": "512" } },
+            )
+          : xml(`<Error><Code>${code}</Code><Message>Please reduce your request rate.</Message><Resource>/${B2.BUCKET}/${xmlText(key)}</Resource></Error>`, status);
+        if (retryAfter !== undefined) res.headers.set("Retry-After", retryAfter);
+        return res;
+      }
       await this.#wait("PUT", [key]);
       const versionId = this.#add(key, { marker: false, bytes });
       return new MfResponse("", { headers: { "x-amz-version-id": versionId } });
@@ -577,7 +603,17 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
   // bucket's lifecycle counts days on it.
   let clockOffset = 0;
   const b2 = new FakeB2(() => Math.floor((Date.now() + clockOffset * 1000) / 1000));
+  // What the Worker writes to its log (console), as text, and passed on to this process's own.
+  const logs = [];
   const mf = new Miniflare({
+    handleRuntimeStdio(stdout, stderr) {
+      for (const [stream, out] of [[stdout, process.stdout], [stderr, process.stderr]]) {
+        stream.on("data", (chunk) => {
+          logs.push(String(chunk));
+          out.write(chunk);
+        });
+      }
+    },
     modules: modules(testEntry),
     modulesRoot: SRC,
     compatibilityDate: "2026-07-28",
@@ -643,6 +679,8 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     google,
     /** The B2 bucket the Worker stores synced objects in (a FakeB2). */
     b2,
+    /** Everything the Worker wrote to its log so far, joined. */
+    logs: () => logs.join(""),
 
     /**
      * POST /api/auth/begin as the start page's form sends it: from PUBLIC_ORIGIN, urlencoded, with

@@ -63,21 +63,23 @@ import { Unavailable } from "./store.mjs";
 const IMAGES = ["campaign", "factor", "skill"];
 
 /**
- * What the rows of a record part reference (rows `{body, state, binding}`, the binding an object of
- * image names): `{always: {name: kind}, pending: [[png, jpeg]]}`. Every row references its body. A row
- * archived without images references no image. A row archived as reduced JPEG references each
- * image's JPEG, and its PNG only while that JPEG is not stored (`pending`). Any other row references
- * every image its binding names.
+ * What the rows of a record part reference (rows `{body, state, images}`, the images an object of
+ * image names: the binding's fields and, when the record has one, `icon`): `{always: {name: kind},
+ * pending: [[png, jpeg]]}`. Every row references its body. A row archived without images references
+ * no image and no icon. A row archived as reduced JPEG references each image's JPEG, and its PNG only
+ * while that JPEG is not stored (`pending`). Any other row references every image its binding names.
+ * Both reference the icon, a JPEG.
  */
 export function referencesOf(rows) {
   const always = {};
   const pending = new Map();
-  for (const { body, state, binding } of rows) {
+  for (const { body, state, images } of rows) {
     always[body] = "body";
     if (state === "none") continue;
+    if (images.icon != null) always[images.icon] = "jpeg";
     for (const image of IMAGES) {
-      const png = binding[`${image}_png`];
-      const jpeg = binding[`${image}_jpeg`];
+      const png = images[`${image}_png`];
+      const jpeg = images[`${image}_jpeg`];
       if (jpeg !== null) always[jpeg] = "jpeg";
       if (png === null) continue;
       if (state === "jpeg" && jpeg !== null) pending.set(`${png} ${jpeg}`, [png, jpeg]);

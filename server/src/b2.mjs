@@ -4,8 +4,13 @@
 // object's bytes as 64 lowercase hex digits. A PUT signs that name as x-amz-content-sha256 and never
 // UNSIGNED-PAYLOAD: B2 checks the bytes it receives against the signed hash and refuses a mismatch
 // (403, the same answer as a wrong key) without storing anything, which is what keeps "name = SHA-256
-// of the bytes" true for images the Worker streams through without reading. With UNSIGNED-PAYLOAD,
+// of the bytes" true for images the Worker passes on without hashing them. With UNSIGNED-PAYLOAD,
 // B2 stores whatever arrives.
+//
+// A PUT or GET B2 answers 429 or 5xx is sent again, up to B2_ATTEMPTS times in all (`#ask`): both are
+// idempotent, a PUT storing the same bytes under the same name. DeleteObjects and ListObjectVersions
+// are sent once. Every answer B2 fails is logged, one line each, with B2's status and error code and
+// nothing of the key, which names the account and the object.
 //
 // vars B2_ENDPOINT (a host name), B2_REGION and B2_BUCKET; secrets B2_KEY_ID and B2_APPLICATION_KEY.
 
@@ -28,6 +33,32 @@ export class StorageFailed extends Error {
     super(`B2 ${operation} answered ${status}`);
     this.status = status;
   }
+}
+
+/**
+ * Whether B2 answered `status` for a moment only: 429, or 500 to 599 (`503 SlowDown` among them), the
+ * answers Backblaze's documentation asks a client to retry with exponential backoff.
+ */
+const transient = (status) => status === 429 || (status >= 500 && status <= 599);
+
+/**
+ * Seconds to wait after transient answer `attempt` (1 for the first) whose Retry-After header is
+ * `retryAfter` (null when absent) before the next, or null when the Worker does not retry it: what it
+ * asks in seconds or as a date on the Worker's clock `now` (ms), up to B2_RETRY_WAIT_MAX; without one,
+ * or with one it cannot read, B2_RETRY_FIRST_WAIT doubled for every attempt before.
+ */
+function retryWait(retryAfter, attempt, now) {
+  const backoff = limits.B2_RETRY_FIRST_WAIT * 2 ** (attempt - 1);
+  if (retryAfter === null) return backoff;
+  const asked = /^[0-9]+$/.test(retryAfter.trim()) ? Number(retryAfter) : (Date.parse(retryAfter) - now) / 1000;
+  if (Number.isNaN(asked)) return backoff;
+  return asked <= limits.B2_RETRY_WAIT_MAX ? Math.max(0, asked) : null;
+}
+
+/** B2's error code in the XML of a failed answer `text` when it has the form of one (letters only), else null. */
+function errorCode(text) {
+  const code = xmlField(text, "Code");
+  return code !== null && /^[A-Za-z]{1,64}$/.test(code) ? code : null;
 }
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -106,25 +137,54 @@ export class Bucket {
   }
 
   /**
-   * Stores `body` (bytes or a stream of `length` bytes) at `key`, signed with `sha256` as its content
-   * hash. Returns true when stored, false when B2 refused it with 403: the bytes did not hash to
-   * `sha256`, or the key is wrong, which B2 does not tell apart. Throws StorageFailed otherwise.
+   * Sends `request` (see #send) for operation `operation` and returns B2's response once it answers 200,
+   * a refusal the caller acts on (`refused`) or an answer that the object is not there (`absent`). A
+   * transient answer is sent again after `retryWait`, up to `attempts` times in all; any other answer,
+   * or the last transient one, throws StorageFailed. Every answer but 200 and `absent` is logged, one
+   * line each. A response returned with a status other than 200 has had its body read, or lost while it arrived.
    */
-  async put(key, body, sha256, length) {
-    const res = await this.#send({ method: "PUT", key, body, payloadHash: sha256, headers: { "content-length": length } });
-    await res.body?.cancel();
-    if (res.status === 200) return true;
-    if (res.status === 403) return false;
-    throw new StorageFailed("PUT", res.status);
+  async #ask(operation, request, { refused = [], absent = [], attempts = 1 } = {}) {
+    for (let attempt = 1; ; attempt++) {
+      const res = await this.#send(request);
+      if (res.status === 200) return res;
+      // The error only names B2's code for the log; a connection lost while it arrives leaves the status to act on.
+      const text = await res.text().catch(() => null);
+      if (absent.includes(res.status)) return res;
+      const retryAfter = res.headers.get("Retry-After");
+      const wait = transient(res.status) && attempt < attempts ? retryWait(retryAfter, attempt, this.now()) : null;
+      const code = text === null ? null : errorCode(text);
+      console.warn(
+        `B2 ${operation} answered ${res.status}${text === null ? " (error unread)" : code === null ? "" : ` ${code}`}` +
+          `${retryAfter === null ? "" : ` (Retry-After ${JSON.stringify(retryAfter.slice(0, 64))})`}` +
+          `, attempt ${attempt} of ${attempts}${wait === null ? "" : `, retrying in ${wait} s`}`,
+      );
+      if (refused.includes(res.status)) return res;
+      if (wait === null) throw new StorageFailed(operation, res.status);
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+    }
   }
 
-  /** The response of GET `key` when its latest version is an object, or null when there is none. */
-  async get(key) {
-    const res = await this.#send({ method: "GET", key, payloadHash: await sha256Hex("") });
-    if (res.status === 200) return res;
+  /**
+   * Stores bytes `body` at `key`, signed with `sha256` as their content hash, retrying a transient
+   * failure (B2_ATTEMPTS). Returns true when stored, false when B2 refused it with 403: the bytes did
+   * not hash to `sha256`, or the key is wrong, which B2 does not tell apart. Throws StorageFailed
+   * otherwise.
+   */
+  async put(key, body, sha256) {
+    const request = { method: "PUT", key, body, payloadHash: sha256, headers: { "content-length": body.length } };
+    const res = await this.#ask("PUT", request, { refused: [403], attempts: limits.B2_ATTEMPTS });
+    if (res.status === 403) return false;
     await res.body?.cancel();
-    if (res.status === 404) return null;
-    throw new StorageFailed("GET", res.status);
+    return true;
+  }
+
+  /**
+   * The response of GET `key` when its latest version is an object, or null when there is none,
+   * retrying a transient failure (B2_ATTEMPTS).
+   */
+  async get(key) {
+    const res = await this.#ask("GET", { method: "GET", key, payloadHash: await sha256Hex("") }, { absent: [404], attempts: limits.B2_ATTEMPTS });
+    return res.status === 404 ? null : res;
   }
 
   /**
@@ -159,16 +219,14 @@ export class Bucket {
     );
     const body = enc.encode(`<?xml version="1.0" encoding="UTF-8"?><Delete><Quiet>${quiet}</Quiet>${objects.join("")}</Delete>`);
     const md5 = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("MD5", body))));
-    const res = await this.#send({
+    const res = await this.#ask("DeleteObjects", {
       method: "POST",
       query: [["delete", ""]],
       body,
       payloadHash: await sha256Hex(body),
       headers: { "content-md5": md5, "content-type": "application/xml", "content-length": body.length },
     });
-    const text = await res.text();
-    if (res.status !== 200) throw new StorageFailed("DeleteObjects", res.status);
-    return text;
+    return res.text();
   }
 
   /**
@@ -183,9 +241,8 @@ export class Bucket {
     const query = [["versions", ""], ["prefix", prefix]];
     if (from !== null) query.push(["key-marker", from.keyMarker]);
     if (from !== null && from.versionIdMarker !== null) query.push(["version-id-marker", from.versionIdMarker]);
-    const res = await this.#send({ method: "GET", query, payloadHash: await sha256Hex("") });
+    const res = await this.#ask("ListObjectVersions", { method: "GET", query, payloadHash: await sha256Hex("") });
     const text = await res.text();
-    if (res.status !== 200) throw new StorageFailed("ListObjectVersions", res.status);
     const entries = [...text.matchAll(/<(Version|DeleteMarker)>([\s\S]*?)<\/\1>/g)].map(([, kind, block]) => ({
       key: xmlField(block, "Key"),
       versionId: xmlField(block, "VersionId"),

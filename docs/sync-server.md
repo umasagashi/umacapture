@@ -37,9 +37,25 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
   the name and stores nothing on a mismatch.
 - **A name that does not match its bytes.** The Worker hashes bodies, parts and roots itself (it
   parses them anyway) and refuses a mismatch with `400 invalid_payload` before B2 is asked. An image
-  it streams to B2 unread; B2 refuses a mismatch with 403, the same answer as a wrong key, and the
-  Worker answers `502 storage_refused`. Any other answer B2 gives that the Worker cannot act on is
-  `502 storage_unavailable`.
+  it reads whole and passes to B2 unhashed; B2 refuses a mismatch with 403, the same answer as a wrong
+  key, and the Worker answers `502 storage_refused`. Any other answer B2 gives that the Worker cannot
+  act on, after the retries below, is `502 storage_unavailable`.
+- **Retries.** A PUT or GET that B2 answers 429 or 5xx (`503 SlowDown` when it is busy, which
+  Backblaze's documentation asks a client to retry with exponential backoff) is sent again, up to
+  `B2_ATTEMPTS` (3) times in all (`#ask` in `server/src/b2.mjs`). Both are idempotent: a PUT stores the
+  same bytes under the same name. Before a retry the Worker waits what B2's `Retry-After` asks, or
+  without one `B2_RETRY_FIRST_WAIT` (1 s) doubled per attempt before (1 s, then 2 s); a `Retry-After`
+  longer than `B2_RETRY_WAIT_MAX` (4 s) ends the attempts there. A request therefore waits for B2 at
+  most 8 s on top of its attempts. A 403 or any other 4xx is not retried. The ten PUTs of a body
+  bundle run concurrently and retry independently; one that runs out of attempts still fails the
+  whole request `502 storage_unavailable`. DeleteObjects and ListObjectVersions are sent once: every
+  endpoint counts them exactly before it changes anything, a hide (a DeleteObjects naming no version)
+  is not idempotent, and what a failed one leaves is a row state the account's next write or the
+  hourly run takes on.
+- **Logging.** Every answer B2 fails (anything but 200, and a GET's 404) writes one line to the
+  Worker's log: the operation, the status, B2's error code and `Retry-After` when present, and the
+  attempt, never the key, which names the account and the object. Workers Logs is off
+  (`observability` in `wrangler.jsonc`), so the lines are seen only through `wrangler tail`.
 - **Versions and markers.** To hide an object the Worker adds a delete marker over it (a
   `DeleteObjects` that names no version); to show it again it deletes that marker by its version id.
   Both go up to 1,000 keys to a `DeleteObjects` (`DELETE_OBJECTS_MAX`). It lists an account's versions
@@ -51,7 +67,7 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 - **Requests per invocation.** One request or one hourly run sends at most
   `B2_REQUESTS_PER_INVOCATION` (50) requests to B2; the `Bucket` of the invocation throws on the
   next, as the platform would. Every endpoint counts the requests its hides and shows take before it
-  changes anything.
+  changes anything, and counts a PUT or GET as its `B2_ATTEMPTS`: a body bundle takes 30 at most.
 
 ## Endpoints
 
@@ -86,7 +102,7 @@ rest of the account.
 | Table | Key | What a row is |
 |---|---|---|
 | `sync_accounts` | `account_id` | An account that synced: `generation`, `root_name`, `image_form` (`'none'` until set), `stored_bytes`, `hidden_bytes` (JSON, UTC day to bytes), `record_count`, `last_synced_day`, and its day's counters `daily_day`, `daily_requests`, `daily_rows_read`, `daily_rows_written` |
-| `sync_objects` | `account_id`, `name` | A name the account stored, or that its list names before it is stored: `kind` (`'body'`, `'png'`, `'jpeg'`, `'part'`, `'root'`), `size`, a body's `binding`, a part's `slot` and `record_count`, `refs`, `stored_at`, `ref_count`, `pending`, and the hide state `hidden_at`, `hidden_since`, `hide_by`, `marker` |
+| `sync_objects` | `account_id`, `name` | A name the account stored, or that its list names before it is stored: `kind` (`'body'`, `'png'`, `'jpeg'`, `'part'`, `'root'`), `size`, a body's `binding` (its image binding and icon), a part's `slot` and `record_count`, `refs`, `stored_at`, `ref_count`, `pending`, and the hide state `hidden_at`, `hidden_since`, `hide_by`, `marker` |
 | `sync_writes` | `account_id`, `write_by` | A request about to write under an account's prefix in B2: `names` (JSON) and `written_at`. It references no account, so it outlives the account it names |
 | `sync_daily` | `day` | Sync's counters of one UTC day over every account: `requests`, `rows_read`, `rows_written`, and `delete_rows`, the part of `rows_written` account deletions wrote |
 | `sync_totals` | `id` = 1 | `stored_bytes` and `hidden_bytes` over every account |
@@ -127,6 +143,9 @@ what was not measured on the real platform.
 | `MAX_SYNC_HELD_REQUEST` | `MAX_SYNC_HELD_NAMES * 67 + 256` | A `held` query's request body |
 | `MAX_SMALL_BODY` | 4 KiB | The settings' request body (and the logins') |
 | `B2_REQUESTS_PER_INVOCATION` | 50 | B2 requests one request or hourly run makes |
+| `B2_ATTEMPTS` | 3 | Times one PUT or GET is sent to B2 while it answers 429 or 5xx |
+| `B2_RETRY_FIRST_WAIT` | 1 s | The wait before the first retry when B2 names none, doubled per retry |
+| `B2_RETRY_WAIT_MAX` | 4 s | The longest `Retry-After` the Worker waits for |
 | `SYNC_PNGS_PER_JPEG` | 999 | PNGs one reduced JPEG stands in for across a root's rows |
 
 **Hides, shows and the hourly run**
@@ -274,4 +293,4 @@ The server enforces these by refusing; the client contract that avoids the refus
   current root already references it from a row archived as `"jpeg"`, so the client replaces the root
   first and puts the JPEG after.
 - **Bodies** carry the app-defined fields that [`sync-protocol.md`](sync-protocol.md#bodies) names; the
-  server reads `metadata.binding` alone.
+  server reads `metadata.binding` and `metadata.icon` alone.
