@@ -105,6 +105,7 @@
     "files": [
       "index.html",
       "notice/index.html",
+      "privacy/index.html",
       "flutter_bootstrap.js",
       "frame_shaping.mjs",
       "video_import.mjs",

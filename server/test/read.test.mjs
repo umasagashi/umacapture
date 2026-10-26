@@ -69,6 +69,7 @@ describe("published record", () => {
     assert.ok(html.includes("<li>support 1 4凸 Lv50</li>"), "support cards missing");
     assert.ok(html.includes("<tr><th>共有日</th><td>2026-09-29</td></tr>"), "share day row missing");
     assert.equal(html.includes("公開日"), false, "the share day is still labelled 公開日");
+    assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
   });
 });
 
@@ -227,6 +228,7 @@ describe("account list", () => {
     assert.ok(html.includes('<meta name="twitter:card" content="summary">'));
     assert.ok(html.includes(`<a href="${ORIGIN}/r/${older}">`), "a listed record links to its page");
     assert.equal(html.includes("<b>"), false, "a raw table name reached the markup");
+    assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
 
     // The records of the list read without a session too.
     for (const path of [`/r/${older}`, `/r/${older}.json`]) {

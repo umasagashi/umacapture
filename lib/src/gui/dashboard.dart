@@ -459,6 +459,9 @@ class AboutGroup extends StatelessWidget {
   /// so a staging or local build links to its own copy.
   static String get noticeUrl => Uri.base.resolve("/notice/").toString();
 
+  /// The privacy policy, the static page shipped next to the notice (`web/privacy/`), resolved the same way.
+  static String get privacyUrl => Uri.base.resolve("/privacy/").toString();
+
   /// One bullet: the service's name, then its address as an ordinary web link.
   ///
   /// **The URL itself is the link text**, rather than a labelled button, so the reader sees where
@@ -519,43 +522,56 @@ class AboutGroup extends StatelessWidget {
     );
   }
 
-  /// The notice paragraph: a translated sentence with the notice's title inline as the link.
+  /// The notice paragraph: a translated sentence with the notice's and the privacy policy's titles inline
+  /// as links.
   ///
-  /// The sentence carries a `{link}` marker where the title goes, so the word order stays the
-  /// translation's. The title is a [WidgetSpan] holding an [InkWell] for the same reason [_link] uses
-  /// one: a span recognizer is unreachable from the keyboard.
+  /// The sentence carries a `{notice}` and a `{privacy}` marker where the titles go, so the word order
+  /// stays the translation's. Each title is a [WidgetSpan] holding an [InkWell] for the same reason
+  /// [_link] uses one: a span recognizer is unreachable from the keyboard.
   Widget _notice(BuildContext context) {
     final theme = Theme.of(context);
-    final parts = "$tr_dashboard.about.notice.text".tr().split("{link}");
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(text: parts.first),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: MergeSemantics(
-              child: Semantics(
-                link: true,
-                child: InkWell(
-                  onTap: () => launchUrl(Uri.parse(noticeUrl)),
-                  borderRadius: BorderRadius.circular(4),
-                  mouseCursor: SystemMouseCursors.click,
-                  child: Text(
-                    "$tr_dashboard.about.notice.link".tr(),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.primary,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
+    final links = {
+      "notice": (label: "$tr_dashboard.about.notice.notice_link".tr(), url: noticeUrl),
+      "privacy": (label: "$tr_dashboard.about.notice.privacy_link".tr(), url: privacyUrl),
+    };
+    final spans = <InlineSpan>[];
+    "$tr_dashboard.about.notice.text".tr().splitMapJoin(
+      RegExp(r"\{(notice|privacy)\}"),
+      onMatch: (match) {
+        final link = links[match[1]];
+        if (link != null) spans.add(_inlineLink(theme, link.label, link.url));
+        return "";
+      },
+      onNonMatch: (text) {
+        spans.add(TextSpan(text: text));
+        return "";
+      },
+    );
+    return Text.rich(TextSpan(children: spans), style: theme.textTheme.bodyMedium);
+  }
+
+  /// One title inside the notice paragraph, drawn as the app's other text links are.
+  WidgetSpan _inlineLink(ThemeData theme, String label, String url) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: MergeSemantics(
+        child: Semantics(
+          link: true,
+          child: InkWell(
+            onTap: () => launchUrl(Uri.parse(url)),
+            borderRadius: BorderRadius.circular(4),
+            mouseCursor: SystemMouseCursors.click,
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                decoration: TextDecoration.underline,
               ),
             ),
           ),
-          TextSpan(text: parts.skip(1).join()),
-        ],
+        ),
       ),
-      style: theme.textTheme.bodyMedium,
     );
   }
 
