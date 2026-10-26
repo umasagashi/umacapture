@@ -1456,6 +1456,13 @@ extension _SelectionPurposeStyle on SelectionPurpose {
       rowLabelKey: "$tr_chara_detail.delete_record.row_overlay",
       actionLabelKey: "$tr_chara_detail.delete_record.overlay.delete",
     ),
+    SelectionPurpose.share => (
+      color: theme.colorScheme.tertiary,
+      onColor: theme.colorScheme.onTertiary,
+      icon: Symbols.public_rounded,
+      rowLabelKey: "$tr_chara_detail.share_record.row_overlay",
+      actionLabelKey: "$tr_chara_detail.share_record.overlay.share",
+    ),
   };
 }
 
@@ -1623,6 +1630,8 @@ class _SelectionConfirmButton extends ConsumerWidget {
                   ExportRecordDialog.show(ref.base, recordIds: recordIds);
                 case SelectionPurpose.delete:
                   BulkDeleteRecordDialog.show(ref.base, recordIds: recordIds, source: ref.read(recordSourceProvider));
+                case SelectionPurpose.share:
+                  BulkShareRecordDialog.show(ref.base, recordIds: recordIds, source: ref.read(recordSourceProvider));
               }
             },
     );

@@ -243,8 +243,9 @@ final class ShareUnreachable extends ShareOutcome {
 
 enum UnshareOutcome { unshared, forbidden, loginRequired, unreachable, failed }
 
-/// One share of the account, as `GET /api/me/shares` lists it.
-typedef AccountShare = ({String id, String url, String sharedOn, String clientKeyHash, Map<String, Object?> summary});
+/// One share of the account, as `GET /api/me/shares` lists it. [cardName] is the trainee's card as the server's name
+/// tables label it (its own form, not the app's), or null when the listing names none.
+typedef AccountShare = ({String id, String url, String sharedOn, String clientKeyHash, String? cardName});
 
 /// What listing the account's shares answered.
 sealed class ShareListing {
@@ -354,6 +355,33 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     if (moduleVersion == null) {
       return {for (final r in records) r.id: const ModuleUnavailable()};
     }
+    final (:toSend, :settled) = await sortForSharing(records, under: session);
+    final outcomes = {...settled};
+    for (var start = 0; start < toSend.length; start += maxSharesPerRequest) {
+      final chunk = toSend.sublist(start, min(start + maxSharesPerRequest, toSend.length));
+      final answered = await _shareChunk(chunk, session, moduleVersion);
+      outcomes.addAll(answered);
+      final stop = answered.values.any(
+        (o) => o is LoginRequired || o is ShareUnreachable || o is ShareRefused && o.reason == ShareRefusal.busy,
+      );
+      if (stop) {
+        for (final record in toSend.skip(start + chunk.length)) {
+          outcomes[record.id] = answered.values.first;
+        }
+        break;
+      }
+    }
+    return outcomes;
+  }
+
+  /// Sorts [records] without sending anything: those [shareAll] would send, and the outcome of each it would not —
+  /// already shared, not shareable, or the failure that kept the account's trainers from being known. A
+  /// confirmation counts from this what a share would leave out. A share passes its session as [under], so the
+  /// account's trainers are asked of that account only.
+  Future<({List<CharaDetailRecord> toSend, Map<String, ShareOutcome> settled})> sortForSharing(
+    List<CharaDetailRecord> records, {
+    ShareSession? under,
+  }) async {
     final outcomes = <String, ShareOutcome>{};
     final toSend = <CharaDetailRecord>[];
     final ownTrainerId = ref.read(trainerIdProvider);
@@ -371,7 +399,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         continue;
       }
       if (!canShare(record, [ownTrainerId])) {
-        account ??= await _accountTrainerIds();
+        account ??= await _accountTrainerIds(under);
         if (account.failure case final failure?) {
           outcomes[record.id] = failure;
           continue;
@@ -383,30 +411,16 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       }
       toSend.add(record);
     }
-    for (var start = 0; start < toSend.length; start += maxSharesPerRequest) {
-      final chunk = toSend.sublist(start, min(start + maxSharesPerRequest, toSend.length));
-      final answered = await _shareChunk(chunk, session.accountId, moduleVersion);
-      outcomes.addAll(answered);
-      final stop = answered.values.any(
-        (o) => o is LoginRequired || o is ShareUnreachable || o is ShareRefused && o.reason == ShareRefusal.busy,
-      );
-      if (stop) {
-        for (final record in toSend.skip(start + chunk.length)) {
-          outcomes[record.id] = answered.values.first;
-        }
-        break;
-      }
-    }
-    return outcomes;
+    return (toSend: toSend, settled: outcomes);
   }
 
   /// The trainer ids the account holds, or the outcome that stands for every record needing them when the server
   /// did not tell. Asked only for a record that is not this device's own training.
-  Future<({Set<String> ids, ShareOutcome? failure})> _accountTrainerIds() async {
+  Future<({Set<String> ids, ShareOutcome? failure})> _accountTrainerIds(ShareSession? under) async {
     ({Set<String> ids, ShareOutcome? failure}) failed(ShareOutcome o) => (ids: const {}, failure: o);
     final ShareAnswer answer;
     try {
-      answer = await _session.send("GET", "/api/me");
+      answer = await _session.send("GET", "/api/me", under: under);
     } on DioException {
       return failed(const ShareUnreachable());
     } on StateError {
@@ -427,9 +441,15 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
 
   Future<Map<String, ShareOutcome>> _shareChunk(
     List<CharaDetailRecord> chunk,
-    String accountId,
+    ShareSession session,
     String moduleVersion,
   ) async {
+    Map<String, ShareOutcome> everyOne(ShareOutcome o) => {for (final r in chunk) r.id: o};
+    // A share begun under one account sends nothing once the device holds another: the server would publish the
+    // records under the new account while their notes named the first. Checked before any note is written.
+    if (!_session.holds(session)) {
+      return everyOne(const LoginRequired());
+    }
     final pending = <RecordShare>[];
     for (final record in chunk) {
       final earlier = entryOf(record.id);
@@ -437,7 +457,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
           earlier ??
           RecordShare(
             recordId: record.id,
-            accountId: accountId,
+            accountId: session.accountId,
             clientKey: newClientKey(),
             state: RecordShareState.pending,
           );
@@ -449,10 +469,9 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       for (final (i, note) in pending.indexed)
         {"client_key": note.clientKey, "record": postedForm(chunk[i], moduleVersion: moduleVersion)},
     ];
-    Map<String, ShareOutcome> everyOne(ShareOutcome o) => {for (final r in chunk) r.id: o};
     final ShareAnswer answer;
     try {
-      answer = await _session.send("POST", "/api/shares", data: {"shares": shares});
+      answer = await _session.send("POST", "/api/shares", data: {"shares": shares}, under: session);
     } on DioException {
       return everyOne(const ShareUnreachable());
     } on StateError {
@@ -526,7 +545,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     }
     final ShareAnswer answer;
     try {
-      answer = await _session.send("GET", "/api/me/shares");
+      answer = await _session.send("GET", "/api/me/shares", under: session);
     } on DioException {
       return const SharesUnreachable();
     } on StateError {
@@ -578,13 +597,11 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       if (id is! String || url is! String || sharedOn is! String || hash is! String) {
         return null;
       }
-      shares.add((
-        id: id,
-        url: url,
-        sharedOn: sharedOn,
-        clientKeyHash: hash,
-        summary: summary is Map<String, Object?> ? summary : const {},
-      ));
+      final cardName = switch (summary) {
+        {"trainee": {"card": {"name": final String name}}} when name.isNotEmpty => name,
+        _ => null,
+      };
+      shares.add((id: id, url: url, sharedOn: sharedOn, clientKeyHash: hash, cardName: cardName));
     }
     return shares;
   }

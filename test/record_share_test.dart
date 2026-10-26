@@ -4,7 +4,8 @@
 // Entry: a real `record.json`'s bytes decoded the way the app decodes them, the real
 // `recordShares` store, and the real diagnostic Dio with only its transport replaced. Nothing
 // reaches a network. The dialog cases enter through the row menu's real share submenu and the
-// long-press confirms of the share and unshare dialogs; the list of shares enters through its
+// long-press confirms of the share and unshare dialogs; sharing the checked records enters through the
+// table toolbar's real share button and the selection scrim; the list of shares enters through its
 // real privacy-settings row.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_share_test.dart
@@ -33,7 +34,10 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/version_check.dart';
+import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
+import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_dialog.dart';
+import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
@@ -111,13 +115,21 @@ ResponseBody _sharesList(List<Map<String, Object?>> shares) => ResponseBody.from
   },
 );
 
-Map<String, Object?> _listed(String id, String clientKeyHash) => {
+Map<String, Object?> _listed(String id, String clientKeyHash, {String? cardName}) => {
   "id": id,
   "url": "${Const.sharingOrigin}/r/$id",
   "shared_on": "2026-10-20",
   "client_key_hash": clientKeyHash,
-  "summary": <String, Object?>{},
+  "summary": <String, Object?>{
+    if (cardName != null)
+      "trainee": {
+        "card": {"gid": 100101, "name": cardName},
+      },
+  },
 };
+
+/// A card's name as the server's name tables label it, which is not the form the app's own rows use.
+const _serverCardName = "[スペシャルドリーマー]スペシャルウィーク";
 
 Map<String, Object?> _me(List<String> trainerIds) => {"account_id": _accountId, "trainer_ids": trainerIds};
 
@@ -142,17 +154,17 @@ String _recordBytes({String? recordType, String? recordId, String? trainerId}) {
   return jsonEncode(map);
 }
 
-/// The record store, holding only the record the row shows.
+/// The record store, holding only the records the rows show.
 class _Shown extends CharaDetailRecordStorage {
-  final CharaDetailRecord record;
+  final List<CharaDetailRecord> shownRecords;
 
-  _Shown(this.record);
-
-  @override
-  Future<List<CharaDetailRecord>> build() async => [record];
+  _Shown(this.shownRecords);
 
   @override
-  CharaDetailRecord? getBy({required String id}) => id == record.id ? record : null;
+  Future<List<CharaDetailRecord>> build() async => shownRecords;
+
+  @override
+  CharaDetailRecord? getBy({required String id}) => shownRecords.where((r) => r.id == id).firstOrNull;
 }
 
 /// A record store that holds nothing: the record a note was made for has been deleted.
@@ -173,6 +185,9 @@ class _FakeListener implements LoginListener {
   Future<String> get code => _code.future;
 
   void callback(String proof) => _code.complete(proof);
+
+  /// The listener's own deadline passing with no callback.
+  void timeOut() => _code.completeError(const LoginListenClosed(timedOut: true));
 
   @override
   Future<void> close() async {
@@ -212,6 +227,7 @@ void main() {
     List<Object> answers, {
     String? trainerId,
     CharaDetailRecord? shown,
+    List<CharaDetailRecord>? held,
     bool emptied = false,
     LoginListener? listener,
   }) {
@@ -235,7 +251,8 @@ void main() {
         recordShareDioProvider.overrideWith(
           (ref) => createDiagnosticDio(operation: "record_share")..httpClientAdapter = server,
         ),
-        if (shown != null) charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(shown)),
+        if (held ?? [?shown] case final records when records.isNotEmpty)
+          charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(records)),
         if (emptied) ...[
           charaDetailRecordStorageLoaderProvider.overrideWith(_Emptied.new),
           charaDetailArchiveStorageLoaderProvider.overrideWith(_EmptyArchive.new),
@@ -340,7 +357,7 @@ void main() {
       );
       await tester.tap(find.text('row'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('公開'));
+      await tester.tap(find.text('共有'));
       await tester.pumpAndSettle();
     }
 
@@ -349,9 +366,9 @@ void main() {
 
     Future<void> shareFromMenu(WidgetTester tester, CharaDetailRecord shown) async {
       await openMenu(tester, shown);
-      await tester.tap(find.text('公開する…'));
+      await tester.tap(find.text('共有する…'));
       await tester.pumpAndSettle();
-      await tester.longPress(find.text('長押しで公開'));
+      await tester.longPress(find.text('長押しで共有'));
     }
 
     testWidgets('sharing shows the URL in the dialog', (tester) async {
@@ -364,7 +381,7 @@ void main() {
       final url = "${Const.sharingOrigin}/r/0123456789";
       await settleUntil(tester, () => find.text(url).evaluate().isNotEmpty, describe: 'the shared URL');
 
-      expect(find.text('公開しました。'), findsOneWidget);
+      expect(find.text('共有しました。'), findsOneWidget);
       expect(find.text('URL をコピー'), findsOneWidget);
       expect(server.sent.single.uri.path, "/api/shares");
       expect(server.sent.single.headers["Authorization"], "Bearer $_token");
@@ -377,19 +394,19 @@ void main() {
         _results([_created("0123456789")]),
       ]);
       await openMenu(tester, record);
-      await tester.tap(find.text('公開する…'));
+      await tester.tap(find.text('共有する…'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('長押しで公開'));
+      await tester.tap(find.text('長押しで共有'));
       // A press that did share needs fake time to elapse (as the hold does) and real time for the write
       // before the request, so the window covers both; it cannot be an arrival, there is none to wait for.
       await tester.pump(const Duration(seconds: 1));
       await pumpRealTimeWindow(tester, rounds: 20);
       expect(server.sent, isEmpty);
-      expect(find.text('長押しで公開'), findsOneWidget, reason: 'the dialog is still waiting for the hold');
+      expect(find.text('長押しで共有'), findsOneWidget, reason: 'the dialog is still waiting for the hold');
 
-      await tester.longPress(find.text('長押しで公開'));
-      await settleUntil(tester, () => find.text('公開しました。').evaluate().isNotEmpty, describe: 'the share');
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.text('共有しました。').evaluate().isNotEmpty, describe: 'the share');
       expect(server.sent, hasLength(1));
     });
 
@@ -411,7 +428,7 @@ void main() {
       answer.complete(_results([_created("0123456789")]));
       // Dio reads the late answer on the fake clock, which nothing else here moves.
       await tester.pump(const Duration(seconds: 1));
-      await settleUntil(tester, () => find.text('公開しました。').evaluate().isNotEmpty, describe: 'the share');
+      await settleUntil(tester, () => find.text('共有しました。').evaluate().isNotEmpty, describe: 'the share');
       await tester.tapAt(const Offset(4, 4));
       await tester.pump();
       expect(find.byType(ShareRecordDialog), findsNothing);
@@ -432,11 +449,15 @@ void main() {
       );
 
       await shareFromMenu(tester, record);
-      await settleUntil(tester, () => find.text('確認ページを開く').evaluate().isNotEmpty, describe: 'the way to the login');
+      await settleUntil(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the way to the login',
+      );
       expect(server.sent, isEmpty);
       expect(container.read(recordSharesProvider), isEmpty, reason: 'no note is made before there is an account');
 
-      await tester.tap(find.text('確認ページを開く'));
+      await tester.tap(find.text('Google でログイン'));
       await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
       listener.callback("proof-from-the-callback");
       // Dio reads each answer on the fake clock: one step for the claim, one for the trainer registration.
@@ -445,14 +466,152 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(
         tester,
-        () => container.read(recordShareSessionProvider) != null && find.text('確認ページを開く').evaluate().isEmpty,
+        () => container.read(recordShareSessionProvider) != null && find.text('Google でログイン').evaluate().isEmpty,
         describe: 'the login to finish',
       );
       expect(server.sent.map((s) => s.uri.path), ["/api/auth/claim", "/api/me/trainers"]);
 
-      await tester.longPress(find.text('長押しで公開'));
-      await settleUntil(tester, () => find.text('公開しました。').evaluate().isNotEmpty, describe: 'the share');
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.text('共有しました。').evaluate().isNotEmpty, describe: 'the share');
       expect(server.sent.last.uri.path, "/api/shares");
+    });
+
+    testWidgets('a login whose listener timed out says the login expired, and claims nothing', (tester) async {
+      final listener = _FakeListener();
+      container = containerFor([], shown: record, listener: listener);
+
+      await shareFromMenu(tester, record);
+      await settleUntil(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the way to the login',
+      );
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+      listener.timeOut();
+      await settleUntil(
+        tester,
+        () => find.text('ログインの有効期限が切れました。もう一度ログインしてください。').evaluate().isNotEmpty,
+        describe: 'the expired sentence',
+      );
+      expect(server.sent, isEmpty);
+      expect(container.read(recordShareSessionProvider), isNull);
+    });
+
+    testWidgets('with no listener, the login is claimed each time the page is shown again, with no second press', (
+      tester,
+    ) async {
+      container = containerFor([
+        _json(409, {"error": "login_incomplete"}),
+        _json(200, _claimed()),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+      ], shown: record);
+      // The login page opens in another tab; coming back to this one is the page being shown again.
+      void leaveAndReturn() {
+        for (final state in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+      }
+
+      await shareFromMenu(tester, record);
+      await settleUntil(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the way to the login',
+      );
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+      expect(server.sent, isEmpty, reason: 'nothing is claimed before the page is shown again');
+
+      leaveAndReturn();
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => server.sent.length == 1, describe: 'the claim of the first return');
+      expect(find.text('Google でログイン'), findsOneWidget, reason: 'an unfinished login waits for the next return');
+
+      leaveAndReturn();
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => server.sent.length == 3, describe: 'the trainer registration');
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(
+        tester,
+        () => container.read(recordShareSessionProvider) != null && find.text('長押しで共有').evaluate().isNotEmpty,
+        describe: 'the login to finish',
+      );
+      expect(server.sent.map((s) => s.uri.path), ["/api/auth/claim", "/api/auth/claim", "/api/me/trainers"]);
+      expect(opened, hasLength(1));
+    });
+
+    testWidgets('a login that does not simply succeed says why, next to what to do about it', (tester) async {
+      const login = 'Google でログイン';
+      final cases = [
+        (
+          'incomplete',
+          <Object>[
+            _json(409, {"error": "login_incomplete"}),
+          ],
+          'ログインがまだ終わっていません。開いたログインのタブで続けてから、もう一度押してください。',
+        ),
+        (
+          'expired',
+          <Object>[
+            _json(410, {"error": "login_expired"}),
+          ],
+          'ログインの有効期限が切れました。もう一度ログインしてください。',
+        ),
+        (
+          'refused',
+          <Object>[
+            _json(403, {"error": "forbidden"}),
+          ],
+          'ログインを確認できませんでした。もう一度ログインしてください。',
+        ),
+        ('unreachable', <Object>[_lostConnection], 'サーバーに接続できなかったため、ログインを確認できませんでした。もう一度お試しください。'),
+        (
+          'trainer limit',
+          <Object>[
+            _json(200, _claimed()),
+            _json(409, {"error": "trainer_limit"}),
+          ],
+          'ログインしました。ただし、このアカウントに登録できるトレーナー ID の数が上限に達しているため、'
+              'この端末のトレーナー ID は登録されませんでした。この端末で育成したレコードは共有できます。',
+        ),
+      ];
+      for (final (name, answers, sentence) in cases) {
+        // No listener: the proof is claimed by pressing the login button a second time.
+        container = containerFor(answers, shown: record);
+        opened = [];
+
+        await shareFromMenu(tester, record);
+        await settleUntil(tester, () => find.text(login).evaluate().isNotEmpty, describe: 'the way to the login');
+        expect(find.text('共有にはログインが必要です。'), findsOneWidget, reason: name);
+        await tester.tap(find.text(login));
+        await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+        await tester.tap(find.text(login));
+        await tester.pump(const Duration(seconds: 1));
+        await settleUntil(tester, () => find.text(sentence).evaluate().isNotEmpty, describe: 'the $name sentence');
+
+        if (name == 'trainer limit') {
+          expect(container.read(recordShareSessionProvider), isNotNull);
+          expect(find.text('長押しで共有'), findsOneWidget, reason: 'signed in, the share can be confirmed');
+          expect(find.text(login), findsNothing);
+        } else {
+          expect(container.read(recordShareSessionProvider), isNull, reason: name);
+          expect(find.text('共有にはログインが必要です。'), findsNothing, reason: 'the login sentence takes its place');
+        }
+        if (name == 'expired' || name == 'refused') {
+          // An ended attempt cannot be claimed again; the next press starts a new login.
+          await tester.tap(find.text(login));
+          await settleUntil(tester, () => opened.length == 2, describe: 'a new login page to open');
+          expect(server.sent, hasLength(1), reason: 'nothing is claimed with the ended attempt');
+        }
+        await tester.tap(find.byIcon(Symbols.close_rounded).last);
+        await tester.pumpAndSettle();
+      }
     });
 
     testWidgets("a record that is not a training of the account's trainers sends nothing", (tester) async {
@@ -469,7 +628,7 @@ void main() {
         await shareFromMenu(tester, shown);
         await settleUntil(
           tester,
-          () => find.text('自分で育成したレコードだけ公開できます。').evaluate().isNotEmpty,
+          () => find.text('自分で育成したレコードだけ共有できます。').evaluate().isNotEmpty,
           describe: 'the refusal',
         );
 
@@ -489,11 +648,11 @@ void main() {
       await tester.runAsync(() => notes().shareAll([record]));
 
       await openMenu(tester, record);
-      await tester.tap(find.text('公開を取り消す…'));
+      await tester.tap(find.text('共有を取り消す…'));
       await tester.pumpAndSettle();
-      expect(find.text('公開の取り消し'), findsOneWidget);
+      expect(find.text('共有を取り消す'), findsOneWidget);
       await tester.longPress(find.text('長押しで取り消す'));
-      await settleUntil(tester, () => find.text('公開の取り消し').evaluate().isEmpty, describe: 'the unshare dialog to close');
+      await settleUntil(tester, () => find.text('共有を取り消す').evaluate().isEmpty, describe: 'the unshare dialog to close');
 
       expect(server.sent.last.method, "DELETE");
       expect(server.sent.last.uri.path, "/api/shares/0123456789");
@@ -501,18 +660,403 @@ void main() {
       expect(container.read(recordSharesProvider), isEmpty);
       expect(StorageBox(StorageBoxKey.recordShares).entries().map((e) => e.key), [shareSessionKey]);
     });
+
+    // S4b G398: P2 leads a lost session to a login, as P1 does, instead of reading it as a refusal.
+    testWidgets('unsharing with no session asks for a login there, and after it the long press unshares', (
+      tester,
+    ) async {
+      await storeNote(state: RecordShareState.shared);
+      final listener = _FakeListener();
+      container = containerFor(
+        [
+          _json(200, _claimed()),
+          _json(200, {"trainer_id": record.metadata.trainerId}),
+          _empty(204),
+        ],
+        shown: record,
+        listener: listener,
+      );
+
+      await openMenu(tester, record);
+      await tester.tap(find.text('共有を取り消す…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで取り消す'));
+      await settleUntil(
+        tester,
+        () => find.text('共有を取り消すにはログインが必要です。').evaluate().isNotEmpty,
+        describe: 'the way to the login',
+      );
+      expect(server.sent, isEmpty);
+
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+      listener.callback("proof-from-the-callback");
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(
+        tester,
+        () => find.text('長押しで取り消す').evaluate().isNotEmpty,
+        describe: 'the long press to come back after the login',
+      );
+
+      await tester.longPress(find.text('長押しで取り消す'));
+      await settleUntil(tester, () => find.text('共有を取り消す').evaluate().isEmpty, describe: 'the unshare dialog to close');
+      expect(server.sent.last.method, "DELETE");
+      expect(server.sent.last.uri.path, "/api/shares/0123456789");
+      expect(container.read(recordSharesProvider), isEmpty);
+    });
+
+    // S4b G396: the account's limit holds a count that only unsharing lowers, as well as a daily charge.
+    testWidgets("the account's limit is not told as the day's limit", (tester) async {
+      await storeSession();
+      container = containerShowing(record, [
+        _results([
+          {"status": "refused", "error": "account_limit"},
+        ]),
+      ]);
+
+      await shareFromMenu(tester, record);
+      await settleUntil(
+        tester,
+        () => find.textContaining('このアカウントで共有できる上限').evaluate().isNotEmpty,
+        describe: "the account's limit",
+      );
+      expect(find.textContaining('今日の共有の上限'), findsNothing);
+    });
+  });
+
+  // S4c: sharing the checked records (N2), from the table toolbar's share button through the selection scrim.
+  group('from the table toolbar', () {
+    setUpAll(loadAppTranslations);
+
+    /// Mounts the real toolbar under the selection scrim over [container], enters share selection from its button,
+    /// checks [ids] as the grid's checkboxes would, and opens the confirmation from the scrim.
+    Future<void> openBulk(WidgetTester tester, List<String> ids) async {
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(() => container.read(charaDetailRecordStorageLoaderProvider.future));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: DialogLayer(
+              child: Scaffold(
+                // The box stands in for the column chips the layer also covers, which the scrim's buttons sit over.
+                body: TopControlsLayer(
+                  controls: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [ColumnPresetBarWidget(), SizedBox(height: 80)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('共有するレコードの選択'));
+      await tester.pump();
+      container.read(selectedRecordIdsProvider.notifier).set(ids.toSet());
+      await tester.pump();
+      await tester.tap(find.text('選択を共有'));
+      await tester.pumpAndSettle();
+    }
+
+    List<CharaDetailRecord> ownRecords(int n) => [
+      for (var i = 0; i < n; i++) CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(i))),
+    ];
+
+    testWidgets(
+      'S4c (C1 i): nine records go as eight and one; the one that failed is told and the rest is sent again',
+      (tester) async {
+        await storeSession();
+        final records = ownRecords(9);
+        container = containerFor([
+          _results([for (var i = 0; i < 8; i++) _created("id-$i")]),
+          _lostConnection,
+          _results([_created("id-8")]),
+        ], held: records);
+
+        await openBulk(tester, [for (final r in records) r.id]);
+        expect(find.text('9 件のレコードを共有します。'), findsOneWidget);
+        await tester.longPress(find.text('長押しで共有'));
+        await settleUntil(tester, () => find.text('残りを再試行').evaluate().isNotEmpty, describe: 'the partial result');
+
+        expect([sharesSent(0).length, sharesSent(1).length], [8, 1]);
+        expect(find.text('8 件を共有しました。\n1 件は共有できませんでした。'), findsOneWidget);
+        expect(find.text('サーバーに接続できませんでした。もう一度お試しください。'), findsOneWidget);
+        expect(
+          container.read(selectionModeProvider),
+          isNull,
+          reason: 'the checked rows are the dialog\'s to tell about',
+        );
+
+        await tester.tap(find.text('残りを再試行'));
+        // Dio reads the answer on the fake clock, which nothing else here moves.
+        await tester.pump(const Duration(seconds: 1));
+        await settleUntil(tester, () => find.text('9 件を共有しました。').evaluate().isNotEmpty, describe: 'the retry');
+        expect(
+          sharesSent(2).single["client_key"],
+          sharesSent(1).single["client_key"],
+          reason: 'the kept key is resent',
+        );
+        expect(find.text("${Const.sharingOrigin}/u/$_accountId"), findsOneWidget, reason: 'all shared: the list URL');
+        expect(find.text('残りを再試行'), findsNothing);
+      },
+    );
+
+    testWidgets('S4d (C1): a share begun under one account sends nothing more once another account has logged in', (
+      tester,
+    ) async {
+      await storeSession();
+      final records = ownRecords(9);
+      final heldAnswer = Completer<Object>();
+      const tokenB = 'second-account-token';
+      container = containerFor([
+        _lostConnection,
+        heldAnswer.future,
+        _empty(204),
+        _json(200, {..._claimed(), 'account_id': 'acct-0002', 'token': tokenB}),
+        _json(200, {'trainer_id': record.metadata.trainerId}),
+        // Answers the last record only if it is wrongly sent under the second account.
+        _results([_created('id-8')]),
+      ], held: records);
+      await openBulk(tester, [for (final r in records) r.id]);
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.text('残りを再試行').evaluate().isNotEmpty, describe: 'the partial result');
+      await tester.tap(find.text('残りを再試行'));
+      await settleUntilElapsing(tester, () => server.sent.length == 2, describe: "the retry's first chunk");
+      // The dialog closes while the retry is still waiting for its answer.
+      await tester.tap(find.text('閉じる'));
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: DialogLayer(child: Scaffold(body: ShareAccountSection())),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ログアウト'));
+      await settleUntilElapsing(tester, () => find.text('Google でログイン').evaluate().isNotEmpty, describe: 'logout');
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => opened.isNotEmpty, describe: "the second account's login page");
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntilElapsing(tester, () => server.sent.length == 5, describe: "the second account's login");
+      expect(container.read(recordShareSessionProvider)?.accountId, 'acct-0002');
+
+      heldAnswer.complete(_results([for (var i = 0; i < 8; i++) _created('id-$i')]));
+      await settleUntilElapsing(
+        tester,
+        () => notes().entryOf(records[7].id)?.state == RecordShareState.shared,
+        describe: "the first account's answer",
+      );
+      // Nothing signals that the share has given up on the last record, so it gets a window.
+      await pumpRealTimeWindow(tester, rounds: 20);
+
+      expect(server.sent[1].headers['Authorization'], 'Bearer $_token');
+      expect(server.sent, hasLength(5), reason: 'the last record is not sent under the second account');
+      expect(notes().entryOf(records.last.id), isNull, reason: 'no note names the first account for it');
+    });
+
+    testWidgets('S4c (C1 ii): before the press the confirmation counts a shared record and a friend\'s one; neither '
+        'is sent, and each is counted', (tester) async {
+      await storeSession();
+      final [own, shared] = ownRecords(2);
+      final friend = CharaDetailRecord.fromRecordJson(_recordBytes(recordType: "FriendStandard", recordId: _uuid(7)));
+      await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      container = containerFor(
+        [
+          _results([_created("id-own")]),
+        ],
+        held: [own, shared, friend],
+      );
+
+      await openBulk(tester, [own.id, shared.id, friend.id]);
+      expect(
+        find.text('1 件はすでに共有しているため、送りません。\n1 件は自分で育成したレコードではないため、除外します。'),
+        findsOneWidget,
+        reason: 'what the share leaves out is told before the press',
+      );
+      expect(server.sent, isEmpty);
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.textContaining('1 件を共有しました。').evaluate().isNotEmpty, describe: 'the result');
+
+      expect(server.sent, hasLength(1));
+      expect(sharesSent(0), hasLength(1));
+      expect(find.text('1 件を共有しました。\n1 件はすでに共有しています。\n1 件は自分で育成したレコードではないため、除外しました。'), findsOneWidget);
+      expect(find.text("${Const.sharingOrigin}/u/$_accountId"), findsNothing, reason: 'not every record is listed');
+    });
+
+    testWidgets('S4c (C1 iii): a plain tap on the confirm sends nothing; only the long press shares', (tester) async {
+      await storeSession();
+      final records = ownRecords(2);
+      container = containerFor([
+        _results([_created("id-0"), _created("id-1")]),
+      ], held: records);
+
+      await openBulk(tester, [for (final r in records) r.id]);
+      await tester.tap(find.text('長押しで共有'));
+      // As in P1's case: the window covers the fake time a hold needs and the real time of the write before a send.
+      await tester.pump(const Duration(seconds: 1));
+      await pumpRealTimeWindow(tester, rounds: 20);
+      expect(server.sent, isEmpty);
+
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.text('2 件を共有しました。').evaluate().isNotEmpty, describe: 'the share');
+      expect(server.sent, hasLength(1));
+    });
+
+    testWidgets('S4c (C1 iv): with no session, the result asks for a login and nothing is sent', (tester) async {
+      final records = ownRecords(2);
+      container = containerFor([], held: records);
+
+      await openBulk(tester, [for (final r in records) r.id]);
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntil(tester, () => find.text('Google でログイン').evaluate().isNotEmpty, describe: 'the login');
+
+      expect(find.text('共有にはログインが必要です。'), findsOneWidget);
+      expect(find.text('0 件を共有しました。\n2 件は共有できませんでした。'), findsOneWidget);
+      expect(find.text('残りを再試行'), findsNothing, reason: 'logging in comes first');
+      expect(server.sent, isEmpty);
+    });
   });
 
   group('from the privacy settings', () {
     setUpAll(loadAppTranslations);
 
-    testWidgets("a share whose record was deleted is listed from the account's list and can be unshared", (
-      tester,
-    ) async {
+    // S4b: the account section (N3), mounted as the privacy settings mount it.
+    Future<void> mountAccount(WidgetTester tester) => tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: DialogLayer(
+            child: Scaffold(body: SingleChildScrollView(child: ShareAccountSection())),
+          ),
+        ),
+      ),
+    );
+
+    const loggedInActions = ['共有の一覧ページを開く', 'ログアウト', 'アカウントを削除…', '共有したレコード'];
+
+    testWidgets(
+      'S4b (C1 i): logged out, the account offers a login; logged in, its list, logout, deletion and shares',
+      (tester) async {
+        final listener = _FakeListener();
+        container = containerFor([
+          _json(200, _claimed()),
+          _json(200, {"trainer_id": record.metadata.trainerId}),
+        ], listener: listener);
+        await mountAccount(tester);
+        await tester.pumpAndSettle();
+
+        expect(find.text('ログインしていません。ログインすると、レコードを共有できます。'), findsOneWidget);
+        for (final action in loggedInActions) {
+          expect(find.text(action), findsNothing, reason: action);
+        }
+        expect(server.sent, isEmpty, reason: 'showing the account asks no server');
+
+        await tester.tap(find.text('Google でログイン'));
+        await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+        listener.callback("proof-from-the-callback");
+        await tester.pump(const Duration(seconds: 1));
+        await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
+        await tester.pump(const Duration(seconds: 1));
+        await settleUntil(tester, () => find.text('ログアウト').evaluate().isNotEmpty, describe: 'the logged-in account');
+
+        for (final action in loggedInActions) {
+          expect(find.text(action), findsOneWidget, reason: action);
+        }
+        expect(find.text('Google でログイン'), findsNothing);
+        expect(accountListUrl(_accountId), "${Const.sharingOrigin}/u/$_accountId");
+      },
+    );
+
+    testWidgets('S4b (C1 ii): logging out from the account drops the session and the share notes', (tester) async {
+      await storeSession();
+      await storeNote(state: RecordShareState.shared);
+      container = containerFor([_empty(204)]);
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('ログアウト'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the account to show logged out',
+      );
+      expect(server.sent.single.uri.path, "/api/auth/logout");
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect(container.read(recordSharesProvider), isEmpty);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+    });
+
+    testWidgets(
+      'S4b (C1 iii, iv): only the long press deletes the account; its progress shows, and a deletion cut short is '
+      'continued, with nothing else offered meanwhile',
+      (tester) async {
+        await storeSession();
+        container = containerFor([
+          _json(200, {
+            "remaining": {"shares": 3, "sync": 2},
+          }),
+          _lostConnection,
+          _json(200, {
+            "remaining": {"shares": 1},
+          }),
+          _empty(204),
+        ]);
+        await mountAccount(tester);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('アカウントを削除…'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('長押しで削除'));
+        await tester.pump(const Duration(seconds: 1));
+        await pumpRealTimeWindow(tester, rounds: 20);
+        expect(server.sent, isEmpty, reason: 'a plain tap deletes nothing');
+
+        await tester.longPress(find.text('長押しで削除'));
+        await settleUntil(
+          tester,
+          () => find.textContaining('削除が途中で止まりました').evaluate().isNotEmpty,
+          describe: 'the deletion to stop at the lost connection',
+        );
+        expect(find.text('削除しています（残り 5）'), findsOneWidget);
+        expect(container.read(recordShareSessionProvider)?.deleting, isTrue);
+
+        await tester.tap(find.byTooltip('削除せずに閉じる'));
+        await tester.pumpAndSettle();
+        expect(find.text('アカウントの削除が途中で止まっています。再開すると、続きから削除します。'), findsOneWidget);
+        expect(find.text('削除を再開'), findsOneWidget);
+        for (final action in [...loggedInActions, 'Google でログイン']) {
+          expect(find.text(action), findsNothing, reason: action);
+        }
+
+        await tester.tap(find.text('削除を再開'));
+        await settleUntilElapsing(
+          tester,
+          () => find.text('Google でログイン').evaluate().isNotEmpty,
+          describe: 'the account to be deleted',
+        );
+        expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), List.filled(4, "DELETE /api/me"));
+        expect(container.read(recordShareSessionProvider), isNull);
+        expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+      },
+    );
+
+    testWidgets("a share whose record was deleted is listed from the account's list and can be unshared; one with no "
+        'note is not called deleted', (tester) async {
       await storeSession();
       final note = await storeNote(state: RecordShareState.shared);
       container = containerFor([
-        _sharesList([_listed("0123456789", note.keyHash)]),
+        // The second share was made on another device: this one holds no note of it.
+        _sharesList([
+          _listed("0123456789", note.keyHash),
+          _listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName),
+        ]),
         _empty(204),
       ], emptied: true);
       await tester.pumpWidget(
@@ -524,7 +1068,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('公開したレコード'));
+      await tester.tap(find.text('共有したレコード'));
       // The dialog asks as it opens; one more fake step reads the answer.
       await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
       await tester.pump(const Duration(seconds: 1));
@@ -534,15 +1078,19 @@ void main() {
         describe: 'the row of the deleted record',
       );
       expect(server.sent.single.uri.path, "/api/me/shares");
-      await tester.tap(find.text('取り消す…'));
+      expect(find.text('共有日 2026-10-20'), findsNWidgets(2));
+      expect(find.text('端末から削除したレコード'), findsOneWidget, reason: 'only the noted share was made here');
+      expect(find.text(_serverCardName), findsOneWidget, reason: 'the share with no note takes the listed name');
+      await tester.tap(find.text('共有を取り消す…').first);
       await tester.pumpAndSettle();
       await tester.longPress(find.text('長押しで取り消す'));
       await settleUntil(
         tester,
-        () => find.text('公開したレコードはありません。').evaluate().isNotEmpty,
-        describe: 'the list to empty',
+        () => find.text('共有日 2026-10-20').evaluate().length == 1,
+        describe: 'the unshared row to leave the list',
       );
 
+      expect(find.text('端末から削除したレコード'), findsNothing);
       expect(server.sent.last.method, "DELETE");
       expect(server.sent.last.uri.path, "/api/shares/0123456789");
       expect(container.read(recordSharesProvider), isEmpty);

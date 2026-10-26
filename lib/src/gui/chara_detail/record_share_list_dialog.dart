@@ -8,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_share.dart';
+import '/src/chara_detail/record_share_session.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
@@ -15,9 +16,8 @@ import '/src/gui/chara_detail/common.dart';
 import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/common.dart';
 
-// The translation key still carries the name of the publication list it replaced.
 // ignore: constant_identifier_names
-const tr_record_share_list = "pages.settings.privacy.published_records";
+const tr_record_share_list = "pages.settings.privacy.shared_records";
 
 /// The privacy settings row that opens [RecordShareListDialog].
 class RecordShareListTile extends ConsumerWidget {
@@ -49,7 +49,21 @@ class RecordShareListDialog extends ConsumerStatefulWidget {
 class _RecordShareListDialogState extends ConsumerState<RecordShareListDialog> {
   /// The server's answer; absent while it is being asked.
   ShareListing? _listing;
-  late final _login = LoginDriver(ref, onSignedIn: _refresh);
+
+  /// What the last login ended with, told in place of the login note's own sentence.
+  String? _loginText;
+  late final _login = LoginDriver(
+    ref,
+    onSettled: (outcome) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _loginText = loginOutcomeText(outcome));
+      if (outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit) {
+        _refresh();
+      }
+    },
+  );
 
   @override
   void initState() {
@@ -95,11 +109,10 @@ class _RecordShareListDialogState extends ConsumerState<RecordShareListDialog> {
           action: _button("$dialog.check_again".tr(), Symbols.refresh_rounded, _refresh),
         ),
       ],
-      // The sentence still speaks of checking; a login is what this button now starts.
       SharesLoginRequired() => [
         _Note(
-          text: "$dialog.unreachable".tr(),
-          action: _button("$tr_record_share.open_verification".tr(), Symbols.login_rounded, _login.press),
+          text: _loginText ?? "$dialog.login_required".tr(),
+          action: _button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press),
         ),
       ],
       SharesListed(:final shares) when shares.isEmpty => [
@@ -109,6 +122,7 @@ class _RecordShareListDialogState extends ConsumerState<RecordShareListDialog> {
         for (final share in shares)
           _AccountShareRow(
             share: share,
+            noted: notes.containsKey(share.clientKeyHash),
             record: switch (notes[share.clientKeyHash]?.recordId) {
               final id? => recordOf?.call(id),
               null => null,
@@ -125,16 +139,13 @@ class _RecordShareListDialogState extends ConsumerState<RecordShareListDialog> {
         closeButtonTooltip: "$tr_record_share.close".tr(),
         usePageView: false,
         scrollableContent: true,
-        content: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text("$dialog.description".tr(), style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 12),
-              ...rows,
-            ],
-          ),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text("$dialog.description".tr(), style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 12),
+            ...rows,
+          ],
         ),
       ),
     );
@@ -165,21 +176,30 @@ class _Note extends StatelessWidget {
 
 class _AccountShareRow extends ConsumerWidget {
   final AccountShare share;
+
+  /// Whether the device holds a note of the share, which names the record it was shared from.
+  final bool noted;
   final CharaDetailRecord? record;
   final bool storesLoaded;
   final VoidCallback onUnshared;
 
   const _AccountShareRow({
     required this.share,
+    required this.noted,
     required this.record,
     required this.storesLoaded,
     required this.onUnshared,
   });
 
+  /// The record's name, or that it was deleted when the note names a record neither store holds. A share with no
+  /// note, as one shared from another device, names no record here, so it takes the name the server listed it with.
   String? _title(WidgetRef ref) {
     final record = this.record;
     if (record != null) {
       return ref.watch(charaCardNameProvider(record.trainee.card)) ?? record.trainee.card.toString();
+    }
+    if (!noted) {
+      return share.cardName;
     }
     return storesLoaded ? "$tr_record_share_list.dialog.deleted_record".tr() : null;
   }
@@ -196,7 +216,7 @@ class _AccountShareRow extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (title != null) Text(title, style: theme.textTheme.titleSmall),
-            Text("$dialog.published_on".tr(namedArgs: {"date": share.sharedOn}), style: theme.textTheme.bodyMedium),
+            Text("$dialog.shared_on".tr(namedArgs: {"date": share.sharedOn}), style: theme.textTheme.bodyMedium),
           ],
         ),
         children: [
@@ -206,13 +226,13 @@ class _AccountShareRow extends ConsumerWidget {
             runSpacing: 8,
             children: [
               _button(
-                "$tr_record_share.open_published".tr(),
+                "$tr_record_share.open_shared".tr(),
                 Symbols.open_in_new_rounded,
                 () => openSharedPage(share.url),
               ),
               _button("$tr_record_share.copy_url".tr(), Symbols.content_copy_rounded, () => copySharedUrl(share.url)),
               _button(
-                "$dialog.withdraw".tr(),
+                "$dialog.unshare".tr(),
                 Symbols.public_off_rounded,
                 () => UnshareRecordDialog.show(ref.base, shareId: share.id, over: true, onUnshared: onUnshared),
               ),

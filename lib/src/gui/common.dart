@@ -868,6 +868,10 @@ class CardDialog extends ConsumerStatefulWidget {
   ConsumerState<CardDialog> createState() => _CardDialogState();
 }
 
+/// The title's start padding, which is also the side inset of self-sizing content so the two line up. It equals the
+/// Material 3 default for `ListTile`, written out because the content needs the value and the default is private.
+const double _titleStartPadding = 16;
+
 class _CardDialogState extends ConsumerState<CardDialog> {
   final ScrollController _controller = ScrollController();
 
@@ -895,6 +899,7 @@ class _CardDialogState extends ConsumerState<CardDialog> {
         children: [
           if (title != null)
             ListTile(
+              contentPadding: const EdgeInsetsDirectional.only(start: _titleStartPadding, end: 24),
               tileColor: theme.colorScheme.tertiary,
               shape: Border(bottom: BorderSide(color: theme.dividerColor)),
               title: Text(title, style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onTertiary)),
@@ -949,10 +954,23 @@ class _CardDialogState extends ConsumerState<CardDialog> {
             // Only for content that sizes itself; `Expanded`/`Flexible` content
             // cannot live inside a `SingleChildScrollView`, so it uses the
             // direct-placement branch below.
+            //
+            // The content spans the card's width and is inset by the title's
+            // start padding, so its text starts where the title's text does
+            // and callers add no side padding of their own. The end inset
+            // mirrors the start rather than the title's end padding, which
+            // makes room for the close button the content does not have.
             Flexible(
-              child: Scrollbar(
-                controller: _controller,
-                child: SingleChildScrollView(controller: _controller, child: widget.content),
+              child: SizedBox(
+                width: double.infinity,
+                child: Scrollbar(
+                  controller: _controller,
+                  child: SingleChildScrollView(
+                    controller: _controller,
+                    padding: const EdgeInsets.symmetric(horizontal: _titleStartPadding),
+                    child: widget.content,
+                  ),
+                ),
               ),
             ),
           if (!widget.usePageView && !widget.scrollableContent) widget.content,

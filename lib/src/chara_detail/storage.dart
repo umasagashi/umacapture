@@ -661,6 +661,9 @@ enum SelectionPurpose {
 
   /// Selecting rows to permanently delete. Available for both sources.
   delete,
+
+  /// Selecting rows to share under the logged-in account. Available for both sources.
+  share,
 }
 
 /// The purpose of the bulk row-selection UI currently engaged, or `null` when no

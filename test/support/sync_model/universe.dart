@@ -454,8 +454,9 @@ final attachedStart = <Op>[
 /// Outside every universe of this kind: a round between the users' operations; a round cut at another step than its
 /// place, or at a later swap than its first; a lost answer and a cut in one run, or either on B; sync turned off,
 /// logged out or a session expired, and the server's refusals (of a full storage, the day's limits, a stale swap); a
-/// lost state file; ratings, titles and column storages deleted (a rating is a cell as a memo is); an archive without
-/// images; a pair undismissed or the dismissal file deleted; a zip exported past the start, or of a record archived;
+/// lost state file; ratings, and titles and column storages deleted but in [_writeTimeUniverse] (a rating is a cell as
+/// a memo is); a device's clock off the world's but in [_writeTimeUniverse]; an archive without images but in
+/// [_writeTimeUniverse]; a pair undismissed or the dismissal file deleted; a zip exported past the start, or of a record archived;
 /// parents, the resolver and the relation bonus; images sent or taken, and what a binding decides of them ([R4-8]);
 /// the app from before the upgrade; a third device; a memo over the send limit.
 class RunUniverse extends Universe<WorldRun> {
@@ -469,6 +470,7 @@ class RunUniverse extends Universe<WorldRun> {
     this.lost = const [null],
     this.eitherOrder = true,
     this.lacking = const {},
+    this.clockAhead = const {},
     required super.properties,
   }) : super(controlsUntilRed: true);
   final List<Op> start;
@@ -481,6 +483,9 @@ class RunUniverse extends Universe<WorldRun> {
   /// What the app's round lacks that its rounds run without here ([WorldRun.lacking]).
   final Set<OfTheModelsRound> lacking;
 
+  /// Device → how far its clock runs ahead of the world's, from the start on ([WorldRun.clockAhead]).
+  final Map<String, int> clockAhead;
+
   static const _aThenB = [SyncRound('A'), SyncRound('B')];
 
   @override
@@ -491,9 +496,16 @@ class RunUniverse extends Universe<WorldRun> {
         final rest = [for (final (i, op) in these.indexed) i == aFirst && l != null ? l.of('A') : op];
         for (final aOps in a.on('A', ids, ids.toSet())) {
           for (final bOps in b.on('B', ids, ids.toSet())) {
-            yield WorldRun([...start, ...aOps, ...bOps, ...rest], shared: start.length, lacking: lacking);
-            if (eitherOrder && aOps.isNotEmpty && bOps.isNotEmpty) {
-              yield WorldRun([...start, ...bOps, ...aOps, ...rest], shared: start.length, lacking: lacking);
+            for (final users in [
+              [...aOps, ...bOps],
+              if (eitherOrder && aOps.isNotEmpty && bOps.isNotEmpty) [...bOps, ...aOps],
+            ]) {
+              yield WorldRun(
+                [...start, ...users, ...rest],
+                shared: start.length,
+                lacking: lacking,
+                clockAhead: clockAhead,
+              );
             }
           }
         }
@@ -506,7 +518,8 @@ class RunUniverse extends Universe<WorldRun> {
       '${ids.length} records (${ids.join(',')}); A: ${a.summary}; B: ${b.summary}; '
       '${eitherOrder ? 'either order' : "A's first"}'
       '${identical(rounds, const [_aThenB]) ? '' : '; rounds ${rounds.map((r) => r.join(', ')).join(' / ')}'}'
-      '${lost.nonNulls.isEmpty ? '' : "; A's first swap ${lost.map((l) => l == null ? 'answered' : '${l.name} lost').join(' / ')}"}';
+      '${lost.nonNulls.isEmpty ? '' : "; A's first swap ${lost.map((l) => l == null ? 'answered' : '${l.name} lost').join(' / ')}"}'
+      '${clockAhead.entries.map((e) => "; ${e.key}'s clock ${e.value} ahead").join()}';
 }
 
 /// A universe of [CutRound]s: from [start], which leaves the records [ids] on both devices and the server, A does what
@@ -566,9 +579,11 @@ class CutUniverse extends Universe<CutRound> {
 ///
 /// Outside every universe of this kind: operations of the device the rounds put them on, before or after them — the
 /// rounds then merge two devices' changes, which no one user's operation stands for —; a round between the users'
-/// operations, or one that stops; sync turned off ([R6-1]: the app has no switch for it yet, and a device that does
-/// not sync is one whose rounds do not run); the devices' images at the end, which the app's round does not send or
-/// take yet, so that [R2-4] and [R4-8] 5 are read of what a record shows and its binding, not of its files; parents and
+/// operations, or one that stops; sync turned off ([R6-1]: a device whose sync is off runs no round, so nothing is put
+/// on it, and what turning it off and on does is [SwitchUniverse]'s); the devices' images at the end, which no round
+/// here sends or takes — its starts set no image form, and an account's form is none until a device sets one —, so
+/// that [R2-4] and [R4-8] 5 are read here of what a record shows and its binding, and of the files by the properties of
+/// images (stage-shapes-the-images, images-stay-with-their-body, images-reach-every-device); parents and
 /// the relation bonus, which the resolution after a round works out again (S-13); ratings, titles, column storages
 /// deleted, the dismissal file deleted; a zip exported past the start; the app from before the upgrade; a third
 /// device; and what [RunUniverse] leaves out besides.
@@ -1278,9 +1293,9 @@ final ciUniverses = <Universe<PropertyInput>>[
     eitherOrder: false,
     properties: _upgraded,
   ),
-  // 1 input: from the upgrade, R2 archived without images, and nothing more. The model's place works out no binding of
-  // a record whose directory holds no image, where the app's places one whose every field is unknown, so the app's
-  // round holds R2 back in every round (test/sync_properties_test.dart, `_counterexamples`).
+  // 1 input: from the upgrade, R2 archived without images, and nothing more. The binding of a record whose directory
+  // holds no image is one whose every field is unknown, in the model ([FRec.boundToNoImage]) as in the app, and the
+  // round sends R2 with it.
   RunUniverse(
     'W8n',
     start: upgradedStart('none'),
@@ -1496,7 +1511,71 @@ final ciUniverses = <Universe<PropertyInput>>[
   // a zip of a record the start merged away, and captures of one uma on both devices; A's rounds and B's, then A
   // finishes.
   _mergeInProgressUniverse('M1'),
+  // 25 inputs. The time a value is written at ([_writeTimeUniverse]): one operation of A's over the values it took in
+  // from B, whose clock runs ahead.
+  _writeTimeUniverse('V1'),
 ];
+
+/// A universe of the time a value is written at (§1.5, [R5-6], [R5-2]): from [aheadStart], on whose devices B's clock
+/// runs [_ahead] ahead of the world's, A does one operation over the values it took in from B and B does none, then
+/// A's round and B's, and the world is driven to rest. A's operation is one of [EveryOp] on R1–R3 — a merge, a delete,
+/// a memo, an archive, a dismissal, a re-recognition, a zip taken in — or the memo column's title, the deletion of its
+/// store, or R3 archived without images; each value it changes replaces one B wrote at B's clock, later than A's:
+/// `A: memo R1 = A1` over B's memo `b`, `A: rerecognize R2 v2` over B's recognition, `A: import z1` and
+/// `A: archive R3 (none)` over B's archive of R3, `A: title memo = A title` over B's title.
+///
+/// Outside it: a device's clock behind the world's, or ahead by less than the run takes, so that A's clock passes B's
+/// times; two operations of A's, or one of B's past the start; a value taken in from a zip or a merge rather than a
+/// round and written over; a rating (a cell as a memo is); both devices writing before either takes the other's in,
+/// whose end [R5-2] does not promise; and what [RunUniverse] leaves out besides.
+UnionUniverse<WorldRun> _writeTimeUniverse(String name) => UnionUniverse<WorldRun>(name, [
+  RunUniverse(
+    '${name}e',
+    start: aheadStart,
+    ids: _attachedIds,
+    a: _onA,
+    b: const EveryOp([0]),
+    clockAhead: _ahead,
+    properties: _writeTime,
+  ),
+  RunUniverse(
+    '${name}c',
+    start: aheadStart,
+    ids: _attachedIds,
+    a: _besidesEveryOp,
+    b: const EveryOp([0]),
+    clockAhead: _ahead,
+    properties: _writeTime,
+  ),
+], properties: _writeTime);
+
+/// The properties of the time a value is written at.
+final _writeTime = [aWriteIsLaterThanWhatItReplaces];
+
+/// How far B's clock runs ahead of the world's in [_writeTimeUniverse]: past every time the run writes at.
+const _ahead = {'B': 100};
+
+/// [attachedStart], then B — whose clock runs ahead ([_ahead]) — writes over what A wrote: a memo on R1, R2 and R3, R2
+/// recognised again with another module, R3 archived with resized JPEGs, and the memo column titled; B's round and A's
+/// put them on A.
+final aheadStart = <Op>[
+  ...attachedStart,
+  for (final id in _attachedIds) EditMemo('B', id, 'b'),
+  const Rerecognize('B', 'R2', 3),
+  const Archive('B', 'R3', 'resized_jpeg'),
+  const Title('B', memoColumn, 'b'),
+  const SyncRound('B'),
+  const SyncRound('A'),
+];
+
+/// What [EveryOp] does not draw and [_writeTimeUniverse] writes over B's values with: the memo column titled, its store
+/// deleted, or R3 archived without images — the one archive that writes over B's, which archived R3 with resized
+/// JPEGs.
+final _besidesEveryOp = OneOf([
+  [(d) => Title(d, memoColumn, '$d title')],
+  [(d) => DeleteColumnStore(d, memoColumn)],
+  [(d) => Archive(d, 'R3', 'none')],
+], 'the memo column titled, or its store deleted, or R3 archived without images');
 
 /// A universe of the merges in progress ([R6-3], [N15-02], [R3-6], G310): from [mergeStart], A does one of
 /// [_onAMergeInProgress] and B one of [_onBMergeInProgress], either first; the rounds of each of [rounds] — two passes of

@@ -1313,11 +1313,24 @@ enum LostAnswer {
 /// rounds last; a round among them may stop where the app's can ([PlaceCut], [SwapCut]). The world runs once, for
 /// every property that reads it; under [mutation], or with each round of the app's [broken], it is another input.
 class WorldRun implements PropertyInput, OfTheAppsRounds<WorldRun> {
-  WorldRun(this.ops, {this.shared = 0, this.mutation, this.broken, this.bindsAt, this.lacking = const {}, this.sync});
+  WorldRun(
+    this.ops, {
+    this.shared = 0,
+    this.mutation,
+    this.broken,
+    this.bindsAt,
+    this.lacking = const {},
+    this.sync,
+    this.clockAhead = const {},
+  });
   final List<Op> ops;
   final int shared;
   final FileMutation? mutation;
   final RoundBreak? broken;
+
+  /// Device → how far its own clock runs ahead of the world's ([FileWorld.clockAhead]); a device not named reads the
+  /// world's.
+  final Map<String, int> clockAhead;
 
   /// The switch of sync every device starts with, where it is not the app's ([FDevice.sync]): a control's.
   final RecordSyncState? sync;
@@ -1342,8 +1355,16 @@ class WorldRun implements PropertyInput, OfTheAppsRounds<WorldRun> {
   }
 
   /// The same operations under [mutation], or with the app's round [broken].
-  WorldRun under({FileMutation? mutation, RoundBreak? broken}) =>
-      WorldRun(ops, shared: shared, mutation: mutation, broken: broken, bindsAt: bindsAt, lacking: lacking, sync: sync);
+  WorldRun under({FileMutation? mutation, RoundBreak? broken}) => WorldRun(
+    ops,
+    shared: shared,
+    mutation: mutation,
+    broken: broken,
+    bindsAt: bindsAt,
+    lacking: lacking,
+    sync: sync,
+    clockAhead: clockAhead,
+  );
 
   @override
   WorldRun withRoundsBroken(RoundBreak broken) => under(broken: broken);
@@ -1385,7 +1406,13 @@ class WorldRun implements PropertyInput, OfTheAppsRounds<WorldRun> {
   ];
 
   List<RunStep> _run() {
-    final w = FileWorld(const ['A', 'B'], mutation: mutation, round: FileRound.app, appRoundLacking: lacking);
+    final w = FileWorld(
+      const ['A', 'B'],
+      mutation: mutation,
+      round: FileRound.app,
+      appRoundLacking: lacking,
+      clockAhead: clockAhead,
+    );
     if (sync case final sync?) {
       for (final d in w.devices.values) {
         d.sync = sync;
@@ -1962,6 +1989,58 @@ final valuesLaterWrittenWhateverTheContent = SyncProperty<WorldRun>(
   controls: [BrokenRound(_keepsItsOwnValues)],
 );
 
+// --- K2: the time a value is written at (§1.5) ------------------------------------------------------------------------
+//
+// A device writes a value at its own clock, and later than the value the field holds there (§1.5): the time is the
+// device's to give, and only the device knows what it holds. That the later written stands where two devices meet is
+// [valuesLaterWrittenWhateverTheContent]'s; this reads each write as it is made, so that the two together say a
+// device's write never yields to the value it replaced ([R5-2]).
+
+/// a-write-is-later-than-what-it-replaces (§1.5, [R5-6], [R5-2]): a value a user's operation writes carries a time later
+/// than the one it replaces on that device, whatever the device's clock reads. The decisive parts are those whose
+/// replaced value carries a time no earlier than the device's clock as the operation ends, so that a write at that
+/// clock would be no later. A value the device held none of before the operation (a record captured or taken in anew,
+/// a title never written) replaces nothing and is not checked; a record the operation took away is no write.
+final aWriteIsLaterThanWhatItReplaces = SyncProperty<WorldRun>(
+  'a-write-is-later-than-what-it-replaces',
+  'After each operation of a user, of each value the device held before it and holds after it — what a record shows, '
+      'its stage, a cell, a column\'s title —, one the operation changed is written at a time later than the value it '
+      'replaced, one the device took in from a device whose clock runs ahead included.',
+  (run) {
+    var (checks, decisive) = (0, 0);
+    final failures = <Failure>[];
+    for (final i in run.users) {
+      final d = run.ops[i].device;
+      final (before, after) = (run.steps[i - 1].sides[d]!, run.steps[i].sides[d]!);
+      final clock = run.steps[i].time + (run.clockAhead[d] ?? 0);
+      final rows = <List<String>>[];
+      void compare(String of, _Parts held, _Parts now) {
+        for (final part in held.keys.where(now.containsKey).toList()..sort()) {
+          final (replaced, written) = (held[part], now[part]);
+          if (replaced == null || written == null || replaced == written) continue;
+          checks++;
+          if (replaced.time >= clock) decisive++;
+          if (written.time <= replaced.time) rows.add([of, part, '$replaced', '$written']);
+        }
+      }
+
+      for (final id in before.records.keys.where(after.records.containsKey).toList()..sort()) {
+        compare(id, _valuesOf(before.records[id], before), _valuesOf(after.records[id], after));
+      }
+      compare('-', _titlesOf(before), _titlesOf(after));
+      if (rows.isEmpty) continue;
+      failures.add(
+        Failure('$d after #${i - run.shared + 1} (${run.ops[i]}), its clock at $clock', [
+          ['record', 'part', 'replaced', 'written'],
+          ...rows,
+        ]),
+      );
+    }
+    return Verdict(checks: checks, failures: failures, decisive: decisive);
+  },
+  controls: [Broken(FileMutation.writeTimeGoesBack, _runUnder)],
+);
+
 // --- K2: rounds that stop, answers lost, an account deleted ---------------------------------------------------------
 //
 // A round stops where the app's round can: while it puts its result in place ([PlaceCut]), or at a swap whose answer
@@ -2495,8 +2574,8 @@ final syncAppliesAsTheUserWould = SyncProperty<AppliedRound>(
   'Where one device\'s user makes operations on what both devices agree on and the rounds put them on the other '
       'device, the other device ends at rest holding the records, what each shows and its binding, its stage and what '
       'it absorbed, the cells, the titles and the dismissed pairs, each with its time, that it holds where its own user '
-      'makes the same operations at the same times — but for its images, which the app\'s round does not send or '
-      'take yet.',
+      'makes the same operations at the same times — but for its images, which no round of its universe sends or '
+      'takes, the account\'s image form being none there, and of which the properties of images read the ends.',
   (input) {
     final (:applied, :madeThere) = input.worlds;
     final (from, to) = (input.from, input.to);
@@ -3065,7 +3144,9 @@ final toldRestoredIsEachRemovalUndone = SyncProperty<WorldRun>(
   'Each round of the app\'s tells, as the removals it undid, how many ids its device\'s base holds that one of the '
       'device and the server listed as the round began and the other did not, and that the device lists as the round '
       'ends — whichever device\'s user removed it, by a delete or a merge: the device that ran the round tells it, the '
-      'other device\'s rounds do not tell it again, and an archive another value undid is no removal undone.',
+      'other device\'s rounds do not tell it again, and an archive another value undid is no removal undone; a round of '
+      'a device that does not know the answer to a swap it asked for reads its base again against the server\'s '
+      '(rereadSyncBase), which this property does not work out, and is left out.',
   (run) {
     var (checks, decisive) = (0, 0);
     final failures = <Failure>[];
@@ -3094,7 +3175,9 @@ final toldSplitIsEachRecordPlacedUnderANewId = SyncProperty<WorldRun>(
   'Each round of the app\'s tells, as the records it split off, how many ids its device lists as the round ends that '
       'neither the device nor the server listed as it began — a round that placed a record split off under a new id '
       'tells it, a round that takes in a record another round split off does not, and a round that placed none, or made '
-      'it one record with the id\'s, tells none.',
+      'it one record with the id\'s, tells none; a round of a device that does not know the answer to a swap it asked '
+      'for reads its base again against the server\'s (rereadSyncBase), which this property does not work out, and is '
+      'left out.',
   (run) {
     var (checks, decisive) = (0, 0);
     final failures = <Failure>[];
@@ -3116,7 +3199,9 @@ final toldAddedIsEachOneSidedRecordKeptWithNoBase = SyncProperty<WorldRun>(
   'told-added-is-each-one-sided-record-kept-with-no-base',
   'Each round of the app\'s tells, as the records it added up, how many ids its device lists as the round ends that one '
       'of the device and the server listed as the round began and the other did not, where the device began it with no '
-      'base — it never synced, lost its state, or its account was made again —, and none where it began with one.',
+      'base — it never synced, lost its state, or its account was made again —, and none where it began with one; a '
+      'round of a device that does not know the answer to a swap it asked for reads its base again against the '
+      'server\'s (rereadSyncBase), which this property does not work out, and is left out.',
   (run) {
     var (checks, decisive) = (0, 0);
     final failures = <Failure>[];
@@ -3169,7 +3254,9 @@ final longMemoHoldsTheRound = SyncProperty<WorldRun>(
   'A round of the app\'s on a device whose listed records\' cells hold a memo over the send limit leaves the device and '
       'the server as they were and tells how many such memos the device holds — the memos of records it lists, not of '
       'one it deleted or merged away, nor of a column store deleted —; a round on a device that holds none runs; and no '
-      'side but a device that held one before the limit ever holds a memo over it.',
+      'side but a device that held one before the limit ever holds a memo over it; a round of a device that does not '
+      'know the answer to a swap it asked for, which reads its base again against the server\'s (rereadSyncBase), is '
+      'left out.',
   (run) {
     var (checks, decisive) = (0, 0);
     final failures = <Failure>[];
