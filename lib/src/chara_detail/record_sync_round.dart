@@ -36,7 +36,7 @@
 // them is one the device could have sent having made some of its operations and not yet the others. An operation that
 // changes more slots than one replacement may is not split: the round stops ([SyncRoundEnd.operationTooLarge]).
 //
-// A memo longer than a round sends ([syncMemoLimit]) — one from before the app limited what a user types, which it
+// A memo longer than a round sends ([memoLengthLimit]) — one from before the app limited what a user types, which it
 // neither removes nor cuts — holds every round of its device back (S-10): the round counts them in the very list it
 // read to merge and send, and where there is one it ends there ([SyncRoundEnd.heldByLongMemos]), the device's records,
 // cells and pairs as they were and the server not asked to change.
@@ -111,6 +111,7 @@ import '/src/chara_detail/record_sync_app_place.dart';
 import '/src/chara_detail/record_sync_list.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/record_sync_place.dart';
+import '/src/chara_detail/spec/loader.dart' show memoLengthLimit;
 import '/src/chara_detail/storage.dart';
 import '/src/core/storage/record_write_effects.dart';
 import '/src/core/utils.dart';
@@ -590,23 +591,20 @@ class SyncRoundOutcome {
       'waitingForTheDay: $waitingForTheDay, imagesUndone: $imagesUndone, serverStop: ${serverStop?.name})';
 }
 
-/// The most characters (code points) a memo a round sends may hold (S-10).
-const syncMemoLimit = 200;
-
-/// S-10: how many memos longer than [syncMemoLimit] the cells of the records [list] lists hold. A cell holds a memo
+/// S-10: how many memos longer than [memoLengthLimit] the cells of the records [list] lists hold. A cell holds a memo
 /// where its value is a string, as `docs/sync-protocol.md` states the list's cells (a rating's is a number). A cell of a
 /// record the list does not hold is none, and so is one that holds no value — of a column store deleted.
 int syncLongMemos(SyncList list) => list.cells.entries.where((e) {
   final value = e.value.value;
   // A string longer than the limit has a JSON text longer than it.
-  if (value == null || value.length <= syncMemoLimit || !list.rows.containsKey(e.key.$2)) return false;
+  if (value == null || value.length <= memoLengthLimit || !list.rows.containsKey(e.key.$2)) return false;
   return switch (jsonDecode(value)) {
-    final String memo => memo.runes.length > syncMemoLimit,
+    final String memo => memo.runes.length > memoLengthLimit,
     _ => false,
   };
 }).length;
 
-/// S-10: how many memos longer than [syncMemoLimit] hold the rounds of the device [place] back, counted as a round
+/// S-10: how many memos longer than [memoLengthLimit] hold the rounds of the device [place] back, counted as a round
 /// counts them ([syncLongMemos]) in what the device holds — which the screen that turns sync on shows before any round
 /// runs. Reads the device alone, and writes nothing; null where a store has not loaded.
 Future<int?> syncLongMemosOf<C>(SyncPlace<C> place) async {
@@ -873,7 +871,7 @@ Future<_Attempt> _attempt<C>(
   // S-10: a memo longer than a round sends holds the round back, counted in the list it would merge and send.
   final longMemos = syncLongMemos(local.list);
   if (longMemos > 0) {
-    logger.i('Sync is held back by $longMemos memo(s) longer than $syncMemoLimit characters.');
+    logger.i('Sync is held back by $longMemos memo(s) longer than $memoLengthLimit characters.');
     return _ended(SyncRoundOutcome(SyncRoundEnd.heldByLongMemos, longMemos: longMemos));
   }
 

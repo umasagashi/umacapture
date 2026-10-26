@@ -855,7 +855,8 @@ class _SemanticSection extends StatelessWidget {
             'ring, the "do not switch yet" sign, and every CaptureStatusTone.hint line of the capture card -- the '
             'web supply-stall and frozen-content notices, the duplicate hint, and the settle wait that tells the '
             'user not to scroll yet. That last one is why the tone is worth keeping distinct from info: it is the '
-            'only capture line whose instruction is an instruction not to act.',
+            'only capture line whose instruction is an instruction not to act. Also the sync icon at the right end of '
+            'the record table\'s toolbar while a part of what sync sends waits (room or the daily limit).',
       ),
       (
         'info',
@@ -958,8 +959,9 @@ const Map<String, String> _roleUsages = {
   'primary':
       'Brand accent: add-column button, drag/slot accents, data-table accents, progress, feedback drawer, '
       'storage-group folder icons, the hold-to-confirm button\'s fill, the enhancement merge dialog\'s '
-      'selected-card border, the single-tab-instance waiting screen\'s icon, and the publish dialog\'s '
-      'notice link and its long-press publish button (held to confirm, but not destructive).',
+      'selected-card border, the single-tab-instance waiting screen\'s icon, and the share dialog\'s '
+      'notice link and its long-press publish button (held to confirm, but not destructive), and the privacy '
+      'link of the dialog that turns sync on.',
   'onPrimary':
       'Text and icons on primary fills (add-column button, data-table accents, feedback drawer, hold-to-confirm '
       'button label, gauge and keyboard-focus ring).',
@@ -972,15 +974,20 @@ const Map<String, String> _roleUsages = {
       'Subtle highlight backgrounds: dashboard and data-table avatars; tag chip drag highlight. Also the '
       'source the pale surfaceContainerLowest/Low/Bright tints are lerped from.',
   'secondary': 'Accent text: script cost / zero-record warnings; experimental-warning card border.',
-  'tertiary': 'Card and dialog header band (ListCard, CardDialog) and the experimental-warning card background.',
-  'onTertiary': 'Text and icons on the card/dialog header band and the experimental-warning card.',
+  'tertiary':
+      'Card and dialog header band (ListCard, CardDialog), the experimental-warning card background, and the '
+      'share row overlay of the record table\'s selection.',
+  'onTertiary':
+      'Text and icons on the card/dialog header band, the experimental-warning card and the share row overlay\'s '
+      'label chip.',
   'onTertiaryContainer':
       'Never painted under this name: the role consolidation in app_widget.dart remaps it onto onTertiary, '
       'so this is the source of the card/dialog header band\'s text color.',
   'error':
       'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs and the withdraw-publication '
       'confirm, task failures, and the '
-      'import-report dialog\'s failure card. In the storage view it moved off the row: the delete button became '
+      'import-report dialog\'s failure card, and the sync icon of the record table\'s toolbar while sync is stopped '
+      'or the session was dropped, and the memo dialog\'s "n / 200" counter for a memo past the limit. In the storage view it moved off the row: the delete button became '
       'the one destructive entry of the row menu, which resolves this role itself, and only while that entry is '
       'live -- a withheld one takes disabledColor instead.',
   'onError': 'Text and icons on error surfaces.',

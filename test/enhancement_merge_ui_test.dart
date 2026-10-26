@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/factor_enhancement.dart';
+import 'package:umacapture/src/chara_detail/record_sync.dart' show syncOnProvider;
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
@@ -179,6 +180,7 @@ ProviderContainer _container({
   LongReadKind kind = LongReadKind.liveCapture,
   Map<String, String>? memo,
   Map<String, double>? rating,
+  bool syncOn = false,
 }) {
   final container = ProviderContainer.test(
     overrides: [
@@ -204,6 +206,7 @@ ProviderContainer _container({
       imageSizeContainerProvider.overrideWith((ref, path) async => null),
       previewImagePathsProvider.overrideWith((ref, path) async => const PreviewImagePaths()),
       predictionAvailableProvider.overrideWith((ref, path) async => false),
+      syncOnProvider.overrideWithValue(syncOn),
     ],
   );
   if (held.isNotEmpty) {
@@ -1011,6 +1014,21 @@ void main() {
       expect(find.byType(TraineeIcon), findsNWidgets(2), reason: 'no icon outside the cards');
     });
 
+    testWidgets('N16: with sync on, the intro adds that the images of the record not kept leave this device', (
+      tester,
+    ) async {
+      final pair = _pair(olderEvaluation: 12000, newerEvaluation: 12000);
+      await _pump(
+        tester,
+        _container(calls: _Calls(), records: pair.records, syncOn: true),
+        EnhancementMergeDialog(candidate: pair.candidate, route: EnhancementMergeRoute.settings),
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('enhancement_merge_intro'))).data,
+        '${appSentenceAt('$_tr.intro')}\n${appSentenceAt('$_tr.intro_synced')}',
+      );
+    });
+
     testWidgets('no card is headed older / newer; icon, evaluation and preview are centred on lines of '
         'their own, and the toggle spans the card', (tester) async {
       final pair = _pair(olderEvaluation: 12000, newerEvaluation: 12000);
@@ -1076,6 +1094,22 @@ void main() {
       older = tester.getRect(find.byKey(const Key('enhancement_merge_card_older')));
       newer = tester.getRect(find.byKey(const Key('enhancement_merge_card_newer')));
       expect(newer.top, greaterThan(older.bottom), reason: 'stacked');
+    });
+
+    testWidgets('a paste of 201 characters into the typed memo leaves it within the limit (S-03)', (tester) async {
+      final pair = _pair();
+      await _pump(
+        tester,
+        _container(calls: _Calls(), records: pair.records, memo: {'older': 'from older', 'newer': 'from newer'}),
+        EnhancementMergeDialog(candidate: pair.candidate, route: EnhancementMergeRoute.settings),
+      );
+      await tester.tap(find.byKey(const Key('enhancement_merge_memo_${_memoKey}_free')));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('enhancement_merge_memo_$_memoKey'));
+      await tester.enterText(field, 'x' * (memoLengthLimit + 1));
+      await tester.pump();
+      final text = tester.widget<TextField>(field).controller!.text;
+      expect(text.runes.length, lessThanOrEqualTo(memoLengthLimit), reason: text);
     });
 
     testWidgets('a column opens its record preview over the dialog, which keeps what was typed', (tester) async {

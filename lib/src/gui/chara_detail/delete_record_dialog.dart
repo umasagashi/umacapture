@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/chara_detail/record_sync.dart' show syncOnProvider;
 import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/storage.dart';
@@ -37,6 +38,11 @@ RecordWriteEffects recordDeleteDialogEffects(RefBase base) => RecordWriteEffects
 
 // ignore: constant_identifier_names
 const tr_delete_record = "pages.chara_detail.delete_record";
+
+/// The caution [description] of a delete confirmation, and where sync is on, that the delete reaches the devices the
+/// account syncs with.
+String deleteCaution(WidgetRef ref, String description) =>
+    [description, if (ref.watch(syncOnProvider)) "$tr_delete_record.synced".tr()].join('\n');
 
 /// Whether deleting the records [recordIds] names would collide with a zip that
 /// is already reading the same folders.
@@ -256,7 +262,7 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
           child: switch ((_deleting, awaitingExtraction)) {
             (true, _) => const CircularProgressIndicator(),
             (false, true) => NoteCard(description: Text(longReadBusyMessage())),
-            (false, false) => WarningCard(message: "$tr_delete_record.bulk.description".tr()),
+            (false, false) => WarningCard(message: deleteCaution(ref, "$tr_delete_record.bulk.description".tr())),
           },
         ),
       ],
@@ -390,7 +396,7 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
               else if (awaitingExtraction)
                 NoteCard(description: Text(longReadBusyMessage()))
               else
-                WarningCard(message: "$tr_delete_record.dialog.description".tr()),
+                WarningCard(message: deleteCaution(ref, "$tr_delete_record.dialog.description".tr())),
             ],
           ),
         ),

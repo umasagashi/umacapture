@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -246,6 +247,33 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 }
 
+/// Takes no edit that leaves the memo longer than [memoLengthLimit] code points and longer than it was (S-03): a typed
+/// character or a paste past the limit leaves the text as it was. A memo already longer, from before the limit, is
+/// neither cut nor emptied; it takes the edits that do not lengthen it.
+class MemoLengthFormatter extends TextInputFormatter {
+  const MemoLengthFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final length = newValue.text.runes.length;
+    return length <= memoLengthLimit || length <= oldValue.text.runes.length ? newValue : oldValue;
+  }
+}
+
+/// The "n / 200" under a memo field (N15) over [controller]'s text, counted in code points as
+/// [MemoLengthFormatter] is (`maxLength` counts grapheme clusters), in the error role past the limit.
+InputCounterWidgetBuilder memoLengthCounter(TextEditingController controller) =>
+    (context, {required currentLength, required isFocused, required maxLength}) {
+      final theme = Theme.of(context);
+      final length = controller.text.runes.length;
+      return Text(
+        '$length / $memoLengthLimit',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: length > memoLengthLimit ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    };
+
 class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String recordId;
   final String storageKey;
@@ -330,6 +358,8 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
                 child: TextField(
                   focusNode: focusNode,
                   controller: controller,
+                  inputFormatters: const [MemoLengthFormatter()],
+                  buildCounter: memoLengthCounter(controller),
                   onSubmitted: (value) {
                     saveMemo(ref.base, storageKey: widget.storageKey, recordId: record.id, memo: controller.text);
                     CardDialog.dismiss(ref.base);

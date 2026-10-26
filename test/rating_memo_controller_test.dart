@@ -14,18 +14,26 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trina_grid/trina_grid.dart';
+import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/memo.dart';
+import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/rating.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
+import 'package:umacapture/src/gui/common.dart';
 
+import 'support/localization.dart';
+import 'support/records.dart';
 import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -440,6 +448,127 @@ void main() {
       expect((await reopenMemo('old')).writtenAt, {'r1': t0});
     });
   });
+
+  // N15, S-03: the dialog a memo cell opens counts what it takes in code points, as the sync gate does
+  // ([memoLengthLimit], `String.runes`), on every device. Driven through the cell's own tap handler.
+  group('memo dialog length', () {
+    setUpAll(loadAppTranslations);
+
+    Future<_SavingMemoController> openDialog(WidgetTester tester, String held) async {
+      final controller = _SavingMemoController(held);
+      final container = ProviderContainer.test(
+        overrides: [
+          charaDetailRecordMemoProvider(_memoDialogKey).overrideWith(() => controller),
+          displayedRecordsProvider.overrideWithValue([makeRecord(id: _memoDialogRecord, card: 1)]),
+          pathInfoProvider.overrideWithValue(pathInfoFor(DirectoryPath(tempRoot.path))),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(body: DialogLayer(child: _MemoCellTap())),
+          ),
+        ),
+      );
+      await settleUntil(
+        tester,
+        () => container.read(charaDetailRecordMemoProvider(_memoDialogKey)).hasValue,
+        describe: 'the memo storage to load',
+      );
+      await tester.tap(find.text('memo cell'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(TextField), findsOneWidget);
+      return controller;
+    }
+
+    String fieldText(WidgetTester tester) => tester.widget<TextField>(find.byType(TextField)).controller!.text;
+
+    Text counter(WidgetTester tester) => tester.widget<Text>(
+      find.byWidgetPredicate((w) => w is Text && (w.data?.endsWith(' / $memoLengthLimit') ?? false)),
+    );
+
+    testWidgets('a character past the limit, a paste past it and a supplementary character past it leave the memo '
+        'as it was', (tester) async {
+      final controller = await openDialog(tester, '');
+      await tester.enterText(find.byType(TextField), 'x' * (memoLengthLimit + 1));
+      expect(fieldText(tester), '', reason: 'a paste of 201 characters into an empty memo is not taken');
+      await tester.enterText(find.byType(TextField), 'x' * memoLengthLimit);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'x' * (memoLengthLimit + 1));
+      expect(fieldText(tester), 'x' * memoLengthLimit, reason: 'one character past 200 is not taken');
+      // One grapheme of two code points: 200 code points but 199 graphemes, which a grapheme count takes.
+      final twoCodePoints = 'x' * (memoLengthLimit - 2) + '👍🏽';
+      await tester.enterText(find.byType(TextField), twoCodePoints);
+      await tester.pump();
+      expect(fieldText(tester), twoCodePoints);
+      expect(counter(tester).data, '$memoLengthLimit / $memoLengthLimit');
+      // 201 code points and 200 graphemes: past the gate's count, within a grapheme count.
+      await tester.enterText(find.byType(TextField), 'x$twoCodePoints');
+      expect(fieldText(tester), twoCodePoints);
+      await tester.tap(find.text(appSentenceAt('$tr_memo.dialog.ok_button.label')));
+      await tester.pump();
+      expect(controller.saved, [twoCodePoints]);
+    });
+
+    testWidgets('a memo already longer than the limit is shown whole, its count in the error role, and kept', (
+      tester,
+    ) async {
+      final long = 'y' * (memoLengthLimit + 50);
+      final controller = await openDialog(tester, long);
+      expect(fieldText(tester), long);
+      final count = counter(tester);
+      expect(count.data, '${memoLengthLimit + 50} / $memoLengthLimit');
+      expect(count.style?.color, Theme.of(tester.element(find.byType(TextField))).colorScheme.error);
+      await tester.enterText(find.byType(TextField), '${long}y');
+      expect(fieldText(tester), long, reason: 'a long memo is not lengthened');
+      await tester.tap(find.text(appSentenceAt('$tr_memo.dialog.ok_button.label')));
+      await tester.pump();
+      expect(controller.saved, [long]);
+    });
+  });
+}
+
+const _memoDialogKey = 'memo';
+const _memoDialogRecord = 'R1';
+
+/// A memo storage holding [held] for [_memoDialogRecord], which records each memo the dialog saves.
+class _SavingMemoController extends CharaDetailRecordMemoController {
+  _SavingMemoController(this.held) : super(_memoDialogKey);
+
+  final String held;
+  final saved = <String?>[];
+
+  @override
+  Future<MemoData> build() async => MemoData(title: 'Note', data: held.isEmpty ? const {} : {_memoDialogRecord: held});
+
+  @override
+  void updateMemo({required String recordId, required String? memo}) => saved.add(memo);
+}
+
+/// Taps a memo cell of [_memoDialogRecord] the way the records table does: through the cell's own handler.
+class _MemoCellTap extends ConsumerWidget {
+  const _MemoCellTap();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FilledButton(
+      onPressed: () {
+        final spec = MemoColumnSpec(
+          id: 'm',
+          title: 'Note',
+          parser: EvaluationValueParser(),
+          predicate: RegExpPredicate(),
+          storageKey: _memoDialogKey,
+        );
+        final cell = spec.cellBuilder(ref.base)(null);
+        final row = TrinaRow(cells: {'m': cell})..setUserData(makeRecord(id: _memoDialogRecord, card: 1));
+        cell.getUserData<MemoCellData>()!.onSelected!(ref.base, TrinaGridOnSelectedEvent(row: row, cell: cell));
+      },
+      child: const Text('memo cell'),
+    );
+  }
 }
 
 /// Holds the read of one storage file until [release] completes, reproducing the

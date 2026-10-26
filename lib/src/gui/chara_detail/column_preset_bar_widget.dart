@@ -7,9 +7,11 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/account_sync_section.dart';
 import '/src/gui/chara_detail/chara_detail_settings_dialog.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/chara_detail/import_button.dart';
+import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
 
@@ -154,6 +156,12 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                       tooltip: "$tr_delete_bar.selection_mode.enable_tooltip".tr(),
                       onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.delete),
                     ),
+                    // Sharing works on either source too.
+                    _PresetActionButton(
+                      icon: Symbols.public_rounded,
+                      tooltip: "$tr_share_record.selection_mode.enable_tooltip".tr(),
+                      onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.share),
+                    ),
                     // CharaDetailExportButton carries the same horizontal:3
                     // margin as _PresetActionButton, so no extra spacer is needed.
                     const CharaDetailExportButton(),
@@ -169,6 +177,8 @@ class ColumnPresetBarWidget extends ConsumerWidget {
               const CharaDetailSettingsButton(),
               const _ToolbarDivider(),
               const SidePreviewToggleButton(),
+              // The state of sync (N9), at the right end; it shows only where the sync section has one to tell.
+              const SyncStatusIcon(),
             ],
           ),
         ),

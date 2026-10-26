@@ -14,8 +14,11 @@ import 'package:material_symbols_icons/symbols.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/enhancement_merge.dart';
 import '/src/chara_detail/factor_enhancement.dart';
+import '/src/chara_detail/record_sync.dart' show syncOnProvider;
+import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/memo.dart' show MemoLengthFormatter, memoLengthCounter;
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
@@ -92,9 +95,18 @@ final enhancementMergeActionsProvider = Provider<EnhancementMergeActions>((ref) 
           effects: enhancementMergeEffects(ref.read(containerRefProvider)),
         ),
     dismiss: (candidate) => ref.read(enhancementDismissalStoreProvider).dismiss(candidate),
-    resolveInheritance: () => ref
-        .read(charaDetailRecordStorageLoaderProvider.notifier)
-        .resolveAllInheritance(effects: inheritanceResolutionDeclaration(ref.read(containerRefProvider))),
+    resolveInheritance: () async {
+      try {
+        await ref
+            .read(charaDetailRecordStorageLoaderProvider.notifier)
+            .resolveAllInheritance(effects: inheritanceResolutionDeclaration(ref.read(containerRefProvider)));
+      } finally {
+        // The settings tile is this action's only caller, so this is the user's resolution and not a round's (which
+        // calls `resolveAllInheritance` itself). It rewrites records' bodies and parents, which a round sends, and
+        // a run that threw can already have persisted part of that.
+        if (ref.mounted) ref.read(syncLocalEditsProvider.notifier).edited();
+      }
+    },
     readMergesInProgress: (recordId) async {
       final directory = recordDirectoryOf(ref, recordId);
       return directory == null ? const <String, MergeDefaults>{} : await readMergesInProgress(directory);
@@ -428,7 +440,11 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
               children: [
                 if (unfinished)
                   _Note(key: const Key('enhancement_merge_unfinished'), text: "$tr_merge.unfinished".tr()),
-                Text("$tr_merge.intro".tr(), key: const Key('enhancement_merge_intro')),
+                // N16: where sync is on, the images of the record the user does not keep leave this device.
+                Text(
+                  ["$tr_merge.intro".tr(), if (ref.watch(syncOnProvider)) "$tr_merge.intro_synced".tr()].join('\n'),
+                  key: const Key('enhancement_merge_intro'),
+                ),
                 const SizedBox(height: 12),
                 // A pair with no factor difference is stated once for both cards, not once per card.
                 if (noFactorDifference)
@@ -987,6 +1003,8 @@ class _MemoFieldState extends State<_MemoField> {
       controller: _controller,
       enabled: widget.enabled,
       decoration: InputDecoration(isDense: true, labelText: widget.title),
+      inputFormatters: const [MemoLengthFormatter()],
+      buildCounter: memoLengthCounter(_controller),
       onChanged: (value) => widget.onChanged(value.isEmpty ? null : value),
     );
   }

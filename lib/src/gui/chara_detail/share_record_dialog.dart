@@ -1,4 +1,4 @@
-// The two dialogs of record sharing: sharing a record (P1) and unsharing it (P2).
+// The dialogs of record sharing: sharing a record (P1), sharing the checked records (N2) and unsharing a share (P2).
 //
 // Every outcome is told inside the dialog that started the request, which stays open, so the user
 // reads what happened next to the button that does the next thing. Logging in, when sharing asks for
@@ -21,16 +21,16 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
+import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
 
-// The translation keys still carry the names of the publication they replaced; their wording is renamed with them.
 // ignore: constant_identifier_names
-const tr_record_share = "pages.chara_detail.publication";
+const tr_record_share = "pages.chara_detail.record_share";
 // ignore: constant_identifier_names
-const tr_share_record = "pages.chara_detail.publish_record";
+const tr_share_record = "pages.chara_detail.share_record";
 // ignore: constant_identifier_names
-const tr_unshare_record = "pages.chara_detail.withdraw_record";
+const tr_unshare_record = "pages.chara_detail.unshare_record";
 
 /// The trial-release notice, served next to the shared pages.
 ///
@@ -69,31 +69,34 @@ MenuItem recordShareMenu(
   return MenuItem.submenu(
     constraints: constraints,
     icon: const Icon(Symbols.public, weight: iconWeight),
-    label: Text("$menu.group_publish".tr(), style: style),
+    label: Text("$menu.group_share".tr(), style: style),
     items: [
       if (shared == null || url == null)
         item(
           Symbols.public,
-          "publish_record",
+          "share_record",
           () => ShareRecordDialog.show(ref.base, recordId: record.id, source: source),
         )
       else ...[
-        item(Symbols.open_in_new, "open_published", () => openSharedPage(url)),
-        item(Symbols.content_copy, "copy_published_url", () => copySharedUrl(url)),
-        item(Symbols.public_off, "withdraw_record", () => UnshareRecordDialog.show(ref.base, shareId: shared.id ?? "")),
+        item(Symbols.open_in_new, "open_shared", () => openSharedPage(url)),
+        item(Symbols.content_copy, "copy_shared_url", () => copySharedUrl(url)),
+        item(Symbols.public_off, "unshare_record", () => UnshareRecordDialog.show(ref.base, shareId: shared.id ?? "")),
       ],
     ],
   );
 }
 
-/// The P1 body: what leaves the device and what cannot be taken back, with a link to the notice.
+/// The body of a share's confirmation, [key] of P1 or N2: what leaves the device and what cannot be taken back,
+/// with a link to the notice.
 class _ShareDescription extends StatelessWidget {
-  const _ShareDescription();
+  final String textKey;
+
+  const _ShareDescription(this.textKey);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final parts = "$tr_share_record.dialog.description".tr().split("{link}");
+    final parts = textKey.tr().split("{link}");
     return Text.rich(
       TextSpan(
         children: [
@@ -136,38 +139,86 @@ Widget _actionRow(List<_Action> actions) => Wrap(
   ],
 );
 
-/// Drives one login from a dialog: the first press opens the start page, and on a platform whose proof does not
-/// arrive by itself a later press claims it. [onSignedIn] runs once the session exists.
+/// Drives one login from a dialog: the first press opens the start page and waits for the login to complete by
+/// itself, and on a platform with no listener a later press also claims it. [onSettled] receives the outcome that
+/// ends the attempt, and that of a later press which leaves it open; an attempt that has ended is dropped, so the
+/// next press starts a new login.
 class LoginDriver {
   final WidgetRef _ref;
-  final VoidCallback onSignedIn;
+  final ValueChanged<LoginOutcome> onSettled;
   LoginAttempt? _attempt;
 
-  LoginDriver(this._ref, {required this.onSignedIn});
+  LoginDriver(this._ref, {required this.onSettled});
 
   Future<void> press() async {
     final attempt = _attempt;
-    if (attempt != null && !attempt.waitsForCallback) {
-      _settle(await attempt.claim());
+    if (attempt != null && !attempt.waitsForCallback && !attempt.isFinished) {
+      final outcome = await attempt.claim();
+      // An outcome that ends the attempt is told once, by the completion the first press awaits.
+      if (!attempt.isFinished) {
+        onSettled(outcome);
+      }
       return;
     }
     await attempt?.cancel();
     final started = await _ref.read(recordShareSessionProvider.notifier).beginLogin();
     _attempt = started;
-    if (started.waitsForCallback) {
-      _settle(await started.completion);
-    }
+    _settle(started, await started.completion);
   }
 
-  void _settle(LoginOutcome outcome) {
-    if (outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit) {
+  void _settle(LoginAttempt attempt, LoginOutcome outcome) {
+    if (attempt.isFinished && identical(_attempt, attempt)) {
       _attempt = null;
-      onSignedIn();
     }
+    onSettled(outcome);
   }
 
   Future<void> dispose() async => _attempt?.cancel();
 }
+
+/// What the user can do about a login that did not simply succeed; null when there is nothing to tell. A
+/// cancelled login is the user's own doing (the dialog closed, or a new press replaced it), so it says nothing.
+String? loginOutcomeText(LoginOutcome outcome) {
+  final key = switch (outcome) {
+    LoginOutcome.signedIn || LoginOutcome.cancelled => null,
+    LoginOutcome.trainerLimit => "trainer_limit",
+    LoginOutcome.incomplete => "incomplete",
+    LoginOutcome.expired => "expired",
+    LoginOutcome.refused => "refused",
+    LoginOutcome.unreachable => "unreachable",
+  };
+  return key == null ? null : "$tr_record_share.login.$key".tr();
+}
+
+/// What a share that did not happen tells the user.
+String _failureText(ShareOutcome outcome) {
+  final key = switch (outcome) {
+    NotShareable() => "not_shareable",
+    ModuleUnavailable() => "module_unavailable",
+    AlreadyShared() => "already_shared",
+    LoginRequired() => "login_required",
+    ShareUnreachable() => "unreachable",
+    ShareSkipped() => "busy",
+    ShareRefused(:final reason) => switch (reason) {
+      ShareRefusal.dailyLimit => "daily_limit",
+      ShareRefusal.accountLimit => "account_limit",
+      ShareRefusal.storageFull => "storage_full",
+      ShareRefusal.serverTablesOlder => "server_tables_older",
+      ShareRefusal.rejected => "rejected",
+      ShareRefusal.sharingPaused || ShareRefusal.accountDeleting => "sharing_paused",
+      ShareRefusal.temporarilyUnavailable || ShareRefusal.busy => "busy",
+    },
+    Shared() => throw StateError("a share is not a failure"),
+  };
+  return "$tr_share_record.failure.$key".tr();
+}
+
+/// Whether the outcome leaves the share to be sent again: a login, a retry, or nothing sent yet.
+bool _sendsAgain(ShareOutcome? outcome) => switch (outcome) {
+  null || LoginRequired() || ShareUnreachable() || ShareSkipped() => true,
+  ShareRefused(reason: ShareRefusal.temporarilyUnavailable || ShareRefusal.busy) => true,
+  _ => false,
+};
 
 /// P1: confirms a share, then shows its URL or why it did not happen.
 class ShareRecordDialog extends ConsumerStatefulWidget {
@@ -186,13 +237,22 @@ class ShareRecordDialog extends ConsumerStatefulWidget {
 
 class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
   ShareOutcome? _outcome;
+
+  /// What the last login ended with, told where a failure is; a login that signed in also clears [_outcome].
+  String? _loginText;
   bool _sending = false;
   late final _login = LoginDriver(
     ref,
-    onSignedIn: () {
-      if (mounted) {
-        setState(() => _outcome = null);
+    onSettled: (outcome) {
+      if (!mounted) {
+        return;
       }
+      setState(() {
+        _loginText = loginOutcomeText(outcome);
+        if (outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit) {
+          _outcome = null;
+        }
+      });
     },
   );
 
@@ -207,7 +267,10 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
   Future<void> _share(CharaDetailRecord record) async {
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _loginText = null;
+    });
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     final ShareOutcome outcome;
     try {
@@ -225,27 +288,6 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
 
   void _close() => CardDialog.dismiss(ref.base);
 
-  String _failureText(ShareOutcome outcome) {
-    final key = switch (outcome) {
-      NotShareable() => "not_publishable",
-      ModuleUnavailable() => "module_unavailable",
-      AlreadyShared() => "already_published",
-      LoginRequired() => "login_required",
-      ShareUnreachable() => "unreachable",
-      ShareSkipped() => "busy",
-      ShareRefused(:final reason) => switch (reason) {
-        ShareRefusal.dailyLimit || ShareRefusal.accountLimit => "daily_limit",
-        ShareRefusal.storageFull => "storage_full",
-        ShareRefusal.serverTablesOlder => "server_tables_older",
-        ShareRefusal.rejected => "rejected",
-        ShareRefusal.sharingPaused || ShareRefusal.accountDeleting => "publishing_paused",
-        ShareRefusal.temporarilyUnavailable || ShareRefusal.busy => "busy",
-      },
-      Shared() => throw StateError("a share is not a failure"),
-    };
-    return "$tr_share_record.failure.$key".tr();
-  }
-
   List<_Action> _actionsFor(ShareOutcome outcome, CharaDetailRecord record) {
     final close = (label: "$tr_record_share.close".tr(), icon: Symbols.close_rounded, onPressed: _close);
     final retry = (
@@ -256,7 +298,7 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
     List<_Action> located(RecordShare entry) => [
       if (entry.url case final url?) ...[
         (
-          label: "$tr_record_share.open_published".tr(),
+          label: "$tr_record_share.open_shared".tr(),
           icon: Symbols.open_in_new_rounded,
           onPressed: () => openSharedPage(url),
         ),
@@ -271,7 +313,7 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
       Shared(:final entry) => [...located(entry), close],
       AlreadyShared(:final entry) => located(entry),
       LoginRequired() => [
-        (label: "$tr_record_share.open_verification".tr(), icon: Symbols.login_rounded, onPressed: _login.press),
+        (label: "$tr_record_share.log_in".tr(), icon: Symbols.login_rounded, onPressed: _login.press),
       ],
       ShareUnreachable() || ShareSkipped() => [retry],
       ShareRefused(reason: ShareRefusal.temporarilyUnavailable || ShareRefusal.busy) => [retry],
@@ -298,13 +340,14 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
       return dismissForMissingRecord(ref.base);
     }
     final outcome = _outcome;
+    final loginText = _loginText;
     final Widget body;
     final Widget bottom;
     if (outcome is Shared) {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("$tr_share_record.dialog.published".tr(), style: theme.textTheme.bodyMedium),
+          Text("$tr_share_record.dialog.shared".tr(), style: theme.textTheme.bodyMedium),
           const SizedBox(height: 8),
           SelectableText(outcome.entry.url ?? "", style: theme.textTheme.bodyMedium),
         ],
@@ -314,20 +357,21 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _ShareDescription(),
+          const _ShareDescription("$tr_share_record.dialog.description"),
           if (outcome != null) ...[
             const SizedBox(height: 12),
-            NoteCard(description: Text(_failureText(outcome)), children: [_actionRow(_actionsFor(outcome, record))]),
+            NoteCard(
+              description: Text(loginText ?? _failureText(outcome)),
+              children: [_actionRow(_actionsFor(outcome, record))],
+            ),
+          ] else if (loginText != null) ...[
+            const SizedBox(height: 12),
+            NoteCard(description: Text(loginText)),
           ],
         ],
       );
       // Settled outcomes leave nothing to confirm; a login or a retry still leads to sharing.
-      final confirmable = switch (outcome) {
-        null || LoginRequired() || ShareUnreachable() || ShareSkipped() => true,
-        ShareRefused(reason: ShareRefusal.temporarilyUnavailable || ShareRefusal.busy) => true,
-        _ => false,
-      };
-      bottom = confirmable
+      bottom = _sendsAgain(outcome)
           ? ConfirmActionRow(
               dismissRef: ref.base,
               cancelLabel: "$tr_share_record.dialog.cancel_button.label".tr(),
@@ -351,11 +395,237 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
         closeButtonEnabled: !_sending,
         usePageView: false,
         scrollableContent: true,
-        content: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: _sending ? Stack(children: [body, const LinearProgressIndicator()]) : body,
-        ),
+        content: _sending ? Stack(children: [body, const LinearProgressIndicator()]) : body,
         bottom: bottom,
+      ),
+    );
+  }
+}
+
+/// N2: confirms sharing the checked records, then tells how many were shared, which were left out and why the rest
+/// were not, and sends that rest again.
+class BulkShareRecordDialog extends ConsumerStatefulWidget {
+  final List<String> recordIds;
+  final RecordSource source;
+
+  const BulkShareRecordDialog({super.key, required this.recordIds, required this.source});
+
+  static void show(RefBase ref, {required List<String> recordIds, required RecordSource source}) {
+    CardDialog.show(ref, (_) => BulkShareRecordDialog(recordIds: recordIds, source: source));
+  }
+
+  @override
+  ConsumerState<BulkShareRecordDialog> createState() => _BulkShareRecordDialogState();
+}
+
+class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
+  /// Each record's latest outcome; a retry replaces those it sent again. Empty until the first send.
+  final _outcomes = <String, ShareOutcome>{};
+
+  /// What the last login ended with; a login that signed in also lets the rest be sent again.
+  String? _loginText;
+  bool _signedIn = false;
+  bool _sending = false;
+  late final _login = LoginDriver(
+    ref,
+    onSettled: (outcome) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loginText = loginOutcomeText(outcome);
+        _signedIn = outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit;
+      });
+    },
+  );
+
+  /// What a share would leave out, sorted once as the dialog opens; null until that answers.
+  Map<String, ShareOutcome>? _leftOut;
+
+  @override
+  void initState() {
+    super.initState();
+    _sortChecked();
+  }
+
+  @override
+  void dispose() {
+    _login.dispose();
+    super.dispose();
+  }
+
+  List<CharaDetailRecord> _recordsOf(Iterable<String> ids) {
+    final storage = recordStorageFor(ref, widget.source);
+    return [for (final id in ids) ?storage.getBy(id: id)];
+  }
+
+  /// Counts, before the press, what the share would leave out. A sort that could not learn the account's trainers
+  /// leaves those records uncounted, so the confirmation then tells the total only; the press sorts again.
+  Future<void> _sortChecked() async {
+    final sorted = await ref.read(recordSharesProvider.notifier).sortForSharing(_recordsOf(widget.recordIds));
+    if (mounted) {
+      setState(() => _leftOut = sorted.settled);
+    }
+  }
+
+  /// The records still to be sent: every one before the first send, then those whose outcome leaves it to be sent
+  /// again.
+  List<String> get _rest => [
+    for (final id in widget.recordIds)
+      if (_sendsAgain(_outcomes[id])) id,
+  ];
+
+  /// Shares [_rest]. **Nothing closes the dialog while a request is out**, for the reason P1 gives.
+  Future<void> _share() async {
+    final records = _recordsOf(_rest);
+    final dialogs = ref.read(dialogBuilderProvider.notifier);
+    final token = dialogs.currentToken;
+    setState(() {
+      _sending = true;
+      _loginText = null;
+      _signedIn = false;
+    });
+    dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    // The checked rows are now this dialog's to tell about, so selection ends here as the bulk delete ends it.
+    exitSelection(ref);
+    final Map<String, ShareOutcome> answered;
+    try {
+      answered = await ref.read(recordSharesProvider.notifier).shareAll(records);
+    } finally {
+      dialogs.setBarrierDismissible(token, barrierDismissible: true);
+      if (mounted) {
+        setState(() => _sending = false);
+      }
+    }
+    if (mounted) {
+      setState(() => _outcomes.addAll(answered));
+    }
+  }
+
+  void _close() => CardDialog.dismiss(ref.base);
+
+  int _count(bool Function(ShareOutcome) test) => _outcomes.values.where(test).length;
+
+  /// The confirmation's line of what the share would leave out; null when it leaves nothing out or is not sorted.
+  String? _leftOutText() {
+    final leftOut = _leftOut?.values ?? const <ShareOutcome>[];
+    final already = leftOut.whereType<AlreadyShared>().length;
+    final excluded = leftOut.whereType<NotShareable>().length;
+    final lines = [
+      if (already > 0) "$tr_share_record.bulk.will_skip_shared".tr(namedArgs: {"count": "$already"}),
+      if (excluded > 0) "$tr_share_record.bulk.will_exclude".tr(namedArgs: {"count": "$excluded"}),
+    ];
+    return lines.isEmpty ? null : lines.join("\n");
+  }
+
+  Widget _results(ThemeData theme) {
+    String line(String key, int count) => "$tr_share_record.bulk.$key".tr(namedArgs: {"count": "$count"});
+    final shared = _count((o) => o is Shared);
+    final already = _count((o) => o is AlreadyShared);
+    final excluded = _count((o) => o is NotShareable);
+    final failures = _outcomes.values.where((o) => o is! Shared && o is! AlreadyShared && o is! NotShareable).toList();
+    final needsLogin = failures.any((o) => o is LoginRequired) && !_signedIn;
+    final session = ref.watch(recordShareSessionProvider);
+    // Told once every checked record is on the account's list, which is what the list's page then shows.
+    final listUrl = failures.isEmpty && excluded == 0 && session != null ? accountListUrl(session.accountId) : null;
+    final style = theme.textTheme.bodyMedium;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          [
+            line("shared", shared),
+            if (already > 0) line("already_shared", already),
+            if (excluded > 0) line("not_shareable", excluded),
+            if (failures.isNotEmpty) line("failed", failures.length),
+          ].join("\n"),
+          style: style,
+        ),
+        if (listUrl != null) ...[
+          const SizedBox(height: 12),
+          Text("$tr_share_record.bulk.list".tr(), style: style),
+          const SizedBox(height: 8),
+          SelectableText(listUrl, style: style),
+          const SizedBox(height: 8),
+          _actionRow([
+            (
+              label: "$tr_record_share.open_shared".tr(),
+              icon: Symbols.open_in_new_rounded,
+              onPressed: () => openSharedPage(listUrl),
+            ),
+            (
+              label: "$tr_record_share.copy_url".tr(),
+              icon: Symbols.content_copy_rounded,
+              onPressed: () => copySharedUrl(listUrl),
+            ),
+          ]),
+        ],
+        if (failures.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          NoteCard(
+            description: Text(_loginText ?? {for (final o in failures) _failureText(o)}.join("\n")),
+            children: [
+              _actionRow([
+                if (needsLogin)
+                  (label: "$tr_record_share.log_in".tr(), icon: Symbols.login_rounded, onPressed: _login.press)
+                else if (_rest.isNotEmpty)
+                  (label: "$tr_share_record.bulk.retry".tr(), icon: Symbols.refresh_rounded, onPressed: _share),
+              ]),
+            ],
+          ),
+        ] else if (_loginText case final loginText?) ...[
+          const SizedBox(height: 12),
+          NoteCard(description: Text(loginText)),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sent = _outcomes.isNotEmpty;
+    final body = sent
+        ? _results(theme)
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "$tr_share_record.bulk.message".tr(namedArgs: {"count": "${widget.recordIds.length}"}),
+                style: theme.textTheme.titleMedium,
+              ),
+              if (_leftOutText() case final text?) ...[
+                const SizedBox(height: 8),
+                Text(text, style: theme.textTheme.bodyMedium),
+              ],
+              const SizedBox(height: 12),
+              const _ShareDescription("$tr_share_record.bulk.description"),
+            ],
+          );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: CardDialog(
+        dialogTitle: "$tr_share_record.bulk.title".tr(),
+        closeButtonTooltip: "$tr_share_record.dialog.cancel_button.tooltip".tr(),
+        closeButtonEnabled: !_sending,
+        usePageView: false,
+        scrollableContent: true,
+        content: _sending ? Stack(children: [body, const LinearProgressIndicator()]) : body,
+        bottom: sent
+            ? _actionRow([(label: "$tr_record_share.close".tr(), icon: Symbols.close_rounded, onPressed: _close)])
+            : ConfirmActionRow(
+                dismissRef: ref.base,
+                cancelLabel: "$tr_share_record.dialog.cancel_button.label".tr(),
+                cancelTooltip: "$tr_share_record.dialog.cancel_button.tooltip".tr(),
+                confirmLabel: "$tr_share_record.dialog.ok_button.label".tr(),
+                confirmTooltip: "$tr_share_record.bulk.ok_tooltip".tr(),
+                confirmIcon: Symbols.public_rounded,
+                destructive: false,
+                requireLongPress: true,
+                onConfirm: _share,
+                enabled: !_sending,
+                cancelEnabled: !_sending,
+              ),
       ),
     );
   }
@@ -387,8 +657,35 @@ class _UnshareRecordDialogState extends ConsumerState<UnshareRecordDialog> {
   UnshareOutcome? _outcome;
   bool _sending = false;
 
+  /// What the last login ended with, told in place of the login note's own sentence; a login that signed in also
+  /// clears [_outcome], so the long press unshares again.
+  String? _loginText;
+  late final _login = LoginDriver(
+    ref,
+    onSettled: (outcome) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loginText = loginOutcomeText(outcome);
+        if (outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit) {
+          _outcome = null;
+        }
+      });
+    },
+  );
+
+  @override
+  void dispose() {
+    _login.dispose();
+    super.dispose();
+  }
+
   Future<void> _unshare() async {
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _loginText = null;
+    });
     final outcome = await ref.read(recordSharesProvider.notifier).unshare(widget.shareId);
     if (!mounted) {
       return;
@@ -410,9 +707,9 @@ class _UnshareRecordDialogState extends ConsumerState<UnshareRecordDialog> {
     final theme = Theme.of(context);
     final outcome = _outcome;
     final retryable = outcome == UnshareOutcome.unreachable || outcome == UnshareOutcome.failed;
-    // A lost session reads as a refusal: there is no sentence of its own yet, nor a way to log in from here.
     final failureKey = switch (outcome) {
-      UnshareOutcome.forbidden || UnshareOutcome.loginRequired => "forbidden",
+      UnshareOutcome.forbidden => "forbidden",
+      UnshareOutcome.loginRequired => "login_required",
       UnshareOutcome.unreachable => "unreachable",
       _ => "failed",
     };
@@ -423,19 +720,25 @@ class _UnshareRecordDialogState extends ConsumerState<UnshareRecordDialog> {
         if (outcome != null) ...[
           const SizedBox(height: 12),
           NoteCard(
-            description: Text("$tr_unshare_record.failure.$failureKey".tr()),
+            description: Text(_loginText ?? "$tr_unshare_record.failure.$failureKey".tr()),
             children: [
               _actionRow([
-                retryable
-                    ? (label: "$tr_record_share.retry".tr(), icon: Symbols.refresh_rounded, onPressed: _unshare)
-                    : (
-                        label: "$tr_record_share.close".tr(),
-                        icon: Symbols.close_rounded,
-                        onPressed: () => CardDialog.dismiss(ref.base),
-                      ),
+                if (outcome == UnshareOutcome.loginRequired)
+                  (label: "$tr_record_share.log_in".tr(), icon: Symbols.login_rounded, onPressed: _login.press)
+                else if (retryable)
+                  (label: "$tr_record_share.retry".tr(), icon: Symbols.refresh_rounded, onPressed: _unshare)
+                else
+                  (
+                    label: "$tr_record_share.close".tr(),
+                    icon: Symbols.close_rounded,
+                    onPressed: () => CardDialog.dismiss(ref.base),
+                  ),
               ]),
             ],
           ),
+        ] else if (_loginText case final loginText?) ...[
+          const SizedBox(height: 12),
+          NoteCard(description: Text(loginText)),
         ],
       ],
     );
@@ -446,10 +749,7 @@ class _UnshareRecordDialogState extends ConsumerState<UnshareRecordDialog> {
         closeButtonTooltip: "$tr_unshare_record.dialog.cancel_button.tooltip".tr(),
         usePageView: false,
         scrollableContent: true,
-        content: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: _sending ? Stack(children: [body, const LinearProgressIndicator()]) : body,
-        ),
+        content: _sending ? Stack(children: [body, const LinearProgressIndicator()]) : body,
         bottom: outcome == null
             ? ConfirmActionRow(
                 dismissRef: ref.base,

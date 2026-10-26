@@ -411,6 +411,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     // own, and nothing here waits for it.
     ref.read(recordSyncTriggersProvider);
 
+    // The toasts of a stop of the rounds (N10), heard wherever the user is.
+    ref.read(syncHaltToastsProvider);
+
     // Rebuild this widget when requested.
     ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));
 

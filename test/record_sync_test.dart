@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:image/image.dart' as img;
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/addon/trigger_catalog.dart' show appExitRequestsProvider;
@@ -50,10 +51,16 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_delete_report.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
+import 'package:umacapture/src/gui/chara_detail/common.dart' show NoteCard;
+import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/column_spec_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart' show ImageSizeContainer;
+import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
+import 'package:umacapture/src/gui/common.dart' show DialogLayer;
+import 'package:umacapture/src/gui/toast.dart' show plainToastEventProvider;
 import 'package:umacapture/src/gui/storage_delete_action.dart';
+import 'package:umacapture/src/gui/theme_extensions.dart' show AppSemanticColors;
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/enhancement_merge_scratch.dart';
@@ -2692,7 +2699,7 @@ void main() {
       await deleteRecords(b, {'R4'});
       await b.round(server);
 
-      await writeMemo(a, 'R1', 'x' * (syncMemoLimit + 1));
+      await writeMemo(a, 'R1', 'x' * (memoLengthLimit + 1));
       expect((await a.round(server)).end, SyncRoundEnd.heldByLongMemos);
       await writeMemo(a, 'R1', 'cut');
       final ran = await a.round(server);
@@ -4023,7 +4030,7 @@ void main() {
                 await b.round(server);
                 seedUmas(a, ['R2']);
                 a.seedRecord('R1', binding: own('R1'), bodyWrittenAt: 1767225600150, fans: 1500);
-                a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * (syncMemoLimit + 1)});
+                a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * (memoLengthLimit + 1)});
                 final (generation, device) = (server.generation, _describe(await listOf(a)));
 
                 expect(
@@ -4880,7 +4887,7 @@ void main() {
       await a.round(server);
       await b.round(server);
       // Memos from before the limit, which carry no time they were written at.
-      a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'x' * (syncMemoLimit + 1), 'R2': 'y' * 300});
+      a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'x' * (memoLengthLimit + 1), 'R2': 'y' * 300});
       await deleteRecords(a, {'R3'});
       final (serverBefore, deviceBefore) = (_describe(onServer()), _describe(await listOf(a)));
 
@@ -4892,11 +4899,11 @@ void main() {
       await writeMemo(a, 'R1', 'cut');
       final cut = await a.round(server);
       expect((cut.end, cut.longMemos), (SyncRoundEnd.heldByLongMemos, 1));
-      await writeMemo(a, 'R2', 'y' * syncMemoLimit);
+      await writeMemo(a, 'R2', 'y' * memoLengthLimit);
       final ran = await a.round(server);
       expect((ran.end, ran.longMemos), (SyncRoundEnd.done, 0));
       expect(onServer().rows.keys.toSet(), {'R1', 'R2'});
-      expect(onServer().cells[('memo/m1', 'R2')]?.value, jsonEncode('y' * syncMemoLimit));
+      expect(onServer().cells[('memo/m1', 'R2')]?.value, jsonEncode('y' * memoLengthLimit));
     });
 
     test('S-10: the gate counts the memos of the list the round merges and sends: one written while the round works '
@@ -4914,7 +4921,7 @@ void main() {
       addTearDown(() => fsBackend = previous);
       final round = a.round(server);
       await waitUntil(() => writes.held, describe: "the round's write of R2's binding to be reached");
-      await writeMemo(a, 'R1', 'x' * (syncMemoLimit + 1));
+      await writeMemo(a, 'R1', 'x' * (memoLengthLimit + 1));
       writes.release();
 
       final held = await round;
@@ -4933,7 +4940,7 @@ void main() {
       // A's round read A and asks the server to take its list; A's user writes a memo over the limit meanwhile.
       server.beforeReplace = () async {
         server.beforeReplace = null;
-        await writeMemo(a, 'R1', 'x' * (syncMemoLimit + 1));
+        await writeMemo(a, 'R1', 'x' * (memoLengthLimit + 1));
       };
       expect((await a.round(server)).end, SyncRoundEnd.done);
       expect(onServer().rows.keys.toSet(), {'R1'}, reason: 'the round sent what it read');
@@ -4951,8 +4958,8 @@ void main() {
       () async {
         seedUmas(a, ['R1']);
         // A memo from before the limit, left in the column's file by a record deleted before the upgrade.
-        a.seedColumn('memo', 'm1', title: 'Note', data: {'R0': 'x' * (syncMemoLimit + 1)});
-        expect((await listOf(a)).cells[('memo/m1', 'R0')]?.value, jsonEncode('x' * (syncMemoLimit + 1)));
+        a.seedColumn('memo', 'm1', title: 'Note', data: {'R0': 'x' * (memoLengthLimit + 1)});
+        expect((await listOf(a)).cells[('memo/m1', 'R0')]?.value, jsonEncode('x' * (memoLengthLimit + 1)));
 
         final ran = await a.round(server);
         expect((ran.end, ran.longMemos), (SyncRoundEnd.done, 0));
@@ -5649,6 +5656,363 @@ void main() {
         await a.login('account-2');
         await a.setSyncOn(true);
         expect(state().counts, isNull, reason: 'sync is on for another account');
+      });
+
+      // T3b2: what the rounds of one account told, and when they last synced, are not shown as another's.
+      test('T3b2 (C1): turned off and on for the same account, the device keeps what its last round told and when it '
+          'last synced; turned on for another account, both go', () async {
+        await a.login(syncTestAccount);
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        RecordSyncState state() => app.read(recordSyncProvider);
+        expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+        final (told, synced) = (state().told, state().lastSynced);
+        expect(told, isNotNull);
+        expect(synced, isNotNull);
+
+        await a.setSyncOn(false);
+        await a.setSyncOn(true);
+        expect((state().told, state().lastSynced), (told, synced), reason: 'the same account (V1)');
+
+        await a.logout();
+        await a.login('account-2');
+        await a.setSyncOn(true);
+        expect((state().told, state().lastSynced), (null, null), reason: 'sync is on for another account');
+      });
+
+      // T3e (R-LIB11a F2): a round of one account that ends after sync was turned on for another is not shown as its.
+      test('T3e (F2): a round of the account logged out of that ends once sync is on for another leaves what it told '
+          'and when it synced unshown', () async {
+        final face = a.syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount');
+        final gate = Completer<void>();
+        final held = Completer<void>();
+        face.beforeAnswer = (request) async {
+          if (request.method == 'POST' && request.uri.path == '/api/sync/root') {
+            if (!held.isCompleted) held.complete();
+            await gate.future;
+          }
+        };
+        await a.login(syncTestAccount);
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        final app = await a.open();
+        RecordSyncState state() => app.read(recordSyncProvider);
+        final pending = a.roundAsAsked(await a.overHttp());
+        await held.future;
+
+        await a.logout();
+        await a.login('account-2');
+        await a.setSyncOn(true);
+        gate.complete();
+        expect((await pending)?.end, SyncRoundEnd.done, reason: "the old account's round ends late");
+        expect((state().countsFor('account-2'), state().told, state().lastSynced), (null, null, null));
+      });
+
+      // T3b: the sync section (N8) and the dialog that turns sync on (N11), entered as the privacy settings mount the
+      // account section (N3), each round over the app's own sync server and the Worker's face.
+      Future<ProviderContainer> mountAccount(WidgetTester tester, {bool triggers = false}) async {
+        loadAppTranslations();
+        tester.view.physicalSize = const Size(1600, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final app = (await tester.runAsync(() async {
+          final app = await a.open();
+          if (triggers) await a.startTriggers();
+          return app;
+        }))!;
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: app,
+            child: const MaterialApp(
+              home: DialogLayer(
+                child: Scaffold(body: SingleChildScrollView(child: ShareAccountSection())),
+              ),
+            ),
+          ),
+        );
+        return app;
+      }
+
+      bool shown(String text) => find.text(text).evaluate().isNotEmpty;
+
+      testWidgets('T3b (C1): logged in, the account offers sync; the dialog that turns it on tells whose the records '
+          'become, what a round would move and the long memos; the section then shows the round running, that the memos '
+          'hold the rounds back, and, once they are short, what syncing now kept and each stop of the rounds in a '
+          "sentence of its own: the account's room, the service's room, the account's day, the service's day and the "
+          'account being deleted', (tester) async {
+        final face = SyncHttpFace(server, token: 'token-$syncTestAccount');
+        a
+          ..syncHttp = face
+          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+        seedUmas(a, ['R1']);
+        a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * 201}, writtenAt: {'R1': 1767225600800});
+        final app = await mountAccount(tester, triggers: true);
+        expect(find.text('端末間の同期'), findsNothing, reason: 'logged out, the account offers no sync');
+
+        // (i) Logged in, the switch; turning it on opens N11, which reads what a round would move and runs none.
+        await tester.runAsync(() => a.login(syncTestAccount));
+        await tester.pump();
+        expect(find.text('端末間の同期'), findsOneWidget);
+        expect(find.text('今すぐ同期'), findsNothing, reason: 'sync is off');
+        await tester.tap(find.byType(Switch));
+        await settleUntilElapsing(
+          tester,
+          () => shown('この端末から送るレコード: 1 件・この端末が受け取るレコード: 0 件'),
+          describe: 'the counts of what turning sync on would move',
+        );
+        expect(find.text('この端末のレコードが、ログイン中のアカウントに加わります。'), findsOneWidget);
+        expect(find.text('200 字を超えるメモが 1 件あります。200 字以内にするまで、同期は始まりません。'), findsOneWidget);
+        expect(app.read(recordSyncProvider).account, isNull, reason: 'opening the dialog turns nothing on');
+        expect(server.replacementsAsked, 0, reason: 'opening the dialog runs no round');
+
+        // (v) The round turning sync on asks for, held at its first request: it shows running, and no press syncs now.
+        final entered = Completer<void>();
+        final answer = Completer<void>();
+        face.beforeAnswer = (request) async {
+          if (request.uri.path != '/api/sync/generation' || entered.isCompleted) return;
+          entered.complete();
+          await answer.future;
+        };
+        // The switch is kept in the settings store every test shares; turned on here, it is turned off as the test ends
+        // ([SyncTestDevice.setSyncOn]).
+        addTearDown(() => StorageEntry<String>(box: StorageBox(StorageBoxKey.settings), key: recordSyncKey).delete());
+        await tester.tap(find.text('オンにする'));
+        await settleUntilElapsing(tester, () => entered.isCompleted, describe: 'the round turning sync on asks for');
+        expect(app.read(recordSyncProvider).account, syncTestAccount);
+        expect(find.text('同期しています…'), findsOneWidget);
+        OutlinedButton syncNow() => tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '今すぐ同期'));
+        expect(syncNow().onPressed, isNull, reason: 'a round runs');
+
+        // (iii) The memos hold it back: the section tells how many and how to find them.
+        answer.complete();
+        await settleUntilElapsing(
+          tester,
+          () => find.textContaining('200 字を超えるメモが 1 件あるため、同期を止めています。').evaluate().isNotEmpty,
+          describe: 'the long memos to hold the round back',
+        );
+        expect(find.textContaining(r'メモの列の絞り込みに「[\s\S]{201,}」と入れると'), findsOneWidget);
+        expect(find.text('アプリを起動してから、まだ同期していません。'), findsOneWidget);
+        expect(syncNow().onPressed, isNotNull, reason: 'no round runs');
+        expect(server.replacementsAsked, 0, reason: 'the memos held the round back');
+
+        // The user shortens the memo; (iv) each stop comes of a press of 「今すぐ同期」, told apart from the others.
+        var loaded = false;
+        unawaited(app.read(charaDetailRecordMemoProvider('m1').future).then((_) => loaded = true));
+        await settleUntilElapsing(tester, () => loaded, describe: 'the memo column to load');
+        expect(saveMemo(app.read(containerRefProvider), storageKey: 'm1', recordId: 'R1', memo: 'あ' * 200), isTrue);
+        var saved = false;
+        unawaited(app.read(charaDetailRecordMemoProvider('m1').notifier).flush().then((done) => saved = done));
+        await settleUntilElapsing(tester, () => saved, describe: 'the memo to be saved');
+        const halts = {
+          'accountRoom': 'このアカウントの保存容量の上限に達したため、',
+          'serviceRoom': '提供元のサーバーの容量が上限に達したため、',
+          'accountDay': 'このアカウントの 1 日の上限に達したため、',
+          'serviceDay': '提供元の 1 日の上限に達したため、',
+          'deleting': 'アカウントの削除中のため、同期は止まっています。',
+        };
+        Future<void> syncNowStopsAt(String halt) async {
+          await tester.tap(find.text('今すぐ同期'));
+          await settleUntilElapsing(
+            tester,
+            () => find.textContaining(halts[halt]!).evaluate().isNotEmpty,
+            describe: 'the stop for $halt',
+          );
+          expect(find.textContaining('200 字を超えるメモ'), findsNothing);
+          for (final other in halts.keys.where((k) => k != halt)) {
+            expect(find.textContaining(halts[other]!), findsNothing, reason: '$halt is not $other');
+          }
+        }
+
+        server.noRoom = 'account_limit';
+        await syncNowStopsAt('accountRoom');
+        expect(find.textContaining('削除やアーカイブなど容量を使わない変更は送りました。'), findsOneWidget);
+        expect(find.textContaining('待っている統合で無くなるレコードは、統合と一緒に待ちます。'), findsOneWidget);
+        expect(find.text('容量の空きを待っているレコード: 1 件'), findsOneWidget, reason: 'R1');
+        // (ii) The counts of what the round kept, and when it synced.
+        expect(
+          find.text('同期で残したレコード: 削除を取り消した 0 件・2 件に分けた 0 件・片方の端末にだけあって足し合わせた 1 件'),
+          findsOneWidget,
+          reason: 'R1, which the device alone held',
+        );
+        expect(
+          find.text("最終同期: ${DateFormat('yyyy/MM/dd HH:mm').format(DateTime.utc(2030, 1, 1, 9).toLocal())}"),
+          findsOneWidget,
+        );
+
+        server.noRoom = 'storage_full';
+        await syncNowStopsAt('serviceRoom');
+        expect(find.textContaining('削除やアーカイブなど容量を使わない変更は送りました。'), findsOneWidget);
+
+        server
+          ..noRoom = null
+          ..limitTheDay(0);
+        await syncNowStopsAt('accountDay');
+        expect(find.text('翌日に送るレコード: 1 件'), findsOneWidget, reason: 'R1');
+        server.limitTheDay(0, scope: 'service');
+        await syncNowStopsAt('serviceDay');
+
+        server
+          ..limitTheDay(10)
+          ..beforeReplace = () async => throw const SyncRefusal(409, 'account_deleting');
+        await syncNowStopsAt('deleting');
+        expect(find.text('今すぐ同期'), findsNothing);
+        expect(find.byType(Switch), findsNothing);
+      });
+
+      // T3c: the sync icon at the right end of the table's toolbar (N9) and the toasts of a stop (N10), mounted beside
+      // the sync section (N8) whose one line the icon's hover shares, each round as the app asks for one.
+      testWidgets('T3c (C1): the toolbar shows a sync icon only while sync is on for the session, its hover telling '
+          "the line the sync section leads with for each stop — the account's room and the service — and a toast tells "
+          'a stop of the server once as it begins, and nothing else', (tester) async {
+        a
+          ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
+          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+        seedUmas(a, ['R1']);
+        loadAppTranslations();
+        tester.view.physicalSize = const Size(1600, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final app = (await tester.runAsync(a.open))!;
+        // The app's entry of the toasts, read as the app reads it at its start.
+        app.read(syncHaltToastsProvider);
+        final toasts = <String?>[];
+        app.listen(plainToastEventProvider, (_, next) {
+          if (next case AsyncData(:final value)) toasts.add(value.description);
+        });
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: app,
+            child: MaterialApp(
+              theme: ThemeData(extensions: [AppSemanticColors.light(ThemeData().colorScheme)]),
+              home: const DialogLayer(
+                child: Scaffold(
+                  body: SingleChildScrollView(
+                    child: Column(children: [ColumnPresetBarWidget(), ShareAccountSection()]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        final icon = find.descendant(
+          of: find.byType(ColumnPresetBarWidget),
+          matching: find.byWidgetPredicate(
+            (w) => w is Icon && (w.icon == Symbols.sync_rounded || w.icon == Symbols.sync_problem_rounded),
+          ),
+        );
+        String hover() =>
+            tester.widget<Tooltip>(find.ancestor(of: icon, matching: find.byType(Tooltip)).first).message!;
+        String sectionHalt() =>
+            tester.widget<Text>(find.descendant(of: find.byType(NoteCard), matching: find.byType(Text))).data!;
+        Future<void> round() async {
+          await tester.runAsync(() => a.roundAsAsked(server));
+          await tester.pump();
+        }
+
+        // (iii) Logged out, and logged in with sync off: no icon.
+        expect(icon, findsNothing, reason: 'logged out');
+        await tester.runAsync(() => a.login(syncTestAccount));
+        await tester.pump();
+        expect(icon, findsNothing, reason: 'sync is off');
+
+        await tester.runAsync(() => a.setSyncOn(true));
+        await settleUntilElapsing(
+          tester,
+          () => !app.read(syncImageFormProvider).isLoading,
+          describe: 'the section to read the image form',
+        );
+        expect(icon, findsOneWidget, reason: 'sync is on');
+        expect(hover(), 'アプリを起動してから、まだ同期していません。', reason: 'the state of the rounds, as the section tells it');
+
+        // (i) Each stop: the hover is the section's sentence for it; (ii) a toast tells it once as it begins.
+        server.noRoom = 'account_limit';
+        await round();
+        expect(hover(), startsWith('このアカウントの保存容量の上限に達したため、'));
+        expect(hover(), sectionHalt(), reason: 'the line of the section (N8)');
+        expect(tester.widget<Icon>(icon).icon, Symbols.sync_problem_rounded);
+        await round();
+        expect(hover(), sectionHalt());
+
+        server
+          ..noRoom = null
+          ..paused = true;
+        await round();
+        expect(hover(), startsWith('提供元が同期を止めているため、'));
+        expect(hover(), sectionHalt(), reason: 'the line of the section (N8)');
+        await round();
+        await tester.pump();
+        expect(toasts, [
+          'このアカウントの保存容量の上限に達したため、容量を使う変更の同期を止めています。',
+          '提供元が同期を止めています。',
+        ], reason: 'one toast per stop as it began, though each stop held two rounds, and no other sentence');
+
+        // The user syncs now, which lowers the mark of the room's stop; the server has room and runs again.
+        server.paused = false;
+        await tester.runAsync(() => app.read(recordSyncProvider.notifier).syncNow(server));
+        await tester.pump();
+        expect(tester.widget<Icon>(icon).icon, Symbols.sync_rounded, reason: 'the rounds sync again');
+        expect(
+          hover(),
+          "最終同期: ${DateFormat('yyyy/MM/dd HH:mm').format(DateTime.utc(2030, 1, 1, 9).toLocal())}",
+          reason: 'no stop: the state of the rounds, as the section tells it',
+        );
+
+        await tester.runAsync(a.logout);
+        await tester.pump();
+        expect(icon, findsNothing, reason: 'logged out');
+        expect(toasts, hasLength(2), reason: 'a round that syncs, and the logout, tell nothing in a toast');
+      });
+
+      testWidgets('T3b2 (C1): set back from none in the section, the form tells, without a count, that the images not '
+          'sent go, and the next round sends them (D6-1)', (tester) async {
+        a.syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount');
+        seedShot(a, 'R1', 1);
+        await tester.runAsync(() async {
+          await a.login(syncTestAccount);
+          await a.setSyncOn(true);
+        });
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () =>
+              find.byType(RadioGroup<String>).evaluate().isNotEmpty &&
+              tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue == 'none',
+          describe: 'the image form read of the server',
+        );
+        expect(server.images, isEmpty, reason: 'the form none sent none');
+
+        await tester.tap(find.text('縮小した画像（JPEG）'));
+        await settleUntilElapsing(tester, () => shown('まだ送っていない画像を送ります。'), describe: 'the note on the form');
+        expect(server.form, 'jpeg');
+
+        await tester.tap(find.text('今すぐ同期'));
+        await settleUntilElapsing(
+          tester,
+          () => server.images.containsKey(iconOfShot(1)),
+          describe: 'the images R1 held back',
+        );
+
+        // T3e (R-LIB11a F1): N11 sets the form too, so it tells what N8 tells as the form leaves none — set back to
+        // none in the section, sync off, and on again through the dialog with JPEG.
+        await tester.tap(find.text('画像は同期しない'));
+        await settleUntilElapsing(tester, () => server.form == 'none', describe: 'the form none');
+        await tester.tap(find.byType(Switch));
+        await settleUntilElapsing(tester, () => find.text('今すぐ同期').evaluate().isEmpty, describe: 'sync off');
+        await tester.tap(find.byType(Switch));
+        await settleUntilElapsing(
+          tester,
+          () =>
+              find.textContaining('この端末から送るレコード').evaluate().isNotEmpty &&
+              find.byType(RadioGroup<String>).evaluate().isNotEmpty &&
+              tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue == 'none',
+          describe: 'the counts and the image form the dialog reads',
+        );
+        expect(shown('まだ送っていない画像を送ります。'), isFalse, reason: 'the form stays none');
+
+        await tester.tap(find.text('縮小した画像（JPEG）'));
+        await tester.pump();
+        expect(shown('まだ送っていない画像を送ります。'), isTrue, reason: 'T3e (F1): the dialog sets the form back');
       });
 
       // T-S401: the owner of the session is [RecordShareSession]; a sync request's 401 and 409 account_deleting reach

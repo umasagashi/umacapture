@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:umacapture/src/chara_detail/record_sync.dart' show syncOnProvider;
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
@@ -143,6 +144,7 @@ final _layout = PathInfo(
 Future<ProviderContainer> _open(WidgetTester tester, CharaDetailRecordStorage storage, {required bool bulk}) async {
   final container = ProviderContainer(
     overrides: [
+      syncOnProvider.overrideWithValue(false),
       charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
       pathInfoProvider.overrideWithValue(_layout),
       pathLayoutProvider.overrideWithValue(_layout),
@@ -236,7 +238,12 @@ class _ShowSingleButton extends ConsumerWidget {
 
 Future<({ProviderContainer container, _FakeRecordStorage storage})> _pump(WidgetTester tester) async {
   final storage = _FakeRecordStorage();
-  final container = ProviderContainer(overrides: [charaDetailRecordStorageLoaderProvider.overrideWith(() => storage)]);
+  final container = ProviderContainer(
+    overrides: [
+      syncOnProvider.overrideWithValue(false),
+      charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
+    ],
+  );
   addTearDown(container.dispose);
   container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
   container.read(selectedRecordIdsProvider.notifier).set({'a', 'b'});
@@ -266,7 +273,12 @@ Future<({ProviderContainer container, _FakeRecordStorage storage})> _pump(Widget
 /// tap the same barrier coordinate with no delete under way.
 Future<ProviderContainer> _pumpUnconfirmed(WidgetTester tester) async {
   final storage = _FakeRecordStorage();
-  final container = ProviderContainer(overrides: [charaDetailRecordStorageLoaderProvider.overrideWith(() => storage)]);
+  final container = ProviderContainer(
+    overrides: [
+      syncOnProvider.overrideWithValue(false),
+      charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
+    ],
+  );
   addTearDown(container.dispose);
   container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
   container.read(selectedRecordIdsProvider.notifier).set({'a', 'b'});
@@ -290,6 +302,7 @@ Future<({ProviderContainer container, _FakeRecordStorage storage})> _pumpSingle(
   final temp = DirectoryPath(Directory.systemTemp.path);
   final container = ProviderContainer(
     overrides: [
+      syncOnProvider.overrideWithValue(false),
       charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
       pathInfoProvider.overrideWithValue(
         PathInfo(documentDir: temp, supportDir: temp, executableDir: temp, downloadDir: temp),
@@ -461,6 +474,7 @@ void main() {
     final temp = DirectoryPath(Directory.systemTemp.path);
     final container = ProviderContainer(
       overrides: [
+        syncOnProvider.overrideWithValue(false),
         charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
         pathInfoProvider.overrideWithValue(
           PathInfo(documentDir: temp, supportDir: temp, executableDir: temp, downloadDir: temp),

@@ -969,6 +969,11 @@ class MemoData with MemoDataMappable {
   }
 }
 
+/// The most characters a memo holds, counted in code points (`String.runes`), on every device whether it syncs or
+/// not (S-03). The memo dialog takes no more than this; a memo already longer is kept as it is, and holds back the
+/// rounds of a syncing device until it is shortened (S-10).
+const memoLengthLimit = 200;
+
 class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> with MetadataWriteChain {
   CharaDetailRecordMemoController(this.key);
 

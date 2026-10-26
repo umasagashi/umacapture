@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:auto_route/auto_route.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -85,7 +86,7 @@ class Toaster {
         behavior: SnackBarBehavior.floating,
         dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
         duration: duration,
-        action: isNarrow ? null : SnackBarAction(textColor: onAccent, label: 'CLOSE', onPressed: () {}),
+        action: isNarrow ? null : SnackBarAction(textColor: onAccent, label: 'toast.close'.tr(), onPressed: () {}),
         content: TextButton.icon(
           icon: Icon(iconMap[data.type], color: onAccent),
           label: Padding(

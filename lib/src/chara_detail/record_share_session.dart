@@ -1,13 +1,16 @@
 // The session with the record-sharing server: logging in, the requests made under the session, and logging out.
 //
-// Shared by web and Windows; the one place the two log in differently is [RecordShareSession.beginLogin]. The
+// Shared by web and Windows; the two log in differently only in [RecordShareSession.beginLogin] and in how a
+// [LoginAttempt] completes by itself. The
 // session lives in the `recordShares` store beside the device's share notes, so both go together when the
 // store is deleted. Nothing here runs at start-up: the store is read, and the server is reached only from an
 // operation the user started.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart' show launchUrl;
 
@@ -124,25 +127,49 @@ class LoginAttempt {
   Future<LoginOutcome>? _claiming;
   bool _finished = false;
 
+  /// Without a listener: claims each time the page is shown again, until [_ended] completes.
+  AppLifecycleListener? _returns;
+  Completer<LoginOutcome>? _ended;
+
   LoginAttempt._(this._owner, this._secret, this._listener);
 
-  /// Whether the proof arrives by itself through [completion]; otherwise [claim] is what asks for it.
+  /// Whether the proof arrives as the listener's callback. Without one, the attempt claims with the login's cookie:
+  /// by itself when the page is shown again, and through [claim] when the user asks.
   bool get waitsForCallback => _listener != null;
 
-  /// The listener's login: resolves once its callback has arrived and been claimed, or the attempt has ended.
+  /// Whether the attempt has ended: signed in, expired, refused or cancelled. Only a new login helps after that;
+  /// an incomplete or unreachable claim leaves it open to be claimed again.
+  bool get isFinished => _finished;
+
+  /// The login completing by itself: resolves with the outcome that ends the attempt.
   ///
-  /// Only an attempt that [waitsForCallback] has one.
-  Future<LoginOutcome> get completion async {
+  /// With a listener, that is the claim of its callback's proof. Without one, every time the page is shown again it
+  /// claims, since the login page sets its cookie from another tab and nothing tells this page when; a claim that
+  /// finds the login unfinished or gets no answer waits for the next time. A [claim] that ends the attempt resolves it
+  /// too.
+  Future<LoginOutcome> get completion {
     final listener = _listener;
-    if (listener == null) {
-      throw StateError("a login with no listener completes through claim()");
+    return listener == null ? _completeOnReturn() : _completeOnCallback(listener);
+  }
+
+  Future<LoginOutcome> _completeOnReturn() {
+    final ended = _ended ??= Completer<LoginOutcome>();
+    if (!_finished) {
+      _returns ??= AppLifecycleListener(onResume: () => unawaited(_claim()));
+    } else if (!ended.isCompleted) {
+      ended.complete(LoginOutcome.cancelled);
     }
+    return ended.future;
+  }
+
+  Future<LoginOutcome> _completeOnCallback(LoginListener listener) async {
     final String code;
     try {
       code = await listener.code;
-    } on LoginListenClosed {
+    } on LoginListenClosed catch (e) {
       _finished = true;
-      return LoginOutcome.cancelled;
+      // The listener outlives the server's login, so a listener that timed out waited past an expired login.
+      return e.timedOut ? LoginOutcome.expired : LoginOutcome.cancelled;
     }
     if (_finished) {
       return LoginOutcome.cancelled;
@@ -150,8 +177,9 @@ class LoginAttempt {
     return _claim(code: code);
   }
 
-  /// Claims the login with the cookie the login page left in this browser. Called from the dialog's check button
-  /// and when the page becomes visible again; a claim already on its way is shared rather than sent twice.
+  /// Claims the login with the cookie the login page left in this browser. Called from the dialog's login button;
+  /// [completion] claims the same way when the page is shown again, and a claim already on its way is shared rather
+  /// than sent twice.
   Future<LoginOutcome> claim() {
     if (_listener != null) {
       throw StateError("a login with a listener completes through completion");
@@ -167,14 +195,25 @@ class LoginAttempt {
       _claiming = null;
       if (outcome != LoginOutcome.incomplete && outcome != LoginOutcome.unreachable) {
         _finished = true;
+        _endReturns(outcome);
       }
       return outcome;
     });
   }
 
+  void _endReturns(LoginOutcome outcome) {
+    _returns?.dispose();
+    _returns = null;
+    final ended = _ended;
+    if (ended != null && !ended.isCompleted) {
+      ended.complete(outcome);
+    }
+  }
+
   /// Ends the attempt when its dialog closes: the listener lets go of its port and nothing more is claimed.
   Future<void> cancel() async {
     _finished = true;
+    _endReturns(LoginOutcome.cancelled);
     await _listener?.close();
   }
 }
@@ -288,11 +327,18 @@ class RecordShareSession extends Notifier<ShareSession?> {
   /// Sends a request under the session. The server's 401 means it no longer knows the session, which is dropped;
   /// the share notes stay, since each names its account and a later login decides whether they still apply.
   ///
-  /// Throws [StateError] when there is no session, and Dio's [DioException] when no answer arrives.
-  Future<ShareAnswer> send(String method, String path, {Object? data}) async {
+  /// A request that belongs to work begun under one session passes it as [under]: once the device holds another
+  /// session (a logout and a login in between), the request is not sent, so it can never act for another account.
+  ///
+  /// Throws [StateError] when there is no session or it is not [under], and Dio's [DioException] when no answer
+  /// arrives.
+  Future<ShareAnswer> send(String method, String path, {Object? data, ShareSession? under}) async {
     final session = state;
     if (session == null) {
       throw StateError("no sharing session");
+    }
+    if (under != null && !holds(under)) {
+      throw StateError("the sharing session is no longer the one the work began under");
     }
     final answer = await sendShareRequest(
       ref.read(recordShareDioProvider),
@@ -304,6 +350,9 @@ class RecordShareSession extends Notifier<ShareSession?> {
     await answered(session.token, answer.status, answer.body?["error"]);
     return answer;
   }
+
+  /// Whether the device still holds [session]: the same login, whatever has since been marked on it.
+  bool holds(ShareSession session) => state?.token == session.token;
 
   /// Hears the server's answer to a request sent under [token], by [send] or by a request made elsewhere under the
   /// session (a sync request): a 401 means the server no longer knows the session, which is dropped; a

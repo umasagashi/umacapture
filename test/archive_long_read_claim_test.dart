@@ -36,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:umacapture/src/chara_detail/record_sync.dart' show syncOnProvider;
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
@@ -147,6 +148,7 @@ DirectoryPath _seedRecord(String id) {
 ProviderContainer _container({_FakeRecordStorage? storage}) {
   final container = ProviderContainer(
     overrides: [
+      syncOnProvider.overrideWithValue(false),
       pathInfoProvider.overrideWithValue(_layout),
       pathInfoLoader.overrideWith((ref) async => _layout),
       pathLayoutLoader.overrideWith((ref) async => _layout),

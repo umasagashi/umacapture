@@ -25,6 +25,7 @@
 
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -36,6 +37,7 @@ import '/src/chara_detail/record_sync_server.dart';
 import '/src/core/app_logger.dart';
 import '/src/core/providers.dart';
 import '/src/gui/chara_detail/import_button.dart' show recordImportEffects;
+import '/src/gui/toast.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
@@ -102,10 +104,13 @@ class SyncToldCounts {
 /// The account sync is on for on this device ([account]), what the last round it ran told ([told]) and the last counts
 /// one told ([counts]), when one last synced ([lastSynced]), and whether one runs ([running]).
 class RecordSyncState {
-  const RecordSyncState({this.account, this.told, this.counts, this.lastSynced, this.running = false});
+  const RecordSyncState({this.account, this.ranAs, this.told, this.counts, this.lastSynced, this.running = false});
 
   /// The account whose session the user turned sync on under (S-08); null while sync is off.
   final String? account;
+
+  /// The account the last round this device ran ran as, whose [told] and [lastSynced] they are; null before one ran.
+  final String? ranAs;
 
   /// What the last round this device ran told its user of the state it left: the memos that hold the rounds back
   /// (S-10), the removals the quarantine shelf withholds from the server ([SyncRoundOutcome.withheld]), the records that
@@ -139,26 +144,42 @@ class RecordSyncState {
   String? roundAccount(String? session) => onFor(session) ? session : null;
 
   /// The state as the user turns sync on for [account], or off (null): the switch, and nothing else of the device but
-  /// the [counts] of another account than the one turned on for, which go.
-  RecordSyncState withOn(String? account) => RecordSyncState(
+  /// what the rounds of another account than the one turned on for left — [told], [lastSynced] and [counts] — which go.
+  RecordSyncState withOn(String? account) {
+    final rounds = account == null || ranAs == account;
+    return RecordSyncState(
+      account: account,
+      ranAs: rounds ? ranAs : null,
+      told: rounds ? told : null,
+      counts: account == null || counts?.account == account ? counts : null,
+      lastSynced: rounds ? lastSynced : null,
+      running: running,
+    );
+  }
+
+  /// The state as a round that ran as [ranAs] ends: unchanged where the switch now names another account — a round
+  /// that started before the user turned sync on for it ended late, and what it told is not that account's — and the
+  /// time it last synced kept only where the same account ran the last round.
+  RecordSyncState _withRound({required SyncRoundOutcome told, required String ranAs, DateTime? lastSynced}) {
+    if (account != null && account != ranAs) return this;
+    return RecordSyncState(
+      account: account,
+      ranAs: ranAs,
+      told: told,
+      counts: SyncToldCounts.of(told, ranAs) ?? (counts?.account == ranAs ? counts : null),
+      lastSynced: lastSynced ?? (this.ranAs == ranAs ? this.lastSynced : null),
+      running: running,
+    );
+  }
+
+  RecordSyncState _withRunning(bool running) => RecordSyncState(
     account: account,
+    ranAs: ranAs,
     told: told,
-    counts: account == null || counts?.account == account ? counts : null,
+    counts: counts,
     lastSynced: lastSynced,
     running: running,
   );
-
-  RecordSyncState _withRound({required SyncRoundOutcome told, required String ranAs, DateTime? lastSynced}) =>
-      RecordSyncState(
-        account: account,
-        told: told,
-        counts: SyncToldCounts.of(told, ranAs) ?? (counts?.account == ranAs ? counts : null),
-        lastSynced: lastSynced ?? this.lastSynced,
-        running: running,
-      );
-
-  RecordSyncState _withRunning(bool running) =>
-      RecordSyncState(account: account, told: told, counts: counts, lastSynced: lastSynced, running: running);
 }
 
 /// This device's switch of sync, kept in the settings store; off until the user turns it on.
@@ -199,10 +220,15 @@ class RecordSync extends Notifier<RecordSyncState> {
 
   /// Sets the account's image form to [form] on [server] (S-09), as the user does on this device: a round running
   /// follows it from now on ([syncImageFormSettingProvider]) — this device sends no image the user just stopped sending
-  /// while the server is asked —, and every round after reads it of the server.
+  /// while the server is asked —, and every round after reads it of the server, as the screens that show it read it
+  /// again ([syncImageFormProvider]).
   Future<void> setImageForm(SyncServer server, String form) async {
     ref.read(syncImageFormSettingProvider).set(form);
-    await server.putImageForm(form);
+    try {
+      await server.putImageForm(form);
+    } finally {
+      ref.invalidate(syncImageFormProvider);
+    }
   }
 
   /// Runs one round against [server] — the server this device syncs with where none is given ([syncServerProvider]) —
@@ -286,6 +312,113 @@ class RecordSync extends Notifier<RecordSyncState> {
 }
 
 final recordSyncProvider = NotifierProvider<RecordSync, RecordSyncState>(RecordSync.new);
+
+/// Whether sync is on for the account the device is logged in to ([RecordSyncState.onFor]): what the screens that
+/// tell a consequence of sync beside an existing one read — the delete confirmations, the merge dialog (N16).
+final syncOnProvider = Provider<bool>(
+  (ref) => ref.watch(recordSyncProvider).onFor(ref.watch(recordShareSessionProvider)?.accountId),
+);
+
+/// The image forms of an account (S-09), as the sync endpoints name them: the original PNG, the reduced JPEG, and none
+/// — the form an account holds until it sets one.
+const syncImageForms = ['png', 'jpeg', 'none'];
+
+/// The account's image form (S-09) as the server this device syncs with holds it ([syncServerProvider]): a setting of
+/// the account's, which every device of it shares, so the screens that show it read it of the server — one request as
+/// one is shown, and again once the user sets it ([RecordSync.setImageForm]). Null where the device holds no server.
+final syncImageFormProvider = FutureProvider.autoDispose<String?>((ref) => ref.watch(syncServerProvider)?.imageForm());
+
+/// Whether setting the account's image form from [from] to [to] sends the images the device had not sent (S-09): those
+/// the form none held back go once the form is one that sends images again, which the screen that sets it tells
+/// without a count (D6-1).
+bool syncImageFormSendsWhatWasHeld(String from, String to) => from == 'none' && to != 'none';
+
+/// What stops the rounds of this device, or holds back a part of what a round sends, as the sync section tells it (N8,
+/// D2-5, D2-7): one reason at a time ([syncHaltOf]).
+enum SyncHalt {
+  /// The account is being deleted: the device holds no server to sync with ([syncServerProvider]).
+  deleting,
+
+  /// Memos longer than a round sends hold every round back (S-10, [SyncRoundOutcome.longMemos]).
+  longMemos,
+
+  /// The account's room is full ([SyncServerStop.accountRoom]): the round sent what needs no room, and what needs room
+  /// waits ([SyncRoundOutcome.waitingForRoom], [SyncRoundOutcome.imagesUndone]).
+  accountRoomWaits,
+
+  /// The account's room refused the request the round ended at: the round did not sync.
+  accountRoomStopped,
+
+  /// The service's room is full ([SyncServerStop.service]): the round sent what needs no room, and what needs room
+  /// waits, as for [accountRoomWaits].
+  serviceRoomWaits,
+
+  /// The service stopped the round: its operator switched sync off (`503 sync_paused`), or its room refused the
+  /// request the round ended at.
+  serviceStopped,
+
+  /// The account's daily limit ([SyncServerStop.accountDay]): what the round did not put waits for the next UTC day.
+  accountDay,
+
+  /// The service's daily limit ([SyncServerStop.serviceDay]), as for [accountDay].
+  serviceDay;
+
+  /// Whether the rounds sync nothing while it lasts, where the others hold back a part of what they send.
+  bool get holdsAll => switch (this) {
+    deleting || longMemos || accountRoomStopped || serviceStopped => true,
+    accountRoomWaits || serviceRoomWaits || accountDay || serviceDay => false,
+  };
+
+  /// Whether the server's room or limits stopped the rounds (N10, D2-5), where the others come of what the user did.
+  bool get byServer => switch (this) {
+    deleting || longMemos => false,
+    accountRoomWaits || accountRoomStopped || serviceRoomWaits || serviceStopped || accountDay || serviceDay => true,
+  };
+}
+
+/// [syncHaltOf] for the session the device is logged in to: what the sync section (N8) and the sync icon of the table's
+/// toolbar (N9) tell, and what the toasts of a stop follow ([syncHaltToastsProvider]).
+final syncHaltProvider = Provider<SyncHalt?>(
+  (ref) => syncHaltOf(ref.watch(recordSyncProvider), ref.watch(recordShareSessionProvider)),
+);
+
+/// N10: the halt a toast tells as the rounds' halt moves from [before] to [now] ([syncHaltProvider]) — [now], where the
+/// server stopped the rounds ([SyncHalt.byServer]) and [before] was not the same halt, so rounds that keep stopping for
+/// one reason tell it once; else none.
+SyncHalt? syncHaltToToast(SyncHalt? before, SyncHalt? now) => now != null && now.byServer && now != before ? now : null;
+
+/// N10: tells in a toast each stop of the rounds the server's room or limits make, once as it begins
+/// ([syncHaltToToast]). Read once as the app starts, and alive for the whole session.
+final syncHaltToastsProvider = Provider<void>((ref) {
+  ref.listen(syncHaltProvider, (before, now) {
+    final halt = syncHaltToToast(before, now);
+    if (halt != null) Toaster.show(ToastData.warning(description: "$trSyncHaltToast.${halt.name}".tr()));
+  });
+});
+
+/// The toasts' sentences of a stop (N10), one per [SyncHalt] the server makes.
+const trSyncHaltToast = "pages.settings.privacy.account.sync.halt_toast";
+
+/// N8: why the rounds of this device stop, or what of the last one waits, for the account of [session] — the
+/// account's deletion first, then what the last round told ([RecordSyncState.told]): the long memos it was held back
+/// by, else what of the server's stopped it ([SyncRoundOutcome.serverStop]), the room's told apart by whether the round
+/// sent what needs none ([SyncRoundEnd.done]; `storage_full` refuses new bytes alone). None where sync is off for the
+/// session's account ([RecordSyncState.onFor]), and none for a round that ran into nothing of these.
+SyncHalt? syncHaltOf(RecordSyncState state, ShareSession? session) {
+  if (!state.onFor(session?.accountId)) return null;
+  if (session?.deleting ?? false) return SyncHalt.deleting;
+  final told = state.told;
+  if (told == null) return null;
+  if (told.end == SyncRoundEnd.heldByLongMemos) return SyncHalt.longMemos;
+  final sent = told.end == SyncRoundEnd.done;
+  return switch (told.serverStop) {
+    null => null,
+    SyncServerStop.accountRoom => sent ? SyncHalt.accountRoomWaits : SyncHalt.accountRoomStopped,
+    SyncServerStop.service => sent ? SyncHalt.serviceRoomWaits : SyncHalt.serviceStopped,
+    SyncServerStop.accountDay => SyncHalt.accountDay,
+    SyncServerStop.serviceDay => SyncHalt.serviceDay,
+  };
+}
 
 /// The moments the app runs a round at, each through [RecordSync.round]: the app's start, sync turned on, five seconds
 /// after the user's last edit ([syncLocalEditsProvider], [syncEditQuiet]) and the app coming back to the foreground
