@@ -1,7 +1,7 @@
 // An account's public list: /u/<id> (HTML) and /u/<id>.json, answered without a session like
 // /r/<id>. It names the account only by its id: no name, no provider, no creation day.
 
-import { esc } from "./page.mjs";
+import { esc, pageFooter } from "./page.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { accountExists, listOwnShares } from "./store.mjs";
 
@@ -66,9 +66,7 @@ footer { margin-top: 3rem; font-size: 0.9em; }
 <body>
 <h1>共有レコード一覧</h1>
 ${items}
-<footer>
-<a href="${esc(list.url)}.json">JSON</a> · <a href="/notice/">お知らせ</a> · <a href="/">umacapture</a>
-</footer>
+${pageFooter(list.url)}
 </body>
 </html>
 `;

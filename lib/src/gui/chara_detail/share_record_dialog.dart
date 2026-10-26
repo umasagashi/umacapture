@@ -32,10 +32,10 @@ const tr_share_record = "pages.chara_detail.share_record";
 // ignore: constant_identifier_names
 const tr_unshare_record = "pages.chara_detail.unshare_record";
 
-/// The trial-release notice, served next to the shared pages.
+/// The privacy policy, served next to the shared pages: it is what states what a share stores and publishes.
 ///
 /// The sharing origin and not the app's own: on Windows the app has no origin to resolve against.
-Uri get _noticeUrl => Uri.parse("${Const.sharingOrigin}/notice/");
+Uri get _privacyUrl => Uri.parse("${Const.sharingOrigin}/privacy/");
 
 void openSharedPage(String url) => launchUrl(Uri.parse(url));
 
@@ -87,7 +87,7 @@ MenuItem recordShareMenu(
 }
 
 /// The body of a share's confirmation, [key] of P1 or N2: what leaves the device and what cannot be taken back,
-/// with a link to the notice.
+/// with a link to the privacy policy.
 class _ShareDescription extends StatelessWidget {
   final String textKey;
 
@@ -107,10 +107,10 @@ class _ShareDescription extends StatelessWidget {
             child: Semantics(
               link: true,
               child: InkWell(
-                onTap: () => launchUrl(_noticeUrl),
+                onTap: () => launchUrl(_privacyUrl),
                 mouseCursor: SystemMouseCursors.click,
                 child: Text(
-                  "pages.dashboard.about.notice.link".tr(),
+                  "$tr_share_record.privacy_link".tr(),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.primary,
                     decoration: TextDecoration.underline,

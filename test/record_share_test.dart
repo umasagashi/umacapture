@@ -12,10 +12,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_context_menu/flutter_context_menu.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:crypto/crypto.dart';
@@ -386,6 +386,26 @@ void main() {
       expect(server.sent.single.uri.path, "/api/shares");
       expect(server.sent.single.headers["Authorization"], "Bearer $_token");
       expect(container.read(recordSharesProvider).values.single.url, url);
+    });
+
+    testWidgets("the confirmation's link opens the privacy policy next to the shared pages", (tester) async {
+      const channel = MethodChannel('plugins.flutter.io/url_launcher');
+      final opened = <Object?>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        opened.add((call.arguments as Map)['url']);
+        return true;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
+      container = containerShowing(record, []);
+
+      await openMenu(tester, record);
+      await tester.tap(find.text('共有する…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('プライバシーポリシー'));
+      await tester.pumpAndSettle();
+
+      expect(opened, ["${Const.sharingOrigin}/privacy/"]);
+      expect(server.sent, isEmpty);
     });
 
     testWidgets('a plain tap on the share button sends nothing; only the long press shares', (tester) async {

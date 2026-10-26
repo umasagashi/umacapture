@@ -10,6 +10,13 @@ export function esc(value) {
   return String(value).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
+/** The footer of every shared page (/r/<id> and /u/<id>): its own JSON, the notice, the privacy policy, the app. */
+export function pageFooter(url) {
+  return `<footer>
+<a href="${esc(url)}.json">JSON</a> · <a href="/notice/">試験公開について</a> · <a href="/privacy/">プライバシーポリシー</a> · <a href="/">umacapture</a>
+</footer>`;
+}
+
 /** The og:image / twitter:card set for one page, chosen by `vars.OG_IMAGE_MODE`. */
 export function ogImage(env, id) {
   switch (env.OG_IMAGE_MODE) {
@@ -148,9 +155,7 @@ footer { margin-top: 3rem; font-size: 0.9em; }
 </head>
 <body>
 ${body(record)}
-<footer>
-<a href="${esc(record.url)}.json">JSON</a> · <a href="/notice/">お知らせ</a> · <a href="/">umacapture</a>
-</footer>
+${pageFooter(record.url)}
 </body>
 </html>
 `;
