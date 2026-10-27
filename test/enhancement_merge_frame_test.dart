@@ -293,6 +293,20 @@ void main() {
       active.replaceBy(existing!, id: 'older');
       expect(active.hasPendingRecords, isTrue, reason: 'nothing was staged, so the sub-case is not reached');
       await expectRefused(buffered, 'the active store holds a regeneration buffer');
+
+      // A binding a sync round placed on an archived record and has not published yet: the archive store serves it
+      // from its buffer, and the rewrite would write the rest from what memory holds.
+      writeRecord(info.charaDetailArchiveDir, makeRecord(id: 'shelved', card: 7));
+      final placing = makeContainer();
+      await loadStores(placing);
+      final archive = placing.read(charaDetailArchiveStorageLoaderProvider.notifier);
+      expect(archive.getBy(id: 'shelved')?.metadata.binding, isNull, reason: 'the fixture record already has one');
+      await placeRecordBindingsUnlocked(placing.read(containerRefProvider), [
+        info.charaDetailArchiveDir / 'shelved',
+      ], publish: false);
+      expect(archive.hasPendingRecords, isTrue, reason: 'nothing was staged, so the sub-case is not reached');
+      expect(placing.read(charaDetailRecordStorageLoaderProvider.notifier).hasPendingRecords, isFalse);
+      await expectRefused(placing, 'the archive store holds a binding it has not published');
     });
   });
 

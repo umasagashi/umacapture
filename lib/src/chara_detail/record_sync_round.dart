@@ -637,7 +637,7 @@ Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
   var base = kept?.account == account ? kept : null;
   final head = await server.readGeneration();
   final moved = base == null || base.generation != head.generation;
-  final there = moved ? await _readServerList(server, head.root) : base.list;
+  final there = moved ? await _readServerList(server, await _serverRoot(server, head.root)) : base.list;
   if (moved && base != null) {
     if (await place.readKept(SyncKept.sent) case final sent?) base = _baseReadAgain(base, sent, there);
   }
@@ -840,10 +840,16 @@ Future<_Attempt> _attempt<C>(
   // 1–2. The generation, and the server's list where it moved from the base's.
   final ({int generation, String? root}) head;
   final SyncList there;
+  // The parts the server's root names, by slot, where the round read them.
+  Map<String, String>? thereSlots;
   try {
     head = await server.readGeneration();
-    final news = base == null || base.generation != head.generation;
-    there = news ? await _readServerList(server, head.root) : base.list;
+    if (base == null || base.generation != head.generation) {
+      thereSlots = await _serverRoot(server, head.root);
+      there = await _readServerList(server, thereSlots);
+    } else {
+      there = base.list;
+    }
   } catch (error, stackTrace) {
     logger.w('Sync could not read the server list.', error, stackTrace);
     return _ended(SyncRoundOutcome(SyncRoundEnd.failed, serverStop: syncServerStopOf(error)));
@@ -1058,7 +1064,10 @@ Future<_Attempt> _attempt<C>(
       );
       next = _listToSend(result, there, local.list, {...kept, ...waiting}, bodyNames);
     }
-    final stored = {for (final text in thereParts.values) syncObjectName(utf8.encode(text))};
+    // The server's root, which it counts a replacement's slots against: a part another build wrote holds the values
+    // [there] holds in a text of its own, under a name the device's text of them does not have.
+    var current = thereSlots ?? await _serverRoot(server, head.root);
+    final stored = {...current.values};
     var (at, generation) = (there, head.generation);
     var changes = syncListChanges(there, next);
     // The slots the server takes in one replacement, once it states them; and fewer, once it refused a replacement for
@@ -1072,15 +1081,15 @@ Future<_Attempt> _attempt<C>(
         return _ended(outcome(SyncRoundEnd.operationTooLarge));
       }
       if (fewer != null) replacement = _upTo(replacement, fewer);
-      final slots = {for (final change in replacement) ...change.slots}.length;
       final list = syncListWith(at, next, replacement);
-      final names = <String, String>{};
-      for (final MapEntry(key: slot, value: text) in syncListParts(list).entries) {
-        final name = syncObjectName(utf8.encode(text));
-        if (!stored.contains(name)) await server.putPart(name, text);
-        stored.add(name);
-        names[slot] = name;
+      final parts = syncListParts(list);
+      final names = syncRootSlots(current, parts, {for (final change in replacement) ...change.slots});
+      final changed = syncRootSlotsChanged(current, names);
+      final slots = changed.length;
+      for (final slot in changed) {
+        if (names[slot] case final name? when !stored.contains(name)) await server.putPart(name, parts[slot]!);
       }
+      stored.addAll(names.values);
       final root = jsonEncode({'format': 1, 'parts': names});
       await place.keep(SyncKept.sent, SyncKeptList(account: account, generation: generation, list: list));
       replacements++;
@@ -1105,6 +1114,7 @@ Future<_Attempt> _attempt<C>(
         return _ended(outcome(SyncRoundEnd.answerLost));
       }
       at = list;
+      current = names;
       agreedBase = agreedBase.copyWith(generation: generation, list: at);
       await place.keep(SyncKept.base, agreedBase);
       await place.keep(SyncKept.sent, null);
@@ -1576,11 +1586,17 @@ SyncKeptList _baseReadAgain(SyncKeptList base, SyncKeptList sent, SyncList there
   return base.copyWith(list: list, unconfirmed: {...base.unconfirmed, ...unknown});
 }
 
-Future<SyncList> _readServerList(SyncServer server, String? rootName) async {
-  if (rootName == null) return const SyncList();
+/// The parts the server's root [rootName] names, by slot; none where the server holds no root.
+Future<Map<String, String>> _serverRoot(SyncServer server, String? rootName) async {
+  if (rootName == null) return const {};
   final root = jsonDecode(await server.root(rootName)) as Map<String, Object?>;
+  return (root['parts'] as Map<String, Object?>).cast<String, String>();
+}
+
+/// The list the parts [slots] names hold ([_serverRoot]).
+Future<SyncList> _readServerList(SyncServer server, Map<String, String> slots) async {
   final texts = <String>[];
-  for (final name in (root['parts'] as Map<String, Object?>).values.cast<String>()) {
+  for (final name in slots.values) {
     texts.add(await server.part(name));
   }
   return syncListOfParts(texts);
@@ -1749,12 +1765,20 @@ Future<(Set<String>, int)> _placeMissingBindings<C>(
   final bound = held - missing.length;
   var worked = 0;
   int? reached;
-  for (final (part, record) in missing) {
-    if (worked >= max(chunk, bound) && part != reached) break;
-    if (!tried.add(record.id)) continue;
-    worked++;
-    reached = part;
-    await place.workOutBinding(record);
+  try {
+    for (final (part, record) in missing) {
+      if (worked >= max(chunk, bound) && part != reached) break;
+      if (!tried.add(record.id)) continue;
+      worked++;
+      reached = part;
+      await place.workOutBinding(record);
+      // Published every [chunk] records, whatever the stage's length: while records wait unpublished a merge is
+      // refused, and a stage grows to as many records as the stores hold bound, so the count bounds that refusal to
+      // one chunk's work, not the stage's.
+      if (worked % chunk == 0) place.bindingsWorkedOut();
+    }
+  } finally {
+    place.bindingsWorkedOut();
   }
   return ({for (final record in place.unbound().records) record.id}, worked);
 }

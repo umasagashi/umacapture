@@ -650,8 +650,13 @@ class FakeSyncServer implements SyncServer {
   /// `503 sync_paused`, and the fake refuses the one a round asks first, the generation.
   bool paused = false;
 
+  /// Whether the device cannot reach the server: the request a round asks first, the generation, fails as a request
+  /// that finds no connection does.
+  bool offline = false;
+
   @override
   Future<({int generation, String? root})> readGeneration() async {
+    if (offline) throw const SocketException('the network is unreachable');
     if (paused) throw const SyncRefusal(503, 'sync_paused');
     return (generation: generation, root: rootName);
   }
@@ -806,6 +811,19 @@ class FakeSyncServer implements SyncServer {
       throw FakeSyncAnswerLost();
     }
     return generation;
+  }
+
+  /// The part in the slot [slot] of the current root written again as [rewrite] makes its text, the root naming it in
+  /// its place: a part another build of the app wrote, the same values in another text. The generation moves, as a
+  /// replacement moves it.
+  void rewritePart(String slot, String Function(String text) rewrite) {
+    final parts = {...(jsonDecode(_roots[rootName]!) as Map)['parts'] as Map<String, Object?>};
+    final text = rewrite(_parts[parts[slot]]!);
+    _parts[_nameOf(text)] = text;
+    parts[slot] = _nameOf(text);
+    final root = jsonEncode({'format': 1, 'parts': parts});
+    _roots[rootName = _nameOf(root)] = root;
+    ++generation;
   }
 
   /// The text of every part the current root names.

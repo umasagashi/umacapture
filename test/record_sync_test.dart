@@ -283,6 +283,27 @@ void main() {
       expect(back.side.dismissed, {syncPairOf('R1', 'R2')});
     });
 
+    test(
+      'QR1: a rating of no fraction is one text whichever build wrote it: the device reads it as the integer, a part '
+      'holding it as `4.0` reads back the same, and the list writes it as the integer, so its parts are the same '
+      'bytes',
+      () async {
+        a.seedRecord('R1', binding: _binding);
+        a.seedColumn('rating', 'r1', title: 'Score', data: {'R1': 4.0}, writtenAt: {'R1': 1767225600600});
+        final read = await a.read();
+        expect(read.list.cells, {('rating/r1', 'R1'): const SyncValue<String?>('4', 1767225600600)});
+
+        final parts = syncListParts(read.list);
+        final part = parts['${syncRecordPartOf('R1')}']!;
+        expect(part, contains('"value":4,'));
+        // The part as the VM writes a double it holds as it is.
+        final asDouble = part.replaceFirst('"value":4,', '"value":4.0,');
+        final back = syncListOfParts([asDouble, parts['columns']!]);
+        expect(back.cells, read.list.cells);
+        expect(syncListParts(back), parts);
+      },
+    );
+
     test('a record falls in the part the protocol states', () {
       // sha256(utf8(id)).readUInt16BE(0) % 128, worked out apart from the app.
       const expected = {'record-1': 70, 'R1': 17, 'R2': 83, 'record-2': 88, 'record-3': 92, 'ﾚｺｰﾄﾞ-ü': 4};
@@ -392,7 +413,7 @@ void main() {
       final rating = container.read(charaDetailRecordRatingProvider('r1').notifier);
       expect(await rating.flush(), isTrue);
       expect(await round(), isEmpty);
-      expect(last.list.cells[('rating/r1', 'R1')]?.value, '4.0');
+      expect(last.list.cells[('rating/r1', 'R1')]?.value, '4');
 
       expect(rating.updateTitle('Grade'), isTrue);
       rating.save();
@@ -550,6 +571,90 @@ void main() {
     }
 
     test(
+      'a record whose binding names no image is taken in with that binding, and the taker has nothing to send',
+      () async {
+        a.seedRecord('R1', binding: const RecordBinding(), bodyWrittenAt: 1767225600100);
+        a.seedRecord(
+          'R2',
+          store: 'archive',
+          binding: const RecordBinding(),
+          bodyWrittenAt: 1767225600200,
+          archived: (state: RecordArchiveState.none, writtenAt: 1767225600400),
+        );
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        final asked = server.replacementsAsked;
+
+        final first = await b.round(server);
+        expect((first.end, first.added), (SyncRoundEnd.done, 2));
+        expect(b.bodyOf('R1'), a.bodyOf('R1'));
+        expect(b.bodyOf('R2', store: 'archive'), a.bodyOf('R2', store: 'archive'));
+        expect(server.replacementsAsked, asked, reason: 'B holds the bodies the server lists, so it puts nothing');
+      },
+    );
+
+    test('the bindings a round works out reach each store in one publish, which holds every one of them', () async {
+      for (final (i, id) in ['R1', 'R2', 'R3'].indexed) {
+        a.seedRecord(id, bodyWrittenAt: 1767225600100 + i);
+      }
+      for (final (i, id) in ['A1', 'A2'].indexed) {
+        a.seedRecord(
+          id,
+          store: 'archive',
+          bodyWrittenAt: 1767225600200 + i,
+          archived: (state: RecordArchiveState.none, writtenAt: 1767225600400),
+        );
+      }
+      final container = await a.open();
+      // Of each list a store publishes, how many of its records carry a binding: every publish that bound more
+      // records than the one before it.
+      void Function(AsyncValue<List<CharaDetailRecord>>?, AsyncValue<List<CharaDetailRecord>>) countInto(
+        List<int> bound,
+      ) => (_, next) {
+        final count = next.value?.where((r) => r.metadata.binding != null).length;
+        if (count != null && count > (bound.lastOrNull ?? 0)) bound.add(count);
+      };
+
+      final active = <int>[], archive = <int>[];
+      container.listen(charaDetailRecordStorageLoaderProvider, countInto(active));
+      container.listen(charaDetailArchiveStorageLoaderProvider, countInto(archive));
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      expect(
+        [active, archive],
+        [
+          [3],
+          [2],
+        ],
+        reason: 'one publish a store, not one a record',
+      );
+      expect(onServer().rows.keys.toSet(), {'R1', 'R2', 'R3', 'A1', 'A2'}, reason: 'each was put with its binding');
+    });
+
+    test('a round that places no record reads neither store again; one that places a record reads both', () async {
+      seed(a);
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      // A capture's directory as the stitcher leaves it, before the recognizer has written recognized.json: a store
+      // read again would find no record.json in it and quarantine it.
+      final inFlight = Directory((a.charaDetail / 'active' / 'C1').path)..createSync(recursive: true);
+      for (final name in ['campaign', 'factor', 'skill']) {
+        File('${inFlight.path}/$name.png').writeAsBytesSync([0x89, 0x50, 0x4e, 0x47]);
+        File('${inFlight.path}/$name.json').writeAsStringSync('{}');
+      }
+      final quarantined = Directory((a.charaDetail / 'quarantine' / 'C1').path);
+
+      final generation = server.generation;
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      expect(server.generation, generation, reason: 'the round had nothing to put in place');
+      expect((inFlight.existsSync(), quarantined.existsSync()), (true, false));
+
+      // Positive control: a round that puts the other device's record in place reads the stores again.
+      b.seedRecord('R4', binding: _binding, bodyWrittenAt: 1767225600500);
+      expect((await b.round(server)).end, SyncRoundEnd.done);
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      expect((await a.open()).read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: 'R4'), isNotNull);
+      expect((inFlight.existsSync(), quarantined.existsSync()), (false, true));
+    });
+
+    test(
       'rule 2, check 1: a record one device deletes goes from both, with what the other did to it meanwhile',
       () async {
         seed(a);
@@ -595,14 +700,14 @@ void main() {
       await rate(a, 'R1', 5);
       await a.round(server);
       await b.round(server);
-      expect((await listOf(b)).cells[('rating/r1', 'R1')], const SyncValue<String?>('5.0', 1767225609000));
+      expect((await listOf(b)).cells[('rating/r1', 'R1')], const SyncValue<String?>('5', 1767225609000));
       // B writes 2 by its own clock, behind the value it replaces: just after it.
       valueWriteClock = () => 1767225605000;
       await rate(b, 'R1', 2);
       await b.round(server);
       await a.round(server);
       for (final list in [onServer(), await listOf(a), await listOf(b)]) {
-        expect(list.cells[('rating/r1', 'R1')], const SyncValue<String?>('2.0', 1767225609001));
+        expect(list.cells[('rating/r1', 'R1')], const SyncValue<String?>('2', 1767225609001));
       }
     });
 
@@ -688,7 +793,7 @@ void main() {
       );
       for (final list in [onServer(), await listOf(a)]) {
         expect(list.titles['rating/r1']?.value, 'Grade');
-        expect(list.cells[('rating/r1', 'R1')]?.value, '5.0');
+        expect(list.cells[('rating/r1', 'R1')]?.value, '5');
         expect(list.rows.keys.toSet(), {'R1', 'R3'});
       }
       expect(SyncKeptList.decode(File(syncBaseFile(a.info).path).readAsBytesSync()).generation, server.generation);
@@ -1860,8 +1965,8 @@ void main() {
 
       test('check 2: a merge whose end the server has no room for waits with the record it absorbed, the other device '
           'sees both as they were, and both go once there is room and the user syncs now', () async {
-        await a.setSyncOn(true);
         seedUmas(a, ['R1', 'R2', 'R3']);
+        await a.setSyncOn(true);
         await a.round(server);
         await b.round(server);
         final before = _describe(onServer());
@@ -1896,8 +2001,8 @@ void main() {
       test(
         'what needs no room goes in the round a body waits for room: the delete and the archive of other records',
         () async {
-          await a.setSyncOn(true);
           seedUmas(a, ['R1', 'R2', 'R3']);
+          await a.setSyncOn(true);
           await a.round(server);
           await b.round(server);
           final r2 = onServer().rows['R2']!.bodyName;
@@ -2219,7 +2324,7 @@ void main() {
         expect(list.cells[('memo/m1', 'R1')], SyncValue<String?>(null, hour(10)));
         expect(list.titles['rating/r1'], SyncValue<String?>(null, hour(10)));
         expect(list.titles['memo/m1'], SyncValue<String?>(null, hour(10)));
-        expect(list.cells[('rating/r1', 'R2')], SyncValue<String?>('3.0', hour(11)));
+        expect(list.cells[('rating/r1', 'R2')], SyncValue<String?>('3', hour(11)));
       }
       for (final (name, device) in [('a', a), ('b', b)]) {
         final rating = RatingDataMapper.fromJson(
@@ -3064,14 +3169,14 @@ void main() {
         final held = await b.read();
         expect(held.unreadable, isEmpty);
         expect(held.list.rows.keys.toSet(), {'R1', 'R3'});
-        expect(held.list.cells[('rating/r1', 'R1')], SyncValue<String?>('5.0', hour(9)));
+        expect(held.list.cells[('rating/r1', 'R1')], SyncValue<String?>('5', hour(9)));
         expect(held.list.cells[('memo/m1', 'R1')], SyncValue<String?>(jsonEncode('X'), hour(9)));
 
         expect((await b.round(server)).end, SyncRoundEnd.done);
         await a.round(server);
         for (final list in await allLists()) {
           expect(list.rows.keys.toSet(), {'R1', 'R3'}, reason: 'R2 deleted on A stays deleted');
-          expect(list.cells[('rating/r1', 'R1')], SyncValue<String?>('5.0', hour(9)));
+          expect(list.cells[('rating/r1', 'R1')], SyncValue<String?>('5', hour(9)));
           expect(list.cells[('memo/m1', 'R1')], SyncValue<String?>(jsonEncode('X'), hour(9)));
           expect(list.dismissed, isEmpty, reason: 'A took R1+R3 out');
         }
@@ -5228,6 +5333,36 @@ void main() {
       expect(onServer().rows.keys.toSet(), {'R1'});
     });
 
+    // T3c2: what the sync section and the toolbar's icon read of a round that failed (V43, `syncHaltProvider`), across a
+    // round that synced nothing either: it stopped at a record the user changed while it asked for bodies.
+    test('T3c2 (C1, V43): a round that failed is told until a round syncs, a round that stops at an edit meanwhile '
+        'between them keeping it told', () async {
+      seedUmas(a, ['R1']);
+      await a.setSyncOn(true);
+      final app = await a.open();
+      SyncHalt? halt() => app.read(syncHaltProvider);
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+      await b.round(server);
+      clockAt(hour(9));
+      await b.recognizeAgain('R1', (result) => result['fans'] = 8);
+      await b.round(server);
+
+      server.offline = true;
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.failed);
+      expect(halt(), SyncHalt.failed);
+      server.offline = false;
+      server.beforeBodies = (names) async {
+        server.beforeBodies = null;
+        clockAt(hour(10));
+        await a.recognizeAgain('R1', (result) => result['fans'] = 9);
+        return const {};
+      };
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.changedMeanwhile);
+      expect(halt(), SyncHalt.failed, reason: 'the round after the failure synced nothing');
+      expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+      expect(halt(), isNull, reason: 'a round synced');
+    });
+
     // T3a1: what the screen reads of the rounds — whether one runs, which keeps the user from syncing now meanwhile,
     // and when the device last synced (N8).
     test('T3a1 (C1 iii, iv): the device shows a round running from when it is asked for until the one asked for '
@@ -5323,7 +5458,7 @@ void main() {
         expect((await ran).end, SyncRoundEnd.done);
         expect(asked, 1);
         expect(onServer().rows.keys.toSet(), {'R1', 'R2'});
-        expect((await listOf(a)).cells[('rating/r1', 'R2')]?.value, '5.0');
+        expect((await listOf(a)).cells[('rating/r1', 'R2')]?.value, '5');
         expect(time.timers, isEmpty, reason: 'the record and the rating the round put in place ask for no round');
       });
 
@@ -5359,7 +5494,7 @@ void main() {
         time.timers.single.fire();
         expect((await ran).end, SyncRoundEnd.done);
         expect(asked, 2);
-        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3');
       });
 
       test('T2b-7a (C1 iii): edits closer together than five seconds are sent by one round', () async {
@@ -5376,8 +5511,8 @@ void main() {
         time.timers.last.fire();
         expect((await ran).end, SyncRoundEnd.done);
         expect(asked, 2, reason: 'the start, and one round for both edits');
-        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
-        expect(onServer().cells[('rating/r1', 'R2')]?.value, '4.0');
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3');
+        expect(onServer().cells[('rating/r1', 'R2')]?.value, '4');
       });
 
       test('T2b-7a (C1 i): coming back to the foreground runs a round ten minutes or more after the last was asked '
@@ -5420,7 +5555,7 @@ void main() {
         final lists = [onServer(), await listOf(a), await listOf(b)].map(_describe).toList();
         expect(lists[1], lists[0]);
         expect(lists[2], lists[0]);
-        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3.0');
+        expect(onServer().cells[('rating/r1', 'R1')]?.value, '3');
       });
 
       test(
@@ -5863,12 +5998,14 @@ void main() {
       // T3c: the sync icon at the right end of the table's toolbar (N9) and the toasts of a stop (N10), mounted beside
       // the sync section (N8) whose one line the icon's hover shares, each round as the app asks for one.
       testWidgets('T3c (C1): the toolbar shows a sync icon only while sync is on for the session, its hover telling '
-          "the line the sync section leads with for each stop — the account's room and the service — and a toast tells "
-          'a stop of the server once as it begins, and nothing else', (tester) async {
+          "the line the sync section leads with for each stop — the account's room, the service, a round that failed "
+          'until one syncs — and a toast tells a stop of the server once as it begins, and nothing '
+          'else', (tester) async {
         a
           ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
           ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
         seedUmas(a, ['R1']);
+        a.seedColumn('memo', 'm1', title: 'Note');
         loadAppTranslations();
         tester.view.physicalSize = const Size(1600, 2400);
         tester.view.devicePixelRatio = 1;
@@ -5958,10 +6095,43 @@ void main() {
           reason: 'no stop: the state of the rounds, as the section tells it',
         );
 
+        // (iv) V43: a round that failed — refused, its replacement's answer lost, a request failed — tells it in the
+        // section and the hover, and the next round that syncs ends it.
+        var loaded = false;
+        unawaited(app.read(charaDetailRecordMemoProvider('m1').future).then((_) => loaded = true));
+        await settleUntilElapsing(tester, () => loaded, describe: 'the memo column to load');
+        expect(saveMemo(app.read(containerRefProvider), storageKey: 'm1', recordId: 'R1', memo: 'mine'), isTrue);
+        var saved = false;
+        unawaited(app.read(charaDetailRecordMemoProvider('m1').notifier).flush().then((done) => saved = done));
+        await settleUntilElapsing(tester, () => saved, describe: 'the memo to be saved');
+        const failed = '同期できませんでした。';
+        void toldFailed(String reason) {
+          expect(hover(), failed, reason: reason);
+          expect(sectionHalt(), failed, reason: 'the line of the section (N8)');
+        }
+
+        server.beforeReplace = () async => throw const SyncRefusal(400, 'invalid_payload', 'root');
+        await round();
+        toldFailed('the server refused the replacement');
+        expect(tester.widget<Icon>(icon).icon, Symbols.sync_problem_rounded);
+        server.beforeReplace = () async => throw const SocketException('connection reset');
+        await round();
+        toldFailed("the replacement's answer did not arrive");
+        server
+          ..beforeReplace = null
+          ..offline = true;
+        await round();
+        toldFailed('the server could not be reached');
+        server.offline = false;
+        await round();
+        expect(find.byType(NoteCard), findsNothing, reason: 'the round synced');
+        expect(hover(), startsWith('最終同期: '));
+        expect(syncListOfParts(server.currentParts()).cells[('memo/m1', 'R1')]?.value, jsonEncode('mine'));
+
         await tester.runAsync(a.logout);
         await tester.pump();
         expect(icon, findsNothing, reason: 'logged out');
-        expect(toasts, hasLength(2), reason: 'a round that syncs, and the logout, tell nothing in a toast');
+        expect(toasts, hasLength(2), reason: 'a round that fails or syncs, and the logout, tell nothing in a toast');
       });
 
       testWidgets('T3b2 (C1): set back from none in the section, the form tells, without a count, that the images not '
@@ -6382,6 +6552,9 @@ void main() {
         file.writeAsStringSync('{not a record');
         expect((await x.round(there, bindingChunk: 2)).end, SyncRoundEnd.done);
         expect(syncListOfParts(there.currentParts()).rows.keys, unorderedEquals(legacyIds(6).toSet()..remove('L0002')));
+        // A round that places no record reads no store again, so the record goes onto the shelf at the next scan.
+        x.close();
+        await x.open();
         final shelf = await readQuarantineLedger(x.info.charaDetailQuarantineDir);
         expect([for (final record in shelf.kept) record.id], ['L0002']);
       });
@@ -6476,6 +6649,48 @@ void main() {
         expect(asked, [1]);
         expect(onServer().rows, isEmpty);
       });
+
+      test(
+        'QR1: parts another build wrote, a rating of no fraction as `4.0` in one and as `4` in another, stay as the '
+        'server holds them: a round that changes a third part changes one slot, as the server counts it, and syncs',
+        () async {
+          final [r1, r2, r3] = apart(3);
+          seedUmas(a, [r1, r2, r3]);
+          a.seedColumn(
+            'rating',
+            'r1',
+            title: 'Score',
+            data: {r1: 4.0, r2: 3.0},
+            writtenAt: {r1: 1767225600400, r2: 1767225600500},
+          );
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          // The VM writes the double 4.0 as `4.0`, the web writes the double 3.0 as `3`.
+          server
+            ..rewritePart(
+              '${syncRecordPartOf(r1)}',
+              (text) => text.replaceFirst(RegExp(r'"value":4(\.0)?,'), '"value":4.0,'),
+            )
+            ..rewritePart(
+              '${syncRecordPartOf(r2)}',
+              (text) => text.replaceFirst(RegExp(r'"value":3(\.0)?,'), '"value":3,'),
+            );
+          expect(
+            server.currentParts().where((text) => text.contains('"value":4.0,') || text.contains('"value":3,')),
+            hasLength(2),
+          );
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+
+          server
+            ..partsLimit = 1
+            ..slotsChanged.clear();
+          await rate(b, r3, 5.0);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          expect(server.slotsChanged, [1], reason: "R3's part alone: the device counts the slots the server does");
+          expect(_describe(onServer()), _describe(await listOf(b)));
+          expect((await a.round(server)).end, SyncRoundEnd.done);
+          expect(_describe(await listOf(a)), _describe(await listOf(b)));
+        },
+      );
 
       test('G142: a merge whose records fill more slots than one replacement takes is not split: the round stops, and '
           'the device, its base and the server stay as they were', () async {

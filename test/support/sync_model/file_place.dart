@@ -448,6 +448,11 @@ class _FilePlace implements SyncPlace<_Carried> {
   @override
   Future<void> workOutBinding(SyncUnbound record) async => d._bind(record.id);
 
+  // The model's store is its records, with no published list beside them, so a binding is in place once it is worked
+  // out and there is nothing more to publish.
+  @override
+  void bindingsWorkedOut() {}
+
   /// As the app's ([readLocalSyncList]): a record a merge of the device's into it has not finished is a merge in
   /// progress, with the ids it retires, by the app's decision over the mark ([syncMergeWaiting] of
   /// [FDevice.mergesInProgress]); and the list holds of it what [previous] — the base's list — does, or nothing where

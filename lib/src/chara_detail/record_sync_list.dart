@@ -71,8 +71,8 @@ class SyncList {
   /// Record id → its row.
   final Map<String, SyncListRow> rows;
 
-  /// (column ([syncColumnOf]), record id) → the cell; its value is the stored value as JSON text, null where it was
-  /// cleared. The list carries the cells of the records it lists, in their rows.
+  /// (column ([syncColumnOf]), record id) → the cell; its value is the stored value as JSON text ([syncCellText]), null
+  /// where it was cleared. The list carries the cells of the records it lists, in their rows.
   final Map<(String, String), SyncValue<String?>> cells;
 
   /// Column → its title, null where the column storage was removed.
@@ -110,14 +110,28 @@ ArchiveImageOption? _stageOf(String name) => switch (RecordArchiveState.values.b
   RecordArchiveState.none => ArchiveImageOption.none,
 };
 
+/// The text a cell holds of the stored value [value] — a rating's number or a memo's string —: its JSON, a number
+/// with no fraction written as an integer ([_cellJson]). The VM writes the double `4.0` as `4.0` and the web, whose
+/// numbers do not tell `4.0` from `4`, as `4`, so the one form both write alike is the integer's: one value is one
+/// text on every platform, and a part of the list holding it has one name.
+String syncCellText(Object? value) => jsonEncode(_cellJson(value));
+
+/// [value] as a cell's JSON holds it: a double with no fraction as the integer it is, within the integers a double
+/// holds exactly (a rating's numbers are far inside them), and any other value as it is.
+Object? _cellJson(Object? value) =>
+    value is double && value == value.truncateToDouble() && value.abs() <= _exactInteger ? value.toInt() : value;
+
+/// The greatest integer whose neighbours a double tells apart: 2^53 − 1.
+const _exactInteger = 9007199254740991;
+
 Map<String, Object?> _timed(String? value, int time, String valueKey) => {
-  if (value != null) valueKey: jsonDecode(value),
+  if (value != null) valueKey: _cellJson(jsonDecode(value)),
   'written_at': time,
 };
 
 SyncValue<String?> _untimed(Object? json, String valueKey) {
   final map = json as Map<String, Object?>;
-  return SyncValue(map.containsKey(valueKey) ? jsonEncode(map[valueKey]) : null, map['written_at'] as int);
+  return SyncValue(map.containsKey(valueKey) ? syncCellText(map[valueKey]) : null, map['written_at'] as int);
 }
 
 Map<String, Object?> _rowJson(SyncListRow row, Map<String, SyncValue<String?>> cells) {
@@ -133,7 +147,8 @@ Map<String, Object?> _rowJson(SyncListRow row, Map<String, SyncValue<String?>> c
       if (body.geometry case final geometry?) 'geometry': geometry.toShallowMap(),
     },
     'archive': {'state': _archiveStateName(record.stage.value), 'written_at': record.stage.time},
-    'image': body.binding?.toMap() ?? const <String, Object?>{},
+    // A binding not worked out yet has no `image`; `{}` is a binding that names no image.
+    'image': ?body.binding?.toMap(),
     'icon': ?body.icon,
     if (record.absorbed.isNotEmpty) 'absorbed': record.absorbed.toList()..sort(),
     'split_from': ?record.splitFrom,
@@ -147,7 +162,9 @@ Map<String, Object?> _rowJson(SyncListRow row, Map<String, SyncValue<String?>> c
 
 /// The parts of [list], by the slot of the root each fills: a record part for each part number that holds a record,
 /// `columns` where a column has a title, `dismissed` where a pair is dismissed. A slot with nothing is left out. The
-/// same list gives the same text, so an unchanged part keeps its name.
+/// same list gives the same text on every platform ([syncCellText]), so an unchanged part keeps its name. A part
+/// another build wrote may hold the same values in another text; a round leaves such a part under the name the server
+/// holds it by until it changes the part ([syncRootSlots]).
 Map<String, String> syncListParts(SyncList list) {
   final cellsByRecord = <String, Map<String, SyncValue<String?>>>{};
   for (final MapEntry(key: (column, id), :value) in list.cells.entries) {
@@ -221,13 +238,15 @@ SyncList syncListOfParts(Iterable<String> texts) {
           if (syncRecordPartOf(id) != number) throw FormatException('Record $id is not of part $number.');
           final body = row['body'] as Map<String, Object?>;
           final archive = row['archive'] as Map<String, Object?>;
-          final image = row['image'] as Map<String, Object?>;
           rows[id] = SyncListRow(
             SyncRecord(
               id,
               body: SyncBody(
                 body['content'] as String,
-                binding: image.isEmpty ? null : RecordBindingMapper.fromMap(image),
+                binding: switch (row['image']) {
+                  final Map<String, Object?> image => RecordBindingMapper.fromMap(image),
+                  _ => null,
+                },
                 geometry: switch (body['geometry']) {
                   final Map<String, Object?> geometry => RecordGeometryMapper.fromMap(geometry),
                   _ => null,
@@ -366,6 +385,26 @@ List<List<SyncListChange>>? syncListReplacements(List<SyncListChange> changes, i
   }
   return replacements;
 }
+
+/// The root of a replacement that changes the slots [changing] of the root [current] — the server's, by slot — to
+/// hold [parts] ([syncListParts]): each slot of [changing] names its part of [parts] by the part's text, or nothing
+/// where [parts] has none, and every other slot [current] names it names as [current] does. A part another build wrote
+/// may hold the values [parts] holds in another text (`docs/sync-protocol.md`), and stays under the name the server
+/// holds it by until a replacement changes it; so the root changes no slot outside [changing] that [current] names.
+Map<String, String> syncRootSlots(Map<String, String> current, Map<String, String> parts, Set<String> changing) => {
+  for (final slot in {...current.keys, ...parts.keys})
+    if (current[slot] case final name? when !changing.contains(slot))
+      slot: name
+    else if (parts[slot] case final text?)
+      slot: syncObjectName(utf8.encode(text)),
+};
+
+/// The slots the root [next] changes of the root [current], as the server counts them against the slots one replacement
+/// may change (`too_many_parts`): each slot one of them fills that the other does not, or fills with another part.
+Set<String> syncRootSlotsChanged(Map<String, String> current, Map<String, String> next) => {
+  for (final slot in {...current.keys, ...next.keys})
+    if (current[slot] != next[slot]) slot,
+};
 
 /// [from] with [changes] — changes from [from] to [to] ([syncListChanges]) — made: their records' rows and cells, their
 /// pairs and the titles where one of them changes those, as [to] holds them; everything else as [from] does.
@@ -682,7 +721,7 @@ Future<({Map<String, SyncValue<String?>> cells, SyncValue<String?> title})> _rea
   return (
     cells: {
       for (final id in {...data.keys, ...writtenAt.keys})
-        id: SyncValue(data.containsKey(id) ? jsonEncode(data[id]) : null, writtenAt[id] ?? 0),
+        id: SyncValue(data.containsKey(id) ? syncCellText(data[id]) : null, writtenAt[id] ?? 0),
     },
     title: SyncValue(titleCleared ? null : title, titleWrittenAt ?? 0),
   );
@@ -731,8 +770,8 @@ SyncHeldRecords? syncHeldRecordsOf(RefBase ref) {
   return SyncHeldRecords(
     {
       for (final (store, archiveStore) in stores)
-        for (final record in store.recordsInMemory)
-          record.id: switch (store.notesOf(record.id)) {
+        for (final (:record, :notes) in store.recordsWithNotesInMemory)
+          record.id: switch (notes) {
             final notes? => syncRecordOf(record, notes, archiveStore: archiveStore),
             null => null,
           },

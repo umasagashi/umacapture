@@ -31,7 +31,16 @@ import '/src/chara_detail/value_write_time.dart';
 ///
 /// Every field is named here through the constructors, so a field added to either class does not compile until it is
 /// decided whether it belongs to the body.
-String recognizedContentKey(CharaDetailRecord record) {
+///
+/// Worked out once a record instance ([_contentKeys]): a record is immutable, and every change of one is a new
+/// instance, which has no key yet.
+String recognizedContentKey(CharaDetailRecord record) => _contentKeys[record] ??= _workOutContentKey(record);
+
+/// The key [recognizedContentKey] worked out of each record instance, held by the instance's identity and gone with
+/// it.
+final _contentKeys = Expando<String>('recognizedContentKey');
+
+String _workOutContentKey(CharaDetailRecord record) {
   final r = record.upgradeFormat();
   final m = r.metadata;
   final body = CharaDetailRecord(

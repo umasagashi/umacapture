@@ -148,8 +148,10 @@ n = sha256(utf8(id)).readUInt16BE(0) % 128
   - `body.name`: the name of a body the account holds.
   - `archive.state`: `"normal"`, `"jpeg"` or `"none"`.
   - `image`: the record's image binding, with the same keys and meaning as a body's
-    `metadata.binding`. It must equal the binding of the body `body.name` names (a missing key and
-    `null` are equal); otherwise 400, `field` `part.records[i].image`.
+    `metadata.binding`. It must be present and equal the binding of the body `body.name` names (a
+    missing key and `null` are equal); otherwise 400, `field` `part.records[i].image`. As the body a
+    row names carries a binding, so does every row the server holds: `{}` there is a binding that
+    names no image.
   - `icon`: the record's icon, an image name, or missing (or `null`) when it has none. It must equal
     the `metadata.icon` of the body `body.name` names; otherwise 400, `field` `part.records[i].icon`.
 - **Opaque fields**: every other key of a row (`body.written_at`, `archive.written_at`, ratings,
@@ -196,7 +198,7 @@ A record row:
 | `body.content` | The SHA-256 of the recognised content alone (`recognizedContentKey`): two bodies with the same content and bindings that agree are the same body, whatever else differs |
 | `body.parents` | The inheritance parents, `parent1` and `parent2`, each left out when empty; the whole key left out when both are |
 | `archive.state`, `archive.written_at` | The archive state and its time, from the record's `archive.json` and the store it is in |
-| `image` | The body's `metadata.binding`, `{}` where it is not worked out |
+| `image` | The body's `metadata.binding`, `{}` where it names no image; left out where it is not worked out yet, which only a list the device has not sent holds (the server refuses such a row) |
 | `icon` | The body's `metadata.icon`; left out when the body has none |
 | `absorbed` | The ids the record absorbed in merges (`merged_ids.json`), sorted; left out when none |
 | `split_from` | The id a round split the record off, where it did |
@@ -212,8 +214,11 @@ The opaque parts:
   storage has no `title`.
 - `dismissed`: `content` is the dismissed pairs, `[["R1", "R2"], …]`, each pair and the list sorted.
 
-The same values make the same text: keys come in one order, rows by id, columns and pairs sorted. An
-unchanged part therefore keeps its name, and a put of it answers `"exists"`.
+The same values make the same text: keys come in one order, rows by id, columns and pairs sorted, and
+a number with no fraction is written as an integer (`4`, never `4.0`), the one form a build on the
+web, whose numbers do not tell the two apart, writes as well. An unchanged part therefore keeps its
+name, and a put of it answers `"exists"`. A part an older build wrote may hold the same values in
+another text; a client leaves it in its slot under the name it has until it changes the part.
 
 ### Endpoints
 
