@@ -1079,6 +1079,10 @@ abstract interface class CharaDetailRecordMergeSurface {
   /// write of this app to those files — or null where it serves no record [id].
   RecordNotes? notesOf(String id);
 
+  /// Every record of [recordsInMemory], in its order, with what [notesOf] answers of it, read in one pass over the
+  /// records rather than a search of them per record.
+  Iterable<({CharaDetailRecord record, RecordNotes? notes})> get recordsWithNotesInMemory;
+
   /// Drops [id] from this store's published list, and changes nothing on disk.
   ///
   /// This is the *other* half of a cross-store merge: the survivor lives in the
@@ -1251,6 +1255,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     final pathInfo = await ref.watch(pathInfoLoader.future);
     _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailActiveDir;
+    // A buffer belongs to the records the last build read; this build reads them again.
+    _pendingRecords = null;
     // Kick off the archive build so capture-time dedup and inheritance
     // resolution can consider archived records; its bulk scan waits for this
     // store's load (see [CharaDetailArchiveStorage.build]) so the two isolate
@@ -2095,6 +2101,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   List<CharaDetailRecord> get recordsInMemory => _records;
 
   @override
+  Iterable<({CharaDetailRecord record, RecordNotes? notes})> get recordsWithNotesInMemory =>
+      _records.map((record) => (record: record, notes: _notes[record.id]));
+
+  @override
   Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) async {
     for (final record in records) {
       await _persistAsync(record);
@@ -2412,9 +2422,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// the buffer and lets [forceRebuild] publish it a single time (rebuilding the
   /// card map), instead of emitting state per id.
   /// Takes each of [records] as its `record.json` now stands, for a record this store serves whose binding it does
-  /// not hold yet ([placeRecordBindingsUnlocked]), and publishes once. A store that has not loaded holds nothing to
+  /// not hold yet ([placeRecordBindingsUnlocked]), and publishes once; where not [publish], into the buffer alone,
+  /// which reads see at once and [publishPendingRecords] publishes. A store that has not loaded holds nothing to
   /// update: its build reads the files.
-  void _takePlacedBindings(List<CharaDetailRecord> records) {
+  void _takePlacedBindings(List<CharaDetailRecord> records, {required bool publish}) {
     if (state.asData == null) return;
     final changed = [
       for (final record in records)
@@ -2424,7 +2435,12 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     for (final record in changed) {
       replaceBy(record, id: record.id);
     }
-    forceRebuild();
+    if (publish) forceRebuild();
+  }
+
+  /// Publishes the buffer ([forceRebuild]) where this store holds one ([hasPendingRecords]); nothing else.
+  void publishPendingRecords() {
+    if (hasPendingRecords) forceRebuild();
   }
 
   void removeRecords(Iterable<String> ids) {
@@ -2627,7 +2643,16 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
 /// built is left alone: its build reads the files written here.
 ///
 /// The caller holds each directory's record lock or the store's root scope.
-Future<Map<String, Uint8List>> placeRecordBindingsUnlocked(RefBase ref, Iterable<DirectoryPath> directories) async {
+///
+/// Where not [publish], each store takes the records into what it serves, which its reads see at once, without
+/// publishing them: for a caller that places one record at a time, each under its own lock, and publishes what it
+/// placed once at the end (`publishPendingRecords` of each store), so that what is worked out of every record a
+/// store serves is worked out again once, not once a record.
+Future<Map<String, Uint8List>> placeRecordBindingsUnlocked(
+  RefBase ref,
+  Iterable<DirectoryPath> directories, {
+  bool publish = true,
+}) async {
   final placed = <String, Uint8List>{};
   final active = <CharaDetailRecord>[];
   final archived = <CharaDetailRecord>[];
@@ -2638,10 +2663,10 @@ Future<Map<String, Uint8List>> placeRecordBindingsUnlocked(RefBase ref, Iterable
     (isInArchiveStore(directory) ? archived : active).add(CharaDetailRecord.fromRecordJson(utf8.decode(bytes)));
   }
   if (ref.exists(charaDetailRecordStorageLoaderProvider)) {
-    ref.read(charaDetailRecordStorageLoaderProvider.notifier)._takePlacedBindings(active);
+    ref.read(charaDetailRecordStorageLoaderProvider.notifier)._takePlacedBindings(active, publish: publish);
   }
   if (ref.exists(charaDetailArchiveStorageLoaderProvider)) {
-    ref.read(charaDetailArchiveStorageLoaderProvider.notifier)._takePlacedBindings(archived);
+    ref.read(charaDetailArchiveStorageLoaderProvider.notifier)._takePlacedBindings(archived, publish: publish);
   }
   return placed;
 }
@@ -2674,6 +2699,8 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
     final pathInfo = await ref.watch(pathInfoLoader.future);
     _pathInfo = pathInfo;
     rootDirectory = pathInfo.charaDetailArchiveDir;
+    // A list held unpublished belongs to the records the last build read; this build reads them again.
+    _pendingRecords = null;
     // Sequence the bulk scan after the active store's, so the two scans do not
     // fan out worker isolates at the same time (each spawns up to
     // [_recordLoadWorkerCount]). Guarantees the order regardless of which
@@ -2724,7 +2751,27 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   @override
   CharaDetailRecord? getBy({required String id}) {
-    return state.asData?.value.firstWhereOrNull((e) => e.id == id);
+    return _records?.firstWhereOrNull((e) => e.id == id);
+  }
+
+  // Holds the records taken in without publishing ([placeRecordBindingsUnlocked] with `publish: false`), as the
+  // active store's buffer does ([CharaDetailRecordStorage._pendingRecords]): while non-null, reads see it instead of
+  // the published state, and every publish of this store starts from it and clears it.
+  List<CharaDetailRecord>? _pendingRecords;
+
+  List<CharaDetailRecord>? get _records => _pendingRecords ?? state.asData?.value;
+
+  /// See [CharaDetailRecordStorage.hasPendingRecords].
+  bool get hasPendingRecords => _pendingRecords != null;
+
+  /// See [CharaDetailRecordStorage.publishPendingRecords].
+  void publishPendingRecords() {
+    if (_pendingRecords case final records?) _publish(records);
+  }
+
+  void _publish(List<CharaDetailRecord> records) {
+    _pendingRecords = null;
+    state = AsyncData(records);
   }
 
   /// Writes [record] back to its archived `record.json` via [_persistRecordJson].
@@ -2734,7 +2781,11 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   Future<void> _persistAsync(CharaDetailRecord record) => _persistRecordJsonAsync(recordPathOf(record), record);
 
   @override
-  List<CharaDetailRecord> get recordsInMemory => state.asData?.value ?? const [];
+  List<CharaDetailRecord> get recordsInMemory => _records ?? const [];
+
+  @override
+  Iterable<({CharaDetailRecord record, RecordNotes? notes})> get recordsWithNotesInMemory =>
+      recordsInMemory.map((record) => (record: record, notes: _notes[record.id]));
 
   @override
   Future<void> persistRecordsUnlocked(List<CharaDetailRecord> records) =>
@@ -2775,7 +2826,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   @override
   void adoptRecordInMemory(CharaDetailRecord record, {RecordNotes? notes}) {
-    final current = state.asData?.value;
+    final current = _records;
     if (current == null) {
       return;
     }
@@ -2789,35 +2840,41 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   @override
   void forgetRecordInMemory(String id) {
-    final current = state.asData?.value;
+    final current = _records;
     if (current == null) {
       return;
     }
     _notes.remove(id);
-    state = AsyncData([
+    _publish([
       for (final e in current)
         if (e.id != id) e,
     ]);
   }
 
   /// See [CharaDetailRecordStorage._takePlacedBindings].
-  void _takePlacedBindings(List<CharaDetailRecord> records) {
+  void _takePlacedBindings(List<CharaDetailRecord> records, {required bool publish}) {
     final changed = [
       for (final record in records)
         if (getBy(id: record.id) case final held? when held.metadata.binding != record.metadata.binding) record,
     ];
-    if (changed.isNotEmpty) _swapInMemory(changed);
+    if (changed.isNotEmpty) _swapInMemory(changed, publish: publish);
   }
 
   /// Swaps [records] into the in-memory list by id, a no-op if the archive view
-  /// never loaded (the next build reads the updated json from disk).
-  void _swapInMemory(List<CharaDetailRecord> records) {
-    final current = state.asData?.value;
+  /// never loaded (the next build reads the updated json from disk). Where not
+  /// [publish], the list is held unpublished ([publishPendingRecords]).
+  void _swapInMemory(List<CharaDetailRecord> records, {bool publish = true}) {
+    final current = _records;
     if (current == null) {
       return;
     }
     final byId = {for (final record in records) record.id: record};
-    state = AsyncData([for (final e in current) byId[e.id] ?? e]);
+    final swapped = [for (final e in current) byId[e.id] ?? e];
+    if (publish) {
+      _publish(swapped);
+    } else {
+      _pendingRecords = swapped;
+    }
   }
 
   /// Appends just-archived [records] to the in-memory list, each with what its directory holds beside its
@@ -2827,14 +2884,14 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// archived directory from disk). No-op when the archive view has never been
   /// loaded — the next build reads the moved directories straight from disk.
   void insert(List<({CharaDetailRecord record, RecordNotes notes})> records) {
-    final current = state.asData?.value;
+    final current = _records;
     if (current == null) {
       return;
     }
     for (final (:record, :notes) in records) {
       _notes[record.id] = notes;
     }
-    state = AsyncData([...current, for (final entry in records) entry.record]);
+    _publish([...current, for (final entry in records) entry.record]);
   }
 
   /// Permanently deletes an archived record's directory and republishes.
@@ -2945,10 +3002,10 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>>
     required Set<String> failed,
     Set<String> left = const {},
   }) {
-    final records = state.asData?.value;
+    final records = _records;
     if (records != null && succeeded.isNotEmpty) {
       _notes.removeWhere((id, _) => succeeded.contains(id));
-      state = AsyncData(records.where((record) => !succeeded.contains(record.id)).toList());
+      _publish(records.where((record) => !succeeded.contains(record.id)).toList());
     }
     if (failed.isNotEmpty) {
       Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));

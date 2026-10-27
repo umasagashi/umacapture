@@ -232,14 +232,15 @@ final class EnhancementMergeFrame {
       }
     }
     final activeStore = _ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    if (activeStore.hasPendingRecords) {
+    final archiveStore = _ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
+    if (activeStore.hasPendingRecords || archiveStore.hasPendingRecords) {
       // The rewrite writes whole `record.json` files from memory, and while a
-      // regeneration buffer is unpublished the records memory serves are not the
-      // ones the store's own state holds.
-      logger.i('Refusing a merge: the active store holds an unpublished regeneration buffer.');
+      // buffer is unpublished (a regeneration batch, a sync round's binding stage)
+      // the records memory serves are not the ones the store's own state holds.
+      logger.i('Refusing a merge: a record store holds an unpublished buffer.');
       return true;
     }
-    if (activeStore.isIncomplete || _ref.read(charaDetailArchiveStorageLoaderProvider.notifier).isIncomplete) {
+    if (activeStore.isIncomplete || archiveStore.isIncomplete) {
       logger.i('Refusing a merge: a record store could not open every record its last scan found.');
       return true;
     }

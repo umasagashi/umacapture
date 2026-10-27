@@ -102,9 +102,18 @@ class SyncToldCounts {
 }
 
 /// The account sync is on for on this device ([account]), what the last round it ran told ([told]) and the last counts
-/// one told ([counts]), when one last synced ([lastSynced]), and whether one runs ([running]).
+/// one told ([counts]), when one last synced ([lastSynced]), whether one failed since ([failedSinceSynced]), and whether
+/// one runs ([running]).
 class RecordSyncState {
-  const RecordSyncState({this.account, this.ranAs, this.told, this.counts, this.lastSynced, this.running = false});
+  const RecordSyncState({
+    this.account,
+    this.ranAs,
+    this.told,
+    this.counts,
+    this.lastSynced,
+    this.failedSinceSynced = false,
+    this.running = false,
+  });
 
   /// The account whose session the user turned sync on under (S-08); null while sync is off.
   final String? account;
@@ -133,6 +142,12 @@ class RecordSyncState {
   /// and not on disk, as [told] is: null until a round of this run of the app has synced.
   final DateTime? lastSynced;
 
+  /// Whether a round this device ran as [ranAs] failed ([syncRoundFailed]) after the last that ended
+  /// [SyncRoundEnd.done], or before any did: a round that ends otherwise without syncing — an edit meanwhile, the app
+  /// closing, the long memos — leaves it as it is, and only one that syncs takes it down. Kept in memory and not
+  /// on disk, as [told] is.
+  final bool failedSinceSynced;
+
   /// Whether a round of this device runs, or is asked for to run once the one running ends ([RecordSync.round]).
   final bool running;
 
@@ -153,6 +168,7 @@ class RecordSyncState {
       told: rounds ? told : null,
       counts: account == null || counts?.account == account ? counts : null,
       lastSynced: rounds ? lastSynced : null,
+      failedSinceSynced: rounds && failedSinceSynced,
       running: running,
     );
   }
@@ -168,6 +184,10 @@ class RecordSyncState {
       told: told,
       counts: SyncToldCounts.of(told, ranAs) ?? (counts?.account == ranAs ? counts : null),
       lastSynced: lastSynced ?? (this.ranAs == ranAs ? this.lastSynced : null),
+      failedSinceSynced: switch (told.end) {
+        SyncRoundEnd.done => false,
+        final end => syncRoundFailed(end) || (this.ranAs == ranAs && failedSinceSynced),
+      },
       running: running,
     );
   }
@@ -178,6 +198,7 @@ class RecordSyncState {
     told: told,
     counts: counts,
     lastSynced: lastSynced,
+    failedSinceSynced: failedSinceSynced,
     running: running,
   );
 }
@@ -361,20 +382,37 @@ enum SyncHalt {
   accountDay,
 
   /// The service's daily limit ([SyncServerStop.serviceDay]), as for [accountDay].
-  serviceDay;
+  serviceDay,
+
+  /// The last round did not sync, for none of the reasons above: the server refused what it sent, or a request failed
+  /// or got no answer ([syncRoundFailed]). The next round that syncs ends it.
+  failed;
 
   /// Whether the rounds sync nothing while it lasts, where the others hold back a part of what they send.
   bool get holdsAll => switch (this) {
-    deleting || longMemos || accountRoomStopped || serviceStopped => true,
+    deleting || longMemos || accountRoomStopped || serviceStopped || failed => true,
     accountRoomWaits || serviceRoomWaits || accountDay || serviceDay => false,
   };
 
-  /// Whether the server's room or limits stopped the rounds (N10, D2-5), where the others come of what the user did.
+  /// Whether the server's room or limits stopped the rounds (N10, D2-5), where the others come of what the user did or
+  /// of a round that failed.
   bool get byServer => switch (this) {
-    deleting || longMemos => false,
+    deleting || longMemos || failed => false,
     accountRoomWaits || accountRoomStopped || serviceRoomWaits || serviceStopped || accountDay || serviceDay => true,
   };
 }
+
+/// Whether a round that ended [end] did not sync for a failure — the server refused what it sent, an operation of it
+/// was more than one replacement takes, or a request failed or got no answer, the device's writes included —, where
+/// it ended otherwise: synced, or stopped by what is no failure (an edit meanwhile, the app closing, the long memos).
+bool syncRoundFailed(SyncRoundEnd end) => switch (end) {
+  SyncRoundEnd.refused ||
+  SyncRoundEnd.answerLost ||
+  SyncRoundEnd.bodiesMissing ||
+  SyncRoundEnd.failed ||
+  SyncRoundEnd.operationTooLarge => true,
+  SyncRoundEnd.done || SyncRoundEnd.changedMeanwhile || SyncRoundEnd.heldByLongMemos || SyncRoundEnd.closing => false,
+};
 
 /// [syncHaltOf] for the session the device is logged in to: what the sync section (N8) and the sync icon of the table's
 /// toolbar (N9) tell, and what the toasts of a stop follow ([syncHaltToastsProvider]).
@@ -402,8 +440,9 @@ const trSyncHaltToast = "pages.settings.privacy.account.sync.halt_toast";
 /// N8: why the rounds of this device stop, or what of the last one waits, for the account of [session] — the
 /// account's deletion first, then what the last round told ([RecordSyncState.told]): the long memos it was held back
 /// by, else what of the server's stopped it ([SyncRoundOutcome.serverStop]), the room's told apart by whether the round
-/// sent what needs none ([SyncRoundEnd.done]; `storage_full` refuses new bytes alone). None where sync is off for the
-/// session's account ([RecordSyncState.onFor]), and none for a round that ran into nothing of these.
+/// sent what needs none ([SyncRoundEnd.done]; `storage_full` refuses new bytes alone), else that a round failed since
+/// the last that synced ([RecordSyncState.failedSinceSynced]). None where sync is off for the session's account
+/// ([RecordSyncState.onFor]), and none for a round that ran into nothing of these.
 SyncHalt? syncHaltOf(RecordSyncState state, ShareSession? session) {
   if (!state.onFor(session?.accountId)) return null;
   if (session?.deleting ?? false) return SyncHalt.deleting;
@@ -412,7 +451,7 @@ SyncHalt? syncHaltOf(RecordSyncState state, ShareSession? session) {
   if (told.end == SyncRoundEnd.heldByLongMemos) return SyncHalt.longMemos;
   final sent = told.end == SyncRoundEnd.done;
   return switch (told.serverStop) {
-    null => null,
+    null => state.failedSinceSynced ? SyncHalt.failed : null,
     SyncServerStop.accountRoom => sent ? SyncHalt.accountRoomWaits : SyncHalt.accountRoomStopped,
     SyncServerStop.service => sent ? SyncHalt.serviceRoomWaits : SyncHalt.serviceStopped,
     SyncServerStop.accountDay => SyncHalt.accountDay,

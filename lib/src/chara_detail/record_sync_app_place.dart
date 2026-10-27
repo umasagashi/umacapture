@@ -150,9 +150,19 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
     await gate.runForRecord(
       info.storageDir,
       record.id,
-      () => placeRecordBindingsUnlocked(ref, [dir]),
+      () => placeRecordBindingsUnlocked(ref, [dir], publish: false),
       declaration: _readsAndWritesRecords,
     );
+  }
+
+  @override
+  void bindingsWorkedOut() {
+    if (ref.exists(charaDetailRecordStorageLoaderProvider)) {
+      ref.read(charaDetailRecordStorageLoaderProvider.notifier).publishPendingRecords();
+    }
+    if (ref.exists(charaDetailArchiveStorageLoaderProvider)) {
+      ref.read(charaDetailArchiveStorageLoaderProvider.notifier).publishPendingRecords();
+    }
   }
 
   @override
@@ -450,9 +460,12 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
     return SyncWriteStop.changed;
   }
 
+  /// A round that committed no publication changed no record directory, so neither store is read again: a rescan reads
+  /// every directory under `active/` and `archive/`, a capture still being written among them.
   @override
   void published(Iterable<String> ids) {
-    if (ids.isNotEmpty) _changedRecords = true;
+    if (ids.isEmpty) return;
+    _changedRecords = true;
     applyRecordsPublished(ref, info, writtenIds: ids, effects: effects);
   }
 
@@ -632,7 +645,7 @@ bool _headsColumn(Map<String, dynamic> map, String storage, String key) =>
   final times = {...writtenAt};
   for (final id in ids) {
     final held = data.containsKey(id) || writtenAt.containsKey(id)
-        ? SyncValue<String?>(data.containsKey(id) ? jsonEncode(data[id]) : null, writtenAt[id] ?? 0)
+        ? SyncValue<String?>(data.containsKey(id) ? syncCellText(data[id]) : null, writtenAt[id] ?? 0)
         : null;
     final cell = result.cells[(column, id)];
     if (held != local.cells[(column, id)] || held == cell) continue;

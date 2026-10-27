@@ -178,8 +178,14 @@ abstract interface class SyncPlace<C> {
   ({List<SyncUnbound> records, int held}) unbound();
 
   /// Works out and places the binding of the record [record] under its lock, and puts the record that changed into
-  /// its store. Nothing where its `record.json` carries one, or cannot be read.
+  /// its store, which every read of the store sees at once, without publishing it ([bindingsWorkedOut]). Nothing where
+  /// its `record.json` carries one, or cannot be read.
   Future<void> workOutBinding(SyncUnbound record);
+
+  /// Publishes the records [workOutBinding] put into the stores since the last call, once for all of them, so that
+  /// what is worked out of every record the stores serve is worked out once a chunk of bindings, not once a record.
+  /// Called after each chunk of records, and once the round stops working out bindings, whether or not it went on.
+  void bindingsWorkedOut();
 
   /// What the device holds, each record read under its lock ([readLocalSyncList]). Given [previous], the records the
   /// stores show may have changed since ([syncRecordsChangedSince]) alone, the rest as [previous] has them. Null where

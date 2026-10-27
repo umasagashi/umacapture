@@ -3722,8 +3722,7 @@ final _forgetsThePngFields = RoundBreak(
 final bindingGoesWithTheBody = SyncProperty<WorldRun>(
   'binding-goes-with-the-body',
   'At rest every side that lists a record — each device and the server\'s list — holds the same binding of it, whatever '
-      'the account\'s image form (the list carries a binding that names no image as one not worked out, and the two '
-      'read alike); and where a device worked out the binding of a record of the same recognised '
+      'the account\'s image form; and where a device worked out the binding of a record of the same recognised '
       'content out of a directory that held the PNGs of the capture the binding names, every side\'s binding knows the '
       'fields of those PNGs: the binding worked out of a directory knows the fields of the forms it holds, and two '
       'bindings of one content that do not disagree are one, with the fields of both.',
@@ -3747,21 +3746,15 @@ final bindingGoesWithTheBody = SyncProperty<WorldRun>(
     final ids = {for (final side in _sides) ...end.sides[side]!.records.keys};
     for (final id in ids.toList()..sort()) {
       checks++;
-      // The server's list carries a binding that names no image as one not worked out (`image` is `{}` for both), and
-      // every rule reads the two alike: neither names a file, and each agrees with every binding.
-      String text(String side, FRec r) => switch (_bindingText(r)) {
-        'unbound' when side == 'server' => 'none',
-        final t => t,
-      };
       final texts = {
         for (final side in _sides)
-          if (end.sides[side]!.records[id] case final r?) side: text(side, r),
+          if (end.sides[side]!.records[id] case final r?) side: _bindingText(r),
       };
       // The rounds begin with the sides holding other bindings of it: an end that sends no binding, or merges none,
       // holds them apart.
       final began = {
         for (final side in _sides)
-          if (run.beforeRounds.sides[side]!.records[id] case final r?) text(side, r),
+          if (run.beforeRounds.sides[side]!.records[id] case final r?) _bindingText(r),
       };
       if (began.length > 1) decisive++;
       final records = [for (final side in _sides) ?end.sides[side]!.records[id]];
