@@ -432,6 +432,12 @@ void stitchFromImages(const std::string &id, const PipelinePaths &paths) {
     runUntilDrainedThenJoin(api, recorder_runner);
 }
 
+// Re-recognizes records that are already in the store, in place: the same update request the app sends to
+// regenerate a record (NativeApi::updateRecord), so the record is read from and rewritten in its active directory
+// and never passes through the assembly directory a new capture is recognized in. Each record needs its
+// record.json, which carries the record type and the metadata the update keeps. A success is announced as
+// onCharaDetailUpdated, not as a finished record, so the summary's `records` stays 0; a failure is an onError
+// naming the record, and makes the exit code non-zero.
 void recognizeFromImages(const std::vector<std::string> &id_list, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
@@ -445,7 +451,7 @@ void recognizeFromImages(const std::vector<std::string> &id_list, const Pipeline
     recorder_runner->start();
 
     for (const auto &id : id_list) {
-        api.recognize(id);
+        api.updateRecord({id});
     }
 
     runUntilDrainedThenJoin(api, recorder_runner);
@@ -549,7 +555,7 @@ int main(int argc, char **argv) {
         uma::cli::PipelinePaths stitch_paths;
         addPipelinePathOptions(stitch_command, stitch_paths);
 
-        auto recognize_command = command.add_subcommand("recognize", "run recognizer mode from stitched images");
+        auto recognize_command = command.add_subcommand("recognize", "re-recognize records in the store in place");
         std::vector<std::string> recognize_id_list;
         recognize_command->add_option("--id", recognize_id_list)->required();
         uma::cli::PipelinePaths recognize_paths;

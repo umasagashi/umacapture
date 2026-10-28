@@ -199,7 +199,7 @@ Subcommands (see `src/core/cli.cpp`):
 | `video`      | Run capture against recorded video files. | `video --video_path_list "C:\Projects\umacapture\sandbox\inheritance_only_1.mp4"` |
 | `replay`     | Re-feed a recorded FFV1 `.mkv` through pane detection and the recognition pipeline, preserving the original frame timestamps. | `replay --record "C:\...\run.mkv" [--no-calibrate]` |
 | `stitch`     | Stitch previously scraped images for one record id. | `stitch --id <uuid>` |
-| `recognize`  | Run the recognizer over stitched images. | `recognize --id <uuid> [<uuid> ...]` |
+| `recognize`  | Re-recognize records already in the store, in place (the app's regeneration). | `recognize --id <uuid> [<uuid> ...]` |
 
 The one-shot pipeline subcommands (`video` / `replay` / `stitch` / `recognize`)
 also accept `--assets_dir`, `--modules_dir`, and `--output_dir`; the defaults
@@ -394,21 +394,33 @@ that still exist in the repo:
 - **`video`** — `sandbox/inheritance_only_1.mp4` (and many other `sandbox/*.mp4`
   clips). Verified: it decodes the clip and writes scraped scene dirs under
   `<build-dir>/temp/chara_detail/<uuid>/`.
-- **`recognize`** / **`stitch`** — operate on record ids under
-  `<build-dir>/storage/chara_detail/active/<uuid>/`. The committed CLion **debug**
-  build dir (`cmake-build-debug-visual-studio`) already contains stitched data
-  for these ids: `4bbc9295-567b-4068-8850-d3e963e638af`,
+- **`stitch`** — reads the scraped fragments under
+  `<build-dir>/temp/chara_detail/<uuid>/`, assembles and recognizes the record in
+  `<build-dir>/temp/chara_detail_assembly/<uuid>/`, and then **moves** it into
+  `<build-dir>/storage/chara_detail/active/<uuid>/` (the move fails if that dir
+  already exists). A new record from `video` / `replay` / `capture` takes the same
+  route.
+- **`recognize`** — re-recognizes records that are **already in the store**, in
+  place under `<build-dir>/storage/chara_detail/active/<uuid>/`, through the same
+  update request the app sends to regenerate a record. It needs that dir's
+  `record.json` (the record type and the metadata it keeps), backs it up as
+  `record_<timestamp>.json`, and rewrites `recognized.json` / `prediction.json` /
+  `trainee.jpg`. Success is logged as `onCharaDetailUpdated`, so the summary line
+  reports `"records":0` (no new record was produced) with exit 0; a failure is an
+  `onError` `updateRecord failed for record_id=<uuid>: …` and exit 2. The committed
+  CLion **debug** build dir (`cmake-build-debug-visual-studio`) already contains
+  records in its active store for these ids:
+  `4bbc9295-567b-4068-8850-d3e963e638af`,
   `84050aec-0088-4f27-900d-814716ac3ebe`,
   `4404be29-3fc0-4ff3-9565-f7884f623399`,
-  `9fc47f24-16f7-479d-bece-05cce428549f`. So the simplest way to exercise
-  `recognize` is to run from that debug dir (it also already has the exe + all
-  runtime DLLs including FFmpeg). Verified: `recognize --id <one of those>`
-  rewrites `prediction.json` / `prediction_*.png` in the id's dir.
+  `9fc47f24-16f7-479d-bece-05cce428549f`.
 
-The data lives only in those gitignored build dirs — there is no fresh-checkout
-fixture. To test `recognize` from a clean build dir, first produce stitched data
-with `video` → `stitch`, or copy a `storage/chara_detail/active/<uuid>/` folder
-from the debug build dir.
+The data lives only in gitignored dirs — there is no fresh-checkout fixture. To
+test `recognize` from a clean build dir, run `video` on a clip first, then copy
+each new record's `recognized.json` to `record.json` in the same dir (the CLI
+writes no `record.json`; the app composes it). Verified: `recognize --id <uuid>`
+on a record made that way from `player_standard_no_scrollbar.mp4` rewrote it in
+place and exited 0.
 
 ## Logs
 

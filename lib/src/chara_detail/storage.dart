@@ -3591,12 +3591,12 @@ Future<void> runArchiveGeometryMigrationIfNeeded(
 /// break that. Nothing on the UI isolate can interleave with it, but it is not
 /// excluded from a critical section a worker isolate is holding.
 ///
-/// The second is the native capture process, which writes `active/<id>` itself
-/// (it is handed `storage_dir` in `platform_controller.dart`) and only then
-/// announces the id to Dart. [InProcessNamedLocks] is an in-process data
-/// structure, so no acquisition on this side can exclude it; what bounds it is
-/// that native writes a record directory it alone knows about until the
-/// announcement.
+/// The second is the native capture process, which assembles a new record
+/// under the scratch root, moves it into `active/<id>` itself (it is handed
+/// `storage_dir` in `platform_controller.dart`) and only then announces the id
+/// to Dart. [InProcessNamedLocks] is an in-process data structure, so no
+/// acquisition on this side can exclude it; what bounds it is that the
+/// directory native moves in is complete, under an id nothing else has used.
 final recordMutationLockUnavailabilityProvider = Provider<RecordMutationLockUnavailableReason?>((ref) {
   return probeRecordMutationLockUnavailability();
 });

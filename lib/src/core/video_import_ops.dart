@@ -1255,7 +1255,7 @@ ImportErrorReportScope buildImportErrorReportScope({
 /// (`.claude/rules/platform-parity.md`). Web puts it on `onLiveRecordsHarvested`, because its
 /// harvest sweeps the MEMFS active root indiscriminately and an import must therefore be scoped
 /// to a `storage_dir` of its own, from which records arrive in batches. Windows puts it on
-/// `onCharaDetailFinished`, because its recognizer writes each record straight into the real
+/// `onCharaDetailFinished`, because its recognizer moves each finished record into the real
 /// active root and announces it one at a time — there is no sweep to defend against, and a split
 /// root would only break the merge, which resolves `rootDirectory / id`. The value, the meaning
 /// and the fail-open direction are identical on both; what differs is per batch versus per

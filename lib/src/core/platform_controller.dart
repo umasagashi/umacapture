@@ -1069,7 +1069,9 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   /// Fails the attempt [recordId] with [message], and only that one; returns whether it was applied.
   ///
   /// An id of another attempt leaves the state unchanged and is logged, as in [success]. The caller
-  /// uses the answer to decide whether the outcome may sound: a late outcome is silent.
+  /// uses the answer to decide what else the outcome does: a late duplicate verdict is silent, while a
+  /// late error is still announced as the loss of that attempt's capture
+  /// ([CaptureEventNotifier.earlierAttemptFailed]).
   bool failForRecord(String recordId, String message, {String? duplicateRecordId}) {
     if (!isCurrentAttempt(recordId)) {
       logger.i("Capture state: ignored $message for $recordId, which is not the current attempt");
@@ -1255,8 +1257,9 @@ class CaptureEventNotifier extends Notifier<CaptureEvent?> {
       //
       // The opposite race -- an outcome of the PREVIOUS attempt arriving after this one began -- never
       // reaches this listener: the notifier applies an outcome only to the attempt it names
-      // ([CharaDetailCaptureStateNotifier.isCurrentAttempt]), so a late one leaves the state, and
-      // therefore this slot, untouched.
+      // ([CharaDetailCaptureStateNotifier.isCurrentAttempt]), so a late one leaves the state untouched.
+      // The one late outcome that still belongs in this slot, a lost capture, is recorded directly by
+      // [earlierAttemptFailed].
       if (previous != null && previous.attemptId != next.attemptId) {
         state = null;
       }
@@ -1313,6 +1316,16 @@ class CaptureEventNotifier extends Notifier<CaptureEvent?> {
     ref.onDispose(() => imports.removeListener(onImportChanged));
     return null;
   }
+
+  /// Records that an attempt which is no longer the one on screen ended without its record, with the
+  /// failure code [error].
+  ///
+  /// The attempt's capture is lost, which is the last thing that happened, so it takes the slot the
+  /// same way the failure of the attempt on screen does and shows the same line. It cannot arrive
+  /// through the capture-state listener above, because that state already describes the next attempt
+  /// and is left alone. There is no record to point at.
+  void earlierAttemptFailed(String error) =>
+      state = CharaCaptureEvent(status: CharaDetailCaptureStatus.failed, error: error);
 
   /// Drops the recorded event, so the card shows none.
   void clear() => state = null;
@@ -1873,18 +1886,20 @@ class PlatformController {
             if (failedRecordId != null) {
               _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).fail(failedRecordId);
             }
-            // `record_id` names the attempt an error ended (a failed stitch, a detail screen lost
-            // mid-capture). A failed stitch is reported off the scraper thread and can arrive after
-            // the next attempt was announced; it is then true of its own record only, so it neither
-            // touches the card nor sounds. An error with no `record_id` is not about any one attempt
-            // and is applied as it always was.
+            // `record_id` names the attempt an error ended (a failed stitch or recognition, a detail
+            // screen lost mid-capture), and every such error means that attempt produced no record. A
+            // failed stitch or recognition is reported off the scraper thread and can arrive after the
+            // next attempt was announced. It then leaves the card's state to the attempt on screen, but
+            // the capture it names is still lost and has to be retaken, so it is recorded as the last
+            // thing that happened and sounds like any other failure. An error with no `record_id` is not
+            // about any one attempt and is applied as it always was.
             final recordId = data['record_id'];
             if (_webToastedErrorCodes.contains(message)) {
               Toaster.show(ToastData.error(description: "$tr_capture.capture_control.web.error.$message".tr()));
             } else if (recordId is String) {
               if (!captureState.failForRecord(recordId, message)) {
-                logger.i("Native error $message belongs to an earlier attempt; no sound");
-                break;
+                logger.i("Native error $message belongs to an earlier attempt $recordId");
+                _ref.read(captureEventProvider.notifier).earlierAttemptFailed(message);
               }
             } else {
               captureState.fail(message);

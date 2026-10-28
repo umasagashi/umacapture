@@ -32,11 +32,12 @@ inline std::string error(const std::string &message) {
 }
 
 // A TERMINAL ERROR THAT BELONGS TO ONE CAPTURE ATTEMPT, named by the `record_id` that attempt was announced
-// under (charaDetailStarted / charaDetailRestarted). Used by the three errors that end a session's record --
-// `stitch_failed`, `scrape_failed` and `closed_before_completed` -- because the first is reported from the
-// stitcher's thread and can therefore reach the front end after the NEXT attempt has been announced. A front
-// end applies such an error to its card only when the id is the attempt it is showing; without the id it could
-// only apply it to whatever attempt happened to be current when the message arrived.
+// under (charaDetailStarted / charaDetailRestarted). Used by the four errors that end a session's record --
+// `stitch_failed`, `recognize_failed`, `scrape_failed` and `closed_before_completed` -- because the first two are
+// reported from the stitcher's and the recognizer's threads and can therefore reach the front end after the NEXT
+// attempt has been announced. A front end applies such an error to its card only when the id is the attempt it is
+// showing; without the id it could only apply it to whatever attempt happened to be current when the message
+// arrived.
 //
 // Every other error carries no `record_id`, and its absence is the meaning: "not scoped to an attempt".
 inline std::string error(const std::string &message, const std::string &record_id) {
@@ -204,11 +205,11 @@ inline std::string factorProbe(
 
 // A CAPTURE ATTEMPT BEGAN, and `record_id` is the id it will finish under: the `id` of the onCharaDetailFinished
 // that ends it, and the `record_id` of every other message scoped to it (onFactorProbe, and onError for
-// stitch_failed / scrape_failed / closed_before_completed). Those outcomes are produced on other threads and can
-// arrive after the next attempt has begun, so a front end compares ids rather than trusting arrival order. Sent by
-// the scraper (CharaDetailSceneScraper::build) after the session's id is minted and before the session is
-// constructed, so the id is the session's own and not a second mint, and a construction that throws ends this
-// attempt under the id already announced (scrape_failed).
+// stitch_failed / recognize_failed / scrape_failed / closed_before_completed). Those outcomes are produced on
+// other threads and can arrive after the next attempt has begun, so a front end compares ids rather than trusting
+// arrival order. Sent by the scraper (CharaDetailSceneScraper::build) after the session's id is minted and before
+// the session is constructed, so the id is the session's own and not a second mint, and a construction that throws
+// ends this attempt under the id already announced (scrape_failed).
 inline std::string charaDetailStarted(const std::string &record_id) {
     return json_util::Json{{"type", "onCharaDetailStarted"}, {"record_id", record_id}}.dump();
 }
