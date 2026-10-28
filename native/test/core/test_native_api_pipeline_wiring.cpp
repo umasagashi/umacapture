@@ -6,23 +6,25 @@
 // no model, so a whole pipeline can be built and torn down without onnxruntime or a model set. No frames are
 // produced: every case here drives a stage directly through the connection the production code gave it.
 //
-// WHAT THESE CASES CANNOT SEE. Two of the three connections that end an attempt -- closed_before_completed and
+// WHAT THESE CASES CANNOT SEE. Two of the four connections that end an attempt -- closed_before_completed and
 // scrape_failed -- are reachable only from inside CharaDetailSceneScraper, i.e. only from a real detail screen
 // recognized out of real frames, so no case here can assert which listener startPipeline attached to them. What
-// is asserted for all three is the listener's body, notifyAttemptFailed, and for stitch_failed also the
-// attachment. Frame production, the preview emission, and everything in windows/runner and native/wasm remain
-// outside this target.
+// is asserted for all four is the listener's body, notifyAttemptFailed, and for stitch_failed and
+// recognize_failed also the attachment. Frame production, the preview emission, and everything in windows/runner
+// and native/wasm remain outside this target.
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "chara_detail/chara_detail_recognizer.h"
@@ -30,7 +32,13 @@
 #include "chara_detail/record_info.h"
 #include "core/native_api.h"
 #include "core/native_api_test_access.h"
+#include "cv/frame.h"
 #include "util/json_util.h"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#include <opencv2/opencv.hpp>
+#pragma clang diagnostic pop
 
 namespace uma::app {
 namespace {
@@ -74,10 +82,18 @@ class NotifySpy {
 public:
     void install(NativeApi &api) {
         api.setNotifyCallback([this](const std::string &message) {
+            auto parsed = json_util::Json::parse(message);
+            if (observe) {
+                observe(parsed);
+            }
             const std::lock_guard<std::mutex> lock(mutex);
-            messages.push_back(json_util::Json::parse(message));
+            messages.push_back(std::move(parsed));
         });
     }
+
+    // Runs on the notifying thread before the message is collected, so a case can look at what was true at the
+    // moment of the notification. Set before the pipeline starts.
+    std::function<void(const json_util::Json &)> observe;
 
     [[nodiscard]] std::vector<json_util::Json> collected() const {
         const std::lock_guard<std::mutex> lock(mutex);
@@ -196,10 +212,10 @@ TEST_CASE("a stitch failure finishes the attempt it names and reports the reason
 }
 
 TEST_CASE("every terminal attempt failure is one finish and one id-scoped error") {
-    // The body all three of startPipeline's attempt-ending listeners run. The tag is what distinguishes them;
+    // The body all four of startPipeline's attempt-ending listeners run. The tag is what distinguishes them;
     // that a tag reaches the front end scoped to its own attempt is one answer, given once.
     PipelineUnderTest pipeline;
-    for (const std::string tag: {"closed_before_completed", "scrape_failed", "stitch_failed"}) {
+    for (const std::string tag: {"closed_before_completed", "scrape_failed", "stitch_failed", "recognize_failed"}) {
         pipeline.spy.clear();
         pipeline.api->notifyAttemptFailed({"attempt-" + tag, std::nullopt}, tag);
 
@@ -215,6 +231,91 @@ TEST_CASE("every terminal attempt failure is one finish and one id-scoped error"
     }
     // A failure produced no record, so it must not raise the run's count.
     CHECK(pipeline.api->recordsProduced() == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Where a new record is assembled, and when it enters the store.
+// ---------------------------------------------------------------------------
+
+// A record directory as the stitcher leaves it, for a recognizer whose predictors read nothing: one factor-tab
+// shaped image (page background, a green header, two rows) for every tab, each with the sidecar Frame::open reads
+// its intersection from. The record.json is there because `NativeApi::recognize(id)` sends no record type, and
+// the recognizer recovers it from that file.
+void writeAssembledRecord(const std::filesystem::path &record_dir, const std::string &record_id) {
+    constexpr int width = 736;
+    constexpr int height = 1308;
+    constexpr int content_top = 596;
+    cv::Mat mat(height, width, CV_8UC3, cv::Scalar(240, 240, 240));
+    mat(cv::Rect(175, content_top + 15, 520, 28)).setTo(cv::Scalar(70, 200, 90));
+    mat(cv::Rect(175, content_top + 61, 235, 48)).setTo(cv::Scalar(180, 180, 180));
+    mat(cv::Rect(455, content_top + 61, 240, 48)).setTo(cv::Scalar(180, 180, 180));
+    std::filesystem::create_directories(record_dir);
+    for (const auto *tab: {"skill", "factor", "campaign"}) {
+        Frame::fixed(mat).save(record_dir / (std::string(tab) + ".png"));
+        json_util::write(record_dir / (std::string(tab) + ".json"),
+                         {{"intersection", Rect<int>{Point<int>{0, 0}, Point<int>{width, height}}}});
+    }
+    chara_detail::record::CharaDetailRecord record{};
+    record.metadata.record_id.self = record_id;
+    record.metadata.record_type = chara_detail::record::RecordType::Standard;
+    json_util::write(record_dir / "record.json", record, 4);
+}
+
+TEST_CASE("a pipeline recognizes a new record under the scratch root and announces it once it is in the store") {
+    PipelineUnderTest pipeline;
+    const auto config = shippedConfig("assembly");
+    const auto temp_dir = json_util::decodePath(config["directory"]["temp_dir"]);
+    const auto active_dir = json_util::decodePath(config["directory"]["storage_dir"]) / "chara_detail" / "active";
+    const auto modules_dir = json_util::decodePath(config["directory"]["modules_dir"]);
+    std::filesystem::create_directories(modules_dir);
+    json_util::write(modules_dir / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
+    // Where the stitcher of this pipeline writes: the record's whole assembly happens here.
+    const auto assembled = temp_dir / "chara_detail_assembly" / "attempt-new";
+    writeAssembledRecord(assembled, "attempt-new");
+
+    // What the disk holds at the moment the front end is told, observed from inside the notification: notify()
+    // calls the callback on the recognizer's thread, inside its completion send.
+    bool announced_with_result = false;
+    bool announced_with_assembly_left = true;
+    pipeline.spy.observe = [&](const json_util::Json &message) {
+        if (message.at("type") == "onCharaDetailFinished") {
+            announced_with_result = std::filesystem::exists(active_dir / "attempt-new" / "recognized.json");
+            announced_with_assembly_left = std::filesystem::exists(assembled);
+        }
+    };
+    pipeline.api->startEventLoop(config.dump());
+    REQUIRE(pipeline.api->isRunning());
+    REQUIRE_FALSE(std::filesystem::exists(active_dir / "attempt-new"));
+
+    pipeline.api->recognize("attempt-new");
+
+    const auto messages = pipeline.spy.waitFor(1);
+    REQUIRE(messages.size() == 1);
+    CHECK(messages[0].at("type") == "onCharaDetailFinished");
+    CHECK(messages[0].at("id") == "attempt-new");
+    CHECK(messages[0].at("success") == true);
+    CHECK(announced_with_result);
+    CHECK_FALSE(announced_with_assembly_left);
+    CHECK(pipeline.api->recordsProduced() == 1);
+}
+
+TEST_CASE("a recognition failure finishes the attempt it names and reports the reason against that id") {
+    PipelineUnderTest pipeline;
+    pipeline.api->startEventLoop(shippedConfig("recognize_failure").dump());
+    REQUIRE(pipeline.api->isRunning());
+
+    // Nothing was assembled for this id, so the recognizer fails on its first read.
+    pipeline.api->recognize("attempt-missing");
+
+    const auto messages = pipeline.spy.waitFor(2);
+    REQUIRE(messages.size() == 2);
+    CHECK(messages[0].at("type") == "onCharaDetailFinished");
+    CHECK(messages[0].at("id") == "attempt-missing");
+    CHECK(messages[0].at("success") == false);
+    CHECK(messages[1].at("type") == "onError");
+    CHECK(messages[1].at("message") == "recognize_failed");
+    REQUIRE(messages[1].contains("record_id"));
+    CHECK(messages[1].at("record_id") == "attempt-missing");
 }
 
 // ---------------------------------------------------------------------------

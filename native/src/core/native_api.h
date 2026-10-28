@@ -235,14 +235,16 @@ private:
 //                (startPipeline). A live session riding an import's loop would neither shed frames under load
 //                nor be closed when its window stops producing them, and an import riding a live loop would
 //                silently drop frames.
-//   storage_dir  becomes stitcher_dir = storage_dir/chara_detail/active, the root every record is written to
+//   storage_dir  becomes active_dir = storage_dir/chara_detail/active, the root every new record is moved into
 //                and, on web, the root the harvest sweeps. Scoping that root per import is the WHOLE isolation
 //                mechanism of docs/video-import.md decision 5 ("isolated by construction"), which was chosen
 //                over a UI gate precisely because a gate cannot make a sweep pick up only what a session
 //                produced. A second import adopting the first one's loop would write into the first one's root
 //                -- exactly the accident the scoping exists to make impossible.
 //   temp_dir     becomes scraping_dir = temp_dir/chara_detail, the fragment staging the scraper writes into and
-//                removes from. Two sessions sharing it can consume and delete each other's fragments.
+//                removes from, and assembly_dir = temp_dir/chara_detail_assembly, where a new record is stitched
+//                and recognized before it is moved into active_dir. Two sessions sharing it can consume and delete
+//                each other's fragments.
 //   modules_dir  is the ONNX model set the recognizer loaded. A loop built against other models keeps
 //                recognizing with them, silently.
 //   trainer_id   is stamped into every record the recognizer produces. A loop built for another trainer
@@ -1022,17 +1024,18 @@ public:
     // import session is open, and nothing at all for a live capture (messages::charaDetailFinished says why
     // absence is the safe default).
     //
-    // The origin is DERIVED FROM THE OPEN SESSION rather than passed in by the three call sites, because the
+    // The origin is DERIVED FROM THE OPEN SESSION rather than passed in by the call sites, because the
     // session claim is the only thing that actually knows: the sites are pipeline wiring inside startPipeline
-    // (a stitch failure, a close-before-complete, and a completed recognition) which run on pipeline threads and
+    // (a failed scrape, stitch or recognition, a close-before-complete, and a completed recognition) which run on
+    // pipeline threads and
     // have no idea who asked for the capture. Threading a flag down to them would mean re-stating at every
     // emitter a fact CaptureSessionPolicy already holds -- and it is the same fact, since a session is exactly
     // what an import must hold to have a pipeline to emit from (startCaptureSession). A record regeneration owns
     // no session, so its path reports no origin, which is correct: it is not an import.
     //
     // THE RUN'S RECORD COUNT IS INCREMENTED HERE, on success, and this is the only site that does it. It is the
-    // one place all three terminal outcomes pass through (a completed recognition, a stitch failure, a
-    // close-before-complete), so counting here cannot come apart from what the front end was told: a record the
+    // one place every terminal outcome passes through (a completed recognition, and each failure above), so
+    // counting here cannot come apart from what the front end was told: a record the
     // user was never told about must not be counted, and one that was must not be missed. A failure is
     // deliberately not counted -- the number exists to answer "did this run produce anything", and an announced
     // failure produced nothing.

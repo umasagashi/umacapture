@@ -318,8 +318,8 @@
       }
     },
     "wasm/umacapture_core.js": {
-      "sha256": "dedfc424e2123f21f12e9ee08c55c0125ceec002441abc10797ff3244158690b",
-      "bytes": 126738,
+      "sha256": "f8deb97c353181bf1438b56bdb49025fabaf54bd40c1840f44d8af202b995a2e",
+      "bytes": 127052,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
@@ -329,7 +329,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "b80136f94f8f0f80eac8e48b915f82d0a66aa62ce5d98374038c328fb1e5f4fa",
+          "digest": "d907f721568c16709042b363928d90203f2d15966aefa22c5e6b010c344f7623",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
@@ -351,8 +351,8 @@
       }
     },
     "wasm/umacapture_core.wasm": {
-      "sha256": "179a037ac0fb9a672b8dc91966e6e2486d7ffddeab9a25854e29bdb520bb65d7",
-      "bytes": 3709884,
+      "sha256": "4f518a2aed32766c20301dc802cb8999e57a9cfc48e4e9329e16e8165fa44f82",
+      "bytes": 3712503,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
@@ -362,7 +362,7 @@
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "b80136f94f8f0f80eac8e48b915f82d0a66aa62ce5d98374038c328fb1e5f4fa",
+          "digest": "d907f721568c16709042b363928d90203f2d15966aefa22c5e6b010c344f7623",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [

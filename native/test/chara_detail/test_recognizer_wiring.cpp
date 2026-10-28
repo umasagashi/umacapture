@@ -1,5 +1,6 @@
 // Wiring tests for CharaDetailRecognizer: each of the three inputs its constructor subscribes to reaches the
-// method it is meant to reach, and answers on the output it is meant to answer on.
+// method it is meant to reach, and answers on the output it is meant to answer on -- and a new record reaches the
+// store's active root only whole, by one move, before it is announced.
 //
 // The recognizer here is the production one, built by its production constructor, so the subscriptions under test
 // are the ones the app runs. Its predictors come from the test target's makePredictor
@@ -7,9 +8,9 @@
 // which channel answers, how often, and with which of the forwarded values. The config is the shipped
 // recognizer.json. All connections are direct, so every send() delivers synchronously and no case waits.
 //
-// What these cases cannot see: a capture subscription (recognize_ready) that calls nothing at all passes case 3,
-// because the capture path reports failure only to the log and success needs a full record on disk. The golden
-// suite, whose every case produces records, is what catches that.
+// What these cases cannot see: which roots startPipeline hands the recognizer. The pipeline wiring tests
+// (core/test_native_api_pipeline_wiring.cpp) read that off a running pipeline, and the golden suite, whose every
+// case reads its records out of the active root, fails if a recognized record never arrives there.
 
 #include <doctest/doctest.h>
 
@@ -54,7 +55,7 @@ private:
     event_util::Connection<Args...> target;
 };
 
-// A record root no case creates: every record under it is missing, so recognize() fails at its first read.
+// A root no case creates: every record under it is missing, so recognize() fails at its first read.
 std::filesystem::path missingRecordRoot() {
     static const auto root = std::filesystem::temp_directory_path()
                              / ("uma_recognizer_wiring_no_records_" + std::to_string(std::random_device{}()));
@@ -70,6 +71,7 @@ recognizer_config::CharaDetailRecognizerConfig shippedRecognizerConfig() {
 struct Wiring {
     event_util::Connection<RecordInfo> recognize_ready = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<RecordInfo> recognize_completed = event_util::makeDirectConnection<RecordInfo>();
+    event_util::Connection<RecordInfo> recognize_failed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<RecordInfo> update_ready = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<RecordInfo> update_completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> factor_probe_ready =
@@ -82,6 +84,7 @@ struct Wiring {
         std::make_shared<CountingListener<RecordInfo>>(recognize_ready);
 
     std::vector<RecordInfo> recognized;
+    std::vector<RecordInfo> failed;
     std::vector<RecordInfo> updated;
     struct Probe {
         std::size_t factor_limit;
@@ -91,10 +94,21 @@ struct Wiring {
     std::vector<Probe> probes;
     std::vector<std::string> errors;
 
+    // Called on the completion channel, before the case's own record of it, while the recognizer is still inside
+    // the send. A case that sets it observes the disk at the moment the record is announced.
+    std::function<void(const RecordInfo &)> on_completed;
+
     std::unique_ptr<CharaDetailRecognizer> recognizer;
 
-    explicit Wiring(const std::filesystem::path &record_root = missingRecordRoot()) {
-        recognize_completed->listen([this](const RecordInfo &info) { recognized.push_back(info); });
+    // Under `root`: `assembly` (where new records are assembled), `active` (the store's active root) and `modules`.
+    explicit Wiring(const std::filesystem::path &root = missingRecordRoot()) {
+        recognize_completed->listen([this](const RecordInfo &info) {
+            if (on_completed) {
+                on_completed(info);
+            }
+            recognized.push_back(info);
+        });
+        recognize_failed->listen([this](const RecordInfo &info) { failed.push_back(info); });
         update_completed->listen([this](const RecordInfo &info) { updated.push_back(info); });
         factor_probe_completed->listen(
             [this](const std::vector<record::Factor> &, std::size_t limit, bool cue, const RecordInfo &info) {
@@ -103,16 +117,18 @@ struct Wiring {
         error->listen([this](const std::string &message) { errors.push_back(message); });
 
         const auto config = shippedRecognizerConfig();
-        const auto module_root = record_root / "modules";
+        const auto module_root = root / "modules";
         const auto factor_rows =
             std::make_shared<const recognizer_impl::FactorRowReader>(module_root, config.factor_tab);
         recognizer = std::make_unique<CharaDetailRecognizer>(
             "wiring_test_trainer",
-            record_root,
+            root / "assembly",
+            root / "active",
             module_root,
             factor_rows,
             recognize_ready_spy,
             recognize_completed,
+            recognize_failed,
             update_ready,
             update_completed,
             factor_probe_ready,
@@ -149,6 +165,33 @@ recognizer_impl::SelfFactorWindow probeWindow(const Frame &frame, std::size_t fa
     return {scroll_area, factor_limit};
 }
 
+std::filesystem::path freshRoot(const std::string &name) {
+    return std::filesystem::temp_directory_path()
+           / ("uma_recognizer_wiring_" + name + "_" + std::to_string(std::random_device{}()));
+}
+
+void writeModules(const std::filesystem::path &root) {
+    std::filesystem::create_directories(root / "modules");
+    json_util::write(root / "modules" / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
+}
+
+// A record directory as the stitcher leaves it: each tab image with the sidecar Frame::open reads its
+// intersection from (the whole image).
+void writeStitchedTabs(const std::filesystem::path &record_dir) {
+    std::filesystem::create_directories(record_dir);
+    for (const auto *tab : {"skill", "factor", "campaign"}) {
+        Frame::fixed(factorTabFrame()).save(record_dir / (std::string(tab) + ".png"));
+        json_util::write(
+            record_dir / (std::string(tab) + ".json"),
+            {{"intersection", Rect<int>{Point<int>{0, 0}, Point<int>{kFrameWidth, kFrameHeight}}}});
+    }
+}
+
+std::string readBytes(const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
 TEST_CASE("a factor probe sent to the recognizer comes back on the completion channel with the limit and cue it was sent") {
     REQUIRE_FALSE(std::filesystem::exists(missingRecordRoot()));
     Wiring wiring;
@@ -167,6 +210,7 @@ TEST_CASE("a factor probe sent to the recognizer comes back on the completion ch
     CHECK(wiring.probes[0].record_id == "probe_record");
     CHECK(wiring.errors.empty());
     CHECK(wiring.recognized.empty());
+    CHECK(wiring.failed.empty());
     CHECK(wiring.updated.empty());
 }
 
@@ -185,6 +229,7 @@ TEST_CASE("an update request for a record that cannot be read is reported on the
           == "updateRecord failed for record_id=missing: record.json not found, cannot resolve record_type");
     CHECK(wiring.updated.empty());
     CHECK(wiring.recognized.empty());
+    CHECK(wiring.failed.empty());
     CHECK(wiring.probes.empty());
     CHECK_FALSE(std::filesystem::exists(missingRecordRoot()));
 }
@@ -192,36 +237,26 @@ TEST_CASE("an update request for a record that cannot be read is reported on the
 TEST_CASE("a re-recognized record is saved to recognized.json with the app's record format, leaving record.json") {
     // A record written before the format change carries 1.0.0, and the loader corrects every record below 2.0.0
     // once more; a re-recognition that kept the old value would have its fresh reading corrected a second time.
-    const auto root = std::filesystem::temp_directory_path()
-                      / ("uma_recognizer_wiring_update_" + std::to_string(std::random_device{}()));
-    const auto record_dir = root / "old_record";
-    std::filesystem::create_directories(record_dir);
-    std::filesystem::create_directories(root / "modules");
-    json_util::write(root / "modules" / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
-    // Each tab image with the sidecar Frame::open reads its intersection from: the whole image.
-    for (const auto *tab : {"skill", "factor", "campaign"}) {
-        Frame::fixed(factorTabFrame()).save(record_dir / (std::string(tab) + ".png"));
-        json_util::write(
-            record_dir / (std::string(tab) + ".json"),
-            {{"intersection", Rect<int>{Point<int>{0, 0}, Point<int>{kFrameWidth, kFrameHeight}}}});
-    }
+    const auto root = freshRoot("update");
+    const auto record_dir = root / "active" / "old_record";
+    writeModules(root);
+    writeStitchedTabs(record_dir);
     record::CharaDetailRecord old_record{};
     old_record.metadata.format_version = "1.0.0";
     old_record.metadata.record_id.self = "old_record";
     old_record.metadata.record_type = record::RecordType::Standard;
     json_util::write(record_dir / "record.json", old_record, 4);
-    const auto readBytes = [](const std::filesystem::path &path) {
-        std::ifstream in(path, std::ios::binary);
-        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    };
     const auto old_bytes = readBytes(record_dir / "record.json");
 
     {
         Wiring wiring(root);
         wiring.update_ready->send(RecordInfo{"old_record"});
         CHECK(wiring.errors.empty());
+        CHECK(wiring.failed.empty());
         REQUIRE(wiring.updated.size() == 1);
     }
+    // Worked on in place: a re-recognition neither assembles nor moves anything.
+    CHECK_FALSE(std::filesystem::exists(root / "assembly"));
     // The result goes to recognized.json; record.json is the app's and is only read here.
     const auto saved = json_util::read(record_dir / "recognized.json").get<record::CharaDetailRecord>();
     CHECK(saved.metadata.format_version == "2.0.0");
@@ -241,22 +276,89 @@ TEST_CASE("a re-recognized record is saved to recognized.json with the app's rec
     std::filesystem::remove_all(root, ignored);
 }
 
-TEST_CASE("the capture input is subscribed once and a failed capture does not report an update error") {
+TEST_CASE("the capture input is subscribed once and a failed capture is reported as that record's failure") {
     REQUIRE_FALSE(std::filesystem::exists(missingRecordRoot()));
     Wiring wiring;
 
     CHECK(wiring.recognize_ready_spy->registrations == 1);
 
-    // Capture mode reports a failure to the log only. An error here would mean this input reached update mode.
+    // A new record that cannot be read fails on the capture's own channel, with its id. An error on the update
+    // channel would mean this input reached update mode.
     wiring.recognize_ready->send(RecordInfo{"missing", record::RecordType::Standard});
     // Without a record_type too, as the CLI's `recognize --id` sends it.
     wiring.recognize_ready->send(RecordInfo{"missing"});
 
+    REQUIRE(wiring.failed.size() == 2);
+    CHECK(wiring.failed[0].record_id == "missing");
+    CHECK(wiring.failed[1].record_id == "missing");
     CHECK(wiring.errors.empty());
     CHECK(wiring.recognized.empty());
     CHECK(wiring.updated.empty());
     CHECK(wiring.probes.empty());
+    // Nothing reached the store, not even its root.
     CHECK_FALSE(std::filesystem::exists(missingRecordRoot()));
+}
+
+TEST_CASE("a new record is in the store with its result when it is announced and not there before") {
+    const auto root = freshRoot("capture");
+    writeModules(root);
+    writeStitchedTabs(root / "assembly" / "new_record");
+
+    bool active_had_result = false;
+    bool active_had_prediction = false;
+    bool assembly_still_there = true;
+    Wiring wiring(root);
+    wiring.on_completed = [&](const RecordInfo &info) {
+        const auto active = root / "active" / info.record_id;
+        active_had_result = std::filesystem::exists(active / "recognized.json");
+        active_had_prediction = std::filesystem::exists(active / "prediction.json");
+        assembly_still_there = std::filesystem::exists(root / "assembly" / info.record_id);
+    };
+
+    // The whole recognition, up to the result, runs before anything is under the store's root.
+    REQUIRE_FALSE(std::filesystem::exists(root / "active"));
+    wiring.recognize_ready->send(RecordInfo{"new_record", record::RecordType::Standard});
+
+    CHECK(wiring.failed.empty());
+    CHECK(wiring.errors.empty());
+    REQUIRE(wiring.recognized.size() == 1);
+    CHECK(wiring.recognized[0].record_id == "new_record");
+    // At the moment of the announcement the record is in the store whole, and it was moved, not copied.
+    CHECK(active_had_result);
+    CHECK(active_had_prediction);
+    CHECK_FALSE(assembly_still_there);
+    const auto saved =
+        json_util::read(root / "active" / "new_record" / "recognized.json").get<record::CharaDetailRecord>();
+    CHECK(saved.metadata.record_id.self == "new_record");
+    CHECK(std::filesystem::exists(root / "active" / "new_record" / "skill.png"));
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
+TEST_CASE("a new record whose move into the store fails is reported as failed and never announced") {
+    const auto root = freshRoot("collision");
+    writeModules(root);
+    writeStitchedTabs(root / "assembly" / "taken");
+    // A directory of the same id is already in the store. The move must not merge into it or replace it.
+    std::filesystem::create_directories(root / "active" / "taken");
+    json_util::write(root / "active" / "taken" / "record.json", {{"already", "here"}});
+    const auto existing_bytes = readBytes(root / "active" / "taken" / "record.json");
+
+    Wiring wiring(root);
+    wiring.recognize_ready->send(RecordInfo{"taken", record::RecordType::Standard});
+
+    REQUIRE(wiring.failed.size() == 1);
+    CHECK(wiring.failed[0].record_id == "taken");
+    CHECK(wiring.recognized.empty());
+    CHECK(wiring.errors.empty());
+    // The store's directory is as it was; the assembled one stays out of the store.
+    CHECK_FALSE(std::filesystem::exists(root / "active" / "taken" / "recognized.json"));
+    CHECK(readBytes(root / "active" / "taken" / "record.json") == existing_bytes);
+    CHECK(std::filesystem::exists(root / "assembly" / "taken" / "recognized.json"));
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }
 
 }  // namespace

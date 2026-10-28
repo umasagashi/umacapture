@@ -917,7 +917,7 @@ harvest-based import**.
 UX affordance; it cannot make a sweep pick up only what the session produced.
 
 The mechanism is already there: `directory.storage_dir` is a per-pipeline-start config key
-(`NativeApi::startPipeline` derives `stitcher_dir` = `storage_dir/chara_detail/active` from it). An import
+(`NativeApi::startPipeline` derives `active_dir` = `storage_dir/chara_detail/active` from it). An import
 session therefore points the core at a **storage root scoped to that import**, and the sweep — which
 can stay as indiscriminate as it is — physically cannot see anything the import did not write.
 Records move from there into the real store through the existing merge path.

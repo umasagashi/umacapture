@@ -919,11 +919,13 @@ void CampaignTabRecognizer::recognize(
 
 CharaDetailRecognizer::CharaDetailRecognizer(
     const std::string &trainer_id,
+    const std::filesystem::path &assembly_root_dir,
     const std::filesystem::path &record_root_dir,
     const std::filesystem::path &module_root_dir,
     const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
     const event_util::Listener<RecordInfo> &on_recognize_ready,
     const event_util::Sender<RecordInfo> &on_recognize_completed,
+    const event_util::Sender<RecordInfo> &on_recognize_failed,
     const event_util::Listener<RecordInfo> &on_update_requested,
     const event_util::Sender<RecordInfo> &on_update_completed,
     const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe_ready,
@@ -931,6 +933,7 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     const event_util::Sender<std::string> &on_error,
     const recognizer_config::CharaDetailRecognizerConfig &config)
     : trainer_id(trainer_id)
+    , assembly_root_dir(assembly_root_dir)
     , record_root_dir(record_root_dir)
     , module_root_dir(module_root_dir)
     , config(config)
@@ -941,6 +944,7 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
     , on_recognize_ready(on_recognize_ready)
     , on_recognize_completed(on_recognize_completed)
+    , on_recognize_failed(on_recognize_failed)
     , on_update_requested(on_update_requested)
     , on_update_completed(on_update_completed)
     , on_factor_probe_ready(on_factor_probe_ready)
@@ -998,7 +1002,8 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
     // file; contain that here so the drop is reported against its record_id and a stop() cancellation is
     // not logged as an error, neither of which the runner's generic arm can do.
     try {
-        const auto record_dir = record_root_dir / raw_info.record_id;
+        // A new record is still being assembled; a re-recognized one is already in the store (see the constructor).
+        const auto record_dir = (isUpdateMode ? record_root_dir : assembly_root_dir) / raw_info.record_id;
         // record.json is the app's: only Dart writes it, and the recognizer only reads it (record_type recovery
         // and the update-mode metadata). The recognizer's result goes to recognized.json, which the app composes
         // into record.json.
@@ -1115,6 +1120,13 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         if (isUpdateMode) {
             on_update_completed->send(record_info);
         } else {
+            // The record enters the store here, whole, in one rename: the assembly root and the store's active root
+            // are on one volume (both sit under the same data root on Windows and in one MEMFS on web), so this is a
+            // directory entry moving, never a copy a scan could find half-done. It fails rather than merges if a
+            // directory of that id is already in the store. Only then is the record announced, so the front end
+            // that picks it up from the store always finds it there.
+            std::filesystem::create_directories(record_root_dir);
+            std::filesystem::rename(record_dir, record_root_dir / raw_info.record_id);
             on_recognize_completed->send(record_info);
         }
     } catch (...) {
@@ -1132,13 +1144,20 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
                 "recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode,
                 failure.message);
         }
-        // Only the update path has a caller blocked on a terminal signal (the Dart regeneration flow, and on
-        // web the worker's update window that otherwise waits out its full timeout). Surface the outcome so it
-        // is not silent; the capture path reports its own failures elsewhere and is left unchanged. An abort
-        // is reported here as well, deliberately: the update did not produce a record either way, and leaving
-        // the waiter to time out would be worse than telling it the update did not happen.
+        // The update path has a caller blocked on a terminal signal (the Dart regeneration flow, and on web the
+        // worker's update window that otherwise waits out its full timeout). An abort is reported there as well,
+        // deliberately: the update did not produce a record either way, and leaving the waiter to time out would
+        // be worse than telling it the update did not happen.
+        //
+        // A new record that failed here never reaches the store, so the capture it came from has to be taken
+        // again, and the user learns that only from this report. An abort is the exception: the pipeline is being
+        // stopped, and the session it belonged to ends with it. The assembled directory is left where it is, for
+        // diagnosis as the stitcher leaves its input; it is under the scratch root, which does not outlive the app (the
+        // desktop app empties it at start, and on web it is in MEMFS).
         if (isUpdateMode) {
             on_error->send("updateRecord failed for record_id=" + raw_info.record_id + ": " + failure.message);
+        } else if (!failure.aborted) {
+            on_recognize_failed->send(raw_info);
         }
     }
 }

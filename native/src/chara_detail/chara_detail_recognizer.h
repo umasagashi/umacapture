@@ -627,13 +627,23 @@ private:
 class CharaDetailRecognizer {
 public:
     // `factor_rows` is the pipeline's one FactorRowReader, which the scene scraper holds too (see there).
+    //
+    // The two roots are the two places a record directory can be, and which one a request reads is decided by its
+    // mode, not by the caller. A new record (`on_recognize_ready`) is read from and written into
+    // `assembly_root_dir`, where the stitcher assembled it, and is then moved into `record_root_dir` -- the store's
+    // active root -- in one rename once recognized.json is in it, before the completion is sent. So a record
+    // directory under the active root always holds a result: the app scans that root while a capture runs, and a
+    // directory there without one is a record it cannot read. A re-recognition (`on_update_requested`) works on a
+    // record that is already in the store, in place under `record_root_dir`.
     CharaDetailRecognizer(
         const std::string &trainer_id,
+        const std::filesystem::path &assembly_root_dir,
         const std::filesystem::path &record_root_dir,
         const std::filesystem::path &module_root_dir,
         const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
         const event_util::Listener<RecordInfo> &on_recognize_ready,
         const event_util::Sender<RecordInfo> &on_recognize_completed,
+        const event_util::Sender<RecordInfo> &on_recognize_failed,
         const event_util::Listener<RecordInfo> &on_update_requested,
         const event_util::Sender<RecordInfo> &on_update_completed,
         const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe_ready,
@@ -667,6 +677,7 @@ public:
 
 private:
     const std::string trainer_id;
+    const std::filesystem::path assembly_root_dir;
     const std::filesystem::path record_root_dir;
     const std::filesystem::path module_root_dir;
     const recognizer_config::CharaDetailRecognizerConfig config;
@@ -681,6 +692,10 @@ private:
 
     const event_util::Listener<RecordInfo> on_recognize_ready;
     const event_util::Sender<RecordInfo> on_recognize_completed;
+    // A new record that will not reach the store: its recognition threw, or the move into the store did. Sent
+    // with the record's own id, which is what lets the front end end that attempt rather than whichever one it
+    // is showing now (NativeApi::notifyAttemptFailed).
+    const event_util::Sender<RecordInfo> on_recognize_failed;
 
     const event_util::Listener<RecordInfo> on_update_requested;
     const event_util::Sender<RecordInfo> on_update_completed;
@@ -692,8 +707,8 @@ private:
     // the front end tell the two apart.
     const event_util::Sender<std::vector<record::Factor>, std::size_t, bool, RecordInfo> on_factor_probe_completed;
 
-    // Surfaces a terminal recognition failure (currently only the update path) as a human-readable message,
-    // wired to NativeApi::notifyError so a failed re-recognition reaches the UI instead of stalling forever.
+    // Surfaces a terminal failure of the update path as a human-readable message, wired to
+    // NativeApi::notifyError so a failed re-recognition reaches the UI instead of stalling forever.
     const event_util::Sender<std::string> on_error;
 };
 

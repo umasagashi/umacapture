@@ -1036,11 +1036,11 @@ function startDrainLoop() {
       // The onError must be attributed to THIS update, not merely observed during it: a record regeneration is
       // a passenger on a shared event loop (see handleUpdateRecord), so a live capture running alongside it
       // emits its own onErrors into the very same message queue: the attempt-ending tags that
-      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, stitch_failed), and
-      // per-frame failures such as updateFrame failed. Counting one of those as the regeneration's failure
-      // would fail a record that never failed. This is the same coexistence the desktop implements on
-      // purpose (native_controller.h), so the
-      // attribution, not the coexistence, is what has to be fixed.
+      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, stitch_failed,
+      // recognize_failed), and per-frame failures such as updateFrame failed. Counting one of those as the
+      // regeneration's failure would fail a record that never failed. This is the same coexistence the desktop
+      // implements on purpose (native_controller.h), so the attribution, not the coexistence, is what has to
+      // be fixed.
       if (parsed && parsed.type === 'onError') {
         const target = updateFailureTarget(parsed.message);
         if (target !== null) {
@@ -1086,7 +1086,7 @@ function startDrainLoop() {
 //
 // A UI GATE IS NOT THE ANSWER and was explicitly rejected as insufficient: a disabled button cannot make a sweep
 // pick up only what the session produced. The mechanism is the config key the core already reads.
-// `directory.storage_dir` is per-pipeline-start (native_api.cpp derives `stitcher_dir` =
+// `directory.storage_dir` is per-pipeline-start (native_api.cpp derives `active_dir` =
 // storage_dir/chara_detail/active from it) AND part of CapturePipelineIdentity, so pointing an import at its own
 // root both scopes what the pipeline writes and forces the loop to be rebuilt rather than adopted.
 //
@@ -1726,7 +1726,7 @@ async function updateRecordBody(message, recordId, replyUpdated, failUpdate) {
   // is this handler's -- see the finally.
   //
   // `storage/chara_detail/active/<id>` is a C++ layout, not a web-owned one: the authority is
-  // `stitcher_dir` in native/src/core/native_api.cpp (storage_dir / "chara_detail" / "active"), mirrored here as
+  // `active_dir` in native/src/core/native_api.cpp (storage_dir / "chara_detail" / "active"), mirrored here as
   // a literal so this worker can build the MEMFS path without a wasm round trip.
   const recordDir = SHARED_ROOTS.storage + '/chara_detail/active/' + recordId;
   // Declared out here so the finally drops exactly the entry this call registered -- and only if it got that
@@ -3725,7 +3725,7 @@ function makeSyntheticRgba(w, h, frameIndex, total) {
   return buffer;
 }
 
-// Harvests every record file under storage_dir/chara_detail/active/<uuid>/ (layout authority: `stitcher_dir` in
+// Harvests every record file under storage_dir/chara_detail/active/<uuid>/ (layout authority: `active_dir` in
 // native/src/core/native_api.cpp) and posts them to main as a structured `harvest` message (transferable
 // ArrayBuffers -- recognized.json/prediction.json/trainee.jpg and the stitch PNGs + their geometry json).
 // Paths are storage-relative (chara_detail/active/<uuid>/<file>) so main can write them straight under
@@ -3797,7 +3797,7 @@ function harvestAndCleanup(roots) {
 // collectFiles returns MEMFS-independent buffers, so freeing the dir afterwards cannot corrupt the shipped
 // bytes, and the pipeline never revisits a completed record.
 //
-// `/work/storage/chara_detail/active/<id>` layout authority: see harvestAndCleanup's `stitcher_dir` reference
+// `/work/storage/chara_detail/active/<id>` layout authority: see harvestAndCleanup's `active_dir` reference
 // above.
 function harvestLiveRecord(recordId) {
   if (Module === null) return;

@@ -516,7 +516,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto factor_rows =
         std::make_shared<const chara_detail::recognizer_impl::FactorRowReader>(modules_dir, recognizer_config.factor_tab);
 
-    const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
+    const auto temp_dir = json_util::decodePath(config_json["directory"]["temp_dir"]);
+    const auto scraping_dir = temp_dir / "chara_detail";
 
     // Route directory create/remove through the (possibly Dart-provided) callbacks so the pipeline
     // components stay decoupled from this singleton and can be unit-tested with fakes. Captured by value
@@ -553,8 +554,13 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto update_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>("update_ready");
     on_update_ready = update_ready_connection;
 
-    const auto stitcher_dir =
-        json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
+    // A new record is stitched and recognized in assembly_dir, under the scratch root, and the recognizer moves it
+    // into active_dir -- the record store's active root -- only once its result is written (CharaDetailRecognizer's
+    // constructor says why). The scratch root is the place for it on every platform: the desktop app empties it at
+    // start, so whatever a crash strands mid-assembly is reclaimed there, and on web it is MEMFS, which the page
+    // does not outlive.
+    const auto assembly_dir = temp_dir / "chara_detail_assembly";
+    const auto active_dir = json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
 
     // Stitching failed partway (a corrupt/partial fragment): the record can never be recognized, so surface a
     // terminal failure just like closed_before_completed instead of leaving the UI waiting forever.
@@ -565,7 +571,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
 
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
-        stitcher_dir,
+        assembly_dir,
         stitch_ready_connection,
         recognize_ready_connection,
         stitch_failed_connection,
@@ -577,14 +583,21 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     recognize_completed_connection->listen(
         [this](const auto &info) { notifyCharaDetailFinished(info, true); });
 
+    // A new record whose recognition, or whose move into the store, failed: the attempt ends with nothing to show
+    // for it, exactly as a failed stitch does, and for the same reason it is reported against the payload's id --
+    // the recognizer runs on its own thread.
+    const auto recognize_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    recognize_failed_connection->listen(
+        [this](const auto &info) { notifyAttemptFailed(info, "recognize_failed"); });
+
     const auto update_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
     update_completed_connection->listen([this](const auto &info) { notifyCharaDetailUpdated(info); });
 
     // A record re-recognition (update path) that throws inside the recognizer emits its reason here; relay it as
     // a terminal onError so the UI (and the Wasm worker's update window) does not wait forever for a completion
     // that will never arrive -- the same guarantee the synchronous updateRecord() catch above provides.
-    const auto recognize_failed_connection = event_util::makeDirectConnection<std::string>();
-    recognize_failed_connection->listen([this](const std::string &message) { notifyError(message); });
+    const auto update_failed_connection = event_util::makeDirectConnection<std::string>();
+    update_failed_connection->listen([this](const std::string &message) { notifyError(message); });
 
     // The recognizer stage runs ONNX inference. The constructor is the same on every platform; only the predictors
     // it builds through makePredictor differ (in-process onnxruntime on Windows, a JS bridge to onnxruntime-web in
@@ -593,16 +606,18 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // end.
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
-        stitcher_dir,
+        assembly_dir,
+        active_dir,
         modules_dir,
         factor_rows,
         recognize_ready_connection,
         recognize_completed_connection,
+        recognize_failed_connection,
         update_ready_connection,
         update_completed_connection,
         factor_probe_ready_connection,
         factor_probe_completed_connection,
-        recognize_failed_connection,
+        update_failed_connection,
         recognizer_config);
 
     event_runners->start();

@@ -4,15 +4,19 @@
 // The core announces each session with its `record_id` (`onCharaDetailStarted` /
 // `onCharaDetailRestarted`). Some outcomes are produced off the thread that makes those
 // announcements -- the record's completion (`onCharaDetailFinished`), the early duplicate check
-// (`onFactorProbe`), a failed stitch (`onError` with `record_id`), and the store's own duplicate
-// verdict on the finished record -- so one of them can arrive after the NEXT session was announced.
-// It is then true of its own record only:
+// (`onFactorProbe`), a failed stitch or recognition (`onError` with `record_id`), and the store's own
+// duplicate verdict on the finished record -- so one of them can arrive after the NEXT session was
+// announced. It is then true of its own record only:
 //
-//   * it changes neither the card nor the recorded CaptureEvent (the card is about the character on
-//     screen now);
-//   * it makes no sound (a cue about a character the user has already left is noise);
+//   * it does not change the card's state (the card is about the character on screen now);
 //   * whatever it does to the record itself -- retention, the store merge, the captured event -- still
 //     happens.
+//
+// What it does beyond that depends on what it says. A completion or a duplicate verdict makes no sound
+// and records no CaptureEvent: a cue about a character the user has already left is noise. An error
+// with `record_id` is different, because it means that attempt's capture is lost: it is recorded as
+// the last thing that happened and sounds the error cue, as it would have for the attempt on screen,
+// since without it the user would not retake the character.
 //
 // Rows B to E below are the four outcomes, each with its in-attempt control.
 //
@@ -47,7 +51,8 @@ String _restarted(String recordId) =>
 
 final _closed = jsonEncode({'type': 'onCharaDetailClosed'});
 
-String _finished(String id) => jsonEncode({'type': 'onCharaDetailFinished', 'success': true, 'id': id});
+String _finished(String id, {bool success = true}) =>
+    jsonEncode({'type': 'onCharaDetailFinished', 'success': success, 'id': id});
 
 /// The self-factors both the stored record and every probe below carry, so a probe of the attempt on
 /// screen is a duplicate of it.
@@ -362,18 +367,24 @@ void main() {
   });
 
   group('row E: an error of an earlier attempt', () {
-    test('a late stitch failure leaves the card alone and makes no sound', () async {
+    test('a late recognition failure leaves the attempt on screen alone but is announced as a lost capture', () async {
       final env = build();
       env.controller.handleNativeMessage(_started('r1'));
-      env.controller.handleNativeMessage(_restarted('r2'));
+      env.controller.handleNativeMessage(_started('r2'));
 
-      env.controller.handleNativeMessage(_error('stitch_failed', recordId: 'r1'));
+      env.controller.handleNativeMessage(_finished('r1', success: false));
+      env.controller.handleNativeMessage(_error('recognize_failed', recordId: 'r1'));
       await pumpEventQueue();
 
+      expect(stateOf(env.container).attemptId, 'r2');
       expect(stateOf(env.container).status, CharaDetailCaptureStatus.waitingForReady);
       expect(stateOf(env.container).error, isNull);
-      expect(env.container.read(captureEventProvider), isNull);
-      expect(env.sounds, isEmpty);
+      final event = env.container.read(captureEventProvider);
+      expect(event, isA<CharaCaptureEvent>());
+      expect((event as CharaCaptureEvent).status, CharaDetailCaptureStatus.failed);
+      expect(event.error, 'recognize_failed');
+      expect(event.recordId, isNull, reason: 'a failed attempt left no record to open');
+      expect(env.sounds, ['error']);
     });
 
     test('the controls: the attempt on screen fails, and an error naming no attempt still applies', () async {
