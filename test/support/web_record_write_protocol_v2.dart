@@ -255,11 +255,11 @@ final class ProtocolDeath {
       }
       if (checkpoint == at) _die(checkpoint.name);
     },
-    writeFile: (target, bytes) async {
+    writeFile: (within, target, bytes) async {
       _checkAlive();
-      await target.writeAsBytes(bytes);
+      await within.writeAsBytes(target, bytes);
     },
-    copyTree: (source, target) async {
+    copyTree: (within, source, target) async {
       _checkAlive();
       if (partialCopy?.call(source, target) ?? false) {
         final files = await treeFiles(source);
@@ -272,24 +272,24 @@ final class ProtocolDeath {
         }
         _die('inside the copy into ${target.name}');
       }
-      return source.copyTreeInto(target);
+      return within.copyTreeInto(source, target);
     },
-    deleteDirectory: (target) async {
+    deleteDirectory: (within, target) async {
       _checkAlive();
       if (partialDelete?.call(target) ?? false) {
         final files = await treeFiles(target);
         if (files.isNotEmpty) await files.first.$2.delete();
         _die('inside the delete of ${target.name}');
       }
-      await target.delete(recursive: true, emptyOk: true);
+      await within.delete(target, recursive: true, emptyOk: true);
     },
-    writeManifest: (target, contents) async {
+    writeManifest: (within, target, contents) async {
       _checkAlive();
       if (tornState != null && (jsonDecode(contents) as Map<String, dynamic>)['state'] == tornState) {
         await target.writeAsString(contents.substring(0, contents.length ~/ 2));
         _die('inside the $tornState manifest write');
       }
-      await target.writeAsString(contents);
+      await within.writeAsString(target, contents);
     },
   );
 }

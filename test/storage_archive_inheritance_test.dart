@@ -12,6 +12,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/record_body.dart';
 import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
@@ -61,6 +62,40 @@ void main() {
     return (map['metadata']['record_id'] as Map)['parent$slot'] as String?;
   }
 
+  RecordBodyImages imagesOnDisk(DirectoryPath storeDir, String id) {
+    final m = CharaDetailRecord.fromRecordJson(File('${(storeDir / id).path}/record.json').readAsStringSync()).metadata;
+    return (binding: m.binding, geometry: m.geometry, icon: m.icon);
+  }
+
+  // Places the binding of the archived record [id] the way a sync round's binding stage does: on disk and in what the
+  // archive store serves, without publishing it. Returns what the placement wrote.
+  Future<RecordBodyImages> placeBindingUnpublished(
+    ProviderContainer container,
+    DirectoryPath archiveDir,
+    String id,
+  ) async {
+    final archive = container.read(charaDetailArchiveStorageLoaderProvider.notifier);
+    await placeRecordBindingsUnlocked(container.read(containerRefProvider), [archiveDir / id], publish: false);
+    final placed = imagesOnDisk(archiveDir, id);
+    expect(placed.binding, isNotNull, reason: 'precondition: no binding was placed');
+    expect(
+      archive.getBy(id: id)?.metadata.binding,
+      placed.binding,
+      reason: 'precondition: the store does not serve it',
+    );
+    expect(
+      container
+          .read(charaDetailArchiveStorageLoaderProvider)
+          .requireValue
+          .firstWhere((e) => e.id == id)
+          .metadata
+          .binding,
+      isNull,
+      reason: 'precondition: the binding was published, so nothing is held unpublished',
+    );
+    return placed;
+  }
+
   // resolveAllInheritance is fire-and-forget on every platform: it publishes the
   // in-flight flag synchronously and clears it when the run completes, so that
   // flag is what a test waits on.
@@ -108,6 +143,8 @@ void main() {
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
     expect(parentOnDisk(activeDir, 'child-active', 1), isNull, reason: 'precondition: starts unlinked');
+    // The archived child the run writes back is in the middle of a sync round's binding stage.
+    final placed = await placeBindingUnpublished(container, archiveDir, 'child-archive');
 
     active.resolveAllInheritance(effects: inheritanceResolutionEffects(container));
     await settleInheritanceResolution(container);
@@ -116,14 +153,16 @@ void main() {
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive');
     expect(active.getBy(id: 'child-active')!.metadata.recordId.parent1, 'parent-archive');
 
-    // Archived child's own record.json was rewritten with its resolved parent.
+    // Archived child's own record.json was rewritten with its resolved parent, over the binding placed on it.
     expect(parentOnDisk(archiveDir, 'child-archive', 1), 'parent-archive2');
+    expect(imagesOnDisk(archiveDir, 'child-archive'), placed, reason: 'the write-back dropped the placed binding');
     final archInMemory = container
         .read(charaDetailArchiveStorageLoaderProvider)
         .asData!
         .value
         .firstWhere((e) => e.id == 'child-archive');
     expect(archInMemory.metadata.recordId.parent1, 'parent-archive2');
+    expect(archInMemory.metadata.binding, placed.binding);
   });
 
   test('resolveAllInheritance completes only after both stores have been written', () async {
@@ -223,6 +262,9 @@ void main() {
     await container.read(charaDetailRecordStorageLoaderProvider.future);
     await container.read(charaDetailArchiveStorageLoaderProvider.future);
 
+    // The archived child is in the middle of a sync round's binding stage.
+    final placed = await placeBindingUnpublished(container, archiveDir, 'child-archive');
+
     final captured = makeRecord(id: 'parent', card: 10, self: const [Factor(1, 1)]);
     writeRecord(activeDir, captured); // the recognizer drops the dir before add()
 
@@ -231,6 +273,7 @@ void main() {
 
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent');
     expect(parentOnDisk(archiveDir, 'child-archive', 1), 'parent');
+    expect(imagesOnDisk(archiveDir, 'child-archive'), placed, reason: 'the write-back dropped the placed binding');
   });
 
   test('resolveAllInheritance keeps active->archive links when the archive failed to load', () async {

@@ -5,40 +5,6 @@ import 'fs_directory.dart';
 
 export 'fs_directory.dart';
 
-/// One directory entry, carrying the kind the listing already determined and,
-/// when the caller asked for it, the metadata the listing could resolve.
-///
-/// Both backends know each entry's kind while they enumerate it — io from the
-/// `FileSystemEntity` subtype, web from `FileSystemHandle.kind` — so returning it
-/// costs nothing and saves the caller a second root-to-leaf resolution per entry.
-/// That extra resolution is cheap on io and expensive on OPFS, where every probe
-/// re-walks the whole handle chain from the storage root.
-///
-/// [size] and [modified] are `null` unless the listing was made with
-/// `withMetadata: true`, and stay `null` even then in the cases named below.
-/// They are opt-in because collecting them is **not** free the way the kind is:
-/// io has to `stat()` each entry (measured on Windows over a 2,000-file
-/// directory: 2.95 ms for the listing alone against 282 ms with a stat per
-/// entry, ~96x) and OPFS has to `getFile()` each file handle, one extra promise
-/// per entry. Every existing caller here is a tree walk — record loading, the
-/// record directory transaction, `sameDirectoryTree` — that wants paths and
-/// kinds only, so charging them for metadata they never read would be a
-/// regression on both platforms.
-///
-/// When metadata *was* requested:
-///
-/// * [size] is the file size in bytes, and is `null` for a directory on **both**
-///   backends. A directory's own `stat().size` on io is an inode figure with no
-///   relation to its contents, and reporting it would make io answer a question
-///   web cannot answer at all with a number that means nothing; a recursive
-///   total is a separate aggregation over the tree.
-/// * [modified] is the last-modified timestamp. It is `null` for a **directory
-///   on web only**, for the same reason [FsBackend.modified] throws there:
-///   `FileSystemDirectoryHandle` exposes no metadata. This is a listing, so the
-///   miss is reported as an absent value rather than as an exception — one
-///   unreachable child must not fail the whole enumeration.
-typedef FsEntry = ({String path, bool isDirectory, int? size, DateTime? modified});
-
 /// Filesystem leaf operations that back [PathEntity] and the record store.
 ///
 /// The **async** surface is the primary, cross-platform contract: the desktop
@@ -51,16 +17,19 @@ typedef FsEntry = ({String path, bool isDirectory, int? size, DateTime? modified
 /// Paths are the platform-joined strings produced by [PathEntity.path]. On the
 /// io backend they are OS paths; on the web backend they are virtual paths whose
 /// segments map 1:1 onto nested OPFS directories.
-abstract interface class FsBackend {
+abstract interface class FsBackend implements FsPathOperations {
   // --- async: primary, both platforms -------------------------------------
 
   /// Whether a file or directory exists at [path].
+  @override
   Future<bool> exists(String path);
 
   /// Reads [path] as a UTF-8 string.
+  @override
   Future<String> readString(String path);
 
   /// Reads [path] as raw bytes.
+  @override
   Future<Uint8List> readBytes(String path);
 
   /// Reads [path] as raw bytes, or null where there is no file at [path].
@@ -68,6 +37,7 @@ abstract interface class FsBackend {
   /// One lookup that answers both questions, for a file that is often not there: asking [exists] first is a
   /// second lookup of the same name, and on web each lookup walks the path from the OPFS root. Any other
   /// failure throws, as [readBytes] does.
+  @override
   Future<Uint8List?> readBytesIfPresent(String path);
 
   /// The directory at [path], resolved once, for a caller with several questions about what lies beneath it.
@@ -101,6 +71,7 @@ abstract interface class FsBackend {
   /// The caller is responsible for creating the parent directory first (as
   /// [FilePath.writeAsString] does); a missing parent is an error on **both**
   /// backends.
+  @override
   Future<void> writeString(String path, String contents);
 
   /// Writes [bytes] to [path], replacing any existing file.
@@ -108,6 +79,7 @@ abstract interface class FsBackend {
   /// Same parent-directory contract as [writeString]. With [flush] the io backend syncs the file to the
   /// disk before the future completes; the web backend ignores it, because an OPFS write lands only at the
   /// writable stream's `close()`, which every write already awaits.
+  @override
   Future<void> writeBytes(String path, List<int> bytes, {bool flush = false});
 
   /// Lists the entries directly (or, with [recursive], transitively) under
@@ -121,6 +93,7 @@ abstract interface class FsBackend {
   /// With [withMetadata] the entries also carry [FsEntry.size] and
   /// [FsEntry.modified]; see [FsEntry] for what each backend can fill in and for
   /// why it is opt-in.
+  @override
   Future<List<FsEntry>> list(
     String path, {
     bool recursive = false,
@@ -129,6 +102,7 @@ abstract interface class FsBackend {
   });
 
   /// Deletes the file or directory at [path].
+  @override
   Future<void> delete(String path, {bool recursive = false});
 
   /// Renames/moves [source] to [destination] (same volume on io).
@@ -137,6 +111,7 @@ abstract interface class FsBackend {
   /// directory rename at all. Moving a directory goes through
   /// [DirectoryPath.moveSyncSafe] / [DirectoryPath.moveAsyncSafe], or
   /// `RecordDirectoryTransaction` when the move must be recoverable.
+  @override
   Future<void> rename(String source, String destination);
 
   /// Whether [rename] of a file onto an existing one replaces it atomically, so that a reader, or a
@@ -151,15 +126,18 @@ abstract interface class FsBackend {
   /// With [recursive] false the parent must already exist, and a missing parent
   /// is an error; with [recursive] true every missing ancestor is created.
   /// Creating a directory that already exists is a no-op on both backends.
+  @override
   Future<void> createDir(String path, {bool recursive = false});
 
   /// Copies the file [source] to [destination].
+  @override
   Future<void> copyFile(String source, String destination);
 
   /// The size of the file at [path], in bytes.
   ///
   /// Throws when [path] does not resolve to a file. Tree comparison uses this to
   /// reject a differing pair without reading either file's contents.
+  @override
   Future<int> length(String path);
 
   /// The last-modified timestamp of the file or directory at [path].
@@ -189,6 +167,7 @@ abstract interface class FsBackend {
   /// so peak memory is bounded by the chunk size rather than by the file size,
   /// and a mismatch near the start costs one chunk instead of two full reads.
   /// Throws when either path does not resolve to a file.
+  @override
   Future<bool> sameFileBytes(String a, String b);
 
   /// Whether [path] currently resolves to a file (as opposed to a directory or
@@ -197,6 +176,7 @@ abstract interface class FsBackend {
   /// The async counterpart of [isFileSync], usable on web: tree walks that must
   /// branch on entry kind (e.g. [DirectoryPath.copyTreeInto]) go through this so
   /// they never touch the sync surface the web backend rejects.
+  @override
   Future<bool> isFile(String path);
 
   // --- sync: io backend only (throws on web) -------------------------------
@@ -233,7 +213,10 @@ abstract interface class FsBackend {
 }
 
 /// An [FsDirectory] that asks [backend] about each descendant by its full path, for a backend where resolving a
-/// directory first saves nothing (io, and the test doubles over it).
+/// directory first saves nothing (io, and the test doubles over it). It holds nothing, so [remembering] is itself.
+///
+/// Every member checks its path is beneath [path] and then makes exactly the call `PathEntity` makes for that path, so
+/// a caller reaching the disk through one of these reads and changes it the way it would by path.
 class PassThroughFsDirectory implements FsDirectory {
   PassThroughFsDirectory(this.backend, this.path);
 
@@ -249,6 +232,15 @@ class PassThroughFsDirectory implements FsDirectory {
   }
 
   @override
+  PassThroughFsDirectory remembering() => this;
+
+  @override
+  Future<bool> exists(String descendant) async => backend.exists(_checked(descendant));
+
+  @override
+  Future<bool> isFile(String descendant) async => backend.isFile(_checked(descendant));
+
+  @override
   Future<String> readString(String descendant) async => backend.readString(_checked(descendant));
 
   @override
@@ -256,6 +248,58 @@ class PassThroughFsDirectory implements FsDirectory {
 
   @override
   Future<Uint8List?> readBytesIfPresent(String descendant) async => backend.readBytesIfPresent(_checked(descendant));
+
+  @override
+  Future<void> writeString(String descendant, String contents) async {
+    return backend.writeString(_checked(descendant), contents);
+  }
+
+  @override
+  Future<void> writeBytes(String descendant, List<int> bytes, {bool flush = false}) async {
+    return backend.writeBytes(_checked(descendant), bytes, flush: flush);
+  }
+
+  @override
+  Future<List<FsEntry>> list(
+    String descendant, {
+    bool recursive = false,
+    bool followLinks = false,
+    bool withMetadata = false,
+  }) async {
+    return backend.list(
+      _checked(descendant),
+      recursive: recursive,
+      followLinks: followLinks,
+      withMetadata: withMetadata,
+    );
+  }
+
+  @override
+  Future<void> delete(String descendant, {bool recursive = false}) async {
+    segmentsToRemoveBelow(path, descendant);
+    return backend.delete(descendant, recursive: recursive);
+  }
+
+  @override
+  Future<void> rename(String source, String destination) async {
+    return backend.rename(_checked(source), _checked(destination));
+  }
+
+  @override
+  Future<void> createDir(String descendant, {bool recursive = false}) async {
+    return backend.createDir(_checked(descendant), recursive: recursive);
+  }
+
+  @override
+  Future<void> copyFile(String source, String destination) async {
+    return backend.copyFile(_checked(source), _checked(destination));
+  }
+
+  @override
+  Future<int> length(String descendant) async => backend.length(_checked(descendant));
+
+  @override
+  Future<bool> sameFileBytes(String a, String b) async => backend.sameFileBytes(_checked(a), _checked(b));
 
   @override
   Future<bool> isDirectory(String descendant) async {

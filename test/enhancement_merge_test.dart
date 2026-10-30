@@ -1016,11 +1016,11 @@ void main() {
       final fixtures = <String, WebRecordWriteTransaction Function(List<WebRecordWriteCheckpoint> reached)>{
         'the base copy fails': (reached) => WebRecordWriteTransaction(
           onCheckpoint: (checkpoint) async => reached.add(checkpoint),
-          copyTree: (source, target) async => false,
+          copyTree: (within, source, target) async => false,
         ),
         'the manifest cannot be written at all': (reached) => WebRecordWriteTransaction(
           onCheckpoint: (checkpoint) async => reached.add(checkpoint),
-          writeManifest: (target, contents) async => throw const FileSystemException('no manifest'),
+          writeManifest: (within, target, contents) async => throw const FileSystemException('no manifest'),
         ),
         // Refused before staging: a directory of the older id's name in the
         // other store makes the id held twice, which no publication stages under.
@@ -1501,7 +1501,7 @@ void main() {
       seedPair();
       var parkingCopies = 0;
       final stuck = WebRecordWriteTransaction(
-        copyTree: (source, target) async {
+        copyTree: (within, source, target) async {
           if (!target.path.contains('superseded')) {
             return _copyTreeByHand(source, target);
           }

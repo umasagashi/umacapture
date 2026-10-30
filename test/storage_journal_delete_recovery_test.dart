@@ -503,7 +503,8 @@ void main() {
       await leaveReplacingSlot(WebRecordWriteCheckpoint.parkedPersisted);
       // The copy into the record store never succeeds — a store out of quota.
       final stuck = WebRecordWriteTransaction(
-        copyTree: (source, target) async => source.name == 'desired' ? false : source.copyTreeInto(target),
+        copyTree: (within, source, target) async =>
+            source.name == 'desired' ? false : within.copyTreeInto(source, target),
       );
 
       final report = await _deleteRetiredGroup(_container(maintenanceWith(stuck)));

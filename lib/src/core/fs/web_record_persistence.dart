@@ -55,7 +55,7 @@ RecordPublication activeOverlayPublication(List<RecordPersistenceFile> files) =>
 /// for the store's own refusals.
 typedef RecordPublicationPlanner =
     Future<RecordPublication?> Function(String recordId, List<RecordPersistenceFile> payload, Set<String> committed);
-typedef RecordFileWriter = Future<void> Function(FilePath target, Uint8List bytes);
+typedef RecordFileWriter = WebRecordStagingWriter;
 typedef PersistentHarvestedRecordFile = ({String path, Uint8List bytes});
 typedef PlatformRecordUpdateBuilder = Future<Iterable<PersistentHarvestedRecordFile>?> Function();
 

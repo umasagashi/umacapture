@@ -184,13 +184,13 @@ void main() {
       // First: the copy of `desired/` over `active/<id>/` gets one file in and
       // dies there, which is what leaves a half-copy standing in the store.
       final firstCrash = WebRecordWriteTransaction(
-        copyTree: (source, target) async {
+        copyTree: (within, source, target) async {
           if (source.name == 'desired') {
             await target.create(recursive: true);
             await target.filePath('old.bin').writeAsBytes(Uint8List.fromList([9]));
             throw StateError('stop mid-copy');
           }
-          return source.copyTreeInto(target);
+          return within.copyTreeInto(source, target);
         },
       );
       expect(await firstCrash.publish(dataRoot, id, overlay()), WebRecordWriteResult.incomplete);
@@ -535,12 +535,12 @@ void main() {
     final finalDir = await _seed(dataRoot, id);
     var injected = false;
     final transaction = WebRecordWriteTransaction(
-      copyTree: (source, target) async {
+      copyTree: (within, source, target) async {
         if (!injected && source.name == 'desired') {
           injected = true;
           return false;
         }
-        return source.copyTreeInto(target);
+        return within.copyTreeInto(source, target);
       },
     );
     expect(await transaction.publish(dataRoot, id, _overlay(id)), WebRecordWriteResult.incomplete);
@@ -565,15 +565,15 @@ void main() {
       final finalDir = await _seed(dataRoot, id);
       final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
       final transaction = WebRecordWriteTransaction(
-        writeManifest: (target, contents) async {
+        writeManifest: (within, target, contents) async {
           if (mode == 'manifest' && jsonDecode(contents)['state'] == 'published') {
             throw StateError('synthetic published manifest failure');
           }
-          await target.writeAsString(contents);
+          await within.writeAsString(target, contents);
         },
-        deleteDirectory: (target) async {
+        deleteDirectory: (within, target) async {
           if (mode == 'cleanup' && target.path == slot.path) throw StateError('synthetic cleanup delete failure');
-          await target.delete(recursive: true, emptyOk: true);
+          await within.delete(target, recursive: true, emptyOk: true);
         },
       );
       expect(await transaction.publish(dataRoot, id, _overlay(id)), WebRecordWriteResult.cleanupPending, reason: mode);
@@ -651,16 +651,16 @@ void main() {
     final finalDir = await _seed(dataRoot, id);
     final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
     final cleanupFailure = WebRecordWriteTransaction(
-      deleteDirectory: (target) async {
+      deleteDirectory: (within, target) async {
         if (target.path == slot.path) throw StateError('synthetic retained cleanup');
-        await target.delete(recursive: true, emptyOk: true);
+        await within.delete(target, recursive: true, emptyOk: true);
       },
     );
     expect(await cleanupFailure.publish(dataRoot, id, _overlay(id)), WebRecordWriteResult.cleanupPending);
     final blocked = WebRecordWriteTransaction(
-      deleteDirectory: (target) async {
+      deleteDirectory: (within, target) async {
         if (target.path == slot.path) throw StateError('synthetic retained cleanup');
-        await target.delete(recursive: true, emptyOk: true);
+        await within.delete(target, recursive: true, emptyOk: true);
       },
     );
     expect(
@@ -708,14 +708,14 @@ void main() {
     final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('ordering');
     var firstManifestWrite = true;
     final transaction = WebRecordWriteTransaction(
-      writeManifest: (target, contents) async {
+      writeManifest: (within, target, contents) async {
         if (firstManifestWrite) {
           firstManifestWrite = false;
           // Nothing may exist at the slot path before the first manifest write:
           // "the slot exists" has to imply "a manifest was at least attempted".
           expect(await slot.exists(), isFalse, reason: 'the slot must be created by the manifest write itself');
         }
-        await target.writeAsString(contents);
+        await within.writeAsString(target, contents);
       },
     );
     expect(await transaction.publish(dataRoot, 'ordering', _overlay('ordering')), WebRecordWriteResult.completed);
@@ -1154,13 +1154,13 @@ Future<void> _crashedFirstPublication(
         throw StateError('the tab went away');
       }
     },
-    deleteDirectory: (_) async {},
-    writeFile: (target, bytes) async {
+    deleteDirectory: (_, _) async {},
+    writeFile: (within, target, bytes) async {
       if (written++ == writesBeforeCrash) {
         if (bytesBeforeCrash != null) await target.writeAsBytes(bytes.sublist(0, bytesBeforeCrash));
         throw StateError('the tab went away');
       }
-      await target.writeAsBytes(bytes);
+      await within.writeAsBytes(target, bytes);
     },
   );
   expect(await transaction.publish(dataRoot, id, overlays), WebRecordWriteResult.incomplete);

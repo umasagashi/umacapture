@@ -122,92 +122,8 @@ class PathEntity {
   ///
   /// Retries the same way, but waits with [Future.delayed] instead of [sleep],
   /// so a locked file stalls only this chain rather than the whole isolate.
-  Future<void> delete({bool recursive = false, bool emptyOk = false}) async {
-    if (emptyOk && !await exists()) {
-      return;
-    }
-
-    // Retry up to 3 times to avoid file lock issues.
-    //
-    // The `catch` below selects on nothing -- it takes `Object` -- and that
-    // breadth is a decision rather than an oversight. The distinction it declines
-    // to draw does exist, and on web it has been measured: an entry held by an
-    // open writable is refused with `NoModificationAllowedError`, and the *same*
-    // delete succeeds once the holder closes -- exactly the shape this retry was
-    // written for -- while `NotFoundError` and `InvalidModificationError` come
-    // back identical on all three attempts, so retrying them only makes the
-    // failure later. (`TypeMismatchError` is a single observation, not a
-    // repeated one, and it was taken on the parent walk rather than on a
-    // delete -- so nothing says whether it clears.)
-    //
-    // Narrowing to the recoverable set is refused all the same, for two reasons.
-    // It cannot be enumerated: nothing establishes that every transient mode has
-    // been seen, and the desktop side -- the one this retry was originally
-    // written for -- has no measurement of its failure modes at all, so the only
-    // evidence that retrying rescues anything there is this comment. And the two
-    // ways of being wrong are not symmetric: a `catch` that is too wide spends
-    // one backoff on a failure that was never going to clear, whereas a predicate
-    // that is too narrow drops a transient mode outright, and does it invisibly
-    // -- a rescue that stops happening reports nothing to anyone.
-    //
-    // The price accepted in exchange is stated plainly: a programming error
-    // reaching here -- a `NoSuchMethodError`, a `TypeError` -- is retried three
-    // times and rethrown two backoffs late, so a defect arrives wearing the face
-    // of a timing problem. That is known, and taken, for the reasons above.
-    //
-    // A narrowing by type would also have to begin from what web actually
-    // delivers here, and that is two kinds, not one. OPFS rejects with a bare
-    // `JSObject` (a DOMException), but `WebVfs.delete` does not pass all of them
-    // on: every "it is not there" case -- a missing segment in the parent walk,
-    // a file occupying a directory name, a leaf that is already gone -- it
-    // converts into web_vfs's own `FileSystemException`. Only a refusal whose
-    // entry still exists is rethrown raw, and that set is exactly the
-    // interesting one: `InvalidModificationError`, and the
-    // `NoModificationAllowedError` this retry was written for.
-    //
-    // So neither obvious tidy-up is safe, and they fail in opposite directions.
-    // `on FileSystemException` -- meaning `dart:io`'s -- selects nothing web
-    // throws, of either kind, and would silently end every retry there. And
-    // `on Exception` selects the converted half only, so it would go on
-    // retrying the failures measured above to be identical on all three
-    // attempts, while dropping the held-entry refusal that is the one thing
-    // retrying rescues. Getting it exactly backwards is available; getting it
-    // right is not, for the reasons above.
-    //
-    // What the measurements rest on: they drove the OPFS API directly, one
-    // layer below this `catch`, so they are evidence about the browser rather
-    // than about this boundary: the identical-on-three-attempts result for
-    // `NotFoundError` and `InvalidModificationError`, that no refusal is
-    // selectable by `dart:io`'s `FileSystemException`, and that whatever the
-    // browser refuses a held entry with, the same delete succeeds once the
-    // writable closes. The `NoModificationAllowedError` name is a recorded
-    // observation, worth re-measuring rather than trusting.
-    int attempts = 0;
-    while (true) {
-      try {
-        await fsBackend.delete(path, recursive: recursive);
-        return;
-      } catch (e) {
-        if (++attempts >= 3) {
-          rethrow;
-        }
-        // The backoff timer is created on the ROOT zone, never the ambient one.
-        // This wait is the real time an operating-system lock needs to be
-        // released, and a zone-installed clock does not model the OS: whatever
-        // an intervening zone decides the time is, the file goes on being held
-        // or released in wall-clock time regardless, so this wait must not be
-        // captured by such a clock. Concretely, under `testWidgets` the ambient
-        // clock is fake and only advances when the test pumps a *duration* --
-        // the repository's own wait helpers (`test/support/settling.dart`) pump
-        // without one -- so a delay created there never fires, and a delete that
-        // was refused once would never complete for the rest of the test.
-        //
-        // Only the timer leaves the zone. `await` resumes where it was written,
-        // so the retry below, the rethrow, and any error either raises stay in
-        // the caller's zone and remain visible to whatever instruments it.
-        await Zone.root.run(() => Future<void>.delayed(_deleteRetryBackoff));
-      }
-    }
+  Future<void> delete({bool recursive = false, bool emptyOk = false}) {
+    return _deleteVia(fsBackend, path, recursive: recursive, emptyOk: emptyOk);
   }
 
   void deleteSyncWithCheck({bool recursive = false, bool emptyOk = false}) {
@@ -222,14 +138,8 @@ class PathEntity {
 
   /// Asynchronous counterpart of [deleteSyncWithCheck] for callers on the UI
   /// isolate (and the only variant usable on web, where the sync FS throws).
-  Future<void> deleteWithCheck({bool recursive = false, bool emptyOk = false}) async {
-    try {
-      await delete(recursive: recursive, emptyOk: emptyOk);
-    } catch (error, stackTrace) {
-      logger.e("Failed to delete record.", error, stackTrace);
-      Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
-      await parent.launchQuietly();
-    }
+  Future<void> deleteWithCheck({bool recursive = false, bool emptyOk = false}) {
+    return _deleteWithCheckVia(fsBackend, this, recursive: recursive, emptyOk: emptyOk);
   }
 
   /// Whether a file or directory exists at this path.
@@ -399,9 +309,7 @@ class FilePath extends PathEntity {
   /// large records does not scale peak memory with the file size.
   Future<bool> sameBytesAs(FilePath other) => fsBackend.sameFileBytes(path, other.path);
 
-  Future<void> writeAsString(String contents) {
-    return parent.create(recursive: true).then((_) => fsBackend.writeString(path, contents));
-  }
+  Future<void> writeAsString(String contents) => _writeStringVia(fsBackend, this, contents);
 
   void writeAsStringSync(String contents) => fsBackend.writeStringSync(path, contents);
 
@@ -423,23 +331,92 @@ class FilePath extends PathEntity {
   Future<T> deserialize<T>() async => MapperContainer.globals.fromJson<T>(await readAsString());
 }
 
-/// [directory] resolved once ([DirectoryPath.open]), answering for files and directories beneath it from that
-/// resolution; see [FsDirectory] for what holds between two questions.
+/// [directory] resolved once ([DirectoryPath.open]), answering for files and directories beneath it, and changing
+/// them, from that resolution; see [FsDirectory] for what holds between two calls.
+///
+/// Each member is the [PathEntity] member of the same name, made through this resolution for a path beneath
+/// [directory]: the same answers, the same failures and the same retries, written once for both.
 class OpenedDirectory {
   OpenedDirectory._(this.directory, this._resolved);
+
+  /// Every path, asked of [fsBackend] by its full path the way [PathEntity] asks it, resolving and holding nothing.
+  ///
+  /// For code that takes an [OpenedDirectory] to act through, when its caller has resolved nothing.
+  factory OpenedDirectory.byPath() =>
+      OpenedDirectory._(DirectoryPath(const <String>[]), PassThroughFsDirectory(fsBackend, ''));
 
   final DirectoryPath directory;
 
   final FsDirectory _resolved;
 
+  /// [directory] from this resolution, holding every directory beneath it that a call walks to until it is dropped;
+  /// see [FsDirectory.remembering] for whom that is for.
+  OpenedDirectory remembering() => OpenedDirectory._(directory, _resolved.remembering());
+
   /// [FilePath.readAsString] of [file], which lies beneath [directory].
   Future<String> readAsString(FilePath file) => _resolved.readString(file.path);
+
+  /// [FilePath.readAsBytes] of [file].
+  Future<Uint8List> readAsBytes(FilePath file) => _resolved.readBytes(file.path);
 
   /// [FilePath.readAsBytesIfPresent] of [file], which lies beneath [directory].
   Future<Uint8List?> readAsBytesIfPresent(FilePath file) => _resolved.readBytesIfPresent(file.path);
 
   /// Whether [descendant], which lies beneath [directory], is a directory — false for a file and for nothing.
   Future<bool> hasDirectory(DirectoryPath descendant) => _resolved.isDirectory(descendant.path);
+
+  /// [PathEntity.exists] of [entity].
+  Future<bool> exists(PathEntity entity) => _resolved.exists(entity.path);
+
+  /// Whether a file stands at [entity]'s path, asked of the disk whatever [entity]'s type says.
+  Future<bool> holdsFile(PathEntity entity) => _resolved.isFile(entity.path);
+
+  /// [FilePath.writeAsString] of [file]: its directory is created first.
+  Future<void> writeAsString(FilePath file, String contents) => _writeStringVia(_resolved, file, contents);
+
+  /// [FilePath.writeAsBytes] of [file].
+  Future<void> writeAsBytes(FilePath file, List<int> bytes, {bool flush = false}) {
+    return _resolved.writeBytes(file.path, bytes, flush: flush);
+  }
+
+  /// [FilePath.length] of [file].
+  Future<int> length(FilePath file) => _resolved.length(file.path);
+
+  /// [FilePath.sameBytesAs] of [file] and [other].
+  Future<bool> sameBytes(FilePath file, FilePath other) => _resolved.sameFileBytes(file.path, other.path);
+
+  /// [FilePath.rename] of [file] to [destination].
+  Future<void> rename(FilePath file, FilePath destination) => _resolved.rename(file.path, destination.path);
+
+  /// [DirectoryPath.create] of [descendant].
+  Future<void> create(DirectoryPath descendant, {bool recursive = false}) {
+    return _resolved.createDir(descendant.path, recursive: recursive);
+  }
+
+  /// [PathEntity.delete] of [entity], which lies strictly beneath [directory].
+  Future<void> delete(PathEntity entity, {bool recursive = false, bool emptyOk = false}) {
+    return _deleteVia(_resolved, entity.path, recursive: recursive, emptyOk: emptyOk);
+  }
+
+  /// [DirectoryPath.list] of [descendant].
+  Stream<PathEntity> list(DirectoryPath descendant, {bool recursive = false, bool followLinks = false}) {
+    return _listVia(_resolved, descendant, recursive: recursive, followLinks: followLinks);
+  }
+
+  /// [DirectoryPath.listWithMetadata] of [descendant].
+  Future<List<FsListing>> listWithMetadata(DirectoryPath descendant, {bool recursive = false}) {
+    return _listWithMetadataVia(_resolved, descendant, recursive: recursive, followLinks: false);
+  }
+
+  /// [DirectoryPath.copyTreeInto] of [source] into [destination].
+  Future<bool> copyTreeInto(DirectoryPath source, DirectoryPath destination) {
+    return _copyTreeVia(_resolved, source, destination);
+  }
+
+  /// [DirectoryPath.moveAsyncSafe] of [source] to [destination].
+  Future<DirectoryPath?> moveAsyncSafe(DirectoryPath source, DirectoryPath destination) {
+    return _moveTreeVia(_resolved, source, destination);
+  }
 }
 
 class DirectoryPath extends PathEntity {
@@ -481,10 +458,8 @@ class DirectoryPath extends PathEntity {
     return fsBackend.listSync(path, recursive: recursive, followLinks: followLinks).map(_typed).toList();
   }
 
-  Stream<PathEntity> list({bool recursive = false, bool followLinks = false}) async* {
-    for (final entry in await fsBackend.list(path, recursive: recursive, followLinks: followLinks)) {
-      yield _typed(entry);
-    }
+  Stream<PathEntity> list({bool recursive = false, bool followLinks = false}) {
+    return _listVia(fsBackend, this, recursive: recursive, followLinks: followLinks);
   }
 
   /// Lists this directory's children together with the size and timestamp the
@@ -503,9 +478,8 @@ class DirectoryPath extends PathEntity {
   /// or a [DirectoryPath], so `isFileSync` is a constant, not a second probe.
   /// Nothing here re-derives the kind, and no caller should: the listing decided
   /// it once.
-  Future<List<FsListing>> listWithMetadata({bool recursive = false, bool followLinks = false}) async {
-    final entries = await fsBackend.list(path, recursive: recursive, followLinks: followLinks, withMetadata: true);
-    return entries.map((e) => (entity: _typed(e), size: e.size, modified: e.modified)).toList();
+  Future<List<FsListing>> listWithMetadata({bool recursive = false, bool followLinks = false}) {
+    return _listWithMetadataVia(fsBackend, this, recursive: recursive, followLinks: followLinks);
   }
 
   Future<void> create({bool recursive = false}) => fsBackend.createDir(path, recursive: recursive);
@@ -538,13 +512,7 @@ class DirectoryPath extends PathEntity {
   /// case the source is left in place (the move is not atomic: a copy that fails
   /// part-way may leave a partial [destination] behind, which is harmless for the
   /// quarantine use case).
-  Future<DirectoryPath?> moveAsyncSafe(DirectoryPath destination) async {
-    if (!await copyTreeInto(destination)) {
-      return null;
-    }
-    await deleteWithCheck(recursive: true);
-    return destination;
-  }
+  Future<DirectoryPath?> moveAsyncSafe(DirectoryPath destination) => _moveTreeVia(fsBackend, this, destination);
 
   /// Recursively copies this directory's contents into [destination].
   ///
@@ -565,113 +533,8 @@ class DirectoryPath extends PathEntity {
   /// materialises every missing ancestor too. A [destination] (or ancestor) that
   /// already existed before the copy started is left untouched, and so is
   /// anything a *different* writer put inside the created chain while this copy
-  /// was running — see [_pruneCreatedChain].
-  Future<bool> copyTreeInto(DirectoryPath destination) async {
-    // A source that is not a directory is not copyable, and must never be
-    // reported as "copied into an empty destination": callers compare the two
-    // trees afterwards and act on the comparison, up to deleting the source.
-    if (await fsBackend.isFile(path)) {
-      logger.e("Refusing to copy a tree from a non-directory source: $path");
-      return false;
-    }
-    final createdRoot = await _shallowestMissingAncestorOf(destination);
-    try {
-      // Track directories we have already created so each one is made at most
-      // once: without this both the per-directory entry and every file's parent
-      // would issue a redundant recursive create (D + N syscalls for N files in
-      // D directories).
-      final created = <String>{};
-      Future<void> ensureDir(DirectoryPath dir) async {
-        if (created.add(dir.path)) {
-          await dir.create(recursive: true);
-        }
-      }
-
-      await ensureDir(destination);
-      await for (final entity in list(recursive: true)) {
-        final relative = PathEntity.context.relative(entity.path, from: path);
-        if (await entity.isFile()) {
-          final target = destination.filePath(relative);
-          await ensureDir(target.parent);
-          await fsBackend.copyFile(entity.path, target.path);
-        } else {
-          // Preserve empty directories, which the per-file branch never creates.
-          await ensureDir(destination / relative);
-        }
-      }
-      return true;
-    } catch (error, stackTrace) {
-      logger.e("Failed to copy directory tree.", error, stackTrace);
-      // Remove the chain we created so a failed copy leaves no orphan
-      // directory; keep anything that predated the copy (the caller owns it).
-      if (createdRoot != null) {
-        try {
-          await _pruneCreatedChain(destination, createdRoot);
-        } catch (cleanupError, cleanupStackTrace) {
-          logger.e("Failed to clean up partial copy destination.", cleanupError, cleanupStackTrace);
-        }
-      }
-      return false;
-    }
-  }
-
-  /// Undoes the directory chain [copyTreeInto] created, from [destination] up to
-  /// and including [createdRoot], removing an ancestor only while it is still
-  /// empty.
-  ///
-  /// [createdRoot] is a snapshot taken *before* the copy, so deleting that path
-  /// recursively would delete by location what the contract defines by
-  /// provenance. The two sets differ as soon as anyone else writes into the
-  /// chain meanwhile: on the web every record publish targets the same
-  /// `active/`, so a sibling record that finished during this copy sits inside
-  /// the chain without having been created by this call. Emptiness is therefore
-  /// re-checked against the filesystem at deletion time instead of trusting the
-  /// snapshot — the walk stops at the first directory that holds anything, which
-  /// covers every writer, present or future, without enumerating who they are.
-  ///
-  /// [destination] itself is the one path this call exclusively owns: the probe
-  /// in [_shallowestMissingAncestorOf] proved it absent, so what stands there is
-  /// this call's own partial copy, and it is removed with everything inside it.
-  /// Reaching into it would mean writing the very record the caller is
-  /// publishing, which its record lock excludes.
-  static Future<void> _pruneCreatedChain(DirectoryPath destination, DirectoryPath createdRoot) async {
-    await destination.delete(recursive: true, emptyOk: true);
-    // Guard on the segment count as well: the chain is bounded by [createdRoot],
-    // which is never the topmost segment, so this only stops a walk that has
-    // already left the chain it was given.
-    for (var dir = destination; dir.path != createdRoot.path && dir.segments.length > 2;) {
-      dir = dir.parent;
-      final isEmpty = await dir.list().isEmpty;
-      if (!isEmpty) {
-        return;
-      }
-      // Non-recursive on purpose: if the directory gains an entry between the
-      // check and the delete, the delete fails instead of taking it with it.
-      await dir.delete(emptyOk: true);
-    }
-  }
-
-  /// The shallowest directory a `create(recursive: true)` of [destination] would
-  /// have to bring into existence, or `null` if [destination] already exists.
-  ///
-  /// It bounds the chain the create produced: nothing above it was created, so
-  /// nothing above it may be removed. It is not by itself a licence to delete —
-  /// what is inside the chain at cleanup time is a separate question, answered in
-  /// [_pruneCreatedChain]. The walk stops before the topmost segment (a drive
-  /// root or `/`), which is never a directory this call could have created.
-  static Future<DirectoryPath?> _shallowestMissingAncestorOf(DirectoryPath destination) async {
-    if (await destination.exists()) {
-      return null;
-    }
-    var shallowest = destination;
-    for (var ancestor = destination.parent; ancestor.segments.length > 1; ancestor = ancestor.parent) {
-      if (await ancestor.exists()) {
-        break;
-      }
-      shallowest = ancestor;
-    }
-    return shallowest;
-  }
+  /// was running — see [_pruneCreatedChainVia].
+  Future<bool> copyTreeInto(DirectoryPath destination) => _copyTreeVia(fsBackend, this, destination);
 
   /// Deletes every entry inside this directory, leaving the (now empty)
   /// directory itself in place.
@@ -734,4 +597,255 @@ extension DirectoryExtension on Directory {
 
 extension FileExtension on File {
   FilePath toPath() => FilePath(this);
+}
+
+/// [PathEntity.delete] of [path], through [fs].
+Future<void> _deleteVia(FsPathOperations fs, String path, {required bool recursive, required bool emptyOk}) async {
+  if (emptyOk && !await fs.exists(path)) {
+    return;
+  }
+
+  // Retry up to 3 times to avoid file lock issues.
+  //
+  // The `catch` below selects on nothing -- it takes `Object` -- and that
+  // breadth is a decision rather than an oversight. The distinction it declines
+  // to draw does exist, and on web it has been measured: an entry held by an
+  // open writable is refused with `NoModificationAllowedError`, and the *same*
+  // delete succeeds once the holder closes -- exactly the shape this retry was
+  // written for -- while `NotFoundError` and `InvalidModificationError` come
+  // back identical on all three attempts, so retrying them only makes the
+  // failure later. (`TypeMismatchError` is a single observation, not a
+  // repeated one, and it was taken on the parent walk rather than on a
+  // delete -- so nothing says whether it clears.)
+  //
+  // Narrowing to the recoverable set is refused all the same, for two reasons.
+  // It cannot be enumerated: nothing establishes that every transient mode has
+  // been seen, and the desktop side -- the one this retry was originally
+  // written for -- has no measurement of its failure modes at all, so the only
+  // evidence that retrying rescues anything there is this comment. And the two
+  // ways of being wrong are not symmetric: a `catch` that is too wide spends
+  // one backoff on a failure that was never going to clear, whereas a predicate
+  // that is too narrow drops a transient mode outright, and does it invisibly
+  // -- a rescue that stops happening reports nothing to anyone.
+  //
+  // The price accepted in exchange is stated plainly: a programming error
+  // reaching here -- a `NoSuchMethodError`, a `TypeError` -- is retried three
+  // times and rethrown two backoffs late, so a defect arrives wearing the face
+  // of a timing problem. That is known, and taken, for the reasons above.
+  //
+  // A narrowing by type would also have to begin from what web actually
+  // delivers here, and that is two kinds, not one. OPFS rejects with a bare
+  // `JSObject` (a DOMException), but `WebVfs.delete` does not pass all of them
+  // on: every "it is not there" case -- a missing segment in the parent walk,
+  // a file occupying a directory name, a leaf that is already gone -- it
+  // converts into web_vfs's own `FileSystemException`. Only a refusal whose
+  // entry still exists is rethrown raw, and that set is exactly the
+  // interesting one: `InvalidModificationError`, and the
+  // `NoModificationAllowedError` this retry was written for.
+  //
+  // So neither obvious tidy-up is safe, and they fail in opposite directions.
+  // `on FileSystemException` -- meaning `dart:io`'s -- selects nothing web
+  // throws, of either kind, and would silently end every retry there. And
+  // `on Exception` selects the converted half only, so it would go on
+  // retrying the failures measured above to be identical on all three
+  // attempts, while dropping the held-entry refusal that is the one thing
+  // retrying rescues. Getting it exactly backwards is available; getting it
+  // right is not, for the reasons above.
+  //
+  // What the measurements rest on: they drove the OPFS API directly, one
+  // layer below this `catch`, so they are evidence about the browser rather
+  // than about this boundary: the identical-on-three-attempts result for
+  // `NotFoundError` and `InvalidModificationError`, that no refusal is
+  // selectable by `dart:io`'s `FileSystemException`, and that whatever the
+  // browser refuses a held entry with, the same delete succeeds once the
+  // writable closes. The `NoModificationAllowedError` name is a recorded
+  // observation, worth re-measuring rather than trusting.
+  int attempts = 0;
+  while (true) {
+    try {
+      await fs.delete(path, recursive: recursive);
+      return;
+    } catch (e) {
+      if (++attempts >= 3) {
+        rethrow;
+      }
+      // The backoff timer is created on the ROOT zone, never the ambient one.
+      // This wait is the real time an operating-system lock needs to be
+      // released, and a zone-installed clock does not model the OS: whatever
+      // an intervening zone decides the time is, the file goes on being held
+      // or released in wall-clock time regardless, so this wait must not be
+      // captured by such a clock. Concretely, under `testWidgets` the ambient
+      // clock is fake and only advances when the test pumps a *duration* --
+      // the repository's own wait helpers (`test/support/settling.dart`) pump
+      // without one -- so a delay created there never fires, and a delete that
+      // was refused once would never complete for the rest of the test.
+      //
+      // Only the timer leaves the zone. `await` resumes where it was written,
+      // so the retry below, the rethrow, and any error either raises stay in
+      // the caller's zone and remain visible to whatever instruments it.
+      await Zone.root.run(() => Future<void>.delayed(_deleteRetryBackoff));
+    }
+  }
+}
+
+/// [PathEntity.deleteWithCheck] of [entity], through [fs].
+Future<void> _deleteWithCheckVia(
+  FsPathOperations fs,
+  PathEntity entity, {
+  required bool recursive,
+  required bool emptyOk,
+}) async {
+  try {
+    await _deleteVia(fs, entity.path, recursive: recursive, emptyOk: emptyOk);
+  } catch (error, stackTrace) {
+    logger.e("Failed to delete record.", error, stackTrace);
+    Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
+    await entity.parent.launchQuietly();
+  }
+}
+
+/// [FilePath.writeAsString] of [file], through [fs]: its directory is created first.
+Future<void> _writeStringVia(FsPathOperations fs, FilePath file, String contents) async {
+  await fs.createDir(file.parent.path, recursive: true);
+  await fs.writeString(file.path, contents);
+}
+
+/// [DirectoryPath.list] of [directory], through [fs].
+Stream<PathEntity> _listVia(
+  FsPathOperations fs,
+  DirectoryPath directory, {
+  required bool recursive,
+  required bool followLinks,
+}) async* {
+  for (final entry in await fs.list(directory.path, recursive: recursive, followLinks: followLinks)) {
+    yield DirectoryPath._typed(entry);
+  }
+}
+
+/// [DirectoryPath.listWithMetadata] of [directory], through [fs].
+Future<List<FsListing>> _listWithMetadataVia(
+  FsPathOperations fs,
+  DirectoryPath directory, {
+  required bool recursive,
+  required bool followLinks,
+}) async {
+  final entries = await fs.list(directory.path, recursive: recursive, followLinks: followLinks, withMetadata: true);
+  return entries.map((e) => (entity: DirectoryPath._typed(e), size: e.size, modified: e.modified)).toList();
+}
+
+/// [DirectoryPath.moveAsyncSafe] of [source] to [destination], through [fs].
+Future<DirectoryPath?> _moveTreeVia(FsPathOperations fs, DirectoryPath source, DirectoryPath destination) async {
+  if (!await _copyTreeVia(fs, source, destination)) {
+    return null;
+  }
+  await _deleteWithCheckVia(fs, source, recursive: true, emptyOk: false);
+  return destination;
+}
+
+/// [DirectoryPath.copyTreeInto] of [source] into [destination], through [fs].
+Future<bool> _copyTreeVia(FsPathOperations fs, DirectoryPath source, DirectoryPath destination) async {
+  // A source that is not a directory is not copyable, and must never be
+  // reported as "copied into an empty destination": callers compare the two
+  // trees afterwards and act on the comparison, up to deleting the source.
+  if (await fs.isFile(source.path)) {
+    logger.e("Refusing to copy a tree from a non-directory source: ${source.path}");
+    return false;
+  }
+  final createdRoot = await _shallowestMissingAncestorVia(fs, destination);
+  try {
+    // Track directories we have already created so each one is made at most
+    // once: without this both the per-directory entry and every file's parent
+    // would issue a redundant recursive create (D + N syscalls for N files in
+    // D directories).
+    final created = <String>{};
+    Future<void> ensureDir(DirectoryPath dir) async {
+      if (created.add(dir.path)) {
+        await fs.createDir(dir.path, recursive: true);
+      }
+    }
+
+    await ensureDir(destination);
+    await for (final entity in _listVia(fs, source, recursive: true, followLinks: false)) {
+      final relative = PathEntity.context.relative(entity.path, from: source.path);
+      if (await entity.isFile()) {
+        final target = destination.filePath(relative);
+        await ensureDir(target.parent);
+        await fs.copyFile(entity.path, target.path);
+      } else {
+        // Preserve empty directories, which the per-file branch never creates.
+        await ensureDir(destination / relative);
+      }
+    }
+    return true;
+  } catch (error, stackTrace) {
+    logger.e("Failed to copy directory tree.", error, stackTrace);
+    // Remove the chain we created so a failed copy leaves no orphan
+    // directory; keep anything that predated the copy (the caller owns it).
+    if (createdRoot != null) {
+      try {
+        await _pruneCreatedChainVia(fs, destination, createdRoot);
+      } catch (cleanupError, cleanupStackTrace) {
+        logger.e("Failed to clean up partial copy destination.", cleanupError, cleanupStackTrace);
+      }
+    }
+    return false;
+  }
+}
+
+/// Undoes the directory chain [DirectoryPath.copyTreeInto] created, from [destination] up to
+/// and including [createdRoot], removing an ancestor only while it is still
+/// empty.
+///
+/// [createdRoot] is a snapshot taken *before* the copy, so deleting that path
+/// recursively would delete by location what the contract defines by
+/// provenance. The two sets differ as soon as anyone else writes into the
+/// chain meanwhile: on the web every record publish targets the same
+/// `active/`, so a sibling record that finished during this copy sits inside
+/// the chain without having been created by this call. Emptiness is therefore
+/// re-checked against the filesystem at deletion time instead of trusting the
+/// snapshot — the walk stops at the first directory that holds anything, which
+/// covers every writer, present or future, without enumerating who they are.
+///
+/// [destination] itself is the one path this call exclusively owns: the probe
+/// in [_shallowestMissingAncestorVia] proved it absent, so what stands there is
+/// this call's own partial copy, and it is removed with everything inside it.
+/// Reaching into it would mean writing the very record the caller is
+/// publishing, which its record lock excludes.
+Future<void> _pruneCreatedChainVia(FsPathOperations fs, DirectoryPath destination, DirectoryPath createdRoot) async {
+  await _deleteVia(fs, destination.path, recursive: true, emptyOk: true);
+  // Guard on the segment count as well: the chain is bounded by [createdRoot],
+  // which is never the topmost segment, so this only stops a walk that has
+  // already left the chain it was given.
+  for (var dir = destination; dir.path != createdRoot.path && dir.segments.length > 2;) {
+    dir = dir.parent;
+    final isEmpty = await _listVia(fs, dir, recursive: false, followLinks: false).isEmpty;
+    if (!isEmpty) {
+      return;
+    }
+    // Non-recursive on purpose: if the directory gains an entry between the
+    // check and the delete, the delete fails instead of taking it with it.
+    await _deleteVia(fs, dir.path, recursive: false, emptyOk: true);
+  }
+}
+
+/// The shallowest directory a `create(recursive: true)` of [destination] would
+/// have to bring into existence, or `null` if [destination] already exists.
+///
+/// It bounds the chain the create produced: nothing above it was created, so
+/// nothing above it may be removed. It is not by itself a licence to delete —
+/// what is inside the chain at cleanup time is a separate question, answered in
+/// [_pruneCreatedChainVia]. The walk stops before the topmost segment (a drive
+/// root or `/`), which is never a directory this call could have created.
+Future<DirectoryPath?> _shallowestMissingAncestorVia(FsPathOperations fs, DirectoryPath destination) async {
+  if (await fs.exists(destination.path)) {
+    return null;
+  }
+  var shallowest = destination;
+  for (var ancestor = destination.parent; ancestor.segments.length > 1; ancestor = ancestor.parent) {
+    if (await fs.exists(ancestor.path)) {
+      break;
+    }
+    shallowest = ancestor;
+  }
+  return shallowest;
 }

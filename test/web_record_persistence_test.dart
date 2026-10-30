@@ -218,10 +218,10 @@ void main() {
         }
         return action();
       }),
-      writeFile: (target, bytes) async {
+      writeFile: (within, target, bytes) async {
         writes.add(target.path);
-        await target.parent.create(recursive: true);
-        await target.writeAsBytes(bytes);
+        await within.create(target.parent, recursive: true);
+        await within.writeAsBytes(target, bytes);
       },
     );
     final persist = persistPlatformHarvestToOpfs(
@@ -239,7 +239,7 @@ void main() {
     final unavailableWrites = <String>[];
     final unavailable = WebRecordPersistence(
       mutationLock: const RecordMutationLock(null),
-      writeFile: (target, _) async => unavailableWrites.add(target.path),
+      writeFile: (_, target, _) async => unavailableWrites.add(target.path),
     );
     expect(
       () => persistPlatformHarvestToOpfs(
@@ -255,10 +255,10 @@ void main() {
   test('empty and unsafe harvested payloads fail closed before writes', () async {
     final writes = <String>[];
     final persistence = WebRecordPersistence(
-      writeFile: (target, bytes) async {
+      writeFile: (within, target, bytes) async {
         writes.add(target.path);
-        await target.parent.create(recursive: true);
-        await target.writeAsBytes(bytes);
+        await within.create(target.parent, recursive: true);
+        await within.writeAsBytes(target, bytes);
       },
     );
     expect(await persistence.persistFiles(storageDir, const []), isEmpty);
@@ -334,9 +334,9 @@ void main() {
     setUp(() {
       recordJsonWrites = [];
       persistence = WebRecordPersistence(
-        writeFile: (target, bytes) async {
+        writeFile: (within, target, bytes) async {
           if (target.name == 'record.json') recordJsonWrites.add(target.path);
-          await target.writeAsBytes(bytes);
+          await within.writeAsBytes(target, bytes);
         },
       );
     });
@@ -511,10 +511,10 @@ void main() {
 
   test('multi-record persistence reports committed IDs when a later record fails', () async {
     final persistence = WebRecordPersistence(
-      writeFile: (target, bytes) async {
+      writeFile: (within, target, bytes) async {
         if (utf8.decode(bytes).contains('second')) throw StateError('synthetic second failure');
-        await target.parent.create(recursive: true);
-        await target.writeAsBytes(bytes);
+        await within.create(target.parent, recursive: true);
+        await within.writeAsBytes(target, bytes);
       },
     );
     final result = await persistence.persistFiles(storageDir, [
@@ -582,7 +582,9 @@ void main() {
     final recordDir = storageDir / 'chara_detail' / 'active' / 'refused';
     await recordDir.create(recursive: true);
     await recordDir.filePath('record.json').writeAsBytes(_recordJson('refused'));
-    final persistence = WebRecordPersistence(transaction: WebRecordWriteTransaction(copyTree: (_, _) async => false));
+    final persistence = WebRecordPersistence(
+      transaction: WebRecordWriteTransaction(copyTree: (_, _, _) async => false),
+    );
 
     final result = await persistence.persistFiles(storageDir, [
       (recordId: 'refused', relativeSegments: ['record.json'], bytes: _recordJson('refused')),
@@ -671,12 +673,12 @@ void main() {
     });
     final persistence = WebRecordPersistence(
       mutationLock: lock,
-      writeFile: (target, bytes) async {
+      writeFile: (within, target, bytes) async {
         if (failSecond && target.name == 'second.bin') {
           throw StateError('synthetic write failure');
         }
-        await target.parent.create(recursive: true);
-        await target.writeAsBytes(bytes);
+        await within.create(target.parent, recursive: true);
+        await within.writeAsBytes(target, bytes);
       },
     );
     final recordDir = storageDir / 'chara_detail' / 'active' / 'failure-id';
@@ -761,15 +763,15 @@ final class _IngestionConcurrencyProbe {
   final release = Completer<void>();
   int entered = 0;
 
-  Future<void> write(FilePath target, Uint8List bytes) async {
+  Future<void> write(OpenedDirectory within, FilePath target, Uint8List bytes) async {
     entered++;
     if (!firstEntered.isCompleted) firstEntered.complete();
     if (entered == expectedBeforeRelease && !allExpectedEntered.isCompleted) {
       allExpectedEntered.complete();
     }
     await release.future;
-    await target.parent.create(recursive: true);
-    await target.writeAsBytes(bytes);
+    await within.create(target.parent, recursive: true);
+    await within.writeAsBytes(target, bytes);
   }
 }
 
