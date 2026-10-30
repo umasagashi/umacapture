@@ -20,7 +20,7 @@
 // WHAT THIS SUITE DOES NOT REACH, and why:
 //
 //  * `platformStorageZipPreflight` / `platformStorageZipRunner`, and with them
-//    `WebVfs`'s own walk and `aggregateDirectoryTotals` -- not a preference:
+//    `aggregateDirectoryTotals` -- not a preference:
 //    `dart test` cannot compile them (`package:flutter` needs `dart:ui`). The
 //    walk here is written against the same OPFS API `web_vfs.dart` uses, so what
 //    is verified is the browser behaviour that code is written against.
@@ -46,6 +46,7 @@ import 'package:archive/archive.dart';
 // ignore: depend_on_referenced_packages
 import 'package:test/test.dart';
 import 'package:umacapture/src/core/fs/opfs_directory.dart';
+import 'package:umacapture/src/core/fs/web_vfs.dart';
 import 'package:umacapture/src/core/storage/zip_bundle.dart';
 import 'package:umacapture/src/core/storage/zip_export_limit.dart';
 import 'package:web/web.dart' as web;
@@ -275,6 +276,49 @@ void main() {
       final record = await OpfsDirectory.open(root, '$name/record');
       await expectLater(record.readBytesIfPresent('$name/other/record.json'), throwsArgumentError);
       await expectLater(record.isDirectory(name), throwsArgumentError);
+    });
+
+    // A remembering directory is what one record publication asks and changes the store through: it reaches a
+    // directory it walked to before from the handle it held, so a directory it removed has to be forgotten, or the
+    // publication's next look at that name is answered from a handle to a directory that is gone.
+    test('remembering: a directory removed through it is gone to it, and one made again under the name is written '
+        'and read through it', () async {
+      final store = (await OpfsDirectory.open(root, name)).remembering();
+      expect(await store.readBytesIfPresent('$name/record/record.json'), '{"id":1}'.codeUnits);
+
+      await store.delete('$name/record', recursive: true);
+      expect(await store.isDirectory('$name/record'), isFalse);
+      expect(await store.exists('$name/record'), isFalse);
+      expect(await store.readBytesIfPresent('$name/record/record.json'), isNull);
+
+      // The step a handle kept past its removal gets wrong in this browser: the lookups through it are refused, which
+      // reads as "not there" and happens to be right, but a create that starts from it makes nothing.
+      await store.createDir('$name/record', recursive: true);
+      expect(await store.isDirectory('$name/record'), isTrue);
+      await store.writeString('$name/record/record.json', '{"id":2}');
+      expect(await store.readString('$name/record/record.json'), '{"id":2}');
+      // Read past the remembering directory, from the origin root: the write landed in the directory on disk.
+      final onDisk = await (await _child(dir, 'record')).getFileHandle('record.json').toDart;
+      expect(await readOpfsFile(onDisk), '{"id":2}'.codeUnits);
+    });
+
+    test('remembering: a directory that was not there when opened is made by a change beneath it', () async {
+      final missing = (await OpfsDirectory.open(root, '$name/missing')).remembering();
+      await missing.createDir('$name/missing/desired', recursive: true);
+      await missing.writeString('$name/missing/desired/record.json', '{"id":3}');
+      final onDisk = await (await _child(await _child(dir, 'missing'), 'desired')).getFileHandle('record.json').toDart;
+      expect(await readOpfsFile(onDisk), '{"id":3}'.codeUnits);
+    });
+
+    // The adapter the web backend writes through walks from the origin root for every call, so a walk that would not
+    // create fails every first write of a record on web.
+    test('from the origin root: a file is written and read beneath directories that were not there', () async {
+      final vfs = WebVfs();
+      await vfs.createDir('$name/fresh/desired', recursive: true);
+      await vfs.writeString('$name/fresh/desired/record.json', '{"id":4}');
+      expect(await vfs.readString('$name/fresh/desired/record.json'), '{"id":4}');
+      final onDisk = await (await _child(await _child(dir, 'fresh'), 'desired')).getFileHandle('record.json').toDart;
+      expect(await readOpfsFile(onDisk), '{"id":4}'.codeUnits);
     });
   });
 }

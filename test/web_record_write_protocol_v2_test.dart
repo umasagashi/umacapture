@@ -181,8 +181,8 @@ void _suite(ProtocolSuite suite) {
     test('a staged copy of baseFrom that does not match it is refused before ready', () async {
       final s = await suite.scene(PublicationLayout.activeToArchive);
       final truncating = WebRecordWriteTransaction(
-        copyTree: (source, target) async {
-          final copied = await source.copyTreeInto(target);
+        copyTree: (within, source, target) async {
+          final copied = await within.copyTreeInto(source, target);
           if (source.path == s.base!.path) await target.filePath('r-only.bin').delete();
           return copied;
         },

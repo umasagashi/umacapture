@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'fs_backend.dart';
+import 'storage_persistence_web.dart' show requestPersistOnce;
 import 'web_vfs.dart';
 
 /// Creates the web filesystem backend. Referenced by the conditional import in
@@ -17,7 +18,9 @@ FsBackend createFsBackend() => WebFsBackend();
 class WebFsBackend implements FsBackend {
   WebFsBackend();
 
-  final WebVfs _vfs = const WebVfs();
+  // Best-effort and once per session; see [requestPersistOnce] for why the first write is the trigger and why an
+  // unanswered prompt is abandoned rather than awaited. The state it settles on is readable from settings.
+  final WebVfs _vfs = WebVfs(beforeWrite: requestPersistOnce);
 
   @override
   Future<bool> exists(String path) => _vfs.exists(path);

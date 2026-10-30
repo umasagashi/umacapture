@@ -12,11 +12,15 @@ import '/src/core/providers.dart' show charaDetailWriteTransactionDirName, chara
 import '/src/core/utils.dart';
 
 typedef WebRecordWriteFile = ({List<String> relativeSegments, Uint8List bytes});
-typedef WebRecordStagingWriter = Future<void> Function(FilePath target, Uint8List bytes);
+
+// The four steps a test can stand in for. Each is handed the data root the transaction resolved for this call
+// ([WebRecordWriteTransaction] opens it, remembering, at every entry) and makes its change through it, so that what
+// the transaction removes is forgotten by the resolution it goes on asking through.
+typedef WebRecordStagingWriter = Future<void> Function(OpenedDirectory within, FilePath target, Uint8List bytes);
 typedef WebRecordWriteCheckpointHook = Future<void> Function(WebRecordWriteCheckpoint checkpoint);
-typedef WebRecordDirectoryDelete = Future<void> Function(DirectoryPath target);
-typedef WebRecordTreeCopy = Future<bool> Function(DirectoryPath source, DirectoryPath target);
-typedef WebRecordManifestWriter = Future<void> Function(FilePath target, String contents);
+typedef WebRecordDirectoryDelete = Future<void> Function(OpenedDirectory within, DirectoryPath target);
+typedef WebRecordTreeCopy = Future<bool> Function(OpenedDirectory within, DirectoryPath source, DirectoryPath target);
+typedef WebRecordManifestWriter = Future<void> Function(OpenedDirectory within, FilePath target, String contents);
 
 /// The durable states of a slot.
 enum WebRecordWriteState {
@@ -254,6 +258,25 @@ enum _StagedTree {
 ///
 /// Whether the bytes it publishes are a *record* is not this machine's question
 /// — the loader asks that, and quarantines what it cannot read.
+///
+/// **Every look and change one call makes goes through one resolution of the
+/// data root**, opened at the entry ([publish], [recoverAll], [recoverRecordIn])
+/// with [OpenedDirectory.remembering] and handed to every step, the shared
+/// helpers and the four stand-in seams included. On web that is what keeps a
+/// publication from walking OPFS from the origin root for each of its several
+/// dozen operations: a directory walked to once is reached from its handle
+/// after that, and one this call removes is forgotten as it is removed. It is a
+/// local of the call and is never returned or stored, so nothing it holds
+/// outlives the call. Within the call nothing else removes a directory it
+/// holds: the record's own directories are under the record's lock, which every
+/// caller holds (or the root's, exclusively, for the store-wide sweep), and a
+/// shared directory — a store, a shelf, the journal root — is removed only by
+/// work that takes the root exclusively, or, while it is empty, by a sibling
+/// record's failed copy taking back the chain it created. A step made through a
+/// handle that sibling removed is refused until a directory is made again under
+/// its name, and reaches that directory after (measured in Chromium), so it
+/// either fails, leaving the slot for the next recovery, or lands where a walk
+/// by path would have.
 final class WebRecordWriteTransaction {
   WebRecordWriteTransaction({
     this._onCheckpoint,
@@ -343,6 +366,8 @@ final class WebRecordWriteTransaction {
   /// staged copy before the overlays are written, so the record directory a
   /// publication leaves holds the base less [removals], plus the overlays. A
   /// name the base does not hold removes nothing.
+  ///
+  /// [baseFrom] lies beneath [dataRoot], as every record store does.
   Future<WebRecordWriteResult> publish(
     DirectoryPath dataRoot,
     String recordId,
@@ -357,13 +382,14 @@ final class WebRecordWriteTransaction {
         !recordStoreNames.contains(store)) {
       return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'unsafe record id, overlay path or store');
     }
+    final fs = (await dataRoot.open()).remembering();
 
     // Before the slot, so a refused record leaves no staging behind and the
     // store that already holds it is not read again by recovery. Callers hold
     // this record's lock, which is the same lock the archive transaction takes,
     // so the move's window in which both stores hold the id cannot be observed
     // here.
-    final holding = await _storesHolding(dataRoot, recordId);
+    final holding = await _storesHolding(fs, recordId);
     final String? displacedStore;
     if (baseFrom == null) {
       final occupied = holding.where((name) => name != store).firstOrNull;
@@ -386,15 +412,15 @@ final class WebRecordWriteTransaction {
           'a replacing publication needs the id in exactly one record store, and ${holding.length} hold it',
         );
       }
-      if (!await baseFrom.exists()) {
+      if (!await fs.exists(baseFrom)) {
         return _refusedPublish(recordId, WebRecordWriteResult.invalidInput, 'the tree to publish from is not there');
       }
       displacedStore = holding.single;
     }
 
     final slot = _transactionDir(dataRoot, recordId);
-    if (await slot.exists()) {
-      final prior = (await _recoverSlot(dataRoot, slot)).result;
+    if (await fs.exists(slot)) {
+      final prior = (await _recoverSlot(fs, slot)).result;
       if (prior != WebRecordWriteResult.completed) {
         // Reported as this publication not happening, and **not** as whatever
         // the prior slot reported. A prior slot that recovered as
@@ -424,20 +450,20 @@ final class WebRecordWriteTransaction {
       // later read of this record recovered as invalidManifest forever, with no
       // path that ever cleared the empty directory.
       var manifest = _WriteManifest.create(dataRoot, recordId, overlays, store: store, displacedStore: displacedStore);
-      await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
+      await _writeManifest(fs, manifestFile, jsonEncode(manifest.toJson()));
       await _checkpoint(WebRecordWriteCheckpoint.manifestCreated);
 
-      await _deleteDirectory(desiredDir);
+      await _deleteDirectory(fs, desiredDir);
       if (baseFrom != null) {
-        if (!await _copyTree(baseFrom, desiredDir) || !await sameDirectoryTree(baseFrom, desiredDir)) {
+        if (!await _copyTree(fs, baseFrom, desiredDir) || !await sameDirectoryTree(baseFrom, desiredDir, within: fs)) {
           return _refusedPublish(
             recordId,
             WebRecordWriteResult.incomplete,
             'could not copy the tree to publish from into staging',
           );
         }
-      } else if (await finalDir.exists()) {
-        if (!await _copyTree(finalDir, desiredDir)) {
+      } else if (await fs.exists(finalDir)) {
+        if (!await _copyTree(fs, finalDir, desiredDir)) {
           return _refusedPublish(
             recordId,
             WebRecordWriteResult.incomplete,
@@ -445,30 +471,30 @@ final class WebRecordWriteTransaction {
           );
         }
       } else {
-        await desiredDir.create(recursive: true);
+        await fs.create(desiredDir, recursive: true);
       }
       await _checkpoint(WebRecordWriteCheckpoint.baseCopied);
 
       for (final name in removals) {
-        await desiredDir.filePath(name).delete(emptyOk: true);
+        await fs.delete(desiredDir.filePath(name), emptyOk: true);
       }
       for (final overlay in overlays) {
         final target = FilePath([...desiredDir.segments, ...overlay.relativeSegments]);
-        await target.parent.create(recursive: true);
-        await _writeFile(target, overlay.bytes);
+        await fs.create(target.parent, recursive: true);
+        await _writeFile(fs, target, overlay.bytes);
       }
       await _checkpoint(WebRecordWriteCheckpoint.overlayApplied);
 
       manifest = manifest.withState(WebRecordWriteState.ready);
-      await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
+      await _writeManifest(fs, manifestFile, jsonEncode(manifest.toJson()));
       readyIsDurable = true;
       await _checkpoint(WebRecordWriteCheckpoint.readyPersisted);
-      return (await _resume(dataRoot, slot, manifest)).result;
+      return (await _resume(fs, slot, manifest)).result;
     } catch (error, stackTrace) {
       logger.e('Web record write transaction failed for $recordId.', error, stackTrace);
       if (!readyIsDurable) {
         try {
-          await _deleteDirectory(slot);
+          await _deleteDirectory(fs, slot);
         } catch (cleanupError, cleanupStackTrace) {
           logger.e('Failed to clean incomplete web record staging for $recordId.', cleanupError, cleanupStackTrace);
         }
@@ -495,16 +521,17 @@ final class WebRecordWriteTransaction {
   /// the only copy of a record that version saved for the user; see
   /// [_recoverSlot] and [quarantineForeignSlot].
   Future<List<WebRecordWriteRecovery>> recoverAll(DirectoryPath dataRoot) async {
+    final fs = (await dataRoot.open()).remembering();
     final root = _transactionRoot(dataRoot);
-    if (!await root.exists()) return const [];
+    if (!await fs.exists(root)) return const [];
     final recoveries = <WebRecordWriteRecovery>[];
-    await for (final entry in root.list(recursive: false, followLinks: false)) {
+    await for (final entry in fs.list(root, recursive: false, followLinks: false)) {
       if (await entry.isFile()) {
         // A stray file in the transaction root is not a slot of anyone's. Still
         // reported, whether or not the move worked, so a root that had
         // something in it is never indistinguishable from an empty one.
         const reason = RecordRecoveryIncompleteReason.strayEntry;
-        await _retire(dataRoot, entry, entry.name, reason.clause);
+        await _retire(fs, entry, entry.name, reason.clause);
         recoveries.add(
           WebRecordWriteRecovery(recordId: null, result: WebRecordWriteResult.incomplete, slot: entry, reason: reason),
         );
@@ -517,8 +544,8 @@ final class WebRecordWriteTransaction {
       // once, through [_recoverSlot] alone. Folding this read away as a
       // duplicate would therefore take the startup sweep's tolerance of a
       // one-off read failure with it, silently and with nothing to notice.
-      final manifest = await _readManifest(entry.asDirectoryPath.filePath(_manifestName));
-      final outcome = await _recoverSlot(dataRoot, entry.asDirectoryPath);
+      final manifest = await _readManifest(fs, entry.asDirectoryPath.filePath(_manifestName));
+      final outcome = await _recoverSlot(fs, entry.asDirectoryPath);
       recoveries.add(
         WebRecordWriteRecovery(
           recordId: manifest?.recordId,
@@ -539,11 +566,15 @@ final class WebRecordWriteTransaction {
 
   /// [recoverRecord] for a caller that has resolved the data root already, so that the slot is looked for from it:
   /// the recovery gate resolves it once for this journal and the archive journal both.
+  ///
+  /// The recovery remembers what it walks to in a resolution of its own ([OpenedDirectory.remembering]) and not in
+  /// [dataRoot]: the archive journal changes the tree by path, and [dataRoot] goes on to answer for it.
   Future<WebRecordWriteResult> recoverRecordIn(OpenedDirectory dataRoot, String recordId) async {
     if (!isSafeRecordId(recordId)) return WebRecordWriteResult.invalidInput;
-    final slot = _transactionDir(dataRoot.directory, recordId);
-    if (!await dataRoot.hasDirectory(slot)) return WebRecordWriteResult.completed;
-    return (await _recoverSlot(dataRoot.directory, slot)).result;
+    final fs = dataRoot.remembering();
+    final slot = _transactionDir(fs.directory, recordId);
+    if (!await fs.hasDirectory(slot)) return WebRecordWriteResult.completed;
+    return (await _recoverSlot(fs, slot)).result;
   }
 
   /// Carries one slot as far as it goes, and sets aside what it cannot carry.
@@ -571,33 +602,34 @@ final class WebRecordWriteTransaction {
   /// the only copy of anything — a claim the app can make about its own
   /// leavings and cannot make about bytes it is unable to read. See
   /// [quarantineForeignSlot].
-  Future<_SlotOutcome> _recoverSlot(DirectoryPath dataRoot, DirectoryPath slot) async {
+  Future<_SlotOutcome> _recoverSlot(OpenedDirectory fs, DirectoryPath slot) async {
+    final dataRoot = fs.directory;
     final ownedRecordId = _slotRecordId(dataRoot, slot);
     if (ownedRecordId == null) {
       const reason = RecordRecoveryIncompleteReason.foreignSlotName;
-      await quarantineForeignSlot(dataRoot, slot, reason.clause);
+      await quarantineForeignSlot(dataRoot, slot, reason.clause, within: fs);
       return _rejected(null, WebRecordWriteResult.incomplete, reason);
     }
     final manifestFile = slot.filePath(_manifestName);
-    final manifest = await _readManifest(manifestFile);
-    if (manifest == null && !await manifestFile.exists()) {
+    final manifest = await _readManifest(fs, manifestFile);
+    if (manifest == null && !await fs.exists(manifestFile)) {
       // Provably a crash before the first manifest write — that write is what
       // creates the slot directory — so the slot carries no state. Kept apart
       // from the branch below only because it may still be reported as
       // committed: there is nothing here for a later publication to be refused
       // over.
-      return _discardSlot(dataRoot, slot, ownedRecordId, null, 'it holds no manifest');
+      return _discardSlot(fs, slot, ownedRecordId, null, 'it holds no manifest');
     }
     if (manifest == null || !_isRecoverableManifest(dataRoot, slot, manifest)) {
       // No manifest is carried into the disposition: one that will not parse,
       // or that names a transaction this build cannot resume, says nothing
       // trustworthy about what its staging was going to hold either.
-      return _abandonSlot(dataRoot, slot, ownedRecordId, null, RecordRecoveryIncompleteReason.unresumableManifest);
+      return _abandonSlot(fs, slot, ownedRecordId, null, RecordRecoveryIncompleteReason.unresumableManifest);
     }
     if (manifest.state == WebRecordWriteState.building) {
-      return _discardSlot(dataRoot, slot, manifest.recordId, manifest, 'it never reached the ready state');
+      return _discardSlot(fs, slot, manifest.recordId, manifest, 'it never reached the ready state');
     }
-    return _resume(dataRoot, slot, manifest);
+    return _resume(fs, slot, manifest);
   }
 
   /// Removes a slot that carries no transaction, after disposing of its
@@ -626,34 +658,34 @@ final class WebRecordWriteTransaction {
   /// are a *record* is, here as everywhere else in this machine, the loader's
   /// question and not this one's.
   Future<_SlotOutcome> _discardSlot(
-    DirectoryPath dataRoot,
+    OpenedDirectory fs,
     DirectoryPath slot,
     String recordId,
     _WriteManifest? manifest,
     String reason,
   ) async {
     try {
-      if (!await _promoteSupersededCopy(dataRoot, slot, recordId)) {
+      if (!await _promoteSupersededCopy(fs, slot, recordId)) {
         return _rejected(
           recordId,
           WebRecordWriteResult.incomplete,
           RecordRecoveryIncompleteReason.supersededCopyNotSaved,
         );
       }
-      final failure = switch (await _stagedTree(dataRoot, slot, recordId, manifest)) {
+      final failure = switch (await _stagedTree(fs, slot, recordId, manifest)) {
         _StagedTree.onlyCopyWhole =>
-          await _publishOnlyCopy(dataRoot, slot, recordId, manifest)
+          await _publishOnlyCopy(fs, slot, recordId, manifest)
               ? null
               : RecordRecoveryIncompleteReason.stagedTreeNotPublished,
         _StagedTree.onlyCopyPartial =>
-          await _setStagingAside(dataRoot, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
+          await _setStagingAside(fs, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
         _StagedTree.notTheOnlyCopy =>
-          await _retireStaging(dataRoot, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
+          await _retireStaging(fs, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
       };
       if (failure != null) {
         return _rejected(recordId, WebRecordWriteResult.incomplete, failure);
       }
-      await _deleteDirectory(slot);
+      await _deleteDirectory(fs, slot);
       logger.w('Discarded the web record write slot for $recordId because $reason.');
       return _slotCarried;
     } catch (error, stackTrace) {
@@ -687,7 +719,7 @@ final class WebRecordWriteTransaction {
   ///   uses, and for the same reason: it is the only copy, and the app is
   ///   telling the user it could not finish with it.
   Future<_SlotOutcome> _abandonSlot(
-    DirectoryPath dataRoot,
+    OpenedDirectory fs,
     DirectoryPath slot,
     String recordId,
     _WriteManifest? manifest,
@@ -698,25 +730,25 @@ final class WebRecordWriteTransaction {
       // used to fill in: the copy of the record was set aside by the earlier,
       // interrupted call and the staging only now, so the record keeps the bare
       // `<id>` name and the staging takes the `_<n>` suffix.
-      if (!await _promoteSupersededCopy(dataRoot, slot, recordId)) {
+      if (!await _promoteSupersededCopy(fs, slot, recordId)) {
         return _rejected(
           recordId,
           WebRecordWriteResult.incomplete,
           RecordRecoveryIncompleteReason.supersededCopyNotSaved,
         );
       }
-      final failure = switch (await _stagedTree(dataRoot, slot, recordId, manifest)) {
+      final failure = switch (await _stagedTree(fs, slot, recordId, manifest)) {
         _StagedTree.onlyCopyWhole =>
-          await _publishOnlyCopy(dataRoot, slot, recordId, manifest)
+          await _publishOnlyCopy(fs, slot, recordId, manifest)
               ? null
               : RecordRecoveryIncompleteReason.stagedTreeNotPublished,
         _StagedTree.onlyCopyPartial || _StagedTree.notTheOnlyCopy =>
-          await _setStagingAside(dataRoot, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
+          await _setStagingAside(fs, slot, recordId) ? null : RecordRecoveryIncompleteReason.stagingNotSetAside,
       };
       if (failure != null) {
         return _rejected(recordId, WebRecordWriteResult.incomplete, failure);
       }
-      await _deleteDirectory(slot);
+      await _deleteDirectory(fs, slot);
       return _rejected(recordId, WebRecordWriteResult.incomplete, reason);
     } catch (error, stackTrace) {
       logger.e('Failed to set the web record write slot of $recordId aside.', error, stackTrace);
@@ -744,7 +776,7 @@ final class WebRecordWriteTransaction {
   /// anything. For a `building` replacing publication that is the displaced
   /// tree, so its staging is retired and nothing else is touched.
   Future<_StagedTree> _stagedTree(
-    DirectoryPath dataRoot,
+    OpenedDirectory fs,
     DirectoryPath slot,
     String recordId,
     _WriteManifest? manifest,
@@ -753,9 +785,9 @@ final class WebRecordWriteTransaction {
     // A slot with nothing staged is [_StagedTree.notTheOnlyCopy] by the same
     // sentence as the rest: shelving what is not there cannot be why a record
     // stops existing. Both shelving calls treat it as trivially done.
-    if (!await staging.exists()) return _StagedTree.notTheOnlyCopy;
-    if ((await _storesHolding(dataRoot, recordId)).isNotEmpty) return _StagedTree.notTheOnlyCopy;
-    return await _stagingIsWhole(staging, manifest) ? _StagedTree.onlyCopyWhole : _StagedTree.onlyCopyPartial;
+    if (!await fs.exists(staging)) return _StagedTree.notTheOnlyCopy;
+    if ((await _storesHolding(fs, recordId)).isNotEmpty) return _StagedTree.notTheOnlyCopy;
+    return await _stagingIsWhole(fs, staging, manifest) ? _StagedTree.onlyCopyWhole : _StagedTree.onlyCopyPartial;
   }
 
   /// Whether every file the publication set out to write is in [staging], each
@@ -790,14 +822,14 @@ final class WebRecordWriteTransaction {
   /// is a truncation — which a length catches. `sameDirectoryTree`, which is
   /// this file's other answer to "is this copy all of it", compares lengths
   /// before bytes and carries no digest.
-  static Future<bool> _stagingIsWhole(DirectoryPath staging, _WriteManifest? manifest) async {
+  static Future<bool> _stagingIsWhole(OpenedDirectory fs, DirectoryPath staging, _WriteManifest? manifest) async {
     final planned = manifest?.overlays;
     if (planned == null) return false;
     // One enumeration rather than a `length()` per planned file: on OPFS every
     // `length()` re-walks the handle chain from the storage root, and the
     // listing already carries the sizes.
     final staged = <String, int?>{};
-    for (final listing in await staging.listWithMetadata(recursive: true)) {
+    for (final listing in await fs.listWithMetadata(staging, recursive: true)) {
       if (listing.entity is! FilePath) continue;
       staged[_WriteManifest.relativeKey(staging, listing.entity)] = listing.size;
     }
@@ -820,13 +852,14 @@ final class WebRecordWriteTransaction {
   /// fragment of a record nor a record with a truncated file in it; and the step is the one
   /// that publication was on its way to performing.
   Future<bool> _publishOnlyCopy(
-    DirectoryPath dataRoot,
+    OpenedDirectory fs,
     DirectoryPath slot,
     String recordId,
     _WriteManifest? manifest,
   ) async {
+    final dataRoot = fs.directory;
     final store = manifest?.store ?? activeStoreName;
-    if (await (slot / _desiredName).moveAsyncSafe(dataRoot / store / recordId) == null) {
+    if (await fs.moveAsyncSafe(slot / _desiredName, dataRoot / store / recordId) == null) {
       return false;
     }
     logger.w('Published the staged tree an unfinished write left for $recordId; it was the only copy.');
@@ -846,12 +879,12 @@ final class WebRecordWriteTransaction {
   /// had failed to read one of their records — the banner counts that shelf's
   /// children without looking into them — and it accumulated one entry per
   /// interruption with nothing that ever collected them.
-  Future<bool> _retireStaging(DirectoryPath dataRoot, DirectoryPath slot, String recordId) async {
+  Future<bool> _retireStaging(OpenedDirectory fs, DirectoryPath slot, String recordId) async {
     final staging = slot / _desiredName;
-    if (!await staging.exists()) return true;
+    if (!await fs.exists(staging)) return true;
     // Named for the record and not for the `desired/` directory it was: the
     // shelf is flat, and `desired` would collide with every other slot's.
-    return _retire(dataRoot, staging, recordId, 'the write that staged it never reached the ready state');
+    return _retire(fs, staging, recordId, 'the write that staged it never reached the ready state');
   }
 
   /// Moves a staged tree the app is giving up on into the sibling
@@ -872,10 +905,11 @@ final class WebRecordWriteTransaction {
   /// as. `retired/`'s delete is offered on the opposite basis, so a fragment
   /// there is deleted as a leaving. [_retireStaging] handles the case where the
   /// duplication is a fact.
-  Future<bool> _setStagingAside(DirectoryPath dataRoot, DirectoryPath slot, String recordId) async {
+  Future<bool> _setStagingAside(OpenedDirectory fs, DirectoryPath slot, String recordId) async {
+    final dataRoot = fs.directory;
     final staging = slot / _desiredName;
-    if (!await staging.exists()) return true;
-    if (await quarantineDirectoryInto(dataRoot / 'quarantine', staging, recordId) == null) {
+    if (!await fs.exists(staging)) return true;
+    if (await quarantineDirectoryInto(dataRoot / 'quarantine', staging, recordId, within: fs) == null) {
       logger.e('Failed to quarantine the staged tree of $recordId; its slot is left for the next sweep.');
       return false;
     }
@@ -895,10 +929,11 @@ final class WebRecordWriteTransaction {
   /// the record there is — the user's own record, on the shelf that is for
   /// exactly that. Nothing here looks at the bytes; the slot being abandoned is
   /// the whole of the reason.
-  Future<bool> _promoteSupersededCopy(DirectoryPath dataRoot, DirectoryPath slot, String recordId) async {
+  Future<bool> _promoteSupersededCopy(OpenedDirectory fs, DirectoryPath slot, String recordId) async {
+    final dataRoot = fs.directory;
     final copy = slot / _supersededName;
-    if (!await copy.exists()) return true;
-    if (await quarantineDirectoryInto(dataRoot / 'quarantine', copy, recordId) == null) {
+    if (!await fs.exists(copy)) return true;
+    if (await quarantineDirectoryInto(dataRoot / 'quarantine', copy, recordId, within: fs) == null) {
       logger.e(
         'Failed to quarantine the version of $recordId an unfinished write was replacing; '
         'its slot is left for the next sweep.',
@@ -933,8 +968,9 @@ final class WebRecordWriteTransaction {
   /// archive journal shares, because the argument is about the name and not
   /// about which journal the name was found in — and this shelf is left holding
   /// only entries the sentence above is true of.
-  Future<bool> _retire(DirectoryPath dataRoot, PathEntity entry, String name, String reason) async {
-    final destination = await retireEntryInto(dataRoot / 'retired', entry, name);
+  Future<bool> _retire(OpenedDirectory fs, PathEntity entry, String name, String reason) async {
+    final dataRoot = fs.directory;
+    final destination = await retireEntryInto(dataRoot / 'retired', entry, name, within: fs);
     if (destination == null) {
       logger.e('Failed to retire ${entry.name}; it stays in the write transaction root.');
       return false;
@@ -983,7 +1019,8 @@ final class WebRecordWriteTransaction {
   /// `desired/`. D and T are the same directory when the publication stays in
   /// one store. Every copy and delete goes through [_copyTree] and
   /// [_deleteDirectory]; nothing here moves a tree.
-  Future<_SlotOutcome> _resume(DirectoryPath dataRoot, DirectoryPath slot, _WriteManifest initialManifest) async {
+  Future<_SlotOutcome> _resume(OpenedDirectory fs, DirectoryPath slot, _WriteManifest initialManifest) async {
+    final dataRoot = fs.directory;
     var manifest = initialManifest;
     final recordId = manifest.recordId;
     final staged = slot / _desiredName;
@@ -997,26 +1034,26 @@ final class WebRecordWriteTransaction {
     // T already holds the staged tree and no second store holds the id: the
     // publication is done but for its manifest. D is gone or is T itself.
     Future<bool> targetHoldsStaging() async =>
-        await sameDirectoryTree(staged, target) &&
-        (displaced == null || displacedIsTarget || !await displaced.exists());
+        await sameDirectoryTree(staged, target, within: fs) &&
+        (displaced == null || displacedIsTarget || !await fs.exists(displaced));
 
     Future<void> persist(WebRecordWriteState next) async {
       manifest = manifest.withState(next);
-      await _writeManifest(manifestFile, jsonEncode(manifest.toJson()));
+      await _writeManifest(fs, manifestFile, jsonEncode(manifest.toJson()));
     }
 
     Future<void> deleteIfPresent(DirectoryPath? directory) async {
-      if (directory != null && await directory.exists()) await _deleteDirectory(directory);
+      if (directory != null && await fs.exists(directory)) await _deleteDirectory(fs, directory);
     }
 
     var committed = false;
     try {
       if (manifest.state == WebRecordWriteState.ready) {
-        if (!await staged.exists()) {
+        if (!await fs.exists(staged)) {
           // Nothing to publish, and D has not been touched in `ready`. An
           // unverified S, if any, is promoted as the give-up path does for
           // every slot.
-          return _abandonSlot(dataRoot, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
+          return _abandonSlot(fs, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
         }
         if (await targetHoldsStaging()) {
           committed = true;
@@ -1028,7 +1065,7 @@ final class WebRecordWriteTransaction {
             // `ready` never deletes D, so D missing here is bytes lost
             // underneath the journal. Nothing can be parked, and guessing
             // which tree to keep is how a record gets destroyed: stop.
-            if (!await displaced.exists()) {
+            if (!await fs.exists(displaced)) {
               return _rejected(
                 recordId,
                 WebRecordWriteResult.incomplete,
@@ -1039,7 +1076,7 @@ final class WebRecordWriteTransaction {
             // inside the copy below — so it is rebuilt from D rather than
             // copied into. D was confirmed present just above.
             await deleteIfPresent(parked);
-            if (!await _copyTree(displaced, parked) || !await sameDirectoryTree(displaced, parked)) {
+            if (!await _copyTree(fs, displaced, parked) || !await sameDirectoryTree(displaced, parked, within: fs)) {
               return _rejected(
                 recordId,
                 WebRecordWriteResult.incomplete,
@@ -1054,7 +1091,7 @@ final class WebRecordWriteTransaction {
       }
 
       if (manifest.state == WebRecordWriteState.parked) {
-        if (await staged.exists()) {
+        if (await fs.exists(staged)) {
           if (!await targetHoldsStaging()) {
             // Q is confirmed present, so it can rebuild T from empty. T is
             // rebuilt rather than copied over because Q may come from another
@@ -1063,7 +1100,7 @@ final class WebRecordWriteTransaction {
             await deleteIfPresent(displaced);
             if (!displacedIsTarget) await deleteIfPresent(target);
             await _checkpoint(WebRecordWriteCheckpoint.finalSetAside);
-            if (!await _copyTree(staged, target)) {
+            if (!await _copyTree(fs, staged, target)) {
               return _rejected(
                 recordId,
                 WebRecordWriteResult.incomplete,
@@ -1071,7 +1108,7 @@ final class WebRecordWriteTransaction {
               );
             }
             await _checkpoint(WebRecordWriteCheckpoint.finalCopied);
-            if (!await sameDirectoryTree(staged, target)) {
+            if (!await sameDirectoryTree(staged, target, within: fs)) {
               return _rejected(
                 recordId,
                 WebRecordWriteResult.incomplete,
@@ -1086,9 +1123,9 @@ final class WebRecordWriteTransaction {
           if (displaced == null) {
             // A first publication displaced nothing, so there is nothing to
             // restore; the give-up path shelves whatever is left.
-            return _abandonSlot(dataRoot, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
+            return _abandonSlot(fs, slot, recordId, manifest, RecordRecoveryIncompleteReason.stagedTreeGone);
           }
-          if (!await parked.exists()) {
+          if (!await fs.exists(parked)) {
             // Neither tree to rebuild from. Not a state these steps produce,
             // so nothing is deleted and the slot stays for someone to look at.
             return _rejected(
@@ -1103,7 +1140,7 @@ final class WebRecordWriteTransaction {
           if (!displacedIsTarget) await deleteIfPresent(target);
           await deleteIfPresent(displaced);
           await _checkpoint(WebRecordWriteCheckpoint.restoreTargetCleared);
-          if (!await _copyTree(parked, displaced) || !await sameDirectoryTree(parked, displaced)) {
+          if (!await _copyTree(fs, parked, displaced) || !await sameDirectoryTree(parked, displaced, within: fs)) {
             return _rejected(
               recordId,
               WebRecordWriteResult.incomplete,
@@ -1125,7 +1162,7 @@ final class WebRecordWriteTransaction {
         await deleteIfPresent(parked);
         await deleteIfPresent(staged);
         await _checkpoint(WebRecordWriteCheckpoint.beforeCleanup);
-        await _deleteDirectory(slot);
+        await _deleteDirectory(fs, slot);
         return _slotCarried;
       }
 
@@ -1134,7 +1171,7 @@ final class WebRecordWriteTransaction {
         // state never reads S, so a half-deleted S is simply deleted again.
         await deleteIfPresent(parked);
         await _checkpoint(WebRecordWriteCheckpoint.supersededDropped);
-        await _deleteDirectory(slot);
+        await _deleteDirectory(fs, slot);
         return _rejected(
           recordId,
           WebRecordWriteResult.incomplete,
@@ -1195,10 +1232,10 @@ final class WebRecordWriteTransaction {
   /// both and cannot drift apart. It is derived from [recordStoreNames] rather
   /// than comparing against a store by name, so it keeps holding when the set
   /// grows.
-  static Future<List<String>> _storesHolding(DirectoryPath dataRoot, String recordId) async {
+  static Future<List<String>> _storesHolding(OpenedDirectory fs, String recordId) async {
     return [
       for (final store in recordStoreNames)
-        if (await (dataRoot / store / recordId).exists()) store,
+        if (await fs.exists(fs.directory / store / recordId)) store,
     ];
   }
 
@@ -1239,10 +1276,10 @@ final class WebRecordWriteTransaction {
     return PathEntity.context.equals(PathEntity.context.normalize(left.path), PathEntity.context.normalize(right.path));
   }
 
-  static Future<_WriteManifest?> _readManifest(FilePath file) async {
-    if (!await file.exists()) return null;
+  static Future<_WriteManifest?> _readManifest(OpenedDirectory fs, FilePath file) async {
+    if (!await fs.exists(file)) return null;
     try {
-      final decoded = jsonDecode(await file.readAsString());
+      final decoded = jsonDecode(await fs.readAsString(file));
       if (decoded is! Map<String, dynamic>) {
         logger.e('Web record write manifest is not a JSON object: ${file.path}');
         return null;
@@ -1254,15 +1291,21 @@ final class WebRecordWriteTransaction {
     }
   }
 
-  static Future<void> _writeFileDefault(FilePath target, Uint8List bytes) async {
-    await target.writeAsBytes(bytes);
+  static Future<void> _writeFileDefault(OpenedDirectory within, FilePath target, Uint8List bytes) async {
+    await within.writeAsBytes(target, bytes);
   }
 
-  static Future<void> _deleteDirectoryDefault(DirectoryPath target) => target.delete(recursive: true, emptyOk: true);
+  static Future<void> _deleteDirectoryDefault(OpenedDirectory within, DirectoryPath target) {
+    return within.delete(target, recursive: true, emptyOk: true);
+  }
 
-  static Future<bool> _copyTreeDefault(DirectoryPath source, DirectoryPath target) => source.copyTreeInto(target);
+  static Future<bool> _copyTreeDefault(OpenedDirectory within, DirectoryPath source, DirectoryPath target) {
+    return within.copyTreeInto(source, target);
+  }
 
-  static Future<void> _writeManifestDefault(FilePath target, String contents) => target.writeAsString(contents);
+  static Future<void> _writeManifestDefault(OpenedDirectory within, FilePath target, String contents) {
+    return within.writeAsString(target, contents);
+  }
 }
 
 Future<List<WebRecordWriteRecovery>> recoverWebRecordWriteTransactionsUnlocked(DirectoryPath dataRoot) {

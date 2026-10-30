@@ -1460,8 +1460,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
     if (activeRecords == null) {
       return false;
     }
-    final archiveRecords =
-        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    final archiveRecords = _archivedRecords() ?? const <CharaDetailRecord>[];
     final existing = [...activeRecords, ...archiveRecords];
     final duplicated = existing.firstWhereOrNull(
       (record) => record.matchesFactorProbe(probeSelf, belowThreshold: belowThreshold),
@@ -1495,10 +1494,15 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   ///
   /// Public so the import path weighs its records against the same set the capture
   /// path does, with the versions an import has just written laid over it.
-  List<CharaDetailRecord> existingRecords() => [
-    ..._records,
-    ...?ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value,
-  ];
+  List<CharaDetailRecord> existingRecords() => [..._records, ...?_archivedRecords()];
+
+  /// The archived records as the archive store serves them, or null while it has not loaded.
+  ///
+  /// Read from the store and not from its published state, for the reason [_records] reads this store's buffer: a
+  /// record the archive holds unpublished ([CharaDetailArchiveStorage.hasPendingRecords] — a binding a sync round has
+  /// placed) is the one on disk, and inheritance writes the records it reads back whole, so reading the published one
+  /// would write the binding off again.
+  List<CharaDetailRecord>? _archivedRecords() => ref.read(charaDetailArchiveStorageLoaderProvider.notifier)._records;
 
   /// Computes the side-effect-free plan for adding [record]: duplicate check,
   /// inheritance resolution, the active-vs-archive split of the changed records,
@@ -1510,8 +1514,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   _AdditionPlan _resolveAddition(CharaDetailRecord record) {
     final activeRecords = _records;
     final existing = existingRecords();
-    final archiveRecords =
-        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    final archiveRecords = _archivedRecords() ?? const <CharaDetailRecord>[];
     final duplicatedId = duplicateCharaIdIn(existing, record);
     if (duplicatedId != null) {
       return _AdditionPlan.duplicate(duplicatedId, discardableArrivalId: discardableArrivalIdIn(existing, record));
@@ -1759,8 +1762,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
             _surfaceInheritance(resolution);
             return;
           }
-          final archiveRecords =
-              ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+          final archiveRecords = _archivedRecords() ?? const <CharaDetailRecord>[];
           final archiveIds = {for (final e in archiveRecords) e.id};
           final archiveStore = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
           final archiveUpdates = <CharaDetailRecord>[];
@@ -1948,7 +1950,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
   /// active->archive pair to zero and rewrite those bonuses downward.
   Future<void> _resolveAllInheritanceAsync() async {
     Set<String>? currentRecordIds() {
-      final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
+      final archiveRecords = _archivedRecords();
       if (archiveRecords == null) return null;
       return {..._records.map((record) => record.id), ...archiveRecords.map((record) => record.id)};
     }
@@ -1999,7 +2001,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
               declaration: _declaredByTheResolutionFrame,
               action: () async {
                 final activeRecords = _records;
-                final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
+                final archiveRecords = _archivedRecords();
                 if (archiveRecords == null) {
                   throw StateError('Archive storage became unavailable during inheritance resolution.');
                 }

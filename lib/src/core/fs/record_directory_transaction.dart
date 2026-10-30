@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
-import '/src/core/fs/fs_backend.dart';
 import '/src/core/fs/record_id_safety.dart';
 import '/src/core/fs/record_recovery_reason.dart';
 import '/src/core/path_entity.dart';
@@ -916,16 +915,20 @@ Future<List<RecordTransactionRecovery>> quarantineForeignArchiveSlotsUnlocked(Di
 /// here rather than imported because `core/fs` must not depend on the
 /// chara-detail layer. Both state machines set data aside through this one, so
 /// what the user finds in `quarantine/` reads the same however it got there.
+///
+/// Every look and change goes through [within], or by path where it is null.
 Future<DirectoryPath?> quarantineDirectoryInto(
   DirectoryPath quarantineRoot,
   DirectoryPath directory,
-  String name,
-) async {
+  String name, {
+  OpenedDirectory? within,
+}) async {
+  final fs = within ?? OpenedDirectory.byPath();
   var destination = quarantineRoot / name;
-  for (var n = 1; await destination.exists(); n++) {
+  for (var n = 1; await fs.exists(destination); n++) {
     destination = quarantineRoot / '${name}_$n';
   }
-  return directory.moveAsyncSafe(destination);
+  return fs.moveAsyncSafe(directory, destination);
 }
 
 /// Carries a transaction slot no writer of ours minted out of a journal root and
@@ -950,9 +953,15 @@ Future<DirectoryPath?> quarantineDirectoryInto(
 /// other route onto this shelf takes ([quarantineDirectoryInto]).
 ///
 /// A move that fails leaves the slot exactly where it was, for the next sweep,
-/// as a failed retirement does.
-Future<bool> quarantineForeignSlot(DirectoryPath dataRoot, DirectoryPath slot, String reason) async {
-  final destination = await quarantineDirectoryInto(dataRoot / 'quarantine', slot, slot.name);
+/// as a failed retirement does. Every look and change goes through [within], or
+/// by path where it is null.
+Future<bool> quarantineForeignSlot(
+  DirectoryPath dataRoot,
+  DirectoryPath slot,
+  String reason, {
+  OpenedDirectory? within,
+}) async {
+  final destination = await quarantineDirectoryInto(dataRoot / 'quarantine', slot, slot.name, within: within);
   if (destination == null) {
     logger.e('Failed to quarantine ${slot.name}; it stays in the transaction root it was found in.');
     return false;
@@ -987,18 +996,26 @@ Future<bool> quarantineForeignSlot(DirectoryPath dataRoot, DirectoryPath slot, S
 /// have to be able to leave: a directory is copied and removed (OPFS has no
 /// directory rename), a file is renamed, which is the one move the web backend
 /// does support for one.
-Future<PathEntity?> retireEntryInto(DirectoryPath retiredRoot, PathEntity entry, String name) async {
+///
+/// Every look and change goes through [within], or by path where it is null.
+Future<PathEntity?> retireEntryInto(
+  DirectoryPath retiredRoot,
+  PathEntity entry,
+  String name, {
+  OpenedDirectory? within,
+}) async {
+  final fs = within ?? OpenedDirectory.byPath();
   var destination = retiredRoot / name;
-  for (var n = 1; await destination.exists(); n++) {
+  for (var n = 1; await fs.exists(destination); n++) {
     destination = retiredRoot / '${name}_$n';
   }
   try {
     if (!await entry.isFile()) {
-      return await entry.asDirectoryPath.moveAsyncSafe(destination);
+      return await fs.moveAsyncSafe(entry.asDirectoryPath, destination);
     }
     final file = FilePath(destination.path);
-    await destination.parent.create(recursive: true);
-    await entry.asFilePath.rename(file);
+    await fs.create(destination.parent, recursive: true);
+    await fs.rename(entry.asFilePath, file);
     return file;
   } catch (error, stackTrace) {
     logger.e('Failed to retire ${entry.path}.', error, stackTrace);
@@ -1027,12 +1044,16 @@ Future<PathEntity?> retireEntryInto(DirectoryPath retiredRoot, PathEntity entry,
 /// "the same, apart from what I wrote", which is how two spellings of one
 /// comparison come about. An entry named here is ignored on both sides, so it may
 /// be present on one, on both with different bytes, or on neither.
+///
+/// Every look goes through [within], or by path where it is null.
 Future<bool> sameDirectoryTree(
   DirectoryPath left,
   DirectoryPath right, {
   bool compareBytes = true,
   Set<String> except = const {},
+  OpenedDirectory? within,
 }) async {
+  final fs = within ?? OpenedDirectory.byPath();
   try {
     // Kind first, on both roots. `exists()` is true for a file on either
     // backend, and `DirectoryPath.isFile()` answers from the static type rather
@@ -1040,11 +1061,11 @@ Future<bool> sameDirectoryTree(
     // directory belongs would be compared as a directory. This function's result
     // is what authorises the source delete, so an unexpected shape must be
     // inequality, never "both trees are empty, therefore equal".
-    if (!await _isExistingDirectory(left) || !await _isExistingDirectory(right)) return false;
+    if (!await _isExistingDirectory(fs, left) || !await _isExistingDirectory(fs, right)) return false;
 
     Future<Map<String, PathEntity>> entriesFor(DirectoryPath root) async {
       final entries = <String, PathEntity>{};
-      await for (final entry in root.list(recursive: true, followLinks: false)) {
+      await for (final entry in fs.list(root, recursive: true, followLinks: false)) {
         final relative = PathEntity.context.relative(entry.path, from: root.path);
         if (except.contains(relative)) {
           continue;
@@ -1071,14 +1092,14 @@ Future<bool> sameDirectoryTree(
       if (!leftIsFile) continue;
       final leftFile = leftEntry.asFilePath;
       final rightFile = rightEntry.asFilePath;
-      if (await leftFile.length() != await rightFile.length()) return false;
+      if (await fs.length(leftFile) != await fs.length(rightFile)) return false;
       files.add((leftFile, rightFile));
     }
     if (!compareBytes) return true;
 
     // Phase 3: contents, streamed and stopping at the first difference.
     for (final (leftFile, rightFile) in files) {
-      if (!await leftFile.sameBytesAs(rightFile)) return false;
+      if (!await fs.sameBytes(leftFile, rightFile)) return false;
     }
     return true;
   } catch (error, stackTrace) {
@@ -1096,8 +1117,8 @@ Future<bool> sameDirectoryTree(
 /// [PathEntity.exists] accepts a file at the same path on both backends, and
 /// `DirectoryPath.isFile()` short-circuits to `false` from its static type, so
 /// the kind has to be asked of the backend directly.
-Future<bool> _isExistingDirectory(DirectoryPath directory) async {
-  return await directory.exists() && !await fsBackend.isFile(directory.path);
+Future<bool> _isExistingDirectory(OpenedDirectory fs, DirectoryPath directory) async {
+  return await fs.exists(directory) && !await fs.holdsFile(directory);
 }
 
 /// Publishes a new tree without intentionally replacing a pre-existing entry.
