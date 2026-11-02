@@ -2,7 +2,7 @@
 # ============================================================================
 # !!! PRODUCTION IMPACT -- READ BEFORE RUNNING !!!
 #
-# Stage 2 of the R2 migration. This installs a live Cloudflare dynamic redirect
+# Stage 2 of the data host move. This installs a live Cloudflare dynamic redirect
 # rule on the umasagashi.com zone that forwards
 #
 #     https://umasagashi.com/data/umacapture/*
@@ -14,8 +14,8 @@
 # The desktop builds up to v0.2.x hardcode the legacy URL and will start
 # following this redirect immediately; v0.3.0 reads data.umacapture.com directly. Only run this while all 5 files verify at
 # data.umacapture.com. That host is served by the Worker umacapture-data
-# (Workers Static Assets), not by the R2 bucket, so the redirected apps fetch
-# from the Worker; it serves the same /umacapture/* paths the target names.
+# (Workers Static Assets), which serves the same /umacapture/* paths the target
+# names.
 #
 # Default status code is 302 (not cached by clients) for the initial rollout.
 # Once stable, re-run with --promote-301 to switch to a cacheable 301.
@@ -157,7 +157,7 @@ new_rule="$(jq -n \
   --argjson status "$STATUS_CODE" '
   {
     ref: $ref,
-    description: "Forward legacy umacapture module URLs to R2 (data.umacapture.com).",
+    description: "Forward legacy umacapture module URLs to data.umacapture.com.",
     expression: $expr,
     action: "redirect",
     action_parameters: {
@@ -192,7 +192,7 @@ echo "    HTTP $hop_code"
 echo "    Location: ${location:-<none>}"
 [[ "$hop_code" == "$STATUS_CODE" ]] || fail "expected $STATUS_CODE at the hop, got $hop_code."
 [[ "$location" == https://data.umacapture.com/umacapture/* ]] \
-  || fail "Location does not point at the R2 custom domain."
+  || fail "Location does not point at data.umacapture.com."
 
 step "Verify final response (curl -sIL): expect 200 + content-length $MODULES_ZIP_BYTES"
 final_code="$(curl -s -L -o /dev/null -w '%{http_code}' "$probe" || true)"
@@ -203,7 +203,7 @@ echo "    final HTTP $final_code, content-length ${final_clen:-<none>}"
   || fail "final content-length $final_clen != expected $MODULES_ZIP_BYTES."
 
 echo
-echo "Stage 2 complete: $MATCH_URL now redirects ($STATUS_CODE) to R2."
+echo "Stage 2 complete: $MATCH_URL now redirects ($STATUS_CODE) to data.umacapture.com."
 if [[ "$STATUS_CODE" == "302" ]]; then
   echo "When stable, re-run with --promote-301 to switch to a cacheable 301."
 fi

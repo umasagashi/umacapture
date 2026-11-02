@@ -150,7 +150,7 @@ resolves to the FVM default, but verify rather than assume.
    the probe fails. The published executable is `flutter_distributor:main`.
 
 5. **`sentry-cli` and a Sentry auth token are available** (needed by the symbol
-   upload in Phase 2, step 8.5). The upload lets Sentry symbolicate native
+   upload in Phase 2, step 9.5). The upload lets Sentry symbolicate native
    Windows crashes; skipping it only means that release's native crashes stay as
    raw addresses, so it is not release-blocking, but do it whenever possible.
    ```bash
@@ -397,25 +397,19 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 
 ### If the release also publishes a web bundle
 
-Steps 8–11 publish the Windows build only. A release that ships a **web** bundle
-needs the browser counterpart of step 9.5 — `tool/upload_web_sourcemaps.sh`.
-Without it every web frame in Sentry arrives minified (`minified:aeK`), which is
-the exact condition the script exists to prevent.
+Steps 8–11 publish the Windows build only. The web app is published by deploying
+it, and a deployment goes through `tool/cloudflare/deploy_web.sh` only: follow the
+**web-deploy** skill, which points into `docs/web-deploy.md` ("Deploying").
 
-Build with source maps through the wrapper (never `flutter build web`), then
-upload:
-```bash
-tool/build_web.sh --pwa-strategy=none --source-maps
-export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
-tool/upload_web_sourcemaps.sh
-```
-Two properties make the order load-bearing:
-- The release string is read from `assets/version_info.json`, so this runs
-  **after** Phase 1. Maps uploaded under any other release do not symbolicate.
-- The script's `sourcemaps inject` pass rewrites `build/web` **in place** with
-  debug IDs. **Deploy that exact tree** — rebuilding afterwards without re-running
-  the script breaks the match. The script verifies the artifact bundle really
-  landed for the release and fails if it did not.
+Do not build or upload the web bundle by hand for a release. The script deletes
+`build/web`, rebuilds it from the committed `HEAD`, and in production uploads the
+source maps itself (`tool/upload_web_sourcemaps.sh`, its stage 2) before it deploys
+that exact tree. A bundle built or maps uploaded by hand beforehand are thrown away,
+and the maps go to Sentry a second time.
+
+One ordering belongs to the release: the maps are uploaded under the release string
+read from `assets/version_info.json`, and maps uploaded under any other release do
+not symbolicate. Deploy the web app **after** Phase 1 has landed the version bump.
 
 ## Notes / gotchas
 
