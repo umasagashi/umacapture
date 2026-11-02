@@ -517,12 +517,17 @@ _HeldRecord? _locate(List<CharaDetailRecordMergeSurface> stores, String id) {
 /// computed from a store view that may be several frames old, and the whole of
 /// what authorises replacing one record's content with another's — or recording
 /// that the two are not the same uma — is this relation. [relateRecords] decides
-/// it the same way the derivation did: an exact duplicate needs no factor table,
+/// the relation the derivation gives the pair, from the same `CharaIdentity.==`
+/// and the same split self factors: an exact duplicate needs no factor table,
 /// and any other pair is unrelated (a refusal, not a pass) while the table has
 /// not loaded.
 bool _stillTheSameCandidate(Ref ref, EnhancementCandidate candidate, CharaDetailRecord older, CharaDetailRecord newer) {
   final info = ref.read(factorInfoLoader).asData;
-  final relation = relateRecords(older, newer, info == null ? null : FactorClassifier.fromInfo(info.value));
+  final relation = relateRecords(
+    enhancementSubjectOf(older),
+    enhancementSubjectOf(newer),
+    info == null ? null : FactorClassifier.fromInfo(info.value),
+  );
   final enhanced = switch (relation) {
     EnhancementRelation.unrelated => null,
     EnhancementRelation.identical => null,
@@ -699,23 +704,42 @@ Future<void> _forgetDeletedRecordsLocked(RefBase ref, PathInfo info, Set<String>
   }
 }
 
+/// What both stores and the dismissal set give the candidate derivation.
+///
+/// The stores are read through [settledRecordStoresProvider], so a publication
+/// that reads both stores again is seen once both have been read, never with
+/// one store new and the other stale. Worked out again whenever that view or
+/// the dismissal set publishes, and
+/// handed on only when it differs ([EnhancementCandidateSource]'s equality): a
+/// publication that changes no subject — a binding, the inheritance links, the
+/// dismissed pairs arriving as the set they already were — reaches no
+/// candidate. Each record's subject is worked out once per record instance, so
+/// this costs a pass over the records and not a derivation.
+final enhancementCandidateSourceProvider = Provider<EnhancementCandidateSource>((ref) {
+  final (:active, :archive) = ref.watch(settledRecordStoresProvider);
+  final dismissed = ref.watch(enhancementDismissedPairsProvider).asData?.value ?? const <RecordIdPair>{};
+  return EnhancementCandidateSource([
+    for (final record in active) enhancementSubjectOf(record),
+    for (final record in archive) enhancementSubjectOf(record),
+  ], dismissed);
+});
+
 /// Every enhancement candidate the app currently has to offer.
 ///
-/// Derived, never persisted: it recomputes whenever either store's list, the
-/// factor table or the dismissal set changes, so adding, deleting or
-/// re-recognising a record moves the list without anything invalidating it by
-/// hand. Exact duplicates are offered whatever state the factor table is in, as
-/// they need no factor colour; every other pair only once the table has loaded,
-/// since the colour of a factor is what decides it.
+/// Derived, never persisted: it recomputes whenever the subjects of the stored
+/// records ([EnhancementSubject]), the factor table or the dismissal set
+/// changes, so adding, deleting or re-recognising a record moves the list
+/// without anything invalidating it by hand. Exact duplicates are offered
+/// whatever state the factor table is in, as they need no factor colour; every
+/// other pair only once the table has loaded, since the colour of a factor is
+/// what decides it.
 final pendingEnhancementCandidatesProvider = Provider<List<EnhancementCandidate>>((ref) {
   final info = ref.watch(factorInfoLoader).asData;
-  final active = ref.watch(charaDetailRecordStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
-  final archive = ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
-  final dismissed = ref.watch(enhancementDismissedPairsProvider).asData?.value ?? const <RecordIdPair>{};
+  final source = ref.watch(enhancementCandidateSourceProvider);
   return findEnhancementCandidates(
-    [...active, ...archive],
+    source.subjects,
     info == null ? null : FactorClassifier.fromInfo(info.value),
-    dismissed: dismissed,
+    dismissed: source.dismissed,
   );
 });
 

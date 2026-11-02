@@ -545,6 +545,50 @@ final class RecordIdMismatch implements Exception {
 /// source-agnostic `traineeIconPathIn` helper in storage.dart.
 const traineeIconFileName = "trainee.jpg";
 
+/// The attributes of a record that tell one trained character from another: two records whose
+/// identities are equal are the same character ([CharaDetailRecord.isSameChara]).
+///
+/// A partial view: it leaves out what a record holds besides the trained character — its id, its
+/// metadata, the support cards, the family, the races.
+///
+/// `==` must stay an equivalence relation, and equal identities must have equal [factors]:
+/// `findEnhancementCandidates` numbers the identities of a record set by comparing each with one
+/// representative per identity among the records with the same factors, so a comparison with a
+/// tolerance would make it miss exact duplicates.
+final class CharaIdentity {
+  const CharaIdentity(this.trainee, this.evaluationValue, this.status, this.aptitudes, this.skills, this.factors);
+
+  final Character trainee;
+  final int evaluationValue;
+  final CharacterStatus status;
+  final AptitudeSet aptitudes;
+  final List<Skill> skills;
+  final FactorSet factors;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    if (other is! CharaIdentity) {
+      return false;
+    }
+    const DeepCollectionEquality equality = DeepCollectionEquality();
+    return [
+      trainee == other.trainee,
+      evaluationValue == other.evaluationValue,
+      status == other.status,
+      aptitudes == other.aptitudes,
+      equality.equals(skills, other.skills),
+      factors == other.factors,
+    ].everyIn();
+  }
+
+  // The members' own hash is by identity ([JsonEquatable]), so only the plain values are hashed.
+  @override
+  int get hashCode => Object.hash(evaluationValue, skills.length, factors.self.length);
+}
+
 // ignoreNull keeps persisted record.json byte-compatible with the native writer,
 // which omits empty optionals. Without it, toMap() would emit optional fields as
 // explicit nulls (e.g. "relation_bonus": null), which the native recognizer cannot
@@ -1130,19 +1174,11 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// 4-space indent.
   Uint8List toRecordJsonBytes() => utf8.encode(const JsonEncoder.withIndent('    ').convert(toMap()));
 
-  /// Determines if another record represents the same character based on key attributes.
-  /// This method partially compares only the attributes necessary for distinguishing records.
-  bool isSameChara(CharaDetailRecord other) {
-    const DeepCollectionEquality equality = DeepCollectionEquality();
-    return [
-      trainee == other.trainee,
-      evaluationValue == other.evaluationValue,
-      status == other.status,
-      aptitudes == other.aptitudes,
-      equality.equals(skills, other.skills),
-      factors == other.factors,
-    ].everyIn();
-  }
+  /// The attributes [isSameChara] compares.
+  CharaIdentity get charaIdentity => CharaIdentity(trainee, evaluationValue, status, aptitudes, skills, factors);
+
+  /// Determines if another record represents the same character based on key attributes ([charaIdentity]).
+  bool isSameChara(CharaDetailRecord other) => charaIdentity == other.charaIdentity;
 
   /// Whether this record's own self-factors could be the character [probeSelf] was read from.
   ///

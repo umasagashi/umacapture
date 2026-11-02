@@ -47,6 +47,7 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/record_image.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
@@ -55,6 +56,22 @@ import 'support/factor_classifier.dart';
 import 'support/localization.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
+
+/// The archive store with a gate in front of its bulk scan.
+///
+/// The gate is taken before `super.scanRecords`, so a closed gate holds no lock
+/// and parks the archive's read-again where both stores are mid-publication.
+class _GatedArchiveStorage extends CharaDetailArchiveStorage {
+  _GatedArchiveStorage(this._gate);
+
+  final Completer<void>? Function() _gate;
+
+  @override
+  Future<RecordScanResult> scanRecords(DirectoryPath directory) async {
+    await _gate()?.future;
+    return super.scanRecords(directory);
+  }
+}
 
 /// A bare carrier of the metadata write chain, so the chain's own contract can
 /// be read without a controller, a `Ref` or a file.
@@ -2452,6 +2469,42 @@ void main() {
           .deleteAsync('retired', effects: recordDeleteEffects(container));
       expect(container.read(pendingEnhancementCandidatesProvider), isEmpty, reason: 'the deletion is watched');
     });
+
+    test(
+      'a publication that moves a record across the stores offers what both stores hold once both are read again',
+      () async {
+        writeRecord(info.charaDetailArchiveDir, preRecord('older'));
+        Completer<void>? gate;
+        final container = await loadedMergeContainer(
+          info: info,
+          overrides: [charaDetailArchiveStorageLoaderProvider.overrideWith(() => _GatedArchiveStorage(() => gate))],
+        );
+        final candidates = container.listen(pendingEnhancementCandidatesProvider, (_, _) {});
+        expect(candidates.read(), isEmpty);
+
+        final held = gate = Completer<void>();
+        try {
+          // What a received publication leaves on disk: `older` moved to the active store, `retired` written archived.
+          Directory((info.charaDetailArchiveDir / 'older').path).deleteSync(recursive: true);
+          writeRecord(info.charaDetailActiveDir, preRecord('older'));
+          writeRecord(info.charaDetailArchiveDir, postRecord('retired'));
+          final ref = container.read(containerRefProvider);
+          applyRecordsPublished(ref, info, writtenIds: const ['older', 'retired'], effects: recordImportEffects(ref));
+
+          await container.read(charaDetailRecordStorageLoaderProvider.future);
+          expect(candidates.read(), isEmpty, reason: 'the stores are not read again together yet');
+
+          held.complete();
+          await container.read(charaDetailArchiveStorageLoaderProvider.future);
+          expect(candidates.read().map((c) => c.pair), [RecordIdPair('older', 'retired')]);
+        } finally {
+          if (!held.isCompleted) {
+            held.complete();
+          }
+          await container.read(charaDetailArchiveStorageLoaderProvider.future).then((_) {}, onError: (_) {});
+        }
+      },
+    );
 
     test('a failure in the reference rewrite stops the merge and leaves memory equal to disk', () async {
       seedPair();

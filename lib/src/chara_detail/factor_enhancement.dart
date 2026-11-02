@@ -1,3 +1,5 @@
+import 'package:collection/collection.dart';
+
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -63,8 +65,11 @@ const kEnhancementAddedWhiteStar = 3;
 /// comparison is by factor id and ignores order. A list with an id the [classifier] does not know, or
 /// with a repeated id, is a misrecognised record and relates to nothing.
 EnhancementRelation compareEnhancement(List<Factor> first, List<Factor> second, FactorClassifier classifier) {
-  final a = SplitFactors.of(first, classifier);
-  final b = SplitFactors.of(second, classifier);
+  return _relateSplits(SplitFactors.of(first, classifier), SplitFactors.of(second, classifier));
+}
+
+/// How two split self-factor lists relate; a list that could not be split relates to nothing.
+EnhancementRelation _relateSplits(SplitFactors? a, SplitFactors? b) {
   if (a == null || b == null) {
     return EnhancementRelation.unrelated;
   }
@@ -97,7 +102,7 @@ final class SplitFactors {
   }
 
   /// The sorted coloured ids joined into one string: two lists can only relate when this is equal.
-  String get colouredKey => (coloured.keys.toList()..sort()).join(',');
+  late final String colouredKey = (coloured.keys.toList()..sort()).join(',');
 
   EnhancementRelation relateTo(SplitFactors other) {
     if (colouredKey != other.colouredKey) {
@@ -169,17 +174,58 @@ final class EnhancementCandidate {
   RecordIdPair get pair => RecordIdPair(olderId, newerId);
 }
 
+/// What of a stored record the candidate derivation reads: its id, its capture date and its
+/// [CharaIdentity].
+///
+/// [findEnhancementCandidates], [relateRecords] and [compareRecordAge] take this and not the record,
+/// so no other field of a record can decide a candidate: a derivation that needs one more field has
+/// to add it here. A record type, so its equality — which decides whether the candidates are kept or
+/// derived again ([EnhancementCandidateSource]) — compares every field it has without listing them.
+typedef EnhancementSubject = ({String id, String capturedDate, CharaIdentity chara});
+
+/// The [EnhancementSubject] of [record], worked out once per record instance ([_subjects]): a record
+/// is immutable, and every change of one is a new instance, which has no subject yet.
+EnhancementSubject enhancementSubjectOf(CharaDetailRecord record) =>
+    _subjects[record] ??= (id: record.id, capturedDate: record.metadata.capturedDate, chara: record.charaIdentity);
+
+/// The subject [enhancementSubjectOf] worked out of each record instance, held by the instance's
+/// identity and gone with it.
+final _subjects = Expando<EnhancementSubject>('EnhancementSubject');
+
+/// Everything the candidates are derived from but the factor table: the subjects of the stored
+/// records, in store order, and the dismissed pairs.
+///
+/// Equal by content, so a store publishing records whose subjects did not change — a binding, the
+/// inheritance links, a reload of the same files — or the dismissed pairs arriving as the set they
+/// already were, derives nothing again.
+final class EnhancementCandidateSource {
+  const EnhancementCandidateSource(this.subjects, this.dismissed);
+
+  final List<EnhancementSubject> subjects;
+  final Set<RecordIdPair> dismissed;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EnhancementCandidateSource &&
+          const ListEquality<EnhancementSubject>().equals(subjects, other.subjects) &&
+          const SetEquality<RecordIdPair>().equals(dismissed, other.dismissed);
+
+  @override
+  int get hashCode => Object.hash(subjects.length, dismissed.length);
+}
+
 /// Orders records by how long their id has existed: earlier `capturedDate` first, an unparseable date
 /// after every parseable one, and the lexicographically smaller id on a tie.
 ///
 /// This decides only which id survives a merge; which side is enhanced is decided by factor content
 /// alone, because a pre-enhancement record can be captured again later. The order is the merge's
 /// ([syncCompareAge]), of each record's id and the instant its date parses to.
-int compareRecordAge(CharaDetailRecord a, CharaDetailRecord b) {
-  ({String id, int? captured}) ageOf(CharaDetailRecord r) =>
-      (id: r.id, captured: DateTime.tryParse(r.metadata.capturedDate)?.microsecondsSinceEpoch);
-  return syncCompareAge(ageOf(a), ageOf(b));
-}
+int compareRecordAge(EnhancementSubject a, EnhancementSubject b) => syncCompareAge(_ageOf(a), _ageOf(b));
+
+/// What [syncCompareAge] orders a record by: its id and the instant its capture date parses to.
+({String id, int? captured}) _ageOf(EnhancementSubject r) =>
+    (id: r.id, captured: DateTime.tryParse(r.capturedDate)?.microsecondsSinceEpoch);
 
 /// How two stored records relate as merge candidates.
 ///
@@ -189,57 +235,85 @@ int compareRecordAge(CharaDetailRecord a, CharaDetailRecord b) {
 /// aptitudes, skills, rank and evaluation is not such a match. Every other pair is decided by
 /// [compareEnhancement] on the self factors alone, which needs the colour of each factor; with no
 /// [classifier] (the factor table has not loaded, or failed to) such a pair is unrelated.
-EnhancementRelation relateRecords(CharaDetailRecord a, CharaDetailRecord b, FactorClassifier? classifier) {
-  if (a.isSameChara(b)) {
+EnhancementRelation relateRecords(EnhancementSubject a, EnhancementSubject b, FactorClassifier? classifier) {
+  if (a.chara == b.chara) {
     return EnhancementRelation.identical;
   }
   if (classifier == null) {
     return EnhancementRelation.unrelated;
   }
-  return compareEnhancement(a.factors.self, b.factors.self, classifier);
+  return compareEnhancement(a.chara.factors.self, b.chara.factors.self, classifier);
 }
+
+/// What [findEnhancementCandidates] works out of each record once, so that a pair only compares them.
+///
+/// [identity] numbers the records' [CharaIdentity] values: two records carry the same number exactly
+/// when their identities are `==`, so it decides [EnhancementRelation.identical] as [relateRecords]
+/// does. It is only meaningful within one call of [findEnhancementCandidates].
+typedef _Prepared = ({EnhancementSubject subject, SplitFactors? split, ({String id, int? captured}) age, int identity});
 
 /// Every pair of [records] that [relateRecords] relates, except the pairs in [dismissed].
 ///
 /// With no [classifier] only the exact duplicates are found, as [relateRecords] relates nothing else.
 ///
+/// What a single record decides — its split self factors, its age and which identity it has — is
+/// worked out once per record ([_Prepared]); each pair relates them as [relateRecords] would relate
+/// the two records.
+///
 /// Records are compared only within the same set of coloured factor kinds, or, for an exact
 /// duplicate, within the same factors; the card is not a term, because the green factor already
 /// differs per card.
 List<EnhancementCandidate> findEnhancementCandidates(
-  Iterable<CharaDetailRecord> records,
+  Iterable<EnhancementSubject> records,
   FactorClassifier? classifier, {
   Set<RecordIdPair> dismissed = const {},
 }) {
   // Two partitions, because each relation is only possible within one: an enhancement pair shares
   // its coloured kinds, and an exact duplicate shares its whole factor set — including a record
   // whose self list [SplitFactors.of] cannot split. A pair can sit in both; [seen] offers it once.
-  final byColouredKinds = <String, List<CharaDetailRecord>>{};
-  final byFactors = <String, List<CharaDetailRecord>>{};
+  //
+  // The identity numbers are given within the factor-set partition, by comparing each record with the
+  // first record of every identity already seen there. That finds every exact duplicate because
+  // `CharaIdentity.==` is an equivalence relation, and identities that are `==` have equal factors, so
+  // they always share a factor-set partition; numbers run across partitions, so records in different
+  // ones never share one.
+  final byColouredKinds = <String, List<_Prepared>>{};
+  final byFactors = <String, List<_Prepared>>{};
+  final representatives = <String, List<_Prepared>>{};
+  var identities = 0;
   for (final record in records) {
-    final split = classifier == null ? null : SplitFactors.of(record.factors.self, classifier);
-    if (split != null) {
-      byColouredKinds.putIfAbsent(split.colouredKey, () => []).add(record);
+    final split = classifier == null ? null : SplitFactors.of(record.chara.factors.self, classifier);
+    final key = _factorsKey(record.chara.factors);
+    final known = representatives.putIfAbsent(key, () => []);
+    final same = known.firstWhereOrNull((r) => r.subject.chara == record.chara);
+    final prepared = (subject: record, split: split, age: _ageOf(record), identity: same?.identity ?? identities++);
+    if (same == null) {
+      known.add(prepared);
     }
-    byFactors.putIfAbsent(_factorsKey(record.factors), () => []).add(record);
+    if (split != null) {
+      byColouredKinds.putIfAbsent(split.colouredKey, () => []).add(prepared);
+    }
+    byFactors.putIfAbsent(key, () => []).add(prepared);
   }
   final seen = <RecordIdPair>{...dismissed};
   final candidates = <EnhancementCandidate>[];
   for (final bucket in [...byColouredKinds.values, ...byFactors.values]) {
     for (var i = 0; i < bucket.length; i++) {
       for (var j = i + 1; j < bucket.length; j++) {
-        final a = bucket[i];
-        final b = bucket[j];
+        final pa = bucket[i];
+        final pb = bucket[j];
+        final a = pa.subject;
+        final b = pb.subject;
         final pair = RecordIdPair(a.id, b.id);
         if (seen.contains(pair)) {
           continue;
         }
-        final relation = relateRecords(a, b, classifier);
+        final relation = pa.identity == pb.identity ? EnhancementRelation.identical : _relateSplits(pa.split, pb.split);
         if (relation == EnhancementRelation.unrelated) {
           continue;
         }
         seen.add(pair);
-        final aOlder = compareRecordAge(a, b) <= 0;
+        final aOlder = syncCompareAge(pa.age, pb.age) <= 0;
         candidates.add(
           EnhancementCandidate(
             olderId: aOlder ? a.id : b.id,
