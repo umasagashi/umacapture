@@ -106,11 +106,17 @@ enum AccountDeletionOutcome {
   /// The server deleted the account; the session and the share notes are gone from the device.
   deleted,
 
-  /// There is no session to continue with. A login onto the account continues its deletion.
+  /// There is no session to continue with, and the device has not seen the deletion start under it: a login is
+  /// needed first.
   loginRequired,
 
   /// No answer arrived. The session is kept, and calling again continues where the server left off.
   unreachable,
+
+  /// The server finishes the rest on its own, so the session and the share notes are gone from the device as on
+  /// [deleted]: the server's day ran out of room for deletions (`429 sync_paused_today`), or a deleting session was
+  /// lost (401) — expired, or dropped by the server once it finished.
+  handedToServer,
 
   /// The server refused or answered something else.
   failed,
@@ -385,12 +391,13 @@ class RecordShareSession extends Notifier<ShareSession?> {
   }
 
   /// Deletes the account: repeats `DELETE /api/me` until the server answers 204, then drops the session and the
-  /// share notes. Each 200 reports through [onProgress] how much is left, summed over every kind the server
-  /// names, since the kinds are the server's to add.
+  /// share notes. A `429 sync_paused_today` leaves the rest to the server, which drops them the same way; a 429
+  /// with any other body, as a firewall's, is a refusal like any other status.
   ///
   /// The session is marked as deleting from the first 200 on, so a deletion cut short continues with the same
-  /// token. A session lost on the way (401) is regained by logging in again: the claim then answers `deleting`.
-  Future<AccountDeletionOutcome> deleteAccount({void Function(int remaining)? onProgress}) async {
+  /// token. A deleting session lost on the way (401) is left to the server as well, which finishes every account
+  /// marked deleting on its own; logging in again after it finished would create a new account.
+  Future<AccountDeletionOutcome> deleteAccount() async {
     while (true) {
       final session = state;
       if (session == null) {
@@ -407,36 +414,27 @@ class RecordShareSession extends Notifier<ShareSession?> {
           logger.i("The sharing account was deleted");
           await _forgetAll();
           return AccountDeletionOutcome.deleted;
+        case 401 when session.deleting:
+          logger.i("The sharing account's deleting session was lost; the deletion is left to the server");
+          await _forgetAll();
+          return AccountDeletionOutcome.handedToServer;
         case 401:
           return AccountDeletionOutcome.loginRequired;
+        case 429 when (answer.body?["error"]) == "sync_paused_today":
+          logger.i("The sharing account's deletion is left to the server for the rest of the day");
+          await _forgetAll();
+          return AccountDeletionOutcome.handedToServer;
         case 200:
-          final remaining = _remainingOf(answer.body);
-          if (remaining == null) {
+          // Only the deletion's own answer carries `remaining`; anything else answering 200 is not progress.
+          if (answer.body?["remaining"] is! Map) {
             return AccountDeletionOutcome.failed;
           }
           await _markDeleting(session);
-          onProgress?.call(remaining);
         default:
           logger.w("The sharing account was not deleted. status=${answer.status}");
           return AccountDeletionOutcome.failed;
       }
     }
-  }
-
-  /// The sum of a 200's `remaining`, whatever kinds it names, or null when the body is not that map.
-  int? _remainingOf(Map<String, Object?>? body) {
-    final remaining = body?["remaining"];
-    if (remaining is! Map) {
-      return null;
-    }
-    var sum = 0;
-    for (final count in remaining.values) {
-      if (count is! int) {
-        return null;
-      }
-      sum += count;
-    }
-    return sum;
   }
 
   /// Ends the session on the server and drops it with the share notes. Returns false when the server did not

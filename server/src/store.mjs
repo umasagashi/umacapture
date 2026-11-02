@@ -472,14 +472,13 @@ export async function beginAccountDeletion(db, accountId, tokenHash, now, expire
 
 /**
  * Removes up to `limit` records of account `accountId` (one batch), giving their charge back to the
- * totals and their places back to the account's cap. Allowed only to a deletion-only session
- * `tokenHash` of the account, while the account is being deleted: the opposite of an unshare's
- * condition, which the mark of the deletion makes fail. Returns the records it removed. Throws
- * Unavailable.
+ * totals and their places back to the account's cap. Allowed only while the account is being
+ * deleted: the opposite of an unshare's condition, which the mark of the deletion makes fail. The mark
+ * is what allows it, not a session, since the hourly run continues a deletion with none. Returns the
+ * records it removed. Throws Unavailable.
  */
-export async function deleteShareChunk(db, accountId, tokenHash, limit) {
-  const allowed = `EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?3 AND account_id = ?1 AND scope = 'delete')
-    AND EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL)`;
+export async function deleteShareChunk(db, accountId, limit) {
+  const allowed = "EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NOT NULL)";
   // The same rows in every statement: the batch is one transaction and the order is total.
   const chunk = "SELECT id FROM records WHERE owner_id = ?1 ORDER BY id LIMIT ?2";
   const results = await query(() =>
@@ -490,17 +489,34 @@ export async function deleteShareChunk(db, accountId, tokenHash, limit) {
              count = count - (SELECT count(*) FROM records WHERE id IN (${chunk}))
            WHERE id = 1 AND ${allowed}`,
         )
-        .bind(accountId, limit, tokenHash),
+        .bind(accountId, limit),
       db
         .prepare(
           `UPDATE accounts SET share_count = share_count - (SELECT count(*) FROM records WHERE id IN (${chunk}))
            WHERE id = ?1 AND ${allowed}`,
         )
-        .bind(accountId, limit, tokenHash),
-      db.prepare(`DELETE FROM records WHERE id IN (${chunk}) AND ${allowed}`).bind(accountId, limit, tokenHash),
+        .bind(accountId, limit),
+      db.prepare(`DELETE FROM records WHERE id IN (${chunk}) AND ${allowed}`).bind(accountId, limit),
     ]),
   );
   return results[2].meta.changes;
+}
+
+/**
+ * The ids of up to `limit` accounts being deleted, the longest deleted first. Read through the
+ * partial index of migrations/0004_accounts_deleting.sql, which holds only those accounts, so the
+ * read costs what is being deleted rather than every account. Throws Unavailable.
+ */
+export async function accountsBeingDeleted(db, limit) {
+  const { results } = await query(() =>
+    db
+      .prepare(
+        "SELECT id FROM accounts INDEXED BY accounts_deleting WHERE deleting_since IS NOT NULL ORDER BY deleting_since LIMIT ?1",
+      )
+      .bind(limit)
+      .all(),
+  );
+  return results.map((row) => row.id);
 }
 
 /** How many records account `accountId` still shares. Throws Unavailable. */

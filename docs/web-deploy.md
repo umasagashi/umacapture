@@ -6,7 +6,7 @@ database. The Worker carries logins (Google, behind Turnstile), record sharing a
 answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, an account's list of shared records
 `/u/<id>` and `/u/<id>.json`, and the API under `/api/` (file sync under `/api/sync/`), and answers 404
 to any other path that matches no file. An hourly run of the same Worker tidies file sync's storage
-(`triggers.crons`). File sync stores its objects in a Backblaze B2 bucket per environment, which the
+and goes on with the deletion of every account being deleted (`triggers.crons`). File sync stores its objects in a Backblaze B2 bucket per environment, which the
 Worker alone reaches, with a key held in Worker secrets ([`sync-server.md`](sync-server.md)). A
 request for a file in `build/web/` is a static-asset request: no Worker script runs and it is not
 counted as a Worker request.
@@ -166,7 +166,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
     | `TURNSTILE_ACTION` | `login` |
     | `GOOGLE_CLIENT_ID` | The OAuth client's id (step 8) |
     | `AUTH_REDIRECT_ORIGIN` | `https://umacapture.com`, the origin of the redirect URI registered with Google |
-    | `SYNC_ENABLED` | `"true"` (a first production deployment starts with `"false"`, see "Deploying"). `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` and stops the hourly run, while sharing, logins and account deletion go on |
+    | `SYNC_ENABLED` | `"true"` (a first production deployment starts with `"false"`, see "Deploying"). `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` and stops the hourly run's sync kinds, while sharing, logins and account deletion go on, the hourly run's included |
     | `B2_ENDPOINT` | `s3.us-west-004.backblazeb2.com` |
     | `B2_REGION` | `us-west-004` |
     | `B2_BUCKET` | `umacapture-sync` |
@@ -747,7 +747,7 @@ Sync can be stopped alone, with logins and sharing going on. In this order of pr
 
 | Means | Effect | Depends on |
 |---|---|---|
-| `SYNC_ENABLED` `"false"` in the target's `vars`, committed, then `deploy_web.sh --target <target>` | Every endpoint under `/api/sync/` answers `503 sync_paused` before it reads anything, and the hourly run does nothing. Logins, sharing and account deletion go on, account deletion's B2 part included. D1 and B2 keep their data. What cut-off requests left to hide stays unhidden, and so undeleted by the lifecycle rule, until sync is on again | As `SHARING_ENABLED` above, the Sentry upload included for production |
+| `SYNC_ENABLED` `"false"` in the target's `vars`, committed, then `deploy_web.sh --target <target>` | Every endpoint under `/api/sync/` answers `503 sync_paused` before it reads anything, and the hourly run runs none of sync's kinds. Logins, sharing and account deletion go on, account deletion's B2 part and the hourly run's deletions included. D1 and B2 keep their data. What cut-off requests left to hide stays unhidden, and so undeleted by the lifecycle rule, until sync is on again | As `SHARING_ENABLED` above, the Sentry upload included for production |
 | Revoke the bucket's application key in the B2 console | B2 refuses every request the Worker sends: a sync request that has to reach B2 answers `502`, the hourly run fails, and no account deletion can finish (each call answers `502 storage_unavailable` after its D1 part). Sync resumes once a new key pair is put with `wrangler secret put B2_KEY_ID` and `B2_APPLICATION_KEY`, each of which deploys a new version at once | The B2 console only. Use it when the Worker cannot be deployed, or when the key itself may have leaked |
 | Lower a limit in `server/src/limits.mjs` (the daily limits per account and over every account, the capacity), committed, then `deploy_web.sh` | Sync past the new limit is refused (`429 daily_limit` to the next UTC day, `507` for capacity); the rest goes on ([`sync-server.md`](sync-server.md#limits)) | As `SYNC_ENABLED` |
 | B2's data caps (One-time preparation, step 10) | Bound what B2 can charge a day. A cap that is reached makes B2 refuse what it covers for the rest of the day, which the Worker answers `502`. They bound the cost, not who syncs | The B2 console only |
@@ -759,8 +759,9 @@ each account's next sync write take on what was left over, with one exception.
 **A stop also stops the repair of referenced images left hidden, and a long one can lose them.** A
 request cut off at the wrong point can leave an object that a current list references hidden in B2;
 the hourly run and the account's next sync write show it again (`showLeftovers`, `tidyLeftoversOf`).
-Every means above that stops the hourly run or keeps it from reaching B2 — `SYNC_ENABLED` `"false"`,
-a revoked key, the rollback, `--sharing off` — stops that repair too. Once such an object has been
+Every means above that stops the hourly run's sync kinds or keeps them from reaching B2 —
+`SYNC_ENABLED` `"false"`, a revoked key, the rollback, `--sharing off` — stops that repair too. Once
+such an object has been
 hidden for 143 hours (`B2_DAYS_FROM_HIDING_TO_DELETING` days less `RESTORE_MARGIN_SECONDS`, both in
 `server/src/limits.mjs`), counted from its first hide and not from the stop, the server treats it as
 gone: neither the hourly run nor a write shows it again after sync resumes, and the lifecycle rule

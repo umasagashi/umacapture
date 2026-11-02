@@ -334,7 +334,8 @@ account or the database hold more:
 
 Deleting the account (`DELETE /api/me`, outside `/api/sync/`) removes what it synced too: every
 version and delete marker under its B2 prefix, deleted by version id, and every sync row in D1. Once
-it answers 204 nothing of the account's sync is left, but for what a request still running then writes
+the account is gone (a 204, or an hourly run that finished the deletion) nothing of the account's sync
+is left, but for what a request still running then writes
 to B2 afterwards: a sync request of the account that passed its session check before the deletion
 began, or the hourly run hiding one of its objects. The server records each such write before it
 asks B2, and that record outlives the account; the hourly run deletes what it wrote, usually within
@@ -348,7 +349,7 @@ it ([what no row accounts for](#references-and-retention)).
 - **`remaining`.** A 200 carries `{remaining: {sync_rows, sync_versions, shares}}`: the sync rows left
   (counted up to `ACCOUNT_DELETE_SYNC_ROWS`), the versions and markers B2 still lists under the prefix
   (up to one page), and the shared records left. The app repeats the call with the same session until
-  it answers 204; it needs only whether they are 0.
+  it answers 204, and reads none of the counts.
 - **The day's share.** The sync rows go a chunk a call within half of `SYNC_DAILY_ROWS`
   (`SYNC_DAILY_DELETE_ROWS`, over every deletion), counted in the day's sync rows written, so a day of
   deletions leaves at least as many rows to everyone's sync. B2's versions go once no row is left. A
@@ -357,6 +358,12 @@ it ([what no row accounts for](#references-and-retention)).
   call that removes nothing because that share has no room answers `429 sync_paused_today` with the
   same `remaining` and a `Retry-After` to the next UTC day; the next call after it goes on where the
   deletion stopped.
+- **The hourly run finishes it.** Every hourly run goes on with the accounts being deleted, whether
+  sync is switched on or off, taking the same steps a call takes within the same day's share, so a
+  deletion finishes without the app. After `429 sync_paused_today` the app leaves the rest to the
+  server and drops its session; a run that meets the share with no room removes nothing, and a run of
+  a later UTC day goes on. Once a run has removed the account, its deletion-only session is gone with
+  it, and a call with that session answers `401`.
 
 ## References and retention
 
@@ -430,7 +437,7 @@ derives the references itself from the root and the parts it names.
     `GET /api/sync/generation`, the fetches and refused writes do not;
   - an hourly run at half past every hour UTC (a quarter to every hour on staging) hides up to 1,000
     of them across all accounts, as many accounts as its 50 requests to B2 have room for, and leaves
-    the rest recorded for the next hour's run. It does nothing while sync is switched off.
+    the rest recorded for the next hour's run. It hides nothing while sync is switched off.
 
   An object referenced again before either comes is not hidden. A client that sees such an error
   reads the generation again, as after any failed replacement; the objects left unhidden meanwhile

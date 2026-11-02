@@ -295,6 +295,70 @@ void main() {
     });
   });
 
+  // Each identity field on its own keeps two otherwise identical records apart: below the guard, a pair that
+  // differs only there is not the same uma, so it is neither offered nor merged from a candidate kept earlier.
+  group('a pair below the guard that differs in one identity field only', () {
+    CharaDetailRecord rebuilt(
+      CharaDetailRecord r, {
+      Character? trainee,
+      CharacterStatus? status,
+      AptitudeSet? aptitudes,
+      List<Skill>? skills,
+    }) => CharaDetailRecord(
+      r.metadata,
+      trainee ?? r.trainee,
+      r.evaluationValue,
+      status ?? r.status,
+      aptitudes ?? r.aptitudes,
+      skills ?? r.skills,
+      r.factors,
+      r.supportCards,
+      r.family,
+      r.fans,
+      r.scenario,
+      r.trainedDate,
+      r.races,
+    );
+
+    final variants = <String, CharaDetailRecord Function(CharaDetailRecord)>{
+      'trainee': (r) => rebuilt(r, trainee: chara(8)),
+      'status': (r) => rebuilt(r, status: const CharacterStatus(1, 0, 0, 0, 0)),
+      'aptitudes': (r) => rebuilt(
+        r,
+        aptitudes: const AptitudeSet(GroundAptitude(1, 0), DistanceAptitude(0, 0, 0, 0), StyleAptitude(0, 0, 0, 0)),
+      ),
+      'skills': (r) => rebuilt(r, skills: const [Skill(id: 1)]),
+    };
+
+    for (final MapEntry(key: field, value: vary) in variants.entries) {
+      test('is not offered when only the $field differs', () async {
+        writeRecord(info.charaDetailActiveDir, _record('a', _self(2), _olderDate));
+        writeRecord(info.charaDetailActiveDir, vary(_record('b', _self(2), _newerDate)));
+        final container = await loadedMergeContainer(info: info);
+        await container.read(enhancementDismissedPairsProvider.future);
+        expect(container.read(pendingEnhancementCandidatesProvider), isEmpty);
+      });
+
+      test('is refused from a kept candidate once only the $field differs', () async {
+        writeRecord(info.charaDetailActiveDir, _record('a', _self(2), _olderDate));
+        writeRecord(info.charaDetailActiveDir, _record('b', _self(2), _newerDate));
+        final container = await loadedMergeContainer(info: info);
+        final candidate = container.read(pendingEnhancementCandidatesProvider).single;
+
+        writeRecord(info.charaDetailActiveDir, vary(_record('b', _self(2), _newerDate)));
+        container.invalidate(charaDetailRecordStorageLoaderProvider);
+        await container.read(charaDetailRecordStorageLoaderProvider.future);
+
+        final result = await container
+            .read(enhancementMergeProvider)
+            .merge(candidate, effects: mergeEffects(container));
+        expect(result.outcome, EnhancementMergeOutcome.refusedMissing);
+        expect(Directory((info.charaDetailActiveDir / 'a').path).existsSync(), isTrue);
+        expect(Directory((info.charaDetailActiveDir / 'b').path).existsSync(), isTrue);
+      });
+    }
+  });
+
   group('without the factor table', () {
     // An exact duplicate needs no factor colour, so it is offered and merged whatever state the
     // table is in; an enhancement pair is decided by colour and waits for it.
