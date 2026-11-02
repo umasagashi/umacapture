@@ -62,12 +62,12 @@
     // start page asks the widget for the same action.
     "TURNSTILE_HOSTNAME": "umacapture.com",
     "TURNSTILE_ACTION": "login",
-    // The Google OAuth client of this environment. Empty until the client is created; a begin
+    // The Google OAuth client of this environment, which staging logs in through as well. A begin
     // refuses to run on an empty value rather than send Google an authorisation request without one.
     // Its secret, GOOGLE_CLIENT_SECRET, and IDENTITY_HMAC_KEY (32 random bytes as 64 lowercase hex
     // digits, the key identities are hashed under; losing it makes every account unreachable by its
     // login) are Worker secrets (`wrangler secret put`), never vars.
-    "GOOGLE_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": "398895641600-5oqtrm01eo0j66qvne28dslqvq84bb2k.apps.googleusercontent.com",
     // The origin of the login callback, ${AUTH_REDIRECT_ORIGIN}/api/auth/callback/<provider>, as
     // registered with the provider. The authorisation request and the token exchange both build it.
     "AUTH_REDIRECT_ORIGIN": "https://umacapture.com",

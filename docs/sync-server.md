@@ -13,7 +13,7 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 
 | Name | Kind | Production | Staging | Read by |
 |---|---|---|---|---|
-| `SYNC_ENABLED` | var | `"true"` | `"true"` | `syncEnabled` (`server/src/sync.mjs`) |
+| `SYNC_ENABLED` | var | `"true"` (a first deployment starts with `"false"`, [Deploying](web-deploy.md#deploying)) | `"true"` | `syncEnabled` (`server/src/sync.mjs`) |
 | `B2_ENDPOINT` | var | `s3.us-west-004.backblazeb2.com` | the same | `Bucket` (`server/src/b2.mjs`) |
 | `B2_REGION` | var | `us-west-004` | the same | `Bucket` |
 | `B2_BUCKET` | var | `umacapture-sync` | `umacapture-sync-staging` | `Bucket` |

@@ -56,7 +56,7 @@ lib/*.g.dart
 # its log output is not). The integration test writes to a temp file instead.
 /tool/addon_test/echo_log.txt
 
-# Cloudflare R2 setup credentials (real token/account id; scripts are tracked,
+# Cloudflare credentials (real token/account id; scripts are tracked,
 # the secrets file is not). Copy tool/cloudflare/.env.example to .env.
 /tool/cloudflare/.env
 # wrangler's local state and bundling scratch (`wrangler dev`, `wrangler deploy --dry-run`),
