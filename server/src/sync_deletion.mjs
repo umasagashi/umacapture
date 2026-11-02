@@ -7,7 +7,7 @@
 // cannot reach the account (it is being deleted), but the hourly run can still hide or show its name
 // and add a marker under the prefix, which the bucket's step then deletes with the rest.
 
-import { accountPrefix, Bucket } from "./b2.mjs";
+import { accountPrefix } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { d1 } from "./sync.mjs";
 
@@ -94,16 +94,18 @@ export async function countSyncRows(db, accountId) {
   return { remaining: Math.min(result.results[0].n, limits.ACCOUNT_DELETE_SYNC_ROWS), read: result.meta.rows_read ?? 0 };
 }
 
+/** B2 requests `deleteSyncVersions` sends at most for `pages` pages. */
+export const deleteVersionsRequests = (pages) => 2 * pages + 1;
+
 /**
  * Deletes the versions and delete markers under the B2 prefix of account `accountId`, by version, at
- * most `pages` pages of ListObjectVersions and one DeleteObjects for each (2 B2
- * requests a page, within B2_REQUESTS_PER_INVOCATION). Every page is listed from the start of the
- * prefix: what the page before deleted is no longer there. Returns `{removed, remaining}`: the
- * versions deleted, and those B2 still lists, up to one page (0 once a page came back whole and every
- * version on it was deleted). With `pages` 0 it only counts. Throws StorageFailed.
+ * most `pages` pages of ListObjectVersions and one DeleteObjects for each, then one more listing, all
+ * through `bucket` (`deleteVersionsRequests(pages)` B2 requests at most). Every page is listed from
+ * the start of the prefix: what the page before deleted is no longer there. Returns `{removed,
+ * remaining}`: the versions deleted, and those B2 still lists, up to one page (0 once a page came back
+ * whole and every version on it was deleted). With `pages` 0 it only counts. Throws StorageFailed.
  */
-export async function deleteSyncVersions(env, now, accountId, pages) {
-  const bucket = new Bucket(env, now);
+export async function deleteSyncVersions(bucket, accountId, pages) {
   const prefix = accountPrefix(accountId);
   let removed = 0;
   for (let page = 0; page < pages; page++) {

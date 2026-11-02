@@ -514,4 +514,41 @@ describe("account deletion", () => {
     }
     assert.equal(await syncRowsOf(a.id), 2);
   });
+
+  describe("with sync switched off", () => {
+    // A Worker with SYNC_ENABLED "false" stands in for the shared one meanwhile: the helpers above read
+    // `worker` when they are called.
+    let shared;
+    before(async () => {
+      shared = worker;
+      worker = await startWorker({ testEntry: true, vars: { SYNC_ENABLED: "false" } });
+    });
+    after(async () => {
+      await worker.dispose();
+      worker = shared;
+    });
+
+    test("the hourly run of the next UTC day finishes a deletion the day's share stopped with sync_paused_today", async () => {
+      const token = await worker.signIn("deletion-paused-sync-off");
+      const id = await worker.accountOf(token);
+      await insertSyncRows(id, 10);
+      await leaveDeleteRows(0);
+      const paused = await deleteMe(token);
+      assert.equal(paused.status, 429, paused.text);
+      assert.equal(paused.body.error, "sync_paused_today");
+      const left = await syncRowsOf(id);
+      assert.ok(left > 0);
+
+      // The day's share still has no room: the run removes nothing.
+      assert.equal(await worker.scheduled(), "ok");
+      assert.equal(await syncRowsOf(id), left);
+      assert.equal(await rowsOf("accounts", "id", id), 1);
+
+      await worker.advanceClock(86_400);
+      assert.equal(await worker.scheduled(), "ok");
+      assert.equal(await syncRowsOf(id), 0);
+      assert.equal(await rowsOf("accounts", "id", id), 0);
+      assert.equal((await getMe(token)).status, 401);
+    });
+  });
 });

@@ -34,6 +34,7 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/version_check.dart';
+import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_dialog.dart';
@@ -1013,59 +1014,146 @@ void main() {
       expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
     });
 
-    testWidgets(
-      'S4b (C1 iii, iv): only the long press deletes the account; its progress shows, and a deletion cut short is '
-      'continued, with nothing else offered meanwhile',
-      (tester) async {
-        await storeSession();
-        container = containerFor([
-          _json(200, {
-            "remaining": {"shares": 3, "sync": 2},
-          }),
-          _lostConnection,
-          _json(200, {
-            "remaining": {"shares": 1},
-          }),
-          _empty(204),
-        ]);
-        await mountAccount(tester);
-        await tester.pumpAndSettle();
+    testWidgets('S4b (C1 iii, iv): only the long press deletes the account, and a deletion cut short is '
+        'continued, with nothing else offered meanwhile', (tester) async {
+      await storeSession();
+      container = containerFor([
+        _json(200, {
+          "remaining": {"shares": 3, "sync": 2},
+        }),
+        _lostConnection,
+        _json(200, {
+          "remaining": {"shares": 1},
+        }),
+        _empty(204),
+      ]);
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.text('アカウントを削除…'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('長押しで削除'));
-        await tester.pump(const Duration(seconds: 1));
-        await pumpRealTimeWindow(tester, rounds: 20);
-        expect(server.sent, isEmpty, reason: 'a plain tap deletes nothing');
+      await tester.tap(find.text('アカウントを削除…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('長押しで削除'));
+      await tester.pump(const Duration(seconds: 1));
+      await pumpRealTimeWindow(tester, rounds: 20);
+      expect(server.sent, isEmpty, reason: 'a plain tap deletes nothing');
 
-        await tester.longPress(find.text('長押しで削除'));
-        await settleUntil(
-          tester,
-          () => find.textContaining('削除が途中で止まりました').evaluate().isNotEmpty,
-          describe: 'the deletion to stop at the lost connection',
-        );
-        expect(find.text('削除しています（残り 5）'), findsOneWidget);
-        expect(container.read(recordShareSessionProvider)?.deleting, isTrue);
+      await tester.longPress(find.text('長押しで削除'));
+      await settleUntil(
+        tester,
+        () => find.text('サーバーに接続できませんでした。もう一度お試しください。').evaluate().isNotEmpty,
+        describe: 'the deletion to stop at the lost connection',
+      );
+      expect(find.textContaining('残り'), findsNothing, reason: 'the server counts no unit the user knows');
+      expect(container.read(recordShareSessionProvider)?.deleting, isTrue);
 
-        await tester.tap(find.byTooltip('削除せずに閉じる'));
-        await tester.pumpAndSettle();
-        expect(find.text('アカウントの削除が途中で止まっています。再開すると、続きから削除します。'), findsOneWidget);
-        expect(find.text('削除を再開'), findsOneWidget);
-        for (final action in [...loggedInActions, 'Google でログイン']) {
-          expect(find.text(action), findsNothing, reason: action);
-        }
+      await tester.tap(find.byTooltip('削除せずに閉じる'));
+      await tester.pumpAndSettle();
+      expect(find.text('アカウントを削除しています。'), findsOneWidget);
+      expect(find.text('削除を再開'), findsOneWidget);
+      for (final action in [...loggedInActions, 'Google でログイン']) {
+        expect(find.text(action), findsNothing, reason: action);
+      }
 
-        await tester.tap(find.text('削除を再開'));
-        await settleUntilElapsing(
-          tester,
-          () => find.text('Google でログイン').evaluate().isNotEmpty,
-          describe: 'the account to be deleted',
-        );
-        expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), List.filled(4, "DELETE /api/me"));
-        expect(container.read(recordShareSessionProvider), isNull);
-        expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
-      },
-    );
+      await tester.tap(find.text('削除を再開'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the account to be deleted',
+      );
+      expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), List.filled(4, "DELETE /api/me"));
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+    });
+
+    testWidgets("stopped by the server's day, the deletion is left to the server and the device logs out", (
+      tester,
+    ) async {
+      await storeSession();
+      await storeNote();
+      container = containerFor([
+        _json(200, {
+          "remaining": {"shares": 0, "sync": 1},
+        }),
+        _json(429, {
+          "error": "sync_paused_today",
+          "remaining": {"shares": 0, "sync": 1},
+        }),
+      ]);
+      final toasts = <String?>[];
+      container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('アカウントを削除…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで削除'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the device to let go of the account',
+      );
+
+      expect(toasts, ['残りは、サーバーが自動で削除します。']);
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+    });
+
+    testWidgets('a deleting session lost on the way leaves the deletion to the server and the device logs out', (
+      tester,
+    ) async {
+      await storeSession();
+      await storeNote();
+      container = containerFor([
+        _json(200, {
+          "remaining": {"shares": 0, "sync": 1},
+        }),
+        _json(401, {"error": "session_required"}),
+      ]);
+      final toasts = <String?>[];
+      container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('アカウントを削除…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで削除'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the device to let go of the account',
+      );
+
+      expect(toasts, ['残りは、サーバーが自動で削除します。']);
+      expect(find.text('ログインが切れています。もう一度ログインしてください。'), findsNothing);
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect(container.read(recordShareSessionDroppedProvider), isFalse);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+    });
+
+    testWidgets('a session lost before the deletion started asks for a login and does not leave it to the server', (
+      tester,
+    ) async {
+      await storeSession();
+      await storeNote();
+      container = containerFor([
+        _json(401, {"error": "session_required"}),
+      ]);
+      final toasts = <String?>[];
+      container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('アカウントを削除…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで削除'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('ログインが切れています。もう一度ログインしてください。').evaluate().isNotEmpty,
+        describe: 'the deletion to ask for a login',
+      );
+
+      expect(toasts, isEmpty);
+    });
 
     testWidgets("a share whose record was deleted is listed from the account's list and can be unshared; one with no "
         'note is not called deleted', (tester) async {
@@ -1508,11 +1596,9 @@ void main() {
           remaining({"shares": 0, "sync": 1}),
           _empty(204),
         ]);
-        final progress = <int>[];
 
-        expect(await session().deleteAccount(onProgress: progress.add), AccountDeletionOutcome.deleted);
+        expect(await session().deleteAccount(), AccountDeletionOutcome.deleted);
 
-        expect(progress, [5, 1]);
         expect(server.sent.map((r) => "${r.method} ${r.uri.path}"), List.filled(3, "DELETE /api/me"));
         for (final request in server.sent) {
           expect(request.headers["Authorization"], "Bearer $_token");
@@ -1520,6 +1606,19 @@ void main() {
         expect(container.read(recordShareSessionProvider), isNull);
         expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
         expect(container.read(recordSharesProvider), isEmpty);
+      });
+
+      test("a 429 that is not the server's day, as a firewall's, keeps the session", () async {
+        await storeSession();
+        container = containerFor([
+          remaining({"shares": 0, "sync": 1}),
+          _json(429, {"error": "rate_limited"}),
+        ]);
+
+        expect(await session().deleteAccount(), AccountDeletionOutcome.failed);
+
+        expect(stored()?.deleting, isTrue);
+        expect(stored()?.token, _token);
       });
 
       test('cut off after its first 200, it continues after a restart with the same token', () async {
@@ -1583,19 +1682,14 @@ void main() {
       });
 
       test(
-        'a session lost on the way is regained by a login that answers deleting, and the deletion finishes',
+        'a login onto an account the server marks deleting continues its deletion, and the deletion finishes',
         () async {
-          await storeSession(deleting: true);
           await storeNote();
           container = containerFor([
-            _json(401, {"error": "session_required"}),
             _json(200, {..._claimed(), "deleting": true}),
             remaining({"shares": 1, "sync": 0}),
             _empty(204),
           ]);
-
-          expect(await session().deleteAccount(), AccountDeletionOutcome.loginRequired);
-          expect(stored(), isNull);
 
           final attempt = await session().beginLogin();
           expect(await attempt.claim(), LoginOutcome.signedIn);
@@ -1604,7 +1698,6 @@ void main() {
 
           // A deletion-only session registers no trainer id: every later request is the deletion's.
           expect(server.sent.map((r) => "${r.method} ${r.uri.path}"), [
-            "DELETE /api/me",
             "POST /api/auth/claim",
             "DELETE /api/me",
             "DELETE /api/me",

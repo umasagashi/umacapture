@@ -23,7 +23,8 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 
 - **`SYNC_ENABLED`** is `"true"` or `"false"`; any other value throws, as a configuration error.
   `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` before it reads anything, and
-  the hourly run does nothing. Sharing, logins and account deletion go on.
+  the hourly run runs none of sync's kinds. Sharing, logins and account deletion go on, the hourly
+  run's `deletions` included.
 - **`server/wrangler.assets-only.jsonc`** has no script and sets `triggers.crons` to `[]`, so a deploy
   of it removes the hourly run that a deploy of `wrangler.jsonc` set.
 
@@ -93,7 +94,7 @@ answers.
 
 Account deletion (`DELETE /api/me`, `server/src/account_deletion.mjs` and
 `server/src/sync_deletion.mjs`) removes an account's sync too, and lives outside the prefix with the
-rest of the account.
+rest of the account. The hourly run continues it (`deletions`, [The hourly run](#the-hourly-run)).
 
 ## Schema
 
@@ -193,6 +194,7 @@ what was not measured on the real platform.
 | `ACCOUNT_DELETE_SYNC_ROWS` | 5,000 (provisional) |
 | `ACCOUNT_DELETE_SYNC_READ_ROWS` | 15,000 (provisional) |
 | `ACCOUNT_DELETE_B2_PAGES` | 4 |
+| `ACCOUNT_DELETE_STEPS_PER_RUN` | `ceil(SYNC_DAILY_DELETE_ROWS / (24 * ACCOUNT_DELETE_SYNC_ROWS))` = 3: steps one hourly run takes on (provisional) |
 
 The other constants of `limits.mjs` bound sharing and logins.
 
@@ -231,11 +233,25 @@ run's one `Bucket`, each after the one before has finished or failed:
 | `shows` | `showLeftovers` | Shows what cut-off requests left referenced and hidden, up to `SYNC_LEFTOVER_SHOWS` |
 | `hides` | `hideLeftovers` | Hides what nothing references and no request is hiding, up to `SYNC_LEFTOVER_HIDES` |
 | `writes` | `writeLeftovers` | Deletes what requests wrote under an account's prefix and no row accounts for, up to `SYNC_LEFTOVER_WRITES` names |
+| `deletions` | `continueAccountDeletions` | Continues the deletion of the accounts being deleted, up to `ACCOUNT_DELETE_STEPS_PER_RUN` steps |
 | `forgets` | `forgetLeftovers` | Deletes gone rows nothing references, up to `SYNC_FORGETS_PER_RUN` |
 | `days` | `forgetDays` | Deletes the `sync_daily` rows before yesterday |
 
-A kind that fails does not stop the ones after it; the run then fails with the first failure. Nothing
-runs while `SYNC_ENABLED` is `"false"`.
+A kind that fails does not stop the ones after it; the run then fails with the first failure. While
+`SYNC_ENABLED` is `"false"` only `deletions` runs: it is not a kind of sync, and account deletion goes
+on while sync is off.
+
+`deletions` reads the accounts being deleted through the partial index `accounts_deleting`
+(`server/migrations/0004_accounts_deleting.sql`), longest deleted first. A step is what one
+`DELETE /api/me` takes on (`stepAccountDeletion`): a chunk of the sync rows, of the B2 versions and of
+the shares, and the account itself once nothing is left. It takes an account on until the account is
+gone or a step of it removes nothing — the day's share of sync rows (`SYNC_DAILY_DELETE_ROWS`, or
+`SYNC_DAILY_READ_ROWS`) has no room, and the next run tries again — and stops at
+`ACCOUNT_DELETE_STEPS_PER_RUN` steps in all. It comes after sync's kinds that send B2 requests and
+takes a step only while what they left of the run's `B2_REQUESTS_PER_INVOCATION` holds a whole step
+(`2 * ACCOUNT_DELETE_B2_PAGES + 1` = 9), so it never takes their requests. A step removing a chunk of
+the sync rows writes within the same day's share as `DELETE /api/me`, so the runs and the app's calls
+of one day write no more than that share between them.
 
 ## Daily limits and the reserve
 
@@ -256,7 +272,8 @@ runs while `SYNC_ENABLED` is `"false"`.
   replacement that commits them, in requests, rows read, rows written and database bytes. Its comment
   in `limits.mjs` derives each figure.
 - **Account deletion** writes its share of the day's rows within `SYNC_DAILY_DELETE_ROWS`, counted in
-  `sync_daily.delete_rows` and in `rows_written`.
+  `sync_daily.delete_rows` and in `rows_written`, whether `DELETE /api/me` or the hourly run takes the
+  step.
 
 ## Usage and the database's room
 

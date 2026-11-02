@@ -137,8 +137,7 @@ class _ShareAccountSectionState extends ConsumerState<ShareAccountSection> {
   }
 }
 
-/// Confirms deleting the account with a long press, then deletes it, telling how much is left as the server
-/// reports it. [resume] continues a deletion already confirmed, so it starts as the dialog opens.
+/// Confirms deleting the account with a long press, then deletes it. [resume] continues a deletion already confirmed, so it starts as the dialog opens.
 class AccountDeletionDialog extends ConsumerStatefulWidget {
   final bool resume;
 
@@ -154,7 +153,6 @@ class AccountDeletionDialog extends ConsumerStatefulWidget {
 
 class _AccountDeletionDialogState extends ConsumerState<AccountDeletionDialog> {
   bool _deleting = false;
-  int? _remaining;
   AccountDeletionOutcome? _failure;
 
   @override
@@ -176,23 +174,20 @@ class _AccountDeletionDialogState extends ConsumerState<AccountDeletionDialog> {
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     final AccountDeletionOutcome outcome;
     try {
-      outcome = await ref
-          .read(recordShareSessionProvider.notifier)
-          .deleteAccount(
-            onProgress: (remaining) {
-              if (mounted) {
-                setState(() => _remaining = remaining);
-              }
-            },
-          );
+      outcome = await ref.read(recordShareSessionProvider.notifier).deleteAccount();
     } finally {
       dialogs.setBarrierDismissible(token, barrierDismissible: true);
     }
     if (!mounted) {
       return;
     }
-    if (outcome == AccountDeletionOutcome.deleted) {
-      Toaster.show(ToastData.success(description: "$tr_share_account.deletion.deleted".tr()));
+    final done = switch (outcome) {
+      AccountDeletionOutcome.deleted => "deleted",
+      AccountDeletionOutcome.handedToServer => "handed_to_server",
+      _ => null,
+    };
+    if (done != null) {
+      Toaster.show(ToastData.success(description: "$tr_share_account.deletion.$done".tr()));
       CardDialog.dismiss(ref.base);
       return;
     }
@@ -206,17 +201,12 @@ class _AccountDeletionDialogState extends ConsumerState<AccountDeletionDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final deletion = "$tr_share_account.deletion";
-    final remaining = _remaining;
     final failure = _failure;
-    final started = widget.resume || _deleting || remaining != null || failure != null;
+    final started = widget.resume || _deleting || failure != null;
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text("$deletion.description".tr(), style: theme.textTheme.bodyMedium),
-        if (remaining != null) ...[
-          const SizedBox(height: 12),
-          Text("$deletion.remaining".tr(namedArgs: {"count": "$remaining"}), style: theme.textTheme.bodyMedium),
-        ],
         if (failure != null) ...[
           const SizedBox(height: 12),
           NoteCard(
@@ -260,7 +250,9 @@ class _AccountDeletionDialogState extends ConsumerState<AccountDeletionDialog> {
   static String _failureKey(AccountDeletionOutcome outcome) => switch (outcome) {
     AccountDeletionOutcome.loginRequired => "login_required",
     AccountDeletionOutcome.unreachable => "unreachable",
-    AccountDeletionOutcome.deleted || AccountDeletionOutcome.failed => "failed",
+    AccountDeletionOutcome.deleted ||
+    AccountDeletionOutcome.handedToServer ||
+    AccountDeletionOutcome.failed => "failed",
   };
 }
 

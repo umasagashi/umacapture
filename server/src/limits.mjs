@@ -321,6 +321,16 @@ export const SYNC_DAILY_ROWS = 600_000;
  */
 export const SYNC_DAILY_DELETE_ROWS = SYNC_DAILY_ROWS / 2;
 
+/**
+ * Steps of account deletion, each what one DELETE /api/me takes on, that one hourly run takes on at
+ * most over every account being deleted: as many as let the 24 runs of a UTC day write the whole of
+ * SYNC_DAILY_DELETE_ROWS a chunk of ACCOUNT_DELETE_SYNC_ROWS a step, ceil(300,000 / (24 * 5,000)) = 3.
+ * A step sends at most 2 * ACCOUNT_DELETE_B2_PAGES + 1 = 9 B2 requests, so three take 27 of the run's
+ * B2_REQUESTS_PER_INVOCATION at most, and about 50 of the 1,000 D1 queries a Workers Paid invocation
+ * may make. Provisional, as ACCOUNT_DELETE_SYNC_ROWS.
+ */
+export const ACCOUNT_DELETE_STEPS_PER_RUN = Math.ceil(SYNC_DAILY_DELETE_ROWS / (24 * ACCOUNT_DELETE_SYNC_ROWS));
+
 // The per-account limits let the bodies and the list of a first sync of ACCOUNT_SYNC_RECORDS_CAP
 // records go through in one day where the rows allow it; its images may take more days. Measured on the
 // local D1, not on the real platform, for 5,000 records over 128 parts, each body binding six image
