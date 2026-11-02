@@ -115,10 +115,13 @@ Future<ProviderContainer> loadedMergeContainer({required PathInfo info, List<Ove
 }
 
 /// The candidates the app would offer over what both stores currently hold.
-List<EnhancementCandidate> candidatesIn(ProviderContainer container) => findEnhancementCandidates([
-  ...container.read(charaDetailRecordStorageLoaderProvider).requireValue,
-  ...container.read(charaDetailArchiveStorageLoaderProvider).requireValue,
-], testClassifier);
+List<EnhancementCandidate> candidatesIn(ProviderContainer container) => findEnhancementCandidates(
+  [
+    ...container.read(charaDetailRecordStorageLoaderProvider).requireValue,
+    ...container.read(charaDetailArchiveStorageLoaderProvider).requireValue,
+  ].map(enhancementSubjectOf),
+  testClassifier,
+);
 
 /// Merges the one pair the fixture offers.
 ///

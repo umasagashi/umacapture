@@ -204,7 +204,7 @@ void main() {
         makeRecord(id: 'z', card: 1, self: [...coloured(3, 3, 1), ...whites(10, from: 1020)]),
       ];
 
-      final candidates = findEnhancementCandidates(records, testClassifier);
+      final candidates = findEnhancementCandidates(records.map(enhancementSubjectOf), testClassifier);
 
       expect(shape(candidates), {('a3', 'a2', 'a3'), ('a3', 'a1', 'a3'), ('a2', 'a1', 'a2'), ('b1', 'b2', 'b1')});
       expect(candidates, hasLength(4));
@@ -216,7 +216,7 @@ void main() {
         makeRecord(id: 'y', card: 1, self: [...pre.reversed]),
       ];
 
-      final candidate = findEnhancementCandidates(records, testClassifier).single;
+      final candidate = findEnhancementCandidates(records.map(enhancementSubjectOf), testClassifier).single;
 
       expect(candidate.identical, isTrue);
       expect((candidate.olderId, candidate.newerId), ('x', 'y'));
@@ -225,7 +225,7 @@ void main() {
     test('candidates: records of different cards with equal coloured kinds are compared (no card term)', () {
       final records = [makeRecord(id: 'p', card: 1, self: pre), makeRecord(id: 'q', card: 2, self: post)];
 
-      expect(shape(findEnhancementCandidates(records, testClassifier)), {('p', 'q', 'q')});
+      expect(shape(findEnhancementCandidates(records.map(enhancementSubjectOf), testClassifier)), {('p', 'q', 'q')});
     });
 
     test('candidates: parent snapshots are ignored, so unlike parents keep the pair a candidate', () {
@@ -250,7 +250,7 @@ void main() {
         makeRecord(id: 'x', card: 1, self: pre, parent1Card: 30, parent1: whites(3), parent2Card: 31),
       ];
 
-      expect(shape(findEnhancementCandidates(records, testClassifier)), {
+      expect(shape(findEnhancementCandidates(records.map(enhancementSubjectOf), testClassifier)), {
         ('p', 'q', 'q'),
         ('q', 'x', 'q'),
         ('p', 'x', null),
@@ -264,20 +264,24 @@ void main() {
         makeRecord(id: 'r', card: 1, self: mid),
       ];
 
-      final candidates = findEnhancementCandidates(records, testClassifier, dismissed: {RecordIdPair('q', 'p')});
+      final candidates = findEnhancementCandidates(
+        records.map(enhancementSubjectOf),
+        testClassifier,
+        dismissed: {RecordIdPair('q', 'p')},
+      );
 
       expect(shape(candidates), {('p', 'r', 'r'), ('q', 'r', 'q')});
     });
 
     test('candidates: equal capturedDate orders by id; unparseable date sorts last', () {
       final sameDate = [makeRecord(id: 'n', card: 1, self: post), makeRecord(id: 'm', card: 1, self: pre)];
-      expect(shape(findEnhancementCandidates(sameDate, testClassifier)), {('m', 'n', 'n')});
+      expect(shape(findEnhancementCandidates(sameDate.map(enhancementSubjectOf), testClassifier)), {('m', 'n', 'n')});
 
       final badDate = [
         makeRecord(id: 'a', card: 1, self: pre, capturedDate: 'not a date'),
         makeRecord(id: 'b', card: 1, self: post, capturedDate: '2030-01-01T00:00:00+0900'),
       ];
-      expect(shape(findEnhancementCandidates(badDate, testClassifier)), {('b', 'a', 'b')});
+      expect(shape(findEnhancementCandidates(badDate.map(enhancementSubjectOf), testClassifier)), {('b', 'a', 'b')});
     });
   });
 }

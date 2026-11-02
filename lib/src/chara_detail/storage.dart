@@ -3057,6 +3057,47 @@ final allRecordsByIdProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
   return {for (final record in archive) record.id: record, for (final record in active) record.id: record};
 });
 
+/// What both stores hold, published only while neither is reading its directory again.
+typedef SettledRecordStores = ({List<CharaDetailRecord> active, List<CharaDetailRecord> archive});
+
+/// Both stores seen together, as they stand once each has finished reading its
+/// directory.
+///
+/// While either store is loading (`isLoading`, its first load or a read-again
+/// after an invalidation) this keeps returning the view it last published, and
+/// moves only when both have settled. A publication that reads both stores
+/// again — [applyRecordsPublished], a merge's wait for fresh stores, a rescan,
+/// the first load — therefore reaches a subscriber once, with both stores' new
+/// lists, instead of once with a new active list beside a stale archive list
+/// (where a record that moved between them is held twice, and one that moved
+/// the other way by neither). The archive is the one that settles later: its
+/// build waits for the active store's ([CharaDetailArchiveStorage.build]), and
+/// the active store's build starts the archive's before it scans
+/// ([CharaDetailRecordStorage.build]), so the archive is already loading when
+/// the active store publishes. Both are watched all the same, so the order is
+/// not what this relies on.
+///
+/// Only the derived view is held, never a write: when both settle, the lists
+/// read are the stores' live ones, including whatever either published while
+/// the view was held. A store in error counts as empty, as it does elsewhere.
+class SettledRecordStoresNotifier extends Notifier<SettledRecordStores> {
+  static const SettledRecordStores _empty = (active: <CharaDetailRecord>[], archive: <CharaDetailRecord>[]);
+
+  @override
+  SettledRecordStores build() {
+    final active = ref.watch(charaDetailRecordStorageLoaderProvider);
+    final archive = ref.watch(charaDetailArchiveStorageLoaderProvider);
+    if (active.isLoading || archive.isLoading) {
+      return stateOrNull ?? _empty;
+    }
+    return (active: active.asData?.value ?? const [], archive: archive.asData?.value ?? const []);
+  }
+}
+
+final settledRecordStoresProvider = NotifierProvider<SettledRecordStoresNotifier, SettledRecordStores>(
+  SettledRecordStoresNotifier.new,
+);
+
 /// The `read`-based counterpart of [displayedRecordsProvider] for a fixed
 /// [source].
 ///

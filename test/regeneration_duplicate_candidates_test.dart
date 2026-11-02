@@ -175,6 +175,14 @@ void main() {
       expectOneIdenticalPair((await load()).read(pendingEnhancementCandidatesProvider));
     });
 
+    test('are offered once per identity when one factor set holds two of them', () async {
+      // All three share every factor; a differs from b and c in its evaluation, so only (b, c) is one uma.
+      writeRecord(info.charaDetailActiveDir, _record('a', _self(2), _olderDate));
+      writeRecord(info.charaDetailActiveDir, _record('b', _self(2), _olderDate, evaluationValue: 1));
+      writeRecord(info.charaDetailActiveDir, _record('c', _self(2), _newerDate, evaluationValue: 1));
+      expectOneIdenticalPair((await load()).read(pendingEnhancementCandidatesProvider), older: 'b', newer: 'c');
+    });
+
     test('are not offered again once dismissed as not the same uma', () async {
       writeRecord(info.charaDetailActiveDir, _record('a', _self(2), _olderDate));
       writeRecord(info.charaDetailActiveDir, _record('b', _self(2), _newerDate));
@@ -304,6 +312,7 @@ void main() {
       CharacterStatus? status,
       AptitudeSet? aptitudes,
       List<Skill>? skills,
+      FactorSet? factors,
     }) => CharaDetailRecord(
       r.metadata,
       trainee ?? r.trainee,
@@ -311,7 +320,7 @@ void main() {
       status ?? r.status,
       aptitudes ?? r.aptitudes,
       skills ?? r.skills,
-      r.factors,
+      factors ?? r.factors,
       r.supportCards,
       r.family,
       r.fans,
@@ -328,6 +337,8 @@ void main() {
         aptitudes: const AptitudeSet(GroundAptitude(1, 0), DistanceAptitude(0, 0, 0, 0), StyleAptitude(0, 0, 0, 0)),
       ),
       'skills': (r) => rebuilt(r, skills: const [Skill(id: 1)]),
+      'parent factors': (r) =>
+          rebuilt(r, factors: FactorSet(r.factors.self, const [Factor(1001, 1)], r.factors.parent2)),
     };
 
     for (final MapEntry(key: field, value: vary) in variants.entries) {
