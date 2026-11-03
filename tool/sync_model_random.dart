@@ -1,6 +1,7 @@
 // Runs the executable sync model (test/support/sync_model/) over many random operation sequences,
-// outside CI. The fixed seeds in test/sync_model_test.dart are the CI share; this is where large
-// seed ranges run.
+// outside CI. CI runs only the fixed seeds of the rules of file sync, in test/sync_model_test.dart; the fixed seeds
+// of the superseded rule sets (designed, lineage, operation-log) run through tool/sync_model_superseded_rules.dart,
+// and this is where large seed ranges run.
 //
 //   dart run tool/sync_model_random.dart [--from N] [--count N] [--rules designed|retirementShortcuts|lineage|oplog|file]
 //       [--mutation <name>] [--lineage-mutation <name>] [--oplog-mutation <name>] [--file-mutation <name>]
