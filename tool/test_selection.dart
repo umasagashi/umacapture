@@ -65,7 +65,7 @@ const double defaultExecutionSeconds = 0.5;
 /// suite was split into them.
 const Map<String, double> measuredExecutionSeconds = {
   "test/storage_tree_context_menu_test.dart": 55.4,
-  "test/sync_model_test.dart": 161.4, // measured the same way, one file at a time, on 2026-10-23
+  "test/sync_model_test.dart": 24.8, // measured the same way, one file at a time, mean of two runs on 2026-11-03
   "test/sync_properties_test.dart": 82.4, // measured the same way, one file at a time, on 2026-10-23
   "test/enhancement_merge_test.dart": 31.8,
   "test/storage_row_menu_gate_test.dart": 27.9,

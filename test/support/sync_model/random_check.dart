@@ -1,6 +1,7 @@
 // Random operation sequences over the model: generated from a seed, replayed, and shrunk to a
 // minimal sequence when the judge reports something. Pure Dart (no test framework), so the fixed
-// seeds in `test/sync_model_test.dart` and the large runs of `tool/sync_model_random.dart` share it.
+// seeds of the rules of file sync in `test/sync_model_test.dart` (CI), those of the superseded rule sets in
+// `tool/sync_model_superseded_rules.dart` and the large runs of `tool/sync_model_random.dart` share it.
 //
 // The generator draws one operation at a time against the world it is building, so every drawn
 // operation is valid where it lands. A shrunk sequence is replayed with the operations that no
