@@ -46,19 +46,41 @@ typedef ShareAnswer = ({int status, Map<String, Object?>? body, Object? json, He
 /// The [Dio] every sharing request goes through: diagnostics log the method, URL and status only.
 final recordShareDioProvider = Provider<Dio>((ref) => createDiagnosticDio(operation: "record_share"));
 
-/// Sends one request to the sharing API. A transport failure is thrown as Dio's [DioException].
-Future<ShareAnswer> sendShareRequest(Dio dio, String method, String path, {Object? data, String? bearer}) async {
-  final response = await dio.request<String>(
-    "${Const.sharingOrigin}$path",
-    data: data == null ? null : jsonEncode(data),
-    options: Options(
-      method: method,
-      contentType: Headers.jsonContentType,
-      responseType: ResponseType.plain,
-      validateStatus: (_) => true,
-      headers: {if (bearer != null) "Authorization": "Bearer $bearer"},
-    ),
-  );
+/// How long one sharing request may take, from connecting to the last byte of the answer. The largest request
+/// (the server's `MAX_SHARE_BODY`, 160 KiB) takes about 4.4 s on the slowest line the sync deadline still carries a
+/// 32 MiB image over (`syncRequestTimeoutProvider`, 15 minutes); a minute leaves the server's work room beside that.
+final shareRequestTimeoutProvider = Provider<Duration>((_) => const Duration(minutes: 1));
+
+/// Sends one request to the sharing API. A transport failure, and a request still unanswered at [timeout], are
+/// thrown as Dio's [DioException]. The deadline covers the whole request, as the sync requests' does: Dio's own
+/// receive timeout restarts on every chunk, and a request still waiting for its answer receives none.
+Future<ShareAnswer> sendShareRequest(
+  Dio dio,
+  String method,
+  String path, {
+  required Duration timeout,
+  Object? data,
+  String? bearer,
+}) async {
+  final cancel = CancelToken();
+  final deadline = Timer(timeout, cancel.cancel);
+  final Response<String> response;
+  try {
+    response = await dio.request<String>(
+      "${Const.sharingOrigin}$path",
+      data: data == null ? null : jsonEncode(data),
+      cancelToken: cancel,
+      options: Options(
+        method: method,
+        contentType: Headers.jsonContentType,
+        responseType: ResponseType.plain,
+        validateStatus: (_) => true,
+        headers: {if (bearer != null) "Authorization": "Bearer $bearer"},
+      ),
+    );
+  } finally {
+    deadline.cancel();
+  }
   Object? json;
   try {
     json = jsonDecode(response.data ?? "");
@@ -272,6 +294,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
     try {
       answer = await sendShareRequest(
         ref.read(recordShareDioProvider),
+        timeout: ref.read(shareRequestTimeoutProvider),
         "POST",
         "/api/auth/claim",
         data: {"s": secret, "code": ?code},
@@ -348,6 +371,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
     }
     final answer = await sendShareRequest(
       ref.read(recordShareDioProvider),
+      timeout: ref.read(shareRequestTimeoutProvider),
       method,
       path,
       data: data,
@@ -453,6 +477,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
     try {
       answer = await sendShareRequest(
         ref.read(recordShareDioProvider),
+        timeout: ref.read(shareRequestTimeoutProvider),
         "POST",
         "/api/auth/logout",
         bearer: session.token,

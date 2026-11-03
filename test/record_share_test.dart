@@ -231,6 +231,7 @@ void main() {
     List<CharaDetailRecord>? held,
     bool emptied = false,
     LoginListener? listener,
+    Duration? requestTimeout,
   }) {
     server = _FakeServer(answers);
     opened = [];
@@ -252,6 +253,7 @@ void main() {
         recordShareDioProvider.overrideWith(
           (ref) => createDiagnosticDio(operation: "record_share")..httpClientAdapter = server,
         ),
+        if (requestTimeout != null) shareRequestTimeoutProvider.overrideWithValue(requestTimeout),
         if (held ?? [?shown] case final records when records.isNotEmpty)
           charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(records)),
         if (emptied) ...[
@@ -1394,6 +1396,14 @@ void main() {
     expect(outcome, isA<Shared>().having((o) => o.entry.keyHash, 'keyHash', pending.keyHash));
     final stored = StorageBox(StorageBoxKey.recordShares).pull<String>(pending.keyHash);
     expect(RecordShareMapper.fromJson(stored ?? "").state, RecordShareState.shared);
+  });
+
+  test('a request the server never answers fails at its deadline and keeps the note to resend', () async {
+    await storeSession();
+    container = containerFor([Completer<Object>().future], requestTimeout: const Duration(milliseconds: 10));
+
+    expect((await notes().shareAll([record]))[record.id], isA<ShareUnreachable>());
+    expect(container.read(recordSharesProvider).values.single.state, RecordShareState.pending);
   });
 
   test("a 404 that is not the API saying the share is gone keeps the note; the API's 404 drops it", () async {
