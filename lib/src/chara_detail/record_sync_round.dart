@@ -604,15 +604,36 @@ int syncLongMemos(SyncList list) => list.cells.entries.where((e) {
   };
 }).length;
 
-/// S-10: how many memos longer than [memoLengthLimit] hold the rounds of the device [place] back, counted as a round
-/// counts them ([syncLongMemos]) in what the device holds — which the screen that turns sync on shows before any round
-/// runs. Reads the device alone, and writes nothing; null where a store has not loaded.
-Future<int?> syncLongMemosOf<C>(SyncPlace<C> place) async {
-  await place.loaded();
-  return switch (await place.read()) {
-    final read? => syncLongMemos(read.local.list),
-    null => null,
+/// What the screen that turns sync on shows before any round runs ([syncBeforeOnOf]).
+typedef SyncBeforeOn = ({int longMemos, ({int toSend, int toReceive})? counts});
+
+/// What the screen that turns sync on shows before any round runs, from one read of what the device [place] holds:
+/// S-10, how many memos longer than [memoLengthLimit] hold the rounds of the device back, counted as a round counts
+/// them ([syncLongMemos]); and N11, what a round of [against]'s account against its server would move
+/// ([syncCountsBeforeOn]). The counts are null where there is no [against], or reading the server's list or counting
+/// failed, which is logged; the long memos are told all the same.
+///
+/// Reads the device once and the server's list once, the two at the same time, and runs no round: nothing of the device
+/// is written, no list is kept, and the server is asked to change nothing. Null where a store has not loaded. A read of
+/// the device that fails throws.
+Future<SyncBeforeOn?> syncBeforeOnOf<C>(SyncPlace<C> place, {({SyncServer server, String account})? against}) async {
+  final local = () async {
+    await place.loaded();
+    return place.read();
+  }();
+  final counts = switch (against) {
+    null => Future<({int toSend, int toReceive})?>.value(),
+    (:final server, :final account) => syncCountsBeforeOn(place, server, account: account, local: local).then(
+      (counts) => counts,
+      onError: (Object error, StackTrace stackTrace) {
+        logger.w('Reading what turning sync on would move failed.', error, stackTrace);
+        return null;
+      },
+    ),
   };
+  final read = await local;
+  if (read == null) return null;
+  return (longMemos: syncLongMemos(read.local.list), counts: await counts);
 }
 
 /// N11 (S-08, ruling V2): what a round of [account] would leave changed of the records, as the screen that turns sync
@@ -626,12 +647,14 @@ Future<int?> syncLongMemosOf<C>(SyncPlace<C> place) async {
 /// included.
 ///
 /// Reads the server's list once — its generation, and its root and parts where the base is not of that generation —
-/// and runs no round: nothing of the device is written, no list is kept, and the server is asked to change nothing.
-/// Null where a store has not loaded. A request that fails throws, as a round's does.
+/// and counts against [local], the device's read ([SyncPlace.read]) its caller made, and runs no round: nothing of the
+/// device is written, no list is kept, and the server is asked to change nothing. Null where a store has not loaded. A
+/// request that fails throws, as a round's does.
 Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
+  required Future<SyncLocal?> local,
 }) async {
   final kept = await place.readKept(SyncKept.base);
   var base = kept?.account == account ? kept : null;
@@ -641,16 +664,15 @@ Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
   if (moved && base != null) {
     if (await place.readKept(SyncKept.sent) case final sent?) base = _baseReadAgain(base, sent, there);
   }
-  await place.loaded();
-  final read = await place.read();
+  final read = await local;
   if (read == null) return null;
-  final local = read.local.list;
-  final merged = mergeRecordSync(base?.agreed.side, local.side, there.side);
+  final device = read.local.list;
+  final merged = mergeRecordSync(base?.agreed.side, device.side, there.side);
   final splitOff = merged.moved.values.toSet();
   final result = merged.result.records.values;
   return (
     toSend: result.where((r) => !syncRecordsAgree(r, there.rows[r.id]?.record)).length,
-    toReceive: result.where((r) => !splitOff.contains(r.id) && !syncRecordsAgree(r, local.rows[r.id]?.record)).length,
+    toReceive: result.where((r) => !splitOff.contains(r.id) && !syncRecordsAgree(r, device.rows[r.id]?.record)).length,
   );
 }
 

@@ -781,7 +781,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     final opened = await directory.open();
     return (
       content: await opened.readAsString(directory.filePath("record.json")),
-      notes: await readRecordNotesIn(opened),
+      notes: await readRecordNotesIn(opened, directory),
     );
   }
 

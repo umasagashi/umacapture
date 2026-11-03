@@ -46,15 +46,17 @@ class RecordNotes {
 }
 
 /// What [recordDir] holds about its record beside `record.json`.
-Future<RecordNotes> readRecordNotes(DirectoryPath recordDir) async => readRecordNotesIn(await recordDir.open());
+Future<RecordNotes> readRecordNotes(DirectoryPath recordDir) async =>
+    readRecordNotesIn(await recordDir.open(), recordDir);
 
-/// [readRecordNotes] for a record directory the caller has resolved already, to read `record.json` from it as well.
-Future<RecordNotes> readRecordNotesIn(OpenedDirectory recordDir) async {
-  final archive = recordDir.directory.filePath(recordArchiveNoteName);
-  final absorbed = recordDir.directory.filePath(mergedIdsFileName);
+/// [readRecordNotes] through a directory the caller has resolved already — [recordDir] itself, or one it lies beneath —
+/// to read `record.json` and more from it as well.
+Future<RecordNotes> readRecordNotesIn(OpenedDirectory opened, DirectoryPath recordDir) async {
+  final archive = recordDir.filePath(recordArchiveNoteName);
+  final absorbed = recordDir.filePath(mergedIdsFileName);
   return RecordNotes(
-    archive: _decodeArchiveNote(archive, await _readIfPresent(recordDir, archive)),
-    absorbed: _decodeAbsorbed(absorbed, await _readIfPresent(recordDir, absorbed)),
+    archive: _decodeArchiveNote(archive, await _readIfPresent(opened, archive)),
+    absorbed: _decodeAbsorbed(absorbed, await _readIfPresent(opened, absorbed)),
   );
 }
 
@@ -83,9 +85,9 @@ const _failed = (bytes: null, failed: true);
 
 typedef _Read = ({Uint8List? bytes, bool failed});
 
-Future<_Read> _readIfPresent(OpenedDirectory recordDir, FilePath file) async {
+Future<_Read> _readIfPresent(OpenedDirectory opened, FilePath file) async {
   try {
-    return (bytes: await recordDir.readAsBytesIfPresent(file), failed: false);
+    return (bytes: await opened.readAsBytesIfPresent(file), failed: false);
   } catch (error, stackTrace) {
     logger.w('Could not read ${file.path}.', error, stackTrace);
     return _failed;

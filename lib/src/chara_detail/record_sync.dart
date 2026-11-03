@@ -272,27 +272,20 @@ class RecordSync extends Notifier<RecordSyncState> {
     return _start(against);
   }
 
-  /// N11: what turning sync on for the account of the session would send of the records and take in
-  /// ([syncCountsBeforeOn]), against [server] — the server this device syncs with where none is given
-  /// ([syncServerProvider]). Reads the server's list once and runs no round: the device and its kept lists stay as they
-  /// are, and the switch too. Null where there is no server, or no session.
-  Future<({int toSend, int toReceive})?> countsBeforeOn([SyncServer? server]) async {
+  /// What the screen that turns sync on shows before any round runs ([syncBeforeOnOf]), from one read of this device:
+  /// S-10, the memos longer than a round sends that hold its rounds back, whether sync is on or not; and N11, what
+  /// turning sync on for the account of the session would send of the records and take in, against [server] — the
+  /// server this device syncs with where none is given ([syncServerProvider]) —, null where there is no server, or no
+  /// session, or the server could not be read. Runs no round: the device and its kept lists stay as they are, and the
+  /// switch too. Null where a store has not loaded.
+  Future<SyncBeforeOn?> beforeOn([SyncServer? server]) async {
     final against = server ?? ref.read(syncServerProvider);
     final account = ref.read(recordShareSessionProvider)?.accountId;
-    if (against == null || account == null) return null;
     final base = ref.read(containerRefProvider);
-    return syncCountsBeforeOn(
+    return syncBeforeOnOf(
       await AppSyncPlace.of(base, effects: recordImportEffects(base)),
-      against,
-      account: account,
+      against: against == null || account == null ? null : (server: against, account: account),
     );
-  }
-
-  /// S-10: the memos longer than a round sends that hold the rounds of this device back ([syncLongMemosOf]), read of
-  /// the device alone, whether sync is on or not; null where a store has not loaded.
-  Future<int?> longMemos() async {
-    final base = ref.read(containerRefProvider);
-    return syncLongMemosOf(await AppSyncPlace.of(base, effects: recordImportEffects(base)));
   }
 
   /// The user syncs now: the device's mark of being stopped for room comes down ([SyncRoomStop.lower], [N1-22]), and

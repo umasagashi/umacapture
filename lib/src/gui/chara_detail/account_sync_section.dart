@@ -5,7 +5,7 @@
 // What either decides to tell is the lib's: the switch and the last round ([recordSyncProvider]), why the rounds stop
 // ([syncHaltProvider]), whether the device holds a server to sync with ([syncServerProvider]), the account's image form
 // ([syncImageFormProvider]) and what setting it tells ([syncImageFormSendsWhatWasHeld]), and before sync is on what a
-// round would move ([RecordSync.countsBeforeOn]) and the memos that would hold it back ([RecordSync.longMemos]).
+// round would move and the memos that would hold it back ([RecordSync.beforeOn]).
 import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -281,8 +281,8 @@ class _ImageFormChoice extends StatelessWidget {
   }
 }
 
-/// N11: turning sync on for the account the device is logged in to. Opening it reads what a first round would send
-/// and take in ([RecordSync.countsBeforeOn]) and the memos that would hold it back ([RecordSync.longMemos]), and runs no
+/// N11: turning sync on for the account the device is logged in to. Opening it reads, from one read of the device, what
+/// a first round would send and take in and the memos that would hold it back ([RecordSync.beforeOn]), and runs no
 /// round; the account's image form is chosen here, as the server holds it to start with.
 class SyncTurnOnDialog extends ConsumerStatefulWidget {
   const SyncTurnOnDialog({super.key});
@@ -315,22 +315,12 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
   }
 
   Future<void> _load() async {
-    final sync = ref.read(recordSyncProvider.notifier);
-    final (counts, longMemos) = await (
-      sync.countsBeforeOn().then<({int toSend, int toReceive})?>(
-        (counts) => counts,
-        onError: (Object error, StackTrace stackTrace) {
-          logger.w('Reading what turning sync on would move failed.', error, stackTrace);
-          return null;
-        },
-      ),
-      sync.longMemos(),
-    ).wait;
+    final before = await ref.read(recordSyncProvider.notifier).beforeOn();
     if (mounted) {
       setState(() {
         _loading = false;
-        _counts = counts;
-        _longMemos = longMemos;
+        _counts = before?.counts;
+        _longMemos = before?.longMemos;
       });
     }
   }

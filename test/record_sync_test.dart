@@ -390,16 +390,24 @@ void main() {
       }
 
       var last = await a.read();
-      expect(syncRecordsChangedSince(last, syncHeldRecordsOf(ref)!), isEmpty, reason: 'the stores hold what is read');
+      expect(
+        syncRecordsChangedSince(last, await syncHeldRecordsOf(syncStoresHeldOf(ref)!)),
+        isEmpty,
+        reason: 'the stores hold what is read',
+      );
 
       /// A round over [last], and that it found everything: what it reads is what reading every unit reads, and the
       /// stores now hold what it read.
       Future<Set<String>> round() async {
-        final changed = syncRecordsChangedSince(last, syncHeldRecordsOf(ref)!);
+        final changed = syncRecordsChangedSince(last, await syncHeldRecordsOf(syncStoresHeldOf(ref)!));
         final next = await a.read(previous: last, records: changed);
         expect(_describe(next.list), _describe((await a.read()).list));
         expect(next.unreadable, isEmpty);
-        expect(syncRecordsChangedSince(next, syncHeldRecordsOf(ref)!), isEmpty, reason: 'the stores hold what it read');
+        expect(
+          syncRecordsChangedSince(next, await syncHeldRecordsOf(syncStoresHeldOf(ref)!)),
+          isEmpty,
+          reason: 'the stores hold what it read',
+        );
         last = next;
         return changed;
       }
@@ -470,6 +478,49 @@ void main() {
       await container.read(charaDetailRecordStorageLoaderProvider.future);
       expect(await round(), {'Z1'});
       expect(last.list.rows.keys.toSet(), {'R1', 'R2', 'older', 'd1', 'd2'});
+    });
+
+    test('the records the stores hold are what they held when copied, whatever they take in before they are worked '
+        'out', () async {
+      // The delete evicts record images, which reads the painting binding.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final info = a.info;
+      // One more than a chunk, so that working them out lets the event loop run between two chunks.
+      for (var i = 0; i <= syncHeldRecordsChunk; i++) {
+        writeRecord(info.charaDetailActiveDir, makeRecord(id: 'R$i', card: i));
+      }
+      final container = await loadedMergeContainer(
+        info: info,
+        overrides: [pathLayoutLoader.overrideWith((ref) async => info)],
+      );
+      final ref = container.read(containerRefProvider);
+      final before = await syncHeldRecordsOf(syncStoresHeldOf(ref)!);
+
+      final stores = syncStoresHeldOf(ref)!;
+      await container
+          .read(charaArchiveControllerProvider.notifier)
+          .archive(['R1'], ArchiveImageOption.none, effects: archiveEffects(container));
+      final deleted = await container.read(charaDetailRecordStorageLoaderProvider.notifier).deleteAllAsync({
+        'R$syncHeldRecordsChunk',
+      }, effects: recordDeleteEffects(container));
+      expect(deleted.isSuccess, isTrue);
+      writeRecord(info.charaDetailActiveDir, makeRecord(id: 'C1', card: syncHeldRecordsChunk + 1));
+      container
+          .read(charaDetailRecordStorageLoaderProvider.notifier)
+          .addFromFile('C1', effects: arrivalEffects(container));
+      final held = await syncHeldRecordsOf(stores);
+
+      expect(held.records.keys.toSet(), before.records.keys.toSet());
+      for (final MapEntry(key: id, value: record) in before.records.entries) {
+        expect(syncRecordsAgree(record!, held.records[id]), isTrue, reason: id);
+      }
+      expect(held.unavailable, before.unavailable);
+
+      // Positive control: the stores did take in each change.
+      final now = (await syncHeldRecordsOf(syncStoresHeldOf(ref)!)).records;
+      expect(now['R1']?.stage.value, ArchiveImageOption.none);
+      expect(now.containsKey('R$syncHeldRecordsChunk'), isFalse);
+      expect(now.containsKey('C1'), isTrue);
     });
 
     test('a record a store could not open is not read as removed', () async {
@@ -4131,19 +4182,27 @@ void main() {
                 if (overHttp) a.syncHttp = SyncHttpFace(server);
                 Future<SyncServer> to() async => overHttp ? a.overHttp() : server;
                 Future<RecordSync> sync() async => (await a.open()).read(recordSyncProvider.notifier);
-                seedUmas(b, ['R2', 'R3']);
+                seedUmas(b, ['R2', 'R3', 'R6', 'R7']);
                 await b.round(server);
-                seedUmas(a, ['R2']);
+                seedUmas(a, ['R2', 'R5']);
                 a.seedRecord('R1', binding: own('R1'), bodyWrittenAt: 1767225600150, fans: 1500);
                 a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * (memoLengthLimit + 1)});
                 final (generation, device) = (server.generation, _describe(await listOf(a)));
 
                 expect(
-                  await (await sync()).countsBeforeOn(await to()),
-                  (toSend: 1, toReceive: 1),
-                  reason: 'R1, which the device alone holds, and R3, which the server alone lists; R2 is on both',
+                  await (await sync()).beforeOn(await to()),
+                  (longMemos: 1, counts: (toSend: 2, toReceive: 3)),
+                  reason:
+                      'R1 and R5, which the device alone holds, and R3, R6 and R7, which the server alone lists; '
+                      'R2 is on both; the one long memo is R1\'s',
                 );
-                expect(await (await sync()).longMemos(), 1);
+                server.paused = true;
+                expect(
+                  await (await sync()).beforeOn(await to()),
+                  (longMemos: 1, counts: null),
+                  reason: 'a server that cannot be read leaves the counts unread, and the long memos told',
+                );
+                server.paused = false;
                 expect(server.generation, generation, reason: 'no round ran');
                 expect(File(syncBaseFile(a.info).path).existsSync(), isFalse, reason: 'no list was kept');
                 expect(_describe(await listOf(a)), device, reason: 'nothing of the device changed');
@@ -4156,9 +4215,9 @@ void main() {
                 b.close();
                 seedUmas(b, ['R4']);
                 await b.round(server);
-                expect(onServer().rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4'});
+                expect(onServer().rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7'});
                 expect(
-                  await (await sync()).countsBeforeOn(await to()),
+                  (await (await sync()).beforeOn(await to()))?.counts,
                   (toSend: 0, toReceive: 1),
                   reason: 'R4; R2, which the device removed since its base, is not taken in again',
                 );
@@ -5657,7 +5716,7 @@ void main() {
       final result = await merging;
       fsBackend = originalBackend;
       expect(result.outcome, EnhancementMergeOutcome.failedDelete);
-      final held = syncHeldRecordsOf(c.read(containerRefProvider))!.records['R1']!;
+      final held = (await syncHeldRecordsOf(syncStoresHeldOf(c.read(containerRefProvider))!)).records['R1']!;
       expect(syncRecordsAgree(held, before), isTrue, reason: 'the merge leaves the row of R1 as the base lists it');
       expect((await a.read()).mergesInProgress.keys, contains('R1'));
 

@@ -302,6 +302,21 @@ void main() {
       expect(await readOpfsFile(onDisk), '{"id":2}'.codeUnits);
     });
 
+    // What a sync read asks of one record, through the data root it resolves once: the record's file in each of the two
+    // stores, the one store holding it, and whether a file is there where the directory above it is not.
+    test('remembering: from a directory above two stores, a file in one is read and the same name in the other is '
+        'absent, and a file exists only where it is', () async {
+      await _write(await _child(await _child(dir, 'active'), 'r1'), 'record.json', '{"id":"r1"}'.codeUnits);
+      await _child(dir, 'archive');
+      final data = (await OpfsDirectory.open(root, name)).remembering();
+      expect(await data.readBytesIfPresent('$name/active/r1/record.json'), '{"id":"r1"}'.codeUnits);
+      expect(await data.readBytesIfPresent('$name/archive/r1/record.json'), isNull);
+      expect(await data.exists('$name/active/r1/record.json'), isTrue);
+      expect(await data.exists('$name/archive/r1/record.json'), isFalse);
+      expect(await data.exists('$name/active/r1/merges_in_progress.json'), isFalse);
+      expect(await data.readString('$name/active/r1/record.json'), '{"id":"r1"}');
+    });
+
     test('remembering: a directory that was not there when opened is made by a change beneath it', () async {
       final missing = (await OpfsDirectory.open(root, '$name/missing')).remembering();
       await missing.createDir('$name/missing/desired', recursive: true);
