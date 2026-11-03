@@ -671,23 +671,31 @@ class _UnsettledMerge implements Exception {
 /// The record [id] as the list holds it, or null where neither store holds it. Throws where it cannot be read — its
 /// merges in progress included —, or both stores hold it (a move between them not finished yet: a later read finds
 /// one), or a merge into it has not finished ([_UnsettledMerge]). The caller holds the record's lock.
+///
+/// The data root is resolved once and every file is read from it, holding the directories walked to
+/// ([OpenedDirectory.remembering]): on web each read by path walks OPFS from the root, and a sync read reads every
+/// record. The writers that would move what this reads are kept out while it runs: the caller holds the record's lock,
+/// which every writer of the record takes, so the record's own directory stays as it is; and with it the root scope
+/// shared, while relocating or deleting the data root and the stores takes that scope exclusively.
 Future<SyncListRow?> readSyncRecordRowUnlocked(PathInfo info, String id) async {
+  final dataRoot = (await info.charaDetailDir.open()).remembering();
+  final stores = [info.charaDetailActiveDir, info.charaDetailArchiveDir];
   final held = [
-    for (final store in [info.charaDetailActiveDir, info.charaDetailArchiveDir])
-      if (await (store / id).filePath('record.json').readAsBytesIfPresent() case final bytes?) (store / id, bytes),
+    for (final store in stores)
+      if (await dataRoot.readAsBytesIfPresent((store / id).filePath('record.json')) case final bytes?)
+        (store / id, bytes),
   ];
   if (held.isEmpty) return null;
   if (held.length > 1) throw StateError('Both stores hold the record $id.');
   final (dir, bytes) = held.single;
-  final stores = [info.charaDetailActiveDir, info.charaDetailArchiveDir];
   Future<bool> isRecord(String other) async {
     for (final store in stores) {
-      if (await (store / other).filePath('record.json').exists()) return true;
+      if (await dataRoot.exists((store / other).filePath('record.json'))) return true;
     }
     return false;
   }
 
-  switch (await recordMergeWaiting(dir, isRecord: isRecord)) {
+  switch (await recordMergeWaitingIn(dataRoot, dir, isRecord: isRecord)) {
     case null:
       throw StateError('The merges in progress into $id cannot be read.');
     case final waiting when waiting.isNotEmpty:
@@ -696,7 +704,7 @@ Future<SyncListRow?> readSyncRecordRowUnlocked(PathInfo info, String id) async {
   }
   final record = syncRecordOf(
     CharaDetailRecord.fromRecordJson(utf8.decode(bytes)),
-    await readRecordNotes(dir),
+    await readRecordNotesIn(dataRoot, dir),
     archiveStore: isInArchiveStore(dir),
   );
   if (record == null) throw StateError('What the directory of $id holds beside its record.json cannot be read.');
@@ -746,6 +754,41 @@ SyncRecord? syncRecordOf(CharaDetailRecord record, RecordNotes notes, {required 
   );
 }
 
+/// What the two record stores held when [syncStoresHeldOf] was called: the record instances and their notes the stores
+/// held then, and nothing that reached a store after. A record instance and its notes are never changed in place — a
+/// store that changes a record puts a new instance in its place — so this copy stays what the stores held however they
+/// change since.
+class SyncStoresHeld {
+  const SyncStoresHeld(this.records, {required this.unavailable});
+
+  /// Every record either store serves, the active store's first: the record, what its directory holds beside its
+  /// `record.json` (null where that could not be read), and whether it is in the archive store.
+  final List<({CharaDetailRecord record, RecordNotes? notes, bool archiveStore})> records;
+
+  /// The ids of the records a store's scan could not open: on disk, and in neither store.
+  final Set<String> unavailable;
+}
+
+/// What the two record stores hold at the call, or null where either has not loaded. Copies what they hold and works
+/// nothing out of it, so it costs as many steps as the stores hold records and no more.
+SyncStoresHeld? syncStoresHeldOf(RefBase ref) {
+  final active = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+  final archive = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
+  if (ref.read(charaDetailRecordStorageLoaderProvider).asData == null ||
+      ref.read(charaDetailArchiveStorageLoaderProvider).asData == null) {
+    return null;
+  }
+  final stores = <(CharaDetailRecordMergeSurface, bool)>[(active, false), (archive, true)];
+  return SyncStoresHeld(
+    [
+      for (final (store, archiveStore) in stores)
+        for (final (:record, :notes) in store.recordsWithNotesInMemory)
+          (record: record, notes: notes, archiveStore: archiveStore),
+    ],
+    unavailable: {...active.unavailableRecordIds, ...archive.unavailableRecordIds},
+  );
+}
+
 /// What the stores hold of the records, as the list holds them.
 class SyncHeldRecords {
   const SyncHeldRecords(this.records, {this.unavailable = const {}});
@@ -758,26 +801,27 @@ class SyncHeldRecords {
   final Set<String> unavailable;
 }
 
-/// What the two record stores hold, or null where either has not loaded.
-SyncHeldRecords? syncHeldRecordsOf(RefBase ref) {
-  final active = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-  final archive = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
-  if (ref.read(charaDetailRecordStorageLoaderProvider).asData == null ||
-      ref.read(charaDetailArchiveStorageLoaderProvider).asData == null) {
-    return null;
+/// How many records [syncHeldRecordsOf] works out before it lets the event loop run. A record whose content key
+/// ([recognizedContentKey]) is still to be worked out takes about 0.6 ms of a web page's one thread, and about 0.45 ms
+/// on the Dart VM; a store read again holds none worked out yet, so 5,000 records take about 3 s. A chunk of this many
+/// keeps the thread for about 40 ms, under the 50 ms a browser counts as a long task, and a record whose key is worked
+/// out already takes about 0.5 µs.
+const syncHeldRecordsChunk = 64;
+
+/// The records [stores] hold, as the list holds them ([syncRecordOf]). Works out [syncHeldRecordsChunk] records at a
+/// time and lets the event loop run between them, through a timer: on the web a timer is a task of the page's event
+/// loop, so the browser paints and handles input between two chunks, where a microtask would run before it does.
+/// What it answers is what [stores] holds, whatever the stores take in the meantime.
+Future<SyncHeldRecords> syncHeldRecordsOf(SyncStoresHeld stores) async {
+  final records = <String, SyncRecord?>{};
+  for (final (i, (:record, :notes, :archiveStore)) in stores.records.indexed) {
+    if (i > 0 && i % syncHeldRecordsChunk == 0) await Future<void>.delayed(Duration.zero);
+    records[record.id] = switch (notes) {
+      final notes? => syncRecordOf(record, notes, archiveStore: archiveStore),
+      null => null,
+    };
   }
-  final stores = <(CharaDetailRecordMergeSurface, bool)>[(active, false), (archive, true)];
-  return SyncHeldRecords(
-    {
-      for (final (store, archiveStore) in stores)
-        for (final (:record, :notes) in store.recordsWithNotesInMemory)
-          record.id: switch (notes) {
-            final notes? => syncRecordOf(record, notes, archiveStore: archiveStore),
-            null => null,
-          },
-    },
-    unavailable: {...active.unavailableRecordIds, ...archive.unavailableRecordIds},
-  );
+  return SyncHeldRecords(records, unavailable: stores.unavailable);
 }
 
 /// The ids of the records whose rows in [previous] may not be what the device holds now, by what the stores [held]

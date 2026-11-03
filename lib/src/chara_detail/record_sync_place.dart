@@ -188,8 +188,13 @@ abstract interface class SyncPlace<C> {
   void bindingsWorkedOut();
 
   /// What the device holds, each record read under its lock ([readLocalSyncList]). Given [previous], the records the
-  /// stores show may have changed since ([syncRecordsChangedSince]) alone, the rest as [previous] has them. Null where
-  /// a store has not loaded.
+  /// stores show may have changed since ([syncRecordsChangedSince]) alone, by what the stores held when it was called
+  /// ([syncStoresHeldOf]), the rest as [previous] has them. The comparison sees only what the stores held then: a
+  /// record a store took in after it, and that the comparison did not pick, is left to a later read; a record it did
+  /// pick is read from disk as it is when this read reaches it, which may be after such a change.
+  /// Without [previous], every record on disk as each is when this read reaches it, and nothing worked out of what the
+  /// stores hold but whether they loaded and what they could not open. Null where a store had not loaded when it was
+  /// called.
   Future<SyncLocal?> read({LocalSyncRead? previous});
 
   /// What the device's record [id], as the round read it ([asRead]), carries to a record split off it, read under its

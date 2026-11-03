@@ -349,12 +349,10 @@ class _Sync extends RecordSync {
 
   void show(RecordSyncState shown) => state = shown;
 
+  /// Unread counts are null, as [RecordSync.beforeOn] gives them when the server's list could not be read.
   @override
-  Future<({int toSend, int toReceive})?> countsBeforeOn([SyncServer? server]) async =>
-      countsUnread ? throw StateError('the server did not answer') : counts;
-
-  @override
-  Future<int?> longMemos() async => longMemoCount;
+  Future<SyncBeforeOn?> beforeOn([SyncServer? server]) async =>
+      (longMemos: longMemoCount, counts: countsUnread ? null : counts);
 
   @override
   Future<void> setOn(bool on) async {}

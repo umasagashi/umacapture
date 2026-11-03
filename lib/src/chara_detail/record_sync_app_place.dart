@@ -167,15 +167,15 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
 
   @override
   Future<SyncLocal?> read({LocalSyncRead? previous}) async {
-    final held = syncHeldRecordsOf(ref);
-    if (held == null) return null;
+    final stores = syncStoresHeldOf(ref);
+    if (stores == null) return null;
     final local = await readLocalSyncList(
       info,
       gate: gate,
       previous: previous,
-      records: previous == null ? null : syncRecordsChangedSince(previous, held),
+      records: previous == null ? null : syncRecordsChangedSince(previous, await syncHeldRecordsOf(stores)),
     );
-    return (local: local, unavailable: held.unavailable);
+    return (local: local, unavailable: stores.unavailable);
   }
 
   /// The directory of the device's record [record], in the store of its stage.

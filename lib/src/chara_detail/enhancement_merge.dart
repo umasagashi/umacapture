@@ -294,13 +294,18 @@ typedef MergeDefaults = ({EnhancementMergeRoute route, bool identical, bool cont
 ///
 /// Absent is the empty map. "There and unusable" is a third answer, as [readMergedIds] gives one: the fact that would
 /// refuse publishing a leftover over the survivor may be the fact it cannot read.
-Future<Map<String, MergeDefaults>?> readMergesInProgress(DirectoryPath recordDir) async {
+Future<Map<String, MergeDefaults>?> readMergesInProgress(DirectoryPath recordDir) =>
+    readMergesInProgressIn(OpenedDirectory.byPath(), recordDir);
+
+/// [readMergesInProgress] through a directory the caller has resolved already: [recordDir] itself, or one it lies
+/// beneath.
+Future<Map<String, MergeDefaults>?> readMergesInProgressIn(OpenedDirectory opened, DirectoryPath recordDir) async {
   final file = recordDir.filePath(mergesInProgressFileName);
   try {
-    if (!await file.exists()) {
+    if (!await opened.exists(file)) {
       return const {};
     }
-    final decoded = jsonDecode(await file.readAsString());
+    final decoded = jsonDecode(await opened.readAsString(file));
     if (decoded is! Map) {
       logger.w('The merges in progress at ${file.path} are not a map of retired ids.');
       return null;
@@ -362,8 +367,16 @@ Future<bool> isRecordMergeSettled(
 Future<Set<String>?> recordMergeWaiting(
   DirectoryPath recordDir, {
   required FutureOr<bool> Function(String id) isRecord,
+}) => recordMergeWaitingIn(OpenedDirectory.byPath(), recordDir, isRecord: isRecord);
+
+/// [recordMergeWaiting] through a directory the caller has resolved already: [recordDir] itself, or one it lies
+/// beneath.
+Future<Set<String>?> recordMergeWaitingIn(
+  OpenedDirectory opened,
+  DirectoryPath recordDir, {
+  required FutureOr<bool> Function(String id) isRecord,
 }) async {
-  final retired = (await readMergesInProgress(recordDir))?.keys;
+  final retired = (await readMergesInProgressIn(opened, recordDir))?.keys;
   final records = {
     for (final id in retired ?? const <String>[])
       if (await isRecord(id)) id,
