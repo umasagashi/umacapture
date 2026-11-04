@@ -77,6 +77,7 @@ void main() {
       'RatingColumnSpec',
       'MemoColumnSpec',
       'ScriptColumnSpec',
+      'ShareStateColumnSpec',
     ];
 
     for (final type in discriminatorValues) {

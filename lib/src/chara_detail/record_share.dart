@@ -27,7 +27,11 @@ part 'record_share.mapper.dart';
 /// A device-side policy and not a defence: the server never receives `trainer_id`, so it can refuse a
 /// friend's record type and nothing more.
 bool canShare(CharaDetailRecord record, Iterable<String> trainerIds) =>
-    !record.isFriend && trainerIds.contains(record.metadata.trainerId);
+    !isNeverShareable(record) && trainerIds.contains(record.metadata.trainerId);
+
+/// Whether [record] can never be shared, whatever the account holds: a friend's record. The part of [canShare] the
+/// device decides without asking the account's trainers.
+bool isNeverShareable(CharaDetailRecord record) => record.isFriend;
 
 Map<String, Object?> _chara(Character c) => {"character": c.character, "card": c.card};
 
@@ -394,7 +398,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       }
       // This device's own trainings never depend on the account's list, so a trainer id that failed to register
       // at login cannot keep them from being shared.
-      if (record.isFriend) {
+      if (isNeverShareable(record)) {
         outcomes[record.id] = const NotShareable();
         continue;
       }

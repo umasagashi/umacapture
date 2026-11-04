@@ -6,7 +6,8 @@
 // reaches a network. The dialog cases enter through the row menu's real share submenu and the
 // long-press confirms of the share and unshare dialogs; sharing the checked records enters through the
 // table toolbar's real share button and the selection scrim; the list of shares enters through its
-// real row on the account tab.
+// real row on the account tab. The table's share column is read off the real grid build, over the notes a real
+// share and a real logout leave.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_share_test.dart
 import 'dart:async';
@@ -27,12 +28,16 @@ import 'package:umacapture/const.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/record_share.dart';
 import 'package:umacapture/src/chara_detail/record_share_session.dart';
+import 'package:umacapture/src/chara_detail/spec/loader.dart';
+import 'package:umacapture/src/chara_detail/spec/base.dart';
+import 'package:umacapture/src/chara_detail/spec/share_state.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/login_receiver.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
+import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/account.dart';
@@ -167,6 +172,19 @@ class _Shown extends CharaDetailRecordStorage {
 
   @override
   CharaDetailRecord? getBy({required String id}) => shownRecords.where((r) => r.id == id).firstOrNull;
+
+  /// The ids each delete was asked for. Nothing is erased: no test here has a data directory under it.
+  final deleteAsked = <Set<String>>[];
+
+  @override
+  Future<RecordDeleteResult> deleteAllAsync(
+    Iterable<String> ids, {
+    required RecordWriteEffects effects,
+    Future<bool> Function(String id)? onlyIf,
+  }) async {
+    deleteAsked.add(ids.toSet());
+    return RecordDeleteResult(succeeded: const {}, failed: ids.toSet());
+  }
 }
 
 /// A record store that holds nothing: the record a note was made for has been deleted.
@@ -233,6 +251,7 @@ void main() {
     bool emptied = false,
     LoginListener? listener,
     Duration? requestTimeout,
+    ({List<CharaDetailRecord> records, List<ColumnSpec>? columns})? table,
   }) {
     server = _FakeServer(answers);
     opened = [];
@@ -255,6 +274,10 @@ void main() {
           (ref) => createDiagnosticDio(operation: "record_share")..httpClientAdapter = server,
         ),
         if (requestTimeout != null) shareRequestTimeoutProvider.overrideWithValue(requestTimeout),
+        if (table != null) ...[
+          displayedRecordsProvider.overrideWithValue(table.records),
+          if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
+        ],
         if (held ?? [?shown] case final records when records.isNotEmpty)
           charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(records)),
         if (emptied) ...[
@@ -347,6 +370,8 @@ void main() {
                             source: RecordSource.active,
                             constraints: const BoxConstraints(minHeight: 40),
                             style: null,
+                            selecting: false,
+                            disabledStyle: null,
                           ),
                         ],
                       ),
@@ -754,9 +779,15 @@ void main() {
   group('from the table toolbar', () {
     setUpAll(loadAppTranslations);
 
-    /// Mounts the real toolbar under the selection scrim over [container], enters share selection from its button,
-    /// checks [ids] as the grid's checkboxes would, and opens the confirmation from the scrim.
-    Future<void> openBulk(WidgetTester tester, List<String> ids) async {
+    /// Mounts the real toolbar under the selection scrim over [container], enters share selection from its button
+    /// (or the selection the button [select] names), checks [ids] as the grid's checkboxes would, and opens the
+    /// confirmation from the scrim's [confirm].
+    Future<void> openBulk(
+      WidgetTester tester,
+      List<String> ids, {
+      String select = '共有するレコードの選択',
+      String confirm = '選択を共有',
+    }) async {
       tester.view.physicalSize = const Size(1600, 1200);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -779,11 +810,11 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.byTooltip('共有するレコードの選択'));
+      await tester.tap(find.byTooltip(select));
       await tester.pump();
       container.read(selectedRecordIdsProvider.notifier).set(ids.toSet());
       await tester.pump();
-      await tester.tap(find.text('選択を共有'));
+      await tester.tap(find.text(confirm));
       await tester.pumpAndSettle();
     }
 
@@ -944,6 +975,57 @@ void main() {
       expect(find.text('残りを再試行'), findsNothing, reason: 'logging in comes first');
       expect(server.sent, isEmpty);
     });
+
+    testWidgets('a delete confirmation left open cannot be confirmed once the share notes change under its selection', (
+      tester,
+    ) async {
+      await storeSession();
+      final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      // The one answer is the reply to an unshare whose dialog the user closed before beginning this selection,
+      // arriving while the confirmation is open.
+      container = containerFor([_empty(204)], held: [shared]);
+      const ended = '選択が解除されたため、実行できません。選び直してください。';
+      const caution = '選択したレコードを完全に削除します。\n削除すると復元はできません。';
+
+      await openBulk(tester, [shared.id], select: '削除するレコードの選択', confirm: '選択を削除');
+      expect(find.text(caution), findsOneWidget, reason: 'opened from a live selection, the confirmation asks');
+      expect(find.text(ended), findsNothing);
+
+      await tester.runAsync(() => notes().unshare("0123456789"));
+      await tester.pump();
+      expect(container.read(recordSharesProvider), isEmpty, reason: 'the reply dropped the note');
+      expect(find.text(ended), findsOneWidget);
+      expect(find.text(caution), findsNothing);
+
+      await tester.longPress(find.text('長押しで削除'));
+      await tester.pump();
+      final storage = container.read(charaDetailRecordStorageLoaderProvider.notifier) as _Shown;
+      expect(storage.deleteAsked, isEmpty, reason: 'the rows were picked under a share state that no longer holds');
+      // The press showed the confirm's tooltip, which says the same.
+      expect(find.text(ended), findsNWidgets(2), reason: 'the confirmation stays up to say why');
+    });
+
+    testWidgets('a delete confirmed after its selection ended, before the confirm was rebuilt, deletes nothing', (
+      tester,
+    ) async {
+      await storeSession();
+      final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      container = containerFor([_empty(204)], held: [shared]);
+      const ended = '選択が解除されたため、実行できません。選び直してください。';
+
+      await openBulk(tester, [shared.id], select: '削除するレコードの選択', confirm: '選択を削除');
+      // No pump between the reply and the press: the confirm on screen is still the one built for the live selection.
+      await tester.runAsync(() => notes().unshare("0123456789"));
+      expect(find.text(ended), findsNothing, reason: 'the confirm has not been rebuilt yet');
+
+      await tester.longPress(find.text('長押しで削除'));
+      await tester.pump();
+      final storage = container.read(charaDetailRecordStorageLoaderProvider.notifier) as _Shown;
+      expect(storage.deleteAsked, isEmpty, reason: 'the press re-reads the selection it was opened under');
+      expect(find.text(ended), findsWidgets, reason: 'the rebuild the ended selection scheduled says why');
+    });
   });
 
   group('from the account tab', () {
@@ -1015,6 +1097,107 @@ void main() {
       expect(container.read(recordShareSessionProvider), isNull);
       expect(container.read(recordSharesProvider), isEmpty);
       expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+    });
+
+    testWidgets('a logout from the account ends a selection the table began under the share column it filtered', (
+      tester,
+    ) async {
+      await storeSession();
+      final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      final onlyShared = ShareStateColumnSpec(
+        id: "only_shared",
+        title: "only_shared",
+        predicate: ShareColumnPredicate(
+          rejects: {ShareColumnState.pending, ShareColumnState.none, ShareColumnState.notShareable},
+        ),
+      );
+      container = containerFor([_empty(204)], table: (records: [shared], columns: [onlyShared]));
+      List<String> listed() => [
+        for (final row in container.read(currentGridProvider).rows) row.getUserData<CharaDetailRecord>()!.id,
+      ];
+      container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
+      container.read(selectedRecordIdsProvider.notifier).set({shared.id});
+      expect(listed(), [shared.id]);
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('ログアウト'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the account to show logged out',
+      );
+
+      expect(container.read(selectionModeProvider), isNull, reason: 'nothing is left to confirm');
+      expect(container.read(selectedRecordIdsProvider), isEmpty);
+      expect(listed(), isEmpty, reason: 'with nothing known, the filtered column lists no row');
+    });
+
+    testWidgets("unsharing from the account's list ends a selection the table began under the share column", (
+      tester,
+    ) async {
+      await storeSession();
+      final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      final note = await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      final onlyShared = ShareStateColumnSpec(
+        id: "only_shared",
+        title: "only_shared",
+        predicate: ShareColumnPredicate(
+          rejects: {ShareColumnState.pending, ShareColumnState.none, ShareColumnState.notShareable},
+        ),
+      );
+      // The list names the note as it is, so showing it changes nothing; the unshare is what changes the note.
+      container = containerFor(
+        [
+          _sharesList([_listed("0123456789", note.keyHash)]),
+          _empty(204),
+        ],
+        held: [shared],
+        table: (records: [shared], columns: [onlyShared]),
+      );
+      List<String> listed() => [
+        for (final row in container.read(currentGridProvider).rows) row.getUserData<CharaDetailRecord>()!.id,
+      ];
+      container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
+      container.read(selectedRecordIdsProvider.notifier).set({shared.id});
+      final selection = container.read(selectionModeProvider);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: DialogLayer(child: Scaffold(body: RecordShareListCard())),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('ログインしたアカウントで共有したレコードの確認と、共有を取り消すことができます。'));
+      await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(
+        tester,
+        () => find.text('共有を取り消す…').evaluate().isNotEmpty,
+        describe: 'the row of the shared record',
+      );
+      expect(
+        identical(container.read(selectionModeProvider), selection),
+        isTrue,
+        reason: 'a list that confirms the notes as they are leaves the selection alone',
+      );
+
+      await tester.tap(find.text('共有を取り消す…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで取り消す'));
+      await settleUntil(
+        tester,
+        () => container.read(recordSharesProvider).isEmpty,
+        describe: 'the unshare to drop the note',
+      );
+
+      expect(server.sent.last.method, "DELETE");
+      expect(container.read(selectionModeProvider), isNull, reason: 'nothing is left to confirm');
+      expect(container.read(selectedRecordIdsProvider), isEmpty);
+      expect(listed(), isEmpty, reason: 'the share column follows the note again, and filters the row out');
     });
 
     testWidgets('S4b (C1 iii, iv): only the long press deletes the account, and a deletion cut short is '
@@ -1421,6 +1604,74 @@ void main() {
 
     expect(await notes().unshare("0123456789"), UnshareOutcome.unshared);
     expect(StorageBox(StorageBoxKey.recordShares).pull<String>(note.keyHash), isNull);
+  });
+
+  test(
+    "the table's share column, filtered to shared, lists the records shared from here, and none once logged out",
+    () async {
+      await storeSession();
+      final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      final pending = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1)));
+      final unnoted = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(2)));
+      final friend = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(3), recordType: "FriendStandard"));
+      await storeNote(recordId: pending.id);
+      final onlyShared = ShareStateColumnSpec(
+        id: "only_shared",
+        title: "only_shared",
+        predicate: ShareColumnPredicate(
+          rejects: {ShareColumnState.pending, ShareColumnState.none, ShareColumnState.notShareable},
+        ),
+      );
+      container = containerFor(
+        [
+          _results([_created("0123456789")]),
+          _empty(204),
+        ],
+        table: (records: [shared, pending, unnoted, friend], columns: [onlyShared]),
+      );
+      List<String> listed() => [
+        for (final row in container.read(currentGridProvider).rows) row.getUserData<CharaDetailRecord>()!.id,
+      ];
+
+      expect(listed(), isEmpty, reason: 'a pending share is not listed as shared');
+      expect((await notes().shareAll([shared]))[shared.id], isA<Shared>());
+      expect(listed(), [shared.id]);
+
+      await container.read(recordShareSessionProvider.notifier).logout();
+      expect(listed(), isEmpty, reason: 'with nothing known, a filtered column lists no row');
+    },
+  );
+
+  test('a share column saved with a filter reads back with it, listing the same rows', () async {
+    await storeSession();
+    final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+    final unnoted = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1)));
+    await storeNote(recordId: shared.id, state: RecordShareState.shared);
+    final table = (records: [shared, unnoted], columns: null);
+    List<String> listed() => [
+      for (final row in container.read(currentGridProvider).rows) row.getUserData<CharaDetailRecord>()!.id,
+    ];
+
+    container = containerFor([], table: table);
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final rejects = {ShareColumnState.pending, ShareColumnState.none, ShareColumnState.notShareable};
+    container
+        .read(currentColumnSpecsLoaderProvider.notifier)
+        .add(
+          ShareStateColumnSpec(
+            id: "only_shared",
+            title: "only_shared",
+            predicate: ShareColumnPredicate(rejects: rejects),
+          ),
+        );
+    expect(listed(), [shared.id]);
+
+    container = containerFor([], table: table);
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final read = container.read(currentColumnSpecsProvider).single;
+    expect(read, isA<ShareStateColumnSpec>());
+    expect((read as ShareStateColumnSpec).predicate.rejects, rejects);
+    expect(listed(), [shared.id]);
   });
 
   group('the sharing session', () {

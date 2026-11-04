@@ -17,6 +17,8 @@ import '/src/chara_detail/inheritance.dart';
 import '/src/chara_detail/record_archive_state.dart';
 import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_notes.dart';
+import '/src/chara_detail/record_share.dart' show recordSharesProvider;
+import '/src/chara_detail/record_share_session.dart' show recordShareSessionProvider;
 import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/spec/loader.dart';
@@ -666,12 +668,56 @@ enum SelectionPurpose {
   share,
 }
 
-/// The purpose of the bulk row-selection UI currently engaged, or `null` when no
-/// selection is in progress.
+/// One bulk row selection, from the press that begins it to the [SelectionMode.exit] that ends it.
 ///
-/// Reset to `null` when switching sources so checked rows from the previous
-/// source do not leak across.
-final selectionModeProvider = settableNotifierProvider<SelectionPurpose?>(null);
+/// Compared by identity, never by [purpose]: two selections made one after the other for the same purpose are still
+/// two, and a confirmation opened from one of them asks exactly that — whether the selection its rows were checked in
+/// is still the one in progress. Hence no `const` constructor, which would make two such selections the same object.
+final class Selection {
+  final SelectionPurpose purpose;
+
+  Selection(this.purpose);
+}
+
+/// The bulk row selection in progress, or `null` when there is none.
+///
+/// Ended when switching sources so checked rows from the previous source do not
+/// leak across, and when what the share column is derived from changes — the
+/// logged-in sharing account or the share notes (see [SelectionMode.build]).
+final selectionModeProvider = NotifierProvider<SelectionMode, Selection?>(SelectionMode.new);
+
+/// The notifier behind [selectionModeProvider]; [exit] is the one way a selection ends.
+class SelectionMode extends Notifier<Selection?> {
+  @override
+  Selection? build() {
+    // A selection belongs to the state the share column is derived from when it began: the logged-in account and
+    // the share notes. While selecting, the grid is a snapshot that follows neither (currentGridProvider), so after a
+    // login, a logout, a lost session, or a note the account's list confirmed, dropped or unshared, the share column
+    // would keep its old values and its filter its old rows, and a confirm would delete or export rows picked under
+    // a state that no longer holds. Ending the selection makes the grid live again, and the user selects anew.
+    // Whether the table shows a share column does not matter: a share selection is made under both just the same.
+    //
+    // Any new map of notes ends it, including one that holds the same notes: no writer puts an unchanged note while
+    // a selection is in progress (a share that does ends the selection before it sends), and should one come to,
+    // ending a selection costs the user a reselection and loses nothing.
+    ref.listen(recordShareSessionProvider.select((session) => session?.accountId), (_, _) => exit());
+    ref.listen(recordSharesProvider, (_, _) => exit());
+    return null;
+  }
+
+  /// Begins a new selection for [purpose].
+  void set(SelectionPurpose purpose) => state = Selection(purpose);
+
+  /// Leaves bulk-selection mode: drops the purpose and clears the checked ids.
+  ///
+  /// The two providers are semantically coupled (a non-null purpose without a
+  /// checked set, or vice versa, is meaningless), so every exit path resets both
+  /// through here rather than repeating the pair.
+  void exit() {
+    state = null;
+    ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+  }
+}
 
 /// Ids of the rows checked for the current bulk selection, kept in sync from the
 /// grid's `onRowChecked` callback. Cleared when leaving selection mode or
@@ -3125,15 +3171,8 @@ CharaDetailRecordMutator recordStorageFor(WidgetRef ref, RecordSource source) {
   }
 }
 
-/// Leaves bulk-selection mode: drops the purpose and clears the checked ids.
-///
-/// The two providers are semantically coupled (a non-null purpose without a
-/// checked set, or vice versa, is meaningless), so every exit path resets both
-/// through here rather than repeating the pair.
-void exitSelection(WidgetRef ref) {
-  ref.read(selectionModeProvider.notifier).set(null);
-  ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
-}
+/// Leaves bulk-selection mode through [SelectionMode.exit].
+void exitSelection(WidgetRef ref) => ref.read(selectionModeProvider.notifier).exit();
 
 /// Switches the displayed [source] and clears any in-progress selection.
 ///

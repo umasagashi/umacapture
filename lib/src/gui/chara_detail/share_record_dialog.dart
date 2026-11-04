@@ -43,24 +43,35 @@ void copySharedUrl(String url) {
 ///
 /// A record not yet confirmed as shared offers sharing, which also resends an unconfirmed attempt with its kept
 /// key; a shared one offers its page, its URL and unsharing it.
+///
+/// While [selecting] rows, sharing and unsharing are disabled, drawn in [disabledStyle]: either changes the
+/// share column's value and so rebuilds the table, which would drop the selection, the same reason the row
+/// menu disables pinning and deleting. Opening the page and copying its URL change nothing and stay enabled.
 MenuItem recordShareMenu(
   WidgetRef ref, {
   required CharaDetailRecord record,
   required RecordSource source,
   required BoxConstraints constraints,
   required TextStyle? style,
+  required bool selecting,
+  required TextStyle? disabledStyle,
 }) {
   // The weight the rest of the row menu draws its icons with.
   const iconWeight = 700.0;
   const menu = "pages.chara_detail.context_menu";
   final entry = ref.read(recordSharesProvider.notifier).entryOf(record.id);
   final (shared, url) = (entry?.state == RecordShareState.shared ? entry : null, entry?.url);
-  MenuItem item(IconData icon, String key, VoidCallback onSelected) => MenuItem(
-    constraints: constraints,
-    icon: Icon(icon, weight: iconWeight),
-    onSelected: (_) => onSelected(),
-    label: Text("$menu.$key".tr(), style: style),
-  );
+  MenuItem item(IconData icon, String key, VoidCallback onSelected, {bool rebuildsTable = false}) {
+    final disabled = rebuildsTable && selecting;
+    return MenuItem(
+      constraints: constraints,
+      enabled: !disabled,
+      icon: Icon(icon, weight: iconWeight, color: disabled ? disabledStyle?.color : null),
+      onSelected: (_) => onSelected(),
+      label: Text("$menu.$key".tr(), style: disabled ? disabledStyle : style),
+    );
+  }
+
   return MenuItem.submenu(
     constraints: constraints,
     icon: const Icon(Symbols.public, weight: iconWeight),
@@ -71,11 +82,17 @@ MenuItem recordShareMenu(
           Symbols.public,
           "share_record",
           () => ShareRecordDialog.show(ref.base, recordId: record.id, source: source),
+          rebuildsTable: true,
         )
       else ...[
         item(Symbols.open_in_new, "open_shared", () => openSharedPage(url)),
         item(Symbols.content_copy, "copy_shared_url", () => copySharedUrl(url)),
-        item(Symbols.public_off, "unshare_record", () => UnshareRecordDialog.show(ref.base, shareId: shared.id ?? "")),
+        item(
+          Symbols.public_off,
+          "unshare_record",
+          () => UnshareRecordDialog.show(ref.base, shareId: shared.id ?? ""),
+          rebuildsTable: true,
+        ),
       ],
     ],
   );
@@ -378,10 +395,14 @@ class BulkShareRecordDialog extends ConsumerStatefulWidget {
   final List<String> recordIds;
   final RecordSource source;
 
-  const BulkShareRecordDialog({super.key, required this.recordIds, required this.source});
+  /// The selection [recordIds] were checked in, read as the dialog is shown ([SelectionConfirmation]).
+  final Selection? selection;
+
+  const BulkShareRecordDialog({super.key, required this.recordIds, required this.source, required this.selection});
 
   static void show(RefBase ref, {required List<String> recordIds, required RecordSource source}) {
-    CardDialog.show(ref, (_) => BulkShareRecordDialog(recordIds: recordIds, source: source));
+    final selection = ref.read(selectionModeProvider);
+    CardDialog.show(ref, (_) => BulkShareRecordDialog(recordIds: recordIds, source: source, selection: selection));
   }
 
   @override
@@ -396,6 +417,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
   String? _loginText;
   bool _signedIn = false;
   bool _sending = false;
+  late final _selection = SelectionConfirmation(widget.selection);
   late final _login = LoginDriver(
     ref,
     onSettled: (outcome) {
@@ -447,6 +469,10 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
 
   /// Shares [_rest]. **Nothing closes the dialog while a request is out**, for the reason P1 gives.
   Future<void> _share() async {
+    // The checked rows are now this dialog's to tell about, so selection ends here as the bulk delete ends it.
+    if (!_selection.takeOver(ref)) {
+      return;
+    }
     final records = _recordsOf(_rest);
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
@@ -456,8 +482,6 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
       _signedIn = false;
     });
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
-    // The checked rows are now this dialog's to tell about, so selection ends here as the bulk delete ends it.
-    exitSelection(ref);
     final Map<String, ShareOutcome> answered;
     try {
       answered = await ref.read(recordSharesProvider.notifier).shareAll(records);
@@ -555,6 +579,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final sent = _outcomes.isNotEmpty;
+    final withdrawn = _selection.withdrawn(ref);
     final body = sent
         ? _results(theme)
         : Column(
@@ -570,6 +595,9 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
               ],
               const SizedBox(height: 12),
               const _ShareDescription("$tr_share_record.bulk.description"),
+              // Stated as body text and not only as the confirm's tooltip, as the other bulk confirmations state
+              // their refusals: a tooltip needs a hover.
+              if (withdrawn) ...[const SizedBox(height: 12), NoteCard(description: Text(selectionEndedMessage()))],
             ],
           );
     return ConstrainedBox(
@@ -588,12 +616,12 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
                 cancelLabel: "$tr_share_record.dialog.cancel_button.label".tr(),
                 cancelTooltip: "$tr_share_record.dialog.cancel_button.tooltip".tr(),
                 confirmLabel: "$tr_share_record.dialog.ok_button.label".tr(),
-                confirmTooltip: "$tr_share_record.bulk.ok_tooltip".tr(),
+                confirmTooltip: withdrawn ? selectionEndedMessage() : "$tr_share_record.bulk.ok_tooltip".tr(),
                 confirmIcon: Symbols.public_rounded,
                 destructive: false,
                 requireLongPress: true,
                 onConfirm: _share,
-                enabled: !_sending,
+                enabled: !_sending && !withdrawn,
                 cancelEnabled: !_sending,
               ),
       ),

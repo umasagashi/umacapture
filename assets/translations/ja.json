@@ -349,6 +349,7 @@
                 "tooltip": "表示列を新規追加"
             },
             "regenerating_message": "認識結果を更新しています",
+            "selection_ended": "選択が解除されたため、実行できません。選び直してください。",
             "item_omission": {
                 "row_height": "行の高さに収まらない {count} 件を省略しています。\n列の幅を広げるか、テーブル設定で行高さ下限を増やしてください。",
                 "cell_height": "セルの高さの上限に収まらない {count} 件を省略しています。\n列の幅を広げるか、テーブル設定でセルの高さの上限を大きくしてください。"
@@ -944,6 +945,15 @@
                         "reject": "含まない"
                     }
                 },
+                "share_state": {
+                    "selection": {
+                        "label": "選択",
+                        "description": "選択した共有の状態に該当するウマ娘がテーブルに表示されます。ログインしていない間は、絞り込むとどの行も表示されません。"
+                    },
+                    "tooltip": {
+                        "accept": "含む"
+                    }
+                },
                 "rating": {
                     "cell": {
                         "description": "クリックして評価"
@@ -1306,6 +1316,17 @@
                     "title": "メモ",
                     "description": "メモを表示し、検索で絞り込めます。セルをクリックするとメモを書き込めます。",
                     "add_description": "新しいメモデータを作り、その列を追加します。"
+                },
+                "share_state": {
+                    "title": "共有",
+                    "description": "この端末から共有したかを表示し、絞り込めます。",
+                    "states": {
+                        "shared": "共有中",
+                        "pending": "確認待ち",
+                        "none": "この端末からの共有なし",
+                        "not_shareable": "共有不可",
+                        "logged_out": "ログインしてください"
+                    }
                 },
                 "captured_date": {
                     "title": "キャプチャ日"

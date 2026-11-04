@@ -331,8 +331,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     final theme = Theme.of(context);
     final source = ref.read(recordSourceProvider);
     final pathInfo = ref.read(pathInfoProvider);
-    // While selecting rows (to archive or export), actions that rebuild the
-    // table (and would drop the in-progress selection) are disabled.
+    // While selecting rows (for a bulk delete or a CSV export), actions that
+    // rebuild the table (and would drop the in-progress selection) are disabled:
+    // pinning, archiving, deleting, and sharing or unsharing (the share column
+    // shows the share state, so a change to it rebuilds the table).
     final selecting = ref.read(selectionModeProvider) != null;
     // Re-recognition is disabled while a video import runs, on exactly the predicate the capture
     // button is gated on, so the two halves of import mutual exclusion cannot drift. A batch started
@@ -437,7 +439,15 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           ],
         ),
         // Share group: sharing, or the shared page, its URL and unsharing it.
-        recordShareMenu(ref, record: record, source: source, constraints: constraints, style: style),
+        recordShareMenu(
+          ref,
+          record: record,
+          source: source,
+          constraints: constraints,
+          style: style,
+          selecting: selecting,
+          disabledStyle: disabledStyle,
+        ),
         // Destructive record actions, set off by a divider: archive (active-only;
         // archived records cannot be archived again) then delete (both sources).
         const MenuDivider(),
@@ -858,7 +868,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     final grid = ref.watch(currentGridProvider);
     // Drives the per-row overlay's color/label so a checked row reads as either
     // "archive" or "export". Non-null whenever the checkbox column is present.
-    final purpose = ref.watch(selectionModeProvider);
+    final purpose = ref.watch(selectionModeProvider)?.purpose;
     // Watched rather than listened to: the rebuild hands TrinaGrid a new
     // configuration, which its didUpdateWidget applies to the live stateManager.
     final strongRowBorders = ref.watch(charaDetailStrongRowBordersProvider);
@@ -1552,7 +1562,7 @@ class TopControlsLayer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final purpose = ref.watch(selectionModeProvider);
+    final purpose = ref.watch(selectionModeProvider)?.purpose;
     final selectedCount = ref.watch(selectedRecordIdsProvider).length;
     return Stack(
       children: [
