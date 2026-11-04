@@ -120,10 +120,14 @@ class BulkDeleteRecordDialog extends ConsumerStatefulWidget {
   final List<String> recordIds;
   final RecordSource source;
 
-  const BulkDeleteRecordDialog({super.key, required this.recordIds, required this.source});
+  /// The selection [recordIds] were checked in, read as the dialog is shown ([SelectionConfirmation]).
+  final Selection? selection;
+
+  const BulkDeleteRecordDialog({super.key, required this.recordIds, required this.source, required this.selection});
 
   static void show(RefBase ref, {required List<String> recordIds, required RecordSource source}) {
-    CardDialog.show(ref, (_) => BulkDeleteRecordDialog(recordIds: recordIds, source: source));
+    final selection = ref.read(selectionModeProvider);
+    CardDialog.show(ref, (_) => BulkDeleteRecordDialog(recordIds: recordIds, source: source, selection: selection));
   }
 
   @override
@@ -134,6 +138,8 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   // Whether this dialog's delete is still running. See [_confirm] for why the
   // dialog has to carry it.
   bool _deleting = false;
+
+  late final _selection = SelectionConfirmation(widget.selection);
 
   /// Deletes the checked records, then closes this dialog.
   ///
@@ -165,6 +171,12 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
   /// whole batch away before anything is removed: the question this dialog asked
   /// is still open, so it stays and [build] says why.
   Future<void> _confirm() async {
+    // The rows are on their way out; leave selection mode now so the checkbox
+    // column disappears and stale checks are dropped even when the delete fails
+    // or the dialog is closed before it finishes.
+    if (!_selection.takeOver(ref)) {
+      return;
+    }
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
     final roomStop = ref.read(syncRoomStopProvider);
@@ -173,10 +185,6 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     final token = dialogs.currentToken;
     setState(() => _deleting = true);
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
-    // The rows are on their way out; leave selection mode now so the checkbox
-    // column disappears and stale checks are dropped even when the delete fails
-    // or the dialog is closed before it finishes.
-    exitSelection(ref);
     var notStarted = false;
     try {
       final deleted = await storage.deleteAllAsync(widget.recordIds, effects: effects);
@@ -245,6 +253,12 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
         layout != null &&
         recordDeleteBlockedBy(pathInfo: layout, source: widget.source, recordIds: widget.recordIds, claims: claims) !=
             null;
+    // An ended selection first: waiting does not bring it back, whereas a long read ends on its own.
+    final refusal = _selection.withdrawn(ref)
+        ? selectionEndedMessage()
+        : awaitingExtraction
+        ? longReadBusyMessage()
+        : null;
     return BulkConfirmDialog(
       dismissRef: ref.base,
       dialogTitle: "$tr_delete_record.bulk.title".tr(),
@@ -259,21 +273,21 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
       // taken the whole screen to ask a question this one cannot be answered.
       bodyExtras: [
         Center(
-          child: switch ((_deleting, awaitingExtraction)) {
+          child: switch ((_deleting, refusal)) {
             (true, _) => const CircularProgressIndicator(),
-            (false, true) => NoteCard(description: Text(longReadBusyMessage())),
-            (false, false) => WarningCard(message: deleteCaution(ref, "$tr_delete_record.bulk.description".tr())),
+            (false, final String refusal) => NoteCard(description: Text(refusal)),
+            (false, null) => WarningCard(message: deleteCaution(ref, "$tr_delete_record.bulk.description".tr())),
           },
         ),
       ],
       cancelLabel: "$tr_delete_record.bulk.cancel_button.label".tr(),
       cancelTooltip: "$tr_delete_record.bulk.cancel_button.tooltip".tr(),
       confirmLabel: "$tr_delete_record.bulk.ok_button.label".tr(),
-      confirmTooltip: awaitingExtraction ? longReadBusyMessage() : "$tr_delete_record.bulk.ok_button.tooltip".tr(),
+      confirmTooltip: refusal ?? "$tr_delete_record.bulk.ok_button.tooltip".tr(),
       confirmIcon: Symbols.delete_rounded,
       destructive: true,
       onConfirm: () => unawaited(_confirm()),
-      confirmEnabled: !_deleting && !awaitingExtraction,
+      confirmEnabled: !_deleting && refusal == null,
       // The other two of the three exits [_confirm] shuts while the delete runs;
       // the barrier is the third, and it is answered by the same flag so none of
       // them can be reinstated alone.

@@ -90,10 +90,14 @@ LongReadKind? _archiveBlockedBy(WidgetRef ref, List<String> recordIds) {
 class BulkArchiveRecordDialog extends ConsumerStatefulWidget {
   final List<String> recordIds;
 
-  const BulkArchiveRecordDialog({super.key, required this.recordIds});
+  /// The selection [recordIds] were checked in, read as the dialog is shown ([SelectionConfirmation]).
+  final Selection? selection;
+
+  const BulkArchiveRecordDialog({super.key, required this.recordIds, required this.selection});
 
   static void show(RefBase ref, {required List<String> recordIds}) {
-    CardDialog.show(ref, (_) => BulkArchiveRecordDialog(recordIds: recordIds));
+    final selection = ref.read(selectionModeProvider);
+    CardDialog.show(ref, (_) => BulkArchiveRecordDialog(recordIds: recordIds, selection: selection));
   }
 
   @override
@@ -105,19 +109,28 @@ class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialo
   // the confirm button stays disabled until then.
   ArchiveImageOption? _option;
 
+  late final _selection = SelectionConfirmation(widget.selection);
+
   void _confirm() {
-    final effects = archiveDialogEffects(ref.read(containerRefProvider));
-    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option!, effects: effects);
     // The grid rebuilds without these rows; leave selection mode so the
     // checkbox column disappears and stale checks are dropped.
-    exitSelection(ref);
+    if (!_selection.takeOver(ref)) {
+      return;
+    }
+    final effects = archiveDialogEffects(ref.read(containerRefProvider));
+    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option!, effects: effects);
     CardDialog.dismiss(ref.base);
   }
 
   @override
   Widget build(BuildContext context) {
     final count = widget.recordIds.length;
-    final awaitingExtraction = _archiveBlockedBy(ref, widget.recordIds) != null;
+    // An ended selection first: waiting does not bring it back, whereas a long read ends on its own.
+    final refusal = _selection.withdrawn(ref)
+        ? selectionEndedMessage()
+        : _archiveBlockedBy(ref, widget.recordIds) != null
+        ? longReadBusyMessage()
+        : null;
     return BulkConfirmDialog(
       dismissRef: ref.base,
       dialogTitle: "$tr_archive_record.dialog.title".tr(),
@@ -128,7 +141,7 @@ class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialo
       // that by four pixels, which is a defect of its own and is fixed here
       // because a case below renders exactly this state. The refusal box is
       // taller again than the caution it replaces, hence the second figure.
-      maxHeight: awaitingExtraction ? 460 : 440,
+      maxHeight: refusal != null ? 460 : 440,
       message: "$tr_archive_record.dialog.message".tr(namedArgs: {"count": "$count"}),
       bodyExtras: [
         RadioGroup<ArchiveImageOption>(
@@ -159,19 +172,19 @@ class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialo
         // hover, and this dialog has already taken the whole screen to ask a
         // question that cannot be answered.
         Center(
-          child: awaitingExtraction
-              ? NoteCard(description: Text(longReadBusyMessage()))
+          child: refusal != null
+              ? NoteCard(description: Text(refusal))
               : WarningCard(message: "$tr_archive_record.dialog.description".tr()),
         ),
       ],
       cancelLabel: "$tr_archive_record.dialog.cancel_button.label".tr(),
       cancelTooltip: "$tr_archive_record.dialog.cancel_button.tooltip".tr(),
       confirmLabel: "$tr_archive_record.dialog.ok_button.label".tr(),
-      confirmTooltip: awaitingExtraction ? longReadBusyMessage() : "$tr_archive_record.dialog.ok_button.tooltip".tr(),
+      confirmTooltip: refusal ?? "$tr_archive_record.dialog.ok_button.tooltip".tr(),
       confirmIcon: Symbols.archive_rounded,
       destructive: true,
       onConfirm: _confirm,
-      confirmEnabled: _option != null && !awaitingExtraction,
+      confirmEnabled: _option != null && refusal == null,
       // Not narrowed by the refusal: leaving is the remedy it asks for, so the
       // way out stays open for exactly the window the confirm is shut.
     );

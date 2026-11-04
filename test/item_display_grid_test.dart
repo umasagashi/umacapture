@@ -1030,7 +1030,7 @@ void main() {
       final selecting = container.read(currentGridProvider);
       await modules.install(container, labels: _renamed(), skillOrder: [1, 0]);
       expect(identical(container.read(currentGridProvider), selecting), isTrue);
-      container.read(selectionModeProvider.notifier).set(null);
+      container.read(selectionModeProvider.notifier).exit();
       expect(_read(container).items('a', 'sd'), [('NS1', _common)]);
     });
   });

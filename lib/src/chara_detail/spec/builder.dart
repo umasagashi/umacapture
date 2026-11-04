@@ -19,6 +19,7 @@ import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
 import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
+import '/src/chara_detail/spec/share_state.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/spec/skill_difference.dart';
@@ -425,6 +426,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         type: ColumnBuilderType.add,
       ),
     ],
+    ShareStateColumnBuilder(title: "$tr_columns.share_state.title".tr(), category: ColumnCategory.metadata),
     DateTimeColumnBuilder(
       title: "$tr_columns.captured_date.title".tr(),
       category: ColumnCategory.metadata,

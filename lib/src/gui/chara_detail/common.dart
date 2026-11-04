@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/misc.dart';
 import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
@@ -435,6 +436,47 @@ class ConfirmActionRow extends StatelessWidget {
     );
   }
 }
+
+/// A bulk confirmation's hold on the selection its rows were checked in.
+///
+/// **Until its press, the confirmation acts for that selection and for nothing else.** A selection can end under an
+/// open confirmation — the logged-in account or the share notes change behind it ([SelectionMode.build]) — and its
+/// rows were then picked under a state that no longer holds, so the press is refused ([withdrawn]) and the user
+/// selects anew. **From the press on, the rows are the confirmation's own**: it ends the selection itself before it
+/// starts the work ([takeOver]), and what it shows after that — a delete running or refused, a share's results and
+/// its retry — no longer answers to any selection. Asking "is a selection still in progress" instead would refuse
+/// exactly that, because every confirmation ends the selection on its own press.
+///
+/// Each confirmation's `show` reads the selection in the same turn as the rows it is handed, so the two cannot belong
+/// to different selections. A confirmation opened with no selection in progress holds none, and nothing withdraws it.
+class SelectionConfirmation {
+  Selection? _selection;
+
+  SelectionConfirmation(this._selection);
+
+  /// Whether the selection ended before this confirmation was pressed. Watched, so the confirm goes out as it ends.
+  bool withdrawn(WidgetRef ref) {
+    final selection = _selection;
+    return selection != null && !identical(ref.watch(selectionModeProvider), selection);
+  }
+
+  /// Takes the checked rows over from the selection, and ends it; false, taking nothing, when the selection already
+  /// ended. Read, not watched: a press can land after the selection ended and before [withdrawn] rebuilt the confirm,
+  /// and the caller then starts nothing. The rebuild already scheduled by that end shows the refusal.
+  bool takeOver(WidgetRef ref) {
+    final selection = _selection;
+    if (selection != null && !identical(ref.read(selectionModeProvider), selection)) {
+      return false;
+    }
+    _selection = null;
+    exitSelection(ref);
+    return true;
+  }
+}
+
+/// Why a [SelectionConfirmation.withdrawn] confirmation cannot be pressed: told in its body, where the other refusals
+/// are, and as its confirm's tooltip.
+String selectionEndedMessage() => "pages.chara_detail.selection_ended".tr();
 
 /// A confirmation dialog reporting a count, an optional body, and a shared
 /// cancel/confirm row.

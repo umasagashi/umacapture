@@ -83,10 +83,14 @@ class CharaDetailExportButton extends ConsumerWidget {
 class ExportRecordDialog extends ConsumerStatefulWidget {
   final List<String> recordIds;
 
-  const ExportRecordDialog({super.key, required this.recordIds});
+  /// The selection [recordIds] were checked in, read as the dialog is shown ([SelectionConfirmation]).
+  final Selection? selection;
+
+  const ExportRecordDialog({super.key, required this.recordIds, required this.selection});
 
   static void show(RefBase ref, {required List<String> recordIds}) {
-    CardDialog.show(ref, (_) => ExportRecordDialog(recordIds: recordIds));
+    final selection = ref.read(selectionModeProvider);
+    CardDialog.show(ref, (_) => ExportRecordDialog(recordIds: recordIds, selection: selection));
   }
 
   @override
@@ -95,6 +99,8 @@ class ExportRecordDialog extends ConsumerStatefulWidget {
 
 class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
   ExportFormat _format = ExportFormat.csvShiftJis;
+
+  late final _selection = SelectionConfirmation(widget.selection);
 
   Exporter _exporterFor(
     ExportFormat format,
@@ -128,6 +134,9 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
     // rather than raw records). Read it before exitSelection makes the grid live
     // again, so a later source switch cannot redirect the CSV to the other set.
     final grid = ref.read(currentGridProvider);
+    if (!_selection.takeOver(ref)) {
+      return;
+    }
     // Run the export on the container-scoped ExportRunner rather than this
     // dialog's ref: the directory picker and write outlive the dialog, which is
     // dismissed immediately below. The selection is already snapshotted into the
@@ -138,7 +147,6 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
           (rb) => _exporterFor(format, title, ids, source, grid, rb),
           onSuccess: (result) => _recordExportEvent.add(result),
         );
-    exitSelection(ref);
     CardDialog.dismiss(ref.base);
   }
 
@@ -181,6 +189,12 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
               claims,
             ) !=
             null;
+    // An ended selection first: waiting does not bring it back, whereas a long read ends on its own.
+    final refusal = _selection.withdrawn(ref)
+        ? selectionEndedMessage()
+        : awaitingExtraction
+        ? longReadBusyMessage()
+        : null;
     return BulkConfirmDialog(
       dismissRef: ref.base,
       dialogTitle: "$tr_chara_detail.export.dialog.title".tr(),
@@ -191,7 +205,7 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
       // box for the refusal to take the place of the way the archive and delete
       // dialogs do — so the alternative to growing is a body that overflows its
       // own card.
-      maxHeight: awaitingExtraction ? 600 : 520,
+      maxHeight: refusal != null ? 600 : 520,
       message: "$tr_chara_detail.export.dialog.message".tr(namedArgs: {"count": "$count"}),
       bodyExtras: [
         RadioGroup<ExportFormat>(
@@ -219,19 +233,17 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
         // reason the delete dialogs give: a tooltip needs a hover, and the dialog
         // has already taken the whole screen to ask a question that cannot be
         // answered yet.
-        if (awaitingExtraction) Center(child: NoteCard(description: Text(longReadBusyMessage()))),
+        if (refusal != null) Center(child: NoteCard(description: Text(refusal))),
       ],
       cancelLabel: "$tr_chara_detail.export.dialog.cancel_button.label".tr(),
       cancelTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
       confirmLabel: "$tr_chara_detail.export.dialog.ok_button.label".tr(),
-      confirmTooltip: awaitingExtraction
-          ? longReadBusyMessage()
-          : "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
+      confirmTooltip: refusal ?? "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
       confirmIcon: Symbols.download_rounded,
       // Export is non-destructive: confirm on a plain tap, no error palette.
       destructive: false,
       onConfirm: _confirm,
-      confirmEnabled: !awaitingExtraction,
+      confirmEnabled: refusal == null,
       // Not narrowed by the refusal: leaving is the remedy it asks for, so the
       // way out stays open for exactly the window the confirm is shut.
     );

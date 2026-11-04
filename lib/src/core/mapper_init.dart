@@ -23,6 +23,7 @@ import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
 import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
+import '/src/chara_detail/spec/share_state.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/spec/skill_difference.dart';
@@ -63,6 +64,7 @@ void initializeMappers() {
   CharaRankColumnSpecMapper.ensureInitialized();
   SimpleLabelColumnSpecMapper.ensureInitialized();
   FamilyRegistrationColumnSpecMapper.ensureInitialized();
+  ShareStateColumnSpecMapper.ensureInitialized();
   SkillColumnSpecMapper.ensureInitialized();
   FactorColumnSpecMapper.ensureInitialized();
   SkillDifferenceColumnSpecMapper.ensureInitialized();
