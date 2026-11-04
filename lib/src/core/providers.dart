@@ -576,7 +576,7 @@ final pathLayoutProvider = Provider<PathInfo?>((ref) {
 /// used to be `pathInfoLoader.value!`, which reported both as
 /// `Null check operator used on a null value` from inside whichever `build`
 /// happened to be running; during a store outage that was three `RenderErrorBox`
-/// widgets in the settings page's About card, each claiming the full height it
+/// widgets in the settings page's data management card, each claiming the full height it
 /// was offered.
 ///
 /// A reader that can be built before the store is prepared — anything that only

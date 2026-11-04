@@ -12,7 +12,9 @@ destroys data the product does promise to keep.
 - **Web app**: one tab per origin (a page-lifetime Web Lock; a second tab waits and continues when the
   first closes). Requires WebAssembly SIMD, `SharedArrayBuffer` and cross-origin isolation; the worker
   refuses the session otherwise. Normal browsers are desktop Chromium-based browsers and Firefox.
-  Android Chrome is normal for **video import and file sync only**. iOS is not promised (never measured). The embedded
+  Android Chrome is normal for **video import, file sync and the storage manager (the saved-data
+  management dialog) only**; the storage manager's rows must stay readable at phone width. iOS is not
+  promised (never measured). The embedded
   browser pane of desktop chat clients is not promised (it cannot nest workers).
   Accepted limits: without `navigator.locks` two tabs are not excluded and settings are last-write-wins;
   a tab of a build older than the single-tab lock is not excluded across an update.

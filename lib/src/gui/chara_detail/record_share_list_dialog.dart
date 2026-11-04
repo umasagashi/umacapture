@@ -1,5 +1,5 @@
-// P3: the shares of the logged-in account, listed by the server, reachable from the privacy settings after the
-// records they came from are gone.
+// P3: the shares of the logged-in account, listed by the server, reachable from the account tab after the records
+// they came from are gone.
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -17,19 +17,31 @@ import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
-const tr_record_share_list = "pages.settings.privacy.shared_records";
+const tr_record_share_list = "pages.account.shared_records";
 
-/// The privacy settings row that opens [RecordShareListDialog].
-class RecordShareListTile extends ConsumerWidget {
-  const RecordShareListTile({super.key});
+/// The account tab's card of the shares: one row that opens [RecordShareListDialog], while logged in to an account
+/// that is not being deleted; otherwise no card.
+class RecordShareListCard extends ConsumerWidget {
+  const RecordShareListCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListTile(
-      title: Text("$tr_record_share_list.title".tr()),
-      subtitle: Text("$tr_record_share_list.description".tr()),
-      trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.public_rounded)),
-      onTap: () => RecordShareListDialog.show(ref.base),
+    final session = ref.watch(recordShareSessionProvider);
+    if (session == null || session.deleting) {
+      return const SizedBox.shrink();
+    }
+    // The card's title names the shares, so the row that opens them reads what they offer.
+    return ListCard(
+      title: "$tr_record_share_list.title".tr(),
+      padding: EdgeInsets.zero,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          title: Text("$tr_record_share_list.description".tr()),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.public_rounded)),
+          onTap: () => RecordShareListDialog.show(ref.base),
+        ),
+      ],
     );
   }
 }

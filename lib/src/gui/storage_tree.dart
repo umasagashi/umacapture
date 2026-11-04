@@ -1463,44 +1463,47 @@ class _GroupTile extends ConsumerWidget {
     required AsyncValue<StorageAggregate> totals,
     required Widget menu,
   }) {
-    return Row(
-      children: [
+    final size = switch (totals) {
+      AsyncData(:final value) => Text(
+        formatAggregatedByteSize(value),
+        key: storageGroupSizeKey(group.id),
+        textAlign: TextAlign.right,
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      AsyncError() => Text(
+        unknownSizeLabel,
+        key: storageGroupSizeKey(group.id),
+        textAlign: TextAlign.right,
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      // "計算中…" and not a spinner: this cell is the group's byte count,
+      // and the walk behind it is exactly the kind a pending size is
+      // supposed to narrate in words.
+      _ => _calculatingCell(theme, key: storageGroupSizeKey(group.id)),
+    };
+    return _StorageRowLine(
+      leading: [
         Icon(open ? Symbols.expand_more_rounded : Symbols.chevron_right_rounded, size: 20),
         const SizedBox(width: 4),
         Icon(Symbols.folder_managed_rounded, size: 20, color: theme.colorScheme.primary),
         const SizedBox(width: 8),
-        Expanded(
-          child: Text(group.labelKey.tr(), style: theme.textTheme.titleSmall, overflow: TextOverflow.ellipsis),
-        ),
-        SizedBox(
-          width: _sizeColumnWidth,
-          child: switch (totals) {
-            AsyncData(:final value) => Text(
-              formatAggregatedByteSize(value),
-              key: storageGroupSizeKey(group.id),
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            AsyncError() => Text(
-              unknownSizeLabel,
-              key: storageGroupSizeKey(group.id),
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            // "計算中…" and not a spinner: this cell is the group's byte count,
-            // and the walk behind it is exactly the kind a pending size is
-            // supposed to narrate in words.
-            _ => _calculatingCell(theme, key: storageGroupSizeKey(group.id)),
-          },
-        ),
-        // Keeps the group row's size column over the entry rows' one, which is
-        // followed by a 128-wide timestamp a group has no counterpart for and
-        // the 8-wide gap before the trailing slot. Both row kinds carry exactly
-        // one slot now, so the difference between them is only the columns a
-        // group has no value for.
-        const SizedBox(width: _valueColumnGap + _modifiedColumnWidth + 8),
-        menu,
       ],
+      name: Text(group.labelKey.tr(), style: theme.textTheme.titleSmall, overflow: TextOverflow.ellipsis),
+      values: (stacked) => stacked
+          ? size
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(width: _sizeColumnWidth, child: size),
+                // Keeps the group row's size column over the entry rows' one,
+                // which is followed by a 128-wide timestamp a group has no
+                // counterpart for. Both row kinds carry exactly one slot, so the
+                // difference between them is only the columns a group has no
+                // value for.
+                const SizedBox(width: _valueColumnGap + _modifiedColumnWidth),
+              ],
+            ),
+      trailing: menu,
     );
   }
 
@@ -1941,8 +1944,8 @@ class _BoxTile extends ConsumerWidget {
       onTap: () => showStorageSettingsBoxPreview(ref, listing.name),
       child: Padding(
         padding: _indent(depth).copyWith(top: 6, bottom: 6),
-        child: Row(
-          children: [
+        child: _StorageRowLine(
+          leading: [
             // The expander's width, held open by a transparent glyph so the store
             // names line up with the file names of every other group. A store has
             // nothing to expand into here.
@@ -1950,49 +1953,43 @@ class _BoxTile extends ConsumerWidget {
             const SizedBox(width: 4),
             Icon(Symbols.tune_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(width: 8),
-            Expanded(
-              // The store's Japanese name, never `listing.name`. The internal
-              // spelling is still what the row is *keyed* by — it is what
-              // addresses the store in Hive, in the delete report and in this
-              // file's test keys — but a general user has no way to know that
-              // `column_spec` is their column presets. `storageBoxLabelKey`'s
-              // switch is what makes a ninth store a compile error here rather
-              // than a row that quietly shows the internal name again.
-              child: Text(
-                storageBoxLabelKey(listing.key).tr(),
-                key: storageBoxRowKey(listing.name),
-                style: theme.textTheme.bodyMedium,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            SizedBox(
-              width: _sizeColumnWidth,
-              // `formatByteSize` renders an absent count as the em dash, which is
-              // the whole of web's answer here: the size is unknown, not zero. See
-              // `listSettingsBoxes` for why the browser cannot produce one.
-              child: Text(
-                formatByteSize(listing.sizeBytes),
-                key: storageBoxSizeKey(listing.name),
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
-            const SizedBox(width: _valueColumnGap),
-            SizedBox(
-              width: _modifiedColumnWidth,
-              // The em dash here is web's answer and it is the right one: an
-              // IndexedDB record has no modification time to read, so the concept
-              // is present in the column and the value is not — the same reading
-              // already given to a directory with no timestamp to derive. On Windows this is
-              // the `.hive`'s mtime; see `_lastWritten` for why not the `.lock`'s.
-              child: Text(
-                formatStorageTimestamp(listing.modified),
-                key: storageBoxModifiedKey(listing.name),
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
           ],
+          // The store's Japanese name, never `listing.name`. The internal
+          // spelling is still what the row is *keyed* by — it is what
+          // addresses the store in Hive, in the delete report and in this
+          // file's test keys — but a general user has no way to know that
+          // `column_spec` is their column presets. `storageBoxLabelKey`'s
+          // switch is what makes a ninth store a compile error here rather
+          // than a row that quietly shows the internal name again.
+          name: Text(
+            storageBoxLabelKey(listing.key).tr(),
+            key: storageBoxRowKey(listing.name),
+            style: theme.textTheme.bodyMedium,
+            overflow: TextOverflow.ellipsis,
+          ),
+          values: (stacked) => _valueCells(
+            stacked: stacked,
+            // `formatByteSize` renders an absent count as the em dash, which is
+            // the whole of web's answer here: the size is unknown, not zero. See
+            // `listSettingsBoxes` for why the browser cannot produce one.
+            size: Text(
+              formatByteSize(listing.sizeBytes),
+              key: storageBoxSizeKey(listing.name),
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            // The em dash here is web's answer and it is the right one: an
+            // IndexedDB record has no modification time to read, so the concept
+            // is present in the column and the value is not — the same reading
+            // already given to a directory with no timestamp to derive. On Windows this is
+            // the `.hive`'s mtime; see `_lastWritten` for why not the `.lock`'s.
+            modified: Text(
+              formatStorageTimestamp(listing.modified),
+              key: storageBoxModifiedKey(listing.name),
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
         ),
       ),
     );
@@ -2103,8 +2100,8 @@ class _EntryTile extends ConsumerWidget {
       },
       child: Padding(
         padding: _indent(depth).copyWith(top: 6, bottom: 6),
-        child: Row(
-          children: [
+        child: _StorageRowLine(
+          leading: [
             Icon(
               expandable
                   ? (open ? Symbols.expand_more_rounded : Symbols.chevron_right_rounded)
@@ -2115,53 +2112,45 @@ class _EntryTile extends ConsumerWidget {
             const SizedBox(width: 4),
             Icon(storageFileKindIcon(storageFileKindOf(entity)), size: 18, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(width: 8),
-            Expanded(
-              child: Text(entity.name, style: theme.textTheme.bodyMedium, overflow: TextOverflow.ellipsis),
-            ),
-            // The two value columns are built together for a directory and apart
-            // for a file, because for a directory they are two readings of one
-            // walk — see [_DirectoryValueCells].
-            if (entity is DirectoryPath)
-              _DirectoryValueCells(
-                key: _directoryValueCellsKey(entity),
-                directory: entity,
-                ownModified: listing.modified,
-              )
-            else ...[
-              SizedBox(
-                width: _sizeColumnWidth,
-                child: Text(
-                  formatByteSize(listing.size),
-                  key: storageSizeCellKey(entity),
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-              const SizedBox(width: _valueColumnGap),
-              SizedBox(
-                width: _modifiedColumnWidth,
-                child: Text(
-                  formatStorageTimestamp(listing.modified),
-                  key: storageModifiedCellKey(entity),
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-            ],
-            const SizedBox(width: 8),
-            // Unconditional, unlike a group row's: every entry row has a menu.
-            // A file row always carries its save, and a directory row always
-            // carries its group's delete — the one group that offers none
-            // (`data_root_config`) resolves to a single *file*, so it has no
-            // directory row for the exception to reach. `_showRowMenu` still
-            // refuses to open an empty menu, which is where that would show.
-            _RowMenuSlot(
-              buttonKey: storageRowMenuEntityKey(entity),
-              refusal: refusal,
-              zipTarget: _zipTarget(nodeId, entity),
-              onOpen: (position) => _showRowMenu(context, ref, position),
-            ),
           ],
+          name: Text(entity.name, style: theme.textTheme.bodyMedium, overflow: TextOverflow.ellipsis),
+          // The two value cells are built together for a directory and apart
+          // for a file, because for a directory they are two readings of one
+          // walk — see [_DirectoryValueCells].
+          values: (stacked) => entity is DirectoryPath
+              ? _DirectoryValueCells(
+                  key: _directoryValueCellsKey(entity),
+                  directory: entity,
+                  ownModified: listing.modified,
+                  stacked: stacked,
+                )
+              : _valueCells(
+                  stacked: stacked,
+                  size: Text(
+                    formatByteSize(listing.size),
+                    key: storageSizeCellKey(entity),
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  modified: Text(
+                    formatStorageTimestamp(listing.modified),
+                    key: storageModifiedCellKey(entity),
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
+          // Unconditional, unlike a group row's: every entry row has a menu.
+          // A file row always carries its save, and a directory row always
+          // carries its group's delete — the one group that offers none
+          // (`data_root_config`) resolves to a single *file*, so it has no
+          // directory row for the exception to reach. `_showRowMenu` still
+          // refuses to open an empty menu, which is where that would show.
+          trailing: _RowMenuSlot(
+            buttonKey: storageRowMenuEntityKey(entity),
+            refusal: refusal,
+            zipTarget: _zipTarget(nodeId, entity),
+            onOpen: (position) => _showRowMenu(context, ref, position),
+          ),
         ),
       ),
     );
@@ -2597,6 +2586,97 @@ const double _sizeColumnWidth = 96;
 const double _valueColumnGap = 16;
 const double _modifiedColumnWidth = 128;
 
+/// The narrowest width a row's name is left when the value columns sit beside it.
+const double _minNameColumnWidth = 120;
+
+/// The row width below which the value cells move under the name.
+///
+/// The expander, the kind icon and their gaps, the two value columns, the gap
+/// before the trailing slot and the slot itself are all fixed — about 340 px —
+/// so a phone-width dialog would leave the name nothing. Below this width the
+/// columns are dropped and the values follow the name on a second line, at their
+/// own widths. Decided per row on the width the row is given, because a deeper
+/// row is indented further and runs out of room first.
+const double _stackedRowBreakpoint =
+    20 +
+    4 +
+    20 +
+    8 +
+    _sizeColumnWidth +
+    _valueColumnGap +
+    _modifiedColumnWidth +
+    8 +
+    _actionSlotWidth +
+    _minNameColumnWidth;
+
+/// One tree row's line: [leading] icons, the [name], its value cells and an
+/// optional [trailing] slot.
+///
+/// The value cells are built by [values], told whether the row is stacked, so
+/// each row kind keeps its own cells and keys while this widget alone decides
+/// the arrangement.
+class _StorageRowLine extends StatelessWidget {
+  const _StorageRowLine({required this.leading, required this.name, required this.values, this.trailing});
+
+  final List<Widget> leading;
+  final Widget name;
+  final Widget Function(bool stacked) values;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < _stackedRowBreakpoint;
+        return Row(
+          children: [
+            ...leading,
+            if (stacked)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [name, values(true)],
+                ),
+              )
+            else ...[
+              Expanded(child: name),
+              values(false),
+            ],
+            if (trailing case final trailing?) ...[const SizedBox(width: 8), trailing],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A row's size cell and, when it has one, its timestamp cell.
+///
+/// Side by side: the fixed, right-aligned columns every row shares. Stacked:
+/// the same texts at their own widths, left-aligned under the name.
+Widget _valueCells({required bool stacked, required Widget size, Key? sizeKey, Widget? modified}) {
+  if (stacked) {
+    return Wrap(
+      spacing: 12,
+      children: [
+        KeyedSubtree(key: sizeKey, child: size),
+        ?modified,
+      ],
+    );
+  }
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      SizedBox(key: sizeKey, width: _sizeColumnWidth, child: size),
+      if (modified != null) ...[
+        const SizedBox(width: _valueColumnGap),
+        SizedBox(width: _modifiedColumnWidth, child: modified),
+      ],
+    ],
+  );
+}
+
 /// The size **and** timestamp cells of a directory row: two readings of one
 /// walk, so one widget owns both.
 ///
@@ -2633,9 +2713,12 @@ const double _modifiedColumnWidth = 128;
 /// this widget implements. The absence of a note is a decision, not an omission;
 /// do not add one back.
 class _DirectoryValueCells extends ConsumerStatefulWidget {
-  const _DirectoryValueCells({super.key, required this.directory, required this.ownModified});
+  const _DirectoryValueCells({super.key, required this.directory, required this.ownModified, required this.stacked});
 
   final DirectoryPath directory;
+
+  /// Whether the row has moved its value cells under the name; see [_StorageRowLine].
+  final bool stacked;
 
   /// The directory's own mtime as the enumeration resolved it, or `null` on a
   /// backend that cannot produce one.
@@ -2658,25 +2741,16 @@ class _DirectoryValueCellsState extends ConsumerState<_DirectoryValueCells> {
     // the on-demand design avoids.
     final totals = _totals ?? cache.peek(widget.directory);
     final style = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: _sizeColumnWidth,
-          key: storageSizeCellKey(widget.directory),
-          child: _sizeCell(theme, cache, totals, style),
-        ),
-        const SizedBox(width: _valueColumnGap),
-        SizedBox(
-          width: _modifiedColumnWidth,
-          child: Text(
-            formatStorageTimestamp(widget.ownModified ?? totals?.latestModified),
-            key: storageModifiedCellKey(widget.directory),
-            textAlign: TextAlign.right,
-            style: style,
-          ),
-        ),
-      ],
+    return _valueCells(
+      stacked: widget.stacked,
+      sizeKey: storageSizeCellKey(widget.directory),
+      size: _sizeCell(theme, cache, totals, style),
+      modified: Text(
+        formatStorageTimestamp(widget.ownModified ?? totals?.latestModified),
+        key: storageModifiedCellKey(widget.directory),
+        textAlign: TextAlign.right,
+        style: style,
+      ),
     );
   }
 

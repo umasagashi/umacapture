@@ -5,7 +5,7 @@
 // WHY THIS SUITE EXISTS. The storage-management view is the screen for repairing
 // a store the app could not open, so it is the one screen that must still
 // open during an outage. It used to be a top-level tab; it is now a row
-// in the settings page's System card, which moved the requirement: the view can
+// in the settings page's data management card, which moved the requirement: the view can
 // only be as reachable as the *settings page* is. Nothing asserted that before —
 // the tab arrangement satisfied it by accident.
 //
@@ -15,12 +15,12 @@
 // the defect took: `DataRootTile` read `pathInfoProvider` (`pathInfoLoader.value!`,
 // which throws during an outage and only then), the `RenderErrorBox` that replaced
 // it claimed the whole height it was given, and the rows under it — the storage
-// row, and every card below the System card — went off the bottom of the world.
+// row, and every card below the data management card — went off the bottom of the world.
 // So each test here ends on a state the user could only have reached by
 // travelling: the dialog is open, or the card is inside the viewport rectangle.
 //
 // WHAT IT DOES NOT REACH. It is VM/`dart:io` only. `settingsOnWebProvider` makes
-// the web *arrangement* of the System card reachable; it does not make the web
+// the web *arrangement* of the data management card reachable; it does not make the web
 // backend reachable, so nothing here says anything about OPFS. It says nothing
 // about the storage view's contents (`storage_tree_test.dart`), about the
 // dialog's own behaviour (`storage_dialog_entry_test.dart`), or about how the
@@ -167,9 +167,8 @@ void main() {
       final container = _container(onWeb: true);
       await _pumpSettings(tester, container);
 
-      // The web arrangement drops every gated row in the card, so the storage
-      // row is the only thing in it. Asserted so the test above and this one
-      // cannot both be measuring the same layout.
+      // The web arrangement drops every platform-gated row in the card. Asserted
+      // so the test above and this one cannot both be measuring the same layout.
       expect(find.byType(DataRootTile), findsNothing);
 
       await _bringIntoView(tester, find.byType(StorageManagerTile));
@@ -235,7 +234,7 @@ void main() {
   });
 
   group('a long reader during the outage does not take the page with it', () {
-    // WHY THE CLAIM IS THE VARIABLE. Three rows in the About card — resolve
+    // WHY THE CLAIM IS THE VARIABLE. Three rows in the data management card — resolve
     // inheritance, apply a modules.zip, regenerate every record — ask the
     // long-read registry whether anything is holding the paths they would write.
     // They used to reach for the store-prepared layout only once a claim
@@ -385,7 +384,7 @@ void main() {
     });
   });
 
-  group('the cards below the System card survive it too', () {
+  group('the cards below the data management card survive it too', () {
     // Not the storage requirement, but the same blast radius: everything after
     // the broken row in the settings list went with it. Privacy holds the
     // telemetry consent and About holds the version and the licences.

@@ -5,16 +5,16 @@
 // WHAT CHANGED. The storage-management view used to be reachable only as a
 // top-level tab. It is not a screen a session passes through — it is the outlet
 // for "it broke, it will not delete, I want one file out" — so the way in is now
-// a row in the settings page's System card, and the view opens over it as a
+// a row in the settings page's data management card, and the view opens over it as a
 // `CardDialog`. The tab is gone — it is not in `Pages.labels` and has no route
 // (`app_navigation_surfaces_test.dart`) — so this is the only way in, and this
 // suite owns it.
 //
 // THE THREE CLAIMS, AND WHY EACH NEEDS ITS OWN TEST.
 //
-//  * **The row is offered on both platforms.** Every other row in the System
-//    card is platform-gated and on web every one of those gates closes, so the
-//    card was previously not drawn at all there (`rows.isEmpty`). The storage
+//  * **The row is offered on both platforms.** The card's other platform rows
+//    (the clipboard mode and the data root) are gated and on web every one of
+//    those gates closes. The storage
 //    view is a shipping requirement of the *browser* build, so a gate on
 //    this row would take the whole feature away from the platform that needs it
 //    most. `kIsWeb` is a compile-time `false` under `flutter test`, which is why
@@ -40,7 +40,7 @@
 // makes the web *arrangement* of the card reachable, not the web *backend*, so
 // nothing here says anything about OPFS listing costs or about how the dialog
 // behaves over a real browser store. It does not stand up the settings page as a
-// whole — `SystemGroup` is pumped directly — and it says nothing about the
+// whole — `DataManagementGroup` is pumped directly — and it says nothing about the
 // storage view's own contents, which are tested separately.
 import 'dart:io';
 
@@ -162,24 +162,23 @@ void main() {
     _root.deleteSync(recursive: true);
   });
 
-  group('the way into the storage view is a row in the System card', () {
-    // The web arrangement: both of the card's platform-gated rows are absent, so
-    // what is asserted is not merely "the storage row is somewhere in the list"
-    // but "it is the only thing keeping the card from being dropped".
+  group('the way into the storage view is a row in the data management card', () {
+    // The web arrangement: both of the card's platform-gated rows are absent, and
+    // the storage row is still drawn.
     testWidgets('the row — and therefore the card — is drawn on web', (tester) async {
       final container = _container(onWeb: true);
-      await _pump(tester, container, const SystemGroup());
+      await _pump(tester, container, const DataManagementGroup());
 
       expect(find.byType(StorageManagerTile), findsOneWidget);
       expect(find.byType(ListCard), findsOneWidget);
-      // The arrangement really is the web one, so the assertion above is about a
-      // card that would otherwise have been empty.
+      // The arrangement really is the web one, so the assertion above is about
+      // the card with its platform-gated rows closed.
       expect(find.byType(DataRootTile), findsNothing);
     });
 
     testWidgets('tapping the row opens the storage view as a dialog', (tester) async {
       final container = _container(onWeb: true);
-      await _pump(tester, container, const SystemGroup());
+      await _pump(tester, container, const DataManagementGroup());
       expect(find.byType(StorageManagerDialog), findsNothing);
 
       await tester.tap(find.byType(StorageManagerTile));
@@ -205,12 +204,11 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       try {
         final container = _container(onWeb: false, withPathInfo: true);
-        await _pump(tester, container, const SystemGroup());
+        await _pump(tester, container, const DataManagementGroup());
 
         expect(find.byType(StorageManagerTile), findsOneWidget);
-        // The arrangement really is the native one: the two gated rows are here,
-        // so this is the same card the web test found holding only the storage
-        // row.
+        // The arrangement really is the native one: the gated rows are here, so
+        // this is the same card the web test found without them.
         expect(find.byType(DataRootTile), findsOneWidget);
       } finally {
         debugDefaultTargetPlatformOverride = null;

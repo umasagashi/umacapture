@@ -302,18 +302,19 @@ export async function createOps({ cdp, sessionId, config, log }) {
     await tapNode({ label: name }, { settleMs: 800 });
   }
 
-  // The settings screen, scrolled until the device-sync tile is on screen.
+  // The account screen, scrolled until the device-sync card's title is on screen.
   async function syncSection() {
-    await goTab('設定');
+    await goTab('アカウント');
     return need({ prefix: '端末間の同期', scroll: true });
   }
 
   const COUNTS_RE = /削除を取り消した (\d+) 件・2 件に分けた (\d+) 件・片方の端末にだけあって足し合わせた (\d+) 件/;
 
-  // The device-sync tile is built only while logged in (and the server is known or sync is on); without
-  // it, the status is read from the account section's login line.
+  // The device-sync card is built only while logged in (and the server is known or sync is on), or to tell
+  // that the server dropped the login; without it, the status is read from the account card's login line.
+  // [tile] is the card's title: the state of the rounds is a line of its own, among [lines].
   async function syncStatus() {
-    await goTab('設定');
+    await goTab('アカウント');
     const tile = (await reveal({ prefix: '端末間の同期', scroll: true }))
       ?? (await reveal({ regex: 'ログインしていません|ログインしています|ログインが切れた|Google でログイン', scroll: true }));
     // The lines under the tile (image form, counts, halts) may sit below the fold; collect while scrolling.
@@ -337,13 +338,13 @@ export async function createOps({ cdp, sessionId, config, log }) {
     };
   }
 
-  // The switch of the device-sync tile: the switch node level with the tile's title.
+  // The switch of the device-sync card: the first switch node below the card's title, in the card's first row.
   async function syncSwitch() {
     const all = await nodes();
     const tile = matchNodes(all, { prefix: '端末間の同期' })[0];
     if (!tile) return undefined;
     const switches = all.filter((n) => n.role === 'switch' || (n.checked !== undefined && n.role !== 'radio'));
-    return switches.filter((s) => Math.abs(s.y - tile.y) <= tile.h / 2).sort((a, b) => Math.abs(a.y - tile.y) - Math.abs(b.y - tile.y))[0];
+    return switches.filter((s) => s.y > tile.y).sort((a, b) => a.y - b.y)[0];
   }
 
   const fansLabel = (fans) => Number(String(fans).replace(/,/g, '')).toLocaleString('en-US');
@@ -500,14 +501,14 @@ export async function createOps({ cdp, sessionId, config, log }) {
       return { offline, sameOriginFetch: probe, workers: [...workers.values()] };
     },
 
-    // ---- the settings screen's device-sync section
+    // ---- the account screen's device-sync card
     async 'sync-status'() {
       return syncStatus();
     },
     async 'sync-on'({ shotName }) {
       await syncSection();
       const sw = await syncSwitch();
-      if (!sw) throw new Error('no switch on the device-sync tile (logged out?)');
+      if (!sw) throw new Error('no switch on the device-sync card (logged out?)');
       if (sw.checked === 'true') return { alreadyOn: true };
       await mouse(sw.x, sw.y, 'left', 0, true);
       await waitFor(async () => matchNodes(await nodes(), { contains: '端末間の同期をオンにする' })[0], 30000, 'turn-on dialog');

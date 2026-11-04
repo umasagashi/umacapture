@@ -6,7 +6,7 @@
 // reaches a network. The dialog cases enter through the row menu's real share submenu and the
 // long-press confirms of the share and unshare dialogs; sharing the checked records enters through the
 // table toolbar's real share button and the selection scrim; the list of shares enters through its
-// real privacy-settings row.
+// real row on the account tab.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/record_share_test.dart
 import 'dart:async';
@@ -35,6 +35,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
+import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_dialog.dart';
@@ -857,9 +858,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(
-            home: DialogLayer(child: Scaffold(body: ShareAccountSection())),
-          ),
+          child: const MaterialApp(home: DialogLayer(child: AccountPage())),
         ),
       );
       await tester.tap(find.text('ログアウト'));
@@ -947,20 +946,22 @@ void main() {
     });
   });
 
-  group('from the privacy settings', () {
+  group('from the account tab', () {
     setUpAll(loadAppTranslations);
 
-    // S4b: the account section (N3), mounted as the privacy settings mount it.
-    Future<void> mountAccount(WidgetTester tester) => tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: const MaterialApp(
-          home: DialogLayer(
-            child: Scaffold(body: SingleChildScrollView(child: ShareAccountSection())),
-          ),
+    // S4b: the account tab (N3), mounted as the app routes to it. The view is tall enough for every card at once,
+    // because the tab lists its cards lazily and one below the fold would not be found.
+    Future<void> mountAccount(WidgetTester tester) {
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      return tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: DialogLayer(child: AccountPage())),
         ),
-      ),
-    );
+      );
+    }
 
     const loggedInActions = ['共有の一覧ページを開く', 'ログアウト', 'アカウントを削除…', '共有したレコード'];
 
@@ -1173,12 +1174,12 @@ void main() {
         UncontrolledProviderScope(
           container: container,
           child: const MaterialApp(
-            home: DialogLayer(child: Scaffold(body: RecordShareListTile())),
+            home: DialogLayer(child: Scaffold(body: RecordShareListCard())),
           ),
         ),
       );
 
-      await tester.tap(find.text('共有したレコード'));
+      await tester.tap(find.text('ログインしたアカウントで共有したレコードの確認と、共有を取り消すことができます。'));
       // The dialog asks as it opens; one more fake step reads the answer.
       await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
       await tester.pump(const Duration(seconds: 1));

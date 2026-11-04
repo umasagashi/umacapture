@@ -177,7 +177,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
               const CharaDetailSettingsButton(),
               const _ToolbarDivider(),
               const SidePreviewToggleButton(),
-              // The state of sync (N9), at the right end; it shows only where the sync section has one to tell.
+              // The state of sync (N9), at the right end; it shows only where the sync card has one to tell.
               const SyncStatusIcon(),
             ],
           ),

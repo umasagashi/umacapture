@@ -1,5 +1,6 @@
-// N3: the privacy settings' "account" section — the device's login to the sharing server, the account's list page,
-// logging out, deleting the account (and continuing a deletion cut short), and the shares of the account.
+// N3: the account tab's cards of the device's login to the sharing server — the account (its state, logging in and
+// out, the account's list page) and, set apart below the rest of the tab, deleting the account (and continuing a
+// deletion cut short).
 //
 // Nothing here reaches the server while it is built: what it shows comes from the stored session alone, and only a
 // button the user pressed sends a request.
@@ -11,29 +12,27 @@ import 'package:material_symbols_icons/symbols.dart';
 import '/const.dart';
 import '/src/chara_detail/record_share_session.dart';
 import '/src/core/utils.dart';
-import '/src/gui/chara_detail/account_sync_section.dart';
 import '/src/gui/chara_detail/common.dart';
-import '/src/gui/chara_detail/record_share_list_dialog.dart';
 import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
-const tr_share_account = "pages.settings.privacy.account";
+const tr_share_account = "pages.account";
 
 /// The page that lists the shares of the account [accountId], as the server serves it.
 String accountListUrl(String accountId) => "${Const.sharingOrigin}/u/$accountId";
 
-/// The account section: logged out, a login; logged in, the list page, logging out, deleting the account and the
-/// shares; an account being deleted, only continuing its deletion.
-class ShareAccountSection extends ConsumerStatefulWidget {
-  const ShareAccountSection({super.key});
+/// The account card: logged out, a login; logged in, the list page and logging out; an account being deleted, only
+/// that it is — continuing the deletion is [AccountDeletionCard]'s.
+class AccountCard extends ConsumerStatefulWidget {
+  const AccountCard({super.key});
 
   @override
-  ConsumerState<ShareAccountSection> createState() => _ShareAccountSectionState();
+  ConsumerState<AccountCard> createState() => _AccountCardState();
 }
 
-class _ShareAccountSectionState extends ConsumerState<ShareAccountSection> {
+class _AccountCardState extends ConsumerState<AccountCard> {
   /// What the last login or logout ended with, told under the account's state.
   String? _note;
   bool _loggingOut = false;
@@ -75,16 +74,7 @@ class _ShareAccountSectionState extends ConsumerState<ShareAccountSection> {
         "$tr_share_account.logged_out".tr(),
         [_button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press)],
       ),
-      ShareSession(deleting: true) => (
-        "$tr_share_account.deleting".tr(),
-        [
-          _button(
-            "$tr_share_account.resume_deletion".tr(),
-            Symbols.delete_forever_rounded,
-            () => AccountDeletionDialog.show(ref.base, resume: true),
-          ),
-        ],
-      ),
+      ShareSession(deleting: true) => ("$tr_share_account.deleting".tr(), const <Widget>[]),
       ShareSession(:final accountId) => (
         "$tr_share_account.logged_in".tr(),
         [
@@ -99,39 +89,62 @@ class _ShareAccountSectionState extends ConsumerState<ShareAccountSection> {
             () => copySharedUrl(accountListUrl(accountId)),
           ),
           _button("$tr_share_account.logout".tr(), Symbols.logout_rounded, _loggingOut ? null : _logout),
-          _button(
-            "$tr_share_account.delete".tr(),
-            Symbols.delete_forever_rounded,
-            () => AccountDeletionDialog.show(ref.base, resume: false),
-          ),
         ],
       ),
     };
     final note = _note;
-    return Column(
+    // The card's title names the account, so the account's state leads the card as its first line.
+    return ListCard(
+      title: "$tr_share_account.title".tr(),
+      padding: EdgeInsets.zero,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ListTile(
-          title: Text("$tr_share_account.title".tr()),
-          subtitle: Text(stateText),
-          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.account_circle_rounded)),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (note != null) ...[
-                NoteCard(description: Text(note, style: theme.textTheme.bodyMedium)),
-                const SizedBox(height: 8),
+        ListTile(title: Text(stateText)),
+        if (note != null || actions.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: 8,
+              children: [
+                if (note != null) NoteCard(description: Text(note, style: theme.textTheme.bodyMedium)),
+                if (actions.isNotEmpty)
+                  Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actions),
               ],
-              Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actions),
-            ],
+            ),
           ),
+      ],
+    );
+  }
+}
+
+/// Deleting the account, in a card of its own so that it never sits in a row with the account's other actions:
+/// logged in, the deletion; an account being deleted, continuing it. Logged out there is no account, and no card.
+class AccountDeletionCard extends ConsumerWidget {
+  const AccountDeletionCard({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(recordShareSessionProvider);
+    if (session == null) {
+      return const SizedBox.shrink();
+    }
+    final resume = session.deleting;
+    return ListCard(
+      title: "$tr_share_account.deletion.title".tr(),
+      padding: const EdgeInsets.all(16),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          alignment: WrapAlignment.end,
+          children: [
+            _button(
+              (resume ? "$tr_share_account.resume_deletion" : "$tr_share_account.delete").tr(),
+              Symbols.delete_forever_rounded,
+              () => AccountDeletionDialog.show(ref.base, resume: resume),
+            ),
+          ],
         ),
-        // The sync section (N8) sits here, inside the account it syncs under.
-        const AccountSyncSection(),
-        if (session != null && !session.deleting) const RecordShareListTile(),
       ],
     );
   }

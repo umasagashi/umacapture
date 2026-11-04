@@ -59,6 +59,7 @@ import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/version_check.dart';
+import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/app_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/account_sync_section.dart';
 import 'package:umacapture/src/gui/chara_detail/archive_record_dialog.dart';
@@ -67,7 +68,6 @@ import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/delete_record_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/enhancement_merge_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart';
-import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
@@ -666,8 +666,8 @@ void main() {
     });
   });
 
-  group('N3, N8, P2 — the account section', () {
-    Widget section() => const SingleChildScrollView(child: ShareAccountSection());
+  group('N3, N8, P2 — the account tab', () {
+    Widget section() => const AccountPage();
 
     testWidgets('logged out, logged in, deleting, and the deletion dialog', (tester) async {
       var c = syncing(_Sync(const RecordSyncState()), server: _SyncServer());
@@ -688,15 +688,15 @@ void main() {
       );
       await _mount(tester, c, section());
       await _shoot(tester, 'N3-logged-in');
-      await tester.tap(find.text(appSentenceAt('pages.settings.privacy.account.delete')));
+      await tester.tap(find.text(appSentenceAt('pages.account.delete')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       await _shoot(tester, 'N3-delete-confirm');
-      await tester.longPress(find.text(appSentenceAt('pages.settings.privacy.account.deletion.ok_button.label')));
+      await tester.longPress(find.text(appSentenceAt('pages.account.deletion.ok_button.label')));
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(
         tester,
-        () => find.textContaining('削除が途中で止まりました').evaluate().isNotEmpty,
+        () => find.text(appSentenceAt('pages.account.deletion.failure.unreachable')).evaluate().isNotEmpty,
         describe: 'the deletion to stop',
       );
       await _shoot(tester, 'N3-deleting-stopped');
@@ -721,7 +721,7 @@ void main() {
       await done(tester);
     });
 
-    testWidgets('N8: every state of the sync section', (tester) async {
+    testWidgets('N8: every state of the sync card', (tester) async {
       const counts = SyncToldCounts(account: _accountId, restored: 1, splitOff: 2, added: 3);
       final undone = (records: 2, stops: <SyncImagesStop>{});
       final cases = <(String, RecordSyncState, SyncServer?)>[
@@ -778,7 +778,7 @@ void main() {
       await _storeSession();
       for (final (name, state, server) in cases) {
         final c = syncing(_Sync(state), server: server);
-        await _mount(tester, c, const SingleChildScrollView(child: AccountSyncSection()));
+        await _mount(tester, c, const SingleChildScrollView(child: AccountSyncCard()));
         await tester.runAsync(() async {
           try {
             await c.read(syncImageFormProvider.future);
@@ -790,7 +790,7 @@ void main() {
 
       // D6-1: setting a form that sends images from none tells that the held images go, with no count.
       final c = syncing(_Sync(_on()), server: _SyncServer());
-      await _mount(tester, c, const SingleChildScrollView(child: AccountSyncSection()));
+      await _mount(tester, c, const SingleChildScrollView(child: AccountSyncCard()));
       await tester.runAsync(() => c.read(syncImageFormProvider.future));
       await tester.pump();
       await tester.tap(find.text(appSentenceAt('$tr_account_sync.image_form.option.png.label')));
@@ -804,10 +804,10 @@ void main() {
       await _shoot(tester, 'N8-image-form-sends-held');
       await tester.pumpWidget(const SizedBox.shrink());
 
-      // The session the server dropped: logged out, the section tells only that.
+      // The session the server dropped: logged out, the sync card tells only that.
       await Hive.box(storageBoxNameOf(StorageBoxKey.recordShares)).clear();
       final dropped = syncing(_Sync(const RecordSyncState()), server: null, dropped: true);
-      await _mount(tester, dropped, const SingleChildScrollView(child: ShareAccountSection()));
+      await _mount(tester, dropped, const AccountPage());
       await _shoot(tester, 'N8-session-dropped');
       await done(tester);
     });

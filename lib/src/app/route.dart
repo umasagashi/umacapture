@@ -1,5 +1,6 @@
 import 'package:auto_route/auto_route.dart';
 
+import '/src/gui/account.dart';
 import '/src/gui/addon.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
@@ -34,6 +35,7 @@ class AppRouter extends RootStackRouter {
         // `FreshStorageTree`. Every route here is therefore kept alive: a route
         // that turned the flag off again would be paying an unmount nothing asks
         // for.
+        AutoRoute(path: 'account', page: AccountRoute.page),
         AutoRoute(path: 'settings', page: SettingsRoute.page),
       ],
     ),

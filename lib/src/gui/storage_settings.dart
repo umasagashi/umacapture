@@ -19,7 +19,7 @@ import '/src/gui/toast.dart';
 // ignore: constant_identifier_names
 const tr_storage = "pages.settings.storage";
 
-/// The System card's own namespace, for the rows that live in it.
+/// The data management card's own namespace, for the rows that live in it.
 ///
 /// Spelled out rather than imported from `settings.dart`'s `tr_settings`: that
 /// file imports this one, and reaching back for a constant would make the pair
@@ -27,7 +27,7 @@ const tr_storage = "pages.settings.storage";
 // ignore: constant_identifier_names
 const tr_settings_system = "pages.settings.system";
 
-/// A single settings row, meant to live inside the System settings card, that
+/// A single settings row, meant to live inside the data management card, that
 /// shows where the app currently keeps its data (records/images, recognition
 /// modules, and the settings database).
 ///
@@ -46,7 +46,7 @@ const tr_settings_system = "pages.settings.system";
 /// during the `AsyncLoading` before the first resolution, which nothing gates the
 /// settings page behind; the
 /// `RenderErrorBox` that replaced this row then claimed about a hundred thousand
-/// pixels of the System card, pushing the row below it — [StorageManagerTile],
+/// pixels of the data management card, pushing the row below it — [StorageManagerTile],
 /// the only way into the screen that exists to repair exactly that outage
 /// — and every card after it off the bottom of the settings page. See
 /// `pathLayoutLoader`, and `storage_tree.dart`, which reads it for the same
@@ -971,15 +971,15 @@ class _MessageBlock extends StatelessWidget {
 /// The view itself is unchanged; only the way in is. It used to be a top-level
 /// tab, and it is a rarely-used one — an outlet for "it broke, it will not
 /// delete, I want one file out" rather than something a session passes through —
-/// so it now hangs off the System card next to [DataRootTile], which is the row
+/// so it now hangs off the data management card next to [DataRootTile], which is the row
 /// that says *where* the data is. This one shows *what* is in it.
 ///
-/// **Ungated, on purpose.** Every other row in that card is platform-gated, and
-/// on web all of those gates close; a gate here would take the whole feature
-/// away from the browser build, and on web this view is not a convenience but
-/// the only way to see the app's data at all — OPFS is reachable from neither
-/// the OS file manager nor the browser's own UI. `settings.dart` asserts the card is
-/// drawn on web for exactly this row.
+/// **Ungated, on purpose.** The rows above it in that card (where the data is,
+/// how images reach the clipboard) are platform-gated and closed on web; a gate
+/// here would take the whole feature away from the browser build, and on web
+/// this view is not a convenience but the only way to see the app's data at
+/// all — OPFS is reachable from neither the OS file manager nor the browser's
+/// own UI.
 class StorageManagerTile extends ConsumerWidget {
   const StorageManagerTile({super.key});
 

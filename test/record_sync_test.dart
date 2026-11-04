@@ -51,12 +51,13 @@ import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/storage_delete_report.dart';
 import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
+import 'package:umacapture/src/gui/account.dart';
+import 'package:umacapture/src/gui/chara_detail/account_sync_section.dart';
 import 'package:umacapture/src/gui/chara_detail/common.dart' show NoteCard;
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/column_spec_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart' show ImageSizeContainer;
-import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/common.dart' show DialogLayer;
 import 'package:umacapture/src/gui/toast.dart' show plainToastEventProvider;
 import 'package:umacapture/src/gui/storage_delete_action.dart';
@@ -5392,7 +5393,7 @@ void main() {
       expect(onServer().rows.keys.toSet(), {'R1'});
     });
 
-    // T3c2: what the sync section and the toolbar's icon read of a round that failed (V43, `syncHaltProvider`), across a
+    // T3c2: what the sync card and the toolbar's icon read of a round that failed (V43, `syncHaltProvider`), across a
     // round that synced nothing either: it stopped at a record the user changed while it asked for bodies.
     test('T3c2 (C1, V43): a round that failed is told until a round syncs, a round that stops at an edit meanwhile '
         'between them keeping it told', () async {
@@ -5903,8 +5904,8 @@ void main() {
         expect((state().countsFor('account-2'), state().told, state().lastSynced), (null, null, null));
       });
 
-      // T3b: the sync section (N8) and the dialog that turns sync on (N11), entered as the privacy settings mount the
-      // account section (N3), each round over the app's own sync server and the Worker's face.
+      // T3b: the sync card (N8) and the dialog that turns sync on (N11), entered as the app routes to the account tab
+      // (N3), each round over the app's own sync server and the Worker's face.
       Future<ProviderContainer> mountAccount(WidgetTester tester, {bool triggers = false}) async {
         loadAppTranslations();
         tester.view.physicalSize = const Size(1600, 2400);
@@ -5918,11 +5919,7 @@ void main() {
         await tester.pumpWidget(
           UncontrolledProviderScope(
             container: app,
-            child: const MaterialApp(
-              home: DialogLayer(
-                child: Scaffold(body: SingleChildScrollView(child: ShareAccountSection())),
-              ),
-            ),
+            child: const MaterialApp(home: DialogLayer(child: AccountPage())),
           ),
         );
         return app;
@@ -6055,9 +6052,9 @@ void main() {
       });
 
       // T3c: the sync icon at the right end of the table's toolbar (N9) and the toasts of a stop (N10), mounted beside
-      // the sync section (N8) whose one line the icon's hover shares, each round as the app asks for one.
+      // the sync card (N8) whose one line the icon's hover shares, each round as the app asks for one.
       testWidgets('T3c (C1): the toolbar shows a sync icon only while sync is on for the session, its hover telling '
-          "the line the sync section leads with for each stop — the account's room, the service, a round that failed "
+          "the line the sync card leads with for each stop — the account's room, the service, a round that failed "
           'until one syncs — and a toast tells a stop of the server once as it begins, and nothing '
           'else', (tester) async {
         a
@@ -6083,9 +6080,7 @@ void main() {
               theme: ThemeData(extensions: [AppSemanticColors.light(ThemeData().colorScheme)]),
               home: const DialogLayer(
                 child: Scaffold(
-                  body: SingleChildScrollView(
-                    child: Column(children: [ColumnPresetBarWidget(), ShareAccountSection()]),
-                  ),
+                  body: SingleChildScrollView(child: Column(children: [ColumnPresetBarWidget(), AccountSyncCard()])),
                 ),
               ),
             ),

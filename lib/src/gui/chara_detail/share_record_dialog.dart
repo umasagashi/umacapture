@@ -32,11 +32,6 @@ const tr_share_record = "pages.chara_detail.share_record";
 // ignore: constant_identifier_names
 const tr_unshare_record = "pages.chara_detail.unshare_record";
 
-/// The privacy policy, served next to the shared pages: it is what states what a share stores and publishes.
-///
-/// The sharing origin and not the app's own: on Windows the app has no origin to resolve against.
-Uri get _privacyUrl => Uri.parse("${Const.sharingOrigin}/privacy/");
-
 void openSharedPage(String url) => launchUrl(Uri.parse(url));
 
 void copySharedUrl(String url) {
@@ -95,34 +90,9 @@ class _ShareDescription extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final parts = textKey.tr().split("{link}");
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(text: parts.first),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: Semantics(
-              link: true,
-              child: InkWell(
-                onTap: () => launchUrl(_privacyUrl),
-                mouseCursor: SystemMouseCursors.click,
-                child: Text(
-                  "$tr_share_record.privacy_link".tr(),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          TextSpan(text: parts.skip(1).join()),
-        ],
-      ),
-      style: theme.textTheme.bodyMedium,
+    return LinkedText(
+      textKey.tr(),
+      links: {"link": (label: "$tr_share_record.privacy_link".tr(), url: Const.privacyUrl)},
     );
   }
 }
