@@ -1716,28 +1716,25 @@ class WebCaptureTutorialDialog extends StatelessWidget {
       child: CardDialog(
         usePageView: false,
         scrollableContent: true,
-        content: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$base.introduction'.tr()),
-              const SizedBox(height: 12),
-              _TutorialWindowTitle(text: '$base.dmm_window_title'.tr()),
-              const SizedBox(height: 4),
-              _TutorialWindowTitle(text: '$base.steam_window_title'.tr()),
-              const SizedBox(height: 12),
-              // The picker's own options are what this warns about, and the constraint is Gecko's:
-              // `monitorTypeSurfaces: exclude` / `displaySurface: window` are honoured by Chromium
-              // and ignored by Firefox, which therefore still offers whole monitors -- and a whole
-              // monitor gives recognition no window frame to trim from. Shown to everyone rather
-              // than sniffed for, because it is worded as a condition the reader can check and
-              // costs a Chromium reader one line they can ignore. Post-selection validation would
-              // be the alternative, but Firefox does not implement `getSettings().displaySurface`.
-              Text('$pickerBase.share_picker_hint_firefox'.tr(), style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$base.introduction'.tr()),
+            const SizedBox(height: 12),
+            _TutorialWindowTitle(text: '$base.dmm_window_title'.tr()),
+            const SizedBox(height: 4),
+            _TutorialWindowTitle(text: '$base.steam_window_title'.tr()),
+            const SizedBox(height: 12),
+            // The picker's own options are what this warns about, and the constraint is Gecko's:
+            // `monitorTypeSurfaces: exclude` / `displaySurface: window` are honoured by Chromium
+            // and ignored by Firefox, which therefore still offers whole monitors -- and a whole
+            // monitor gives recognition no window frame to trim from. Shown to everyone rather
+            // than sniffed for, because it is worded as a condition the reader can check and
+            // costs a Chromium reader one line they can ignore. Post-selection validation would
+            // be the alternative, but Firefox does not implement `getSettings().displaySurface`.
+            Text('$pickerBase.share_picker_hint_firefox'.tr(), style: Theme.of(context).textTheme.bodySmall),
+          ],
         ),
       ),
     );

@@ -732,7 +732,7 @@ class _UnshareRecordDialogState extends ConsumerState<UnshareRecordDialog> {
                 onConfirm: _unshare,
                 enabled: !_sending,
               )
-            : const SizedBox.shrink(),
+            : null,
       ),
     );
   }

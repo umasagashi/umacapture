@@ -432,58 +432,55 @@ class _EnhancementMergeDialogState extends ConsumerState<EnhancementMergeDialog>
         closeButtonTooltip: "$tr_merge.close_tooltip".tr(),
         closeButtonEnabled: !_running,
         usePageView: false,
-        content: Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (unfinished)
-                  _Note(key: const Key('enhancement_merge_unfinished'), text: "$tr_merge.unfinished".tr()),
-                // N16: where sync is on, the images of the record the user does not keep leave this device.
-                Text(
-                  ["$tr_merge.intro".tr(), if (ref.watch(syncOnProvider)) "$tr_merge.intro_synced".tr()].join('\n'),
-                  key: const Key('enhancement_merge_intro'),
-                ),
-                const SizedBox(height: 12),
-                // A pair with no factor difference is stated once for both cards, not once per card.
-                if (noFactorDifference)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      "$tr_merge.no_factor_difference".tr(),
-                      key: const Key('enhancement_merge_no_factor_difference'),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                LayoutBuilder(
-                  builder: (context, constraints) => constraints.maxWidth >= _sideBySideWidth
-                      ? IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (final (i, c) in cards(fillHeight: true).indexed) ...[
-                                if (i > 0) const SizedBox(width: 12),
-                                Expanded(child: c),
-                              ],
-                            ],
-                          ),
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            for (final (i, c) in cards(fillHeight: false).indexed) ...[
-                              if (i > 0) const SizedBox(height: 12),
-                              c,
-                            ],
-                          ],
-                        ),
-                ),
-                const SizedBox(height: 16),
-                ..._metadataRows(olderSide, newerSide, identical, enabled: metadataEditable),
-              ],
+        // The content sizes itself (side by side, the two cards only match each other's height), so the
+        // dialog scrolls and insets it.
+        scrollableContent: true,
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (unfinished) _Note(key: const Key('enhancement_merge_unfinished'), text: "$tr_merge.unfinished".tr()),
+            // N16: where sync is on, the images of the record the user does not keep leave this device.
+            Text(
+              ["$tr_merge.intro".tr(), if (ref.watch(syncOnProvider)) "$tr_merge.intro_synced".tr()].join('\n'),
+              key: const Key('enhancement_merge_intro'),
             ),
-          ),
+            const SizedBox(height: 12),
+            // A pair with no factor difference is stated once for both cards, not once per card.
+            if (noFactorDifference)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  "$tr_merge.no_factor_difference".tr(),
+                  key: const Key('enhancement_merge_no_factor_difference'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            LayoutBuilder(
+              builder: (context, constraints) => constraints.maxWidth >= _sideBySideWidth
+                  ? IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (i, c) in cards(fillHeight: true).indexed) ...[
+                            if (i > 0) const SizedBox(width: 12),
+                            Expanded(child: c),
+                          ],
+                        ],
+                      ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (i, c) in cards(fillHeight: false).indexed) ...[
+                          if (i > 0) const SizedBox(height: 12),
+                          c,
+                        ],
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 16),
+            ..._metadataRows(olderSide, newerSide, identical, enabled: metadataEditable),
+          ],
         ),
         bottom: Row(
           children: [

@@ -245,7 +245,7 @@ class _AccountDeletionDialogState extends ConsumerState<AccountDeletionDialog> {
         scrollableContent: true,
         content: _deleting ? Stack(children: [body, const LinearProgressIndicator()]) : body,
         bottom: started
-            ? const SizedBox.shrink()
+            ? null
             : ConfirmActionRow(
                 dismissRef: ref.base,
                 cancelLabel: "$deletion.cancel_button.label".tr(),

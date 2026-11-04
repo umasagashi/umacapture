@@ -524,7 +524,7 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
       // The overview can grow taller than the card (per-directory breakdown plus
       // the bootstrap-file hint), so let it scroll instead of overflowing.
       scrollableContent: true,
-      content: Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: _content()),
+      content: _content(),
       bottom: _bottom(),
     );
   }
