@@ -75,6 +75,15 @@ class Const {
   static String get sharingOrigin =>
       const String.fromEnvironment("UMACAPTURE_SHARING_ORIGIN", defaultValue: "https://umacapture.com");
 
+  /// The privacy policy, a static page served from [sharingOrigin] next to the shared pages.
+  ///
+  /// Built on [sharingOrigin] rather than on the origin the app is served from: the Windows app has no origin to
+  /// resolve against, and a staging web build is served from its staging sharing origin anyway.
+  static Uri get privacyUrl => Uri.parse("$sharingOrigin/privacy/");
+
+  /// The trial-release notice, served next to [privacyUrl] and built the same way.
+  static Uri get noticeUrl => Uri.parse("$sharingOrigin/notice/");
+
   static RegExp get uninstallerPattern => RegExp(r"unins[0-9]+\.exe");
 
   static Uri get sentrySampleUrl => Uri.parse("$moduleUrlRoot/sentry_sample.json");

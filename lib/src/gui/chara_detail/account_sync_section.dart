@@ -1,4 +1,4 @@
-// N8: the sync section inside the account section — the switch, the account's image form, the state of the rounds
+// N8: the account tab's sync card — the switch, the account's image form, the state of the rounds
 // and why they stop, the counts the last rounds told, and syncing now — N9: the sync icon of the table's toolbar,
 // whose hover tells the line N8 leads with — and N11: the dialog that turns sync on.
 //
@@ -21,23 +21,22 @@ import '/src/chara_detail/record_sync_round.dart';
 import '/src/chara_detail/record_sync_server.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
-import '/src/gui/chara_detail/share_record_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/theme_extensions.dart';
 
 // ignore: constant_identifier_names
-const tr_account_sync = "pages.settings.privacy.account.sync";
+const tr_account_sync = "pages.account.sync";
 
-/// The sync section (N8): logged in, the switch and, with sync on, the state of the rounds; logged out, only that the
-/// server dropped the session, where it did.
-class AccountSyncSection extends ConsumerStatefulWidget {
-  const AccountSyncSection({super.key});
+/// The sync card (N8): logged in, the switch and, with sync on, the state of the rounds; logged out, only that the
+/// server dropped the session, where it did, and otherwise no card at all.
+class AccountSyncCard extends ConsumerStatefulWidget {
+  const AccountSyncCard({super.key});
 
   @override
-  ConsumerState<AccountSyncSection> createState() => _AccountSyncSectionState();
+  ConsumerState<AccountSyncCard> createState() => _AccountSyncCardState();
 }
 
-class _AccountSyncSectionState extends ConsumerState<AccountSyncSection> {
+class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
   /// What the user's last setting of the image form ended with, told under the forms.
   String? _formNote;
   bool _settingForm = false;
@@ -82,7 +81,7 @@ class _AccountSyncSectionState extends ConsumerState<AccountSyncSection> {
     final server = ref.watch(syncServerProvider);
     if (session == null) {
       return ref.watch(recordShareSessionDroppedProvider)
-          ? _padded(Text("$tr_account_sync.session_dropped".tr(), style: theme.textTheme.bodyMedium))
+          ? _card([ListTile(title: Text("$tr_account_sync.session_dropped".tr()))])
           : const SizedBox.shrink();
     }
     final on = state.onFor(session.accountId);
@@ -95,69 +94,72 @@ class _AccountSyncSectionState extends ConsumerState<AccountSyncSection> {
     final subtitle = on ? _roundsLine(state) : "$tr_account_sync.off".tr();
     Widget line(String key, int count) =>
         Text("$tr_account_sync.$key".tr(namedArgs: {"count": "$count"}), style: theme.textTheme.bodyMedium);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ListTile(
-          title: Text("$tr_account_sync.title".tr()),
-          subtitle: Text(subtitle),
-          trailing: server == null
-              ? null
-              : Switch(
-                  value: on,
-                  onChanged: (turnOn) => turnOn
-                      ? SyncTurnOnDialog.show(ref.base)
-                      : unawaited(ref.read(recordSyncProvider.notifier).setOn(false)),
-                ),
-        ),
-        if (on)
-          _padded(
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: 8,
-              children: [
-                if (halt != null)
-                  NoteCard(description: Text(_haltLine(halt, state), style: theme.textTheme.bodyMedium)),
-                if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
-                  if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
-                  if (told.waitingForTheDay > 0) line("waiting_for_the_day", told.waitingForTheDay),
-                  if (told.imagesUndone case final undone?) line("images_undone", undone.records),
-                  if (told.withheld > 0) line("withheld", told.withheld),
-                ],
-                if (counts != null)
-                  Text(
-                    "$tr_account_sync.counts".tr(
-                      namedArgs: {
-                        "restored": "${counts.restored}",
-                        "split_off": "${counts.splitOff}",
-                        "added": "${counts.added}",
-                      },
-                    ),
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                if (server != null) ...[
-                  _AccountImageForm(
-                    enabled: !_settingForm,
-                    onChanged: (from, to) => _setForm(server, from, to),
-                    note: _formNote,
-                  ),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    children: [
-                      OutlinedButton.icon(
-                        icon: const Icon(Symbols.sync_rounded),
-                        label: Text("$tr_account_sync.sync_now".tr()),
-                        onPressed: state.running ? null : _syncNow,
-                      ),
-                    ],
-                  ),
-                ],
+    // The card's title names sync, so the state of the rounds leads the card, beside the switch.
+    return _card([
+      ListTile(
+        title: Text(subtitle),
+        trailing: server == null
+            ? null
+            : Switch(
+                value: on,
+                onChanged: (turnOn) => turnOn
+                    ? SyncTurnOnDialog.show(ref.base)
+                    : unawaited(ref.read(recordSyncProvider.notifier).setOn(false)),
+              ),
+      ),
+      if (on)
+        _padded(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 8,
+            children: [
+              if (halt != null) NoteCard(description: Text(_haltLine(halt, state), style: theme.textTheme.bodyMedium)),
+              if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
+                if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
+                if (told.waitingForTheDay > 0) line("waiting_for_the_day", told.waitingForTheDay),
+                if (told.imagesUndone case final undone?) line("images_undone", undone.records),
+                if (told.withheld > 0) line("withheld", told.withheld),
               ],
-            ),
+              if (counts != null)
+                Text(
+                  "$tr_account_sync.counts".tr(
+                    namedArgs: {
+                      "restored": "${counts.restored}",
+                      "split_off": "${counts.splitOff}",
+                      "added": "${counts.added}",
+                    },
+                  ),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              if (server != null) ...[
+                _AccountImageForm(
+                  enabled: !_settingForm,
+                  onChanged: (from, to) => _setForm(server, from, to),
+                  note: _formNote,
+                ),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(Symbols.sync_rounded),
+                      label: Text("$tr_account_sync.sync_now".tr()),
+                      onPressed: state.running ? null : _syncNow,
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
-      ],
-    );
+        ),
+    ]);
   }
+
+  Widget _card(List<Widget> children) => ListCard(
+    title: "$tr_account_sync.title".tr(),
+    padding: EdgeInsets.zero,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: children,
+  );
 }
 
 /// The state of the rounds, while sync is on: running, else when they last synced.
@@ -176,7 +178,7 @@ String _roundsLine(RecordSyncState state) {
 String _haltLine(SyncHalt halt, RecordSyncState state) =>
     "$tr_account_sync.halt.${halt.name}".tr(namedArgs: {"count": "${state.told?.longMemos ?? 0}"});
 
-/// N9: the sync icon at the right end of the table's toolbar, shown where the sync section (N8) tells a state of the
+/// N9: the sync icon at the right end of the table's toolbar, shown where the sync card (N8) tells a state of the
 /// rounds — sync on for the session's account, or the session the server dropped (G377) — and coloured by it; its hover
 /// tells the one line N8 leads with: why the rounds stop, else their state, else that the session was dropped.
 class SyncStatusIcon extends ConsumerWidget {
@@ -218,7 +220,7 @@ class SyncStatusIcon extends ConsumerWidget {
 
 Widget _padded(Widget child) => Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: child);
 
-/// The account's image form in the sync section, as the server holds it ([syncImageFormProvider]); [onChanged] sets it.
+/// The account's image form in the sync card, as the server holds it ([syncImageFormProvider]); [onChanged] sets it.
 class _AccountImageForm extends ConsumerWidget {
   final bool enabled;
   final void Function(String from, String to) onChanged;
@@ -363,7 +365,6 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
     final longMemos = _longMemos;
     final busy = _loading || form.isLoading || _turning;
     Text body(String text) => Text(text, style: theme.textTheme.bodyMedium);
-    final privacy = "$dialog.privacy".tr().split("{link}");
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 8,
@@ -384,32 +385,9 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
         if (form.hasError) body("$tr_account_sync.image_form.unread".tr()),
         if ((read, _chosen) case (final from?, final to?) when syncImageFormSendsWhatWasHeld(from, to))
           body("$tr_account_sync.image_form.sends_held".tr()),
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: privacy.first),
-              WidgetSpan(
-                alignment: PlaceholderAlignment.baseline,
-                baseline: TextBaseline.alphabetic,
-                child: Semantics(
-                  link: true,
-                  child: InkWell(
-                    onTap: () => openSharedPage("${Const.sharingOrigin}/privacy/"),
-                    mouseCursor: SystemMouseCursors.click,
-                    child: Text(
-                      "$dialog.privacy_link".tr(),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              TextSpan(text: privacy.skip(1).join()),
-            ],
-          ),
-          style: theme.textTheme.bodyMedium,
+        LinkedText(
+          "$dialog.privacy".tr(),
+          links: {"link": (label: "$dialog.privacy_link".tr(), url: Const.privacyUrl)},
         ),
         if (_failed) NoteCard(description: body("$dialog.failed".tr())),
       ],

@@ -65,7 +65,7 @@ class _SilentSoundSettingNotifier extends SoundSettingNotifier {
 ///   (tool/live_capture_test/app_drive_run.py): the capture attempt and its status, the last capture
 ///   event, the ids each record store holds, whether the factor table has loaded, the pending
 ///   enhancement candidates, and every sound's volume.
-/// * `sync_state` reports the record sync as the account sync section reads it.
+/// * `sync_state` reports the record sync as the account tab's sync card reads it.
 /// * `pick:<json list of paths>`, `save:<path>` and `cancel` queue the answer of the next file dialog
 ///   ([_ScriptedPicker]).
 /// * `pointer:<json>` dispatches one press ([_dispatchPointer]).
@@ -321,7 +321,7 @@ Map<String, Object?> _harnessState(ProviderContainer container) {
   };
 }
 
-/// The record sync as the account sync section shows it: whether the device is logged in and sync is on
+/// The record sync as the account tab's sync card shows it: whether the device is logged in and sync is on
 /// for that account, whether a round runs, the counts it shows, the halt it tells, and what the last
 /// round this run of the app ran told.
 Map<String, Object?> _syncState(ProviderContainer container) {

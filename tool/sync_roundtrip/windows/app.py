@@ -49,7 +49,9 @@ DEFAULT_STATE_DIR = ROOT / ".notes/sync-roundtrip/windows"
 TRANSLATIONS = ROOT / "assets/translations/ja.json"
 DEFAULT_PORTS = {"vm": 18181, "proxy": 18080, "control": 18081}
 
-ROUTES = {"capture": "CaptureRoute", "records": "CharaDetailRoute", "settings": "SettingsRoute"}
+ROUTES = {"capture": "CaptureRoute", "records": "CharaDetailRoute", "account": "AccountRoute", "settings": "SettingsRoute"}
+# The page widget of each tab that lists its rows, which is what a drag scrolls.
+PAGES = {"account": "AccountPage", "settings": "SettingsPage"}
 # How long a hold-to-confirm button is held: its gauge fills in 1000 ms (kHoldToConfirmDuration).
 HOLD_MS = 1600
 POLL_SECONDS = 0.2
@@ -321,18 +323,18 @@ class App:
     def scroll_into_view(self, finder: dict) -> None:
         self.command("scrollIntoView", finder, alignment="0.3")
 
-    def reveal_in_settings(self, finder: dict, drags: int = 20) -> None:
-        """Opens the settings page and brings [finder] into view. The page builds its sections lazily, so
-        one that is far down does not exist until the page is dragged towards it."""
-        self.navigate("settings")
+    def reveal_on(self, page: str, finder: dict, drags: int = 20) -> None:
+        """Opens the tab [page] and brings [finder] into view. The page builds its cards lazily, so one
+        that is far down does not exist until the page is dragged towards it."""
+        self.navigate(page)
         for _ in range(drags):
             if self.exists(finder, 300):
                 self.scroll_into_view(finder)
                 self.settle()
                 return
-            self.command("scroll", by_type("SettingsPage"), timeout_ms=10000, dx="0", dy="-400",
+            self.command("scroll", by_type(PAGES[page]), timeout_ms=10000, dx="0", dy="-400",
                          duration="150000", frequency="60")
-        raise Failure("not found on the settings page (the sync controls show only while logged in, and only "
+        raise Failure(f"not found on the {page} page (the sync controls show only while logged in, and only "
                       "while sync is on)")
 
     def state(self) -> dict:
@@ -700,7 +702,7 @@ def op_merge(app: App, args) -> dict:
     if pair is None:
         raise Failure(f"the pair is not a pending candidate; candidates: {state['candidates']}")
     tile = by_text(tr("pages.settings.about.resolve_inheritance.title"))
-    app.reveal_in_settings(tile)
+    app.reveal_on("settings", tile)
     app.tap(tile)
     row = next((by_key(f"enhancement_review_merge_{x}_{y}") for x, y in ((first, second), (second, first))
                 if app.exists(by_key(f"enhancement_review_merge_{x}_{y}"), 3000)), None)
@@ -846,13 +848,13 @@ def op_video_import(app: App, args) -> dict:
     return result
 
 
-def _sync_section_control(app: App, finder: dict) -> None:
-    app.reveal_in_settings(finder)
+def _sync_card_control(app: App, finder: dict) -> None:
+    app.reveal_on("account", finder)
 
 
 def op_sync_now(app: App, args) -> dict:
-    button = by_text(tr("pages.settings.privacy.account.sync.sync_now"))
-    _sync_section_control(app, button)
+    button = by_text(tr("pages.account.sync.sync_now"))
+    _sync_card_control(app, button)
     before = app.sync_state()
     app.tap(button)
     def ended(s: dict) -> bool:
@@ -865,24 +867,25 @@ def op_sync_now(app: App, args) -> dict:
 
 
 def op_image_form(app: App, args) -> dict:
-    option = by_text(tr(f"pages.settings.privacy.account.sync.image_form.option.{args.form}.label"))
-    _sync_section_control(app, option)
+    option = by_text(tr(f"pages.account.sync.image_form.option.{args.form}.label"))
+    _sync_card_control(app, option)
     app.tap(option)
     # The form is the server's: the section reads it back asynchronously, so the shot is what shows it.
     return {"form": args.form, "sync": app.sync_state()}
 
 
 def op_sync_on(app: App, args) -> dict:
-    title = by_text(tr("pages.settings.privacy.account.sync.title"))
-    _sync_section_control(app, title)
+    title = by_text(tr("pages.account.sync.title"))
+    _sync_card_control(app, title)
     if app.sync_state()["on"]:
         return {"sync": app.sync_state(), "already_on": True}
-    app.tap(descendant(ancestor(title, by_type("ListTile")), by_type("Switch")))
-    ok = in_dialog(by_text(tr("pages.settings.privacy.account.sync.turn_on.ok_button.label")))
+    # The card's title is its header; the switch sits in the card's first row, below it.
+    app.tap(descendant(by_type("AccountSyncCard"), by_type("Switch")))
+    ok = in_dialog(by_text(tr("pages.account.sync.turn_on.ok_button.label")))
     if not app.exists(ok, 10000):
         raise Failure("the turn-on dialog did not open")
     if args.form:
-        app.tap(in_dialog(by_text(tr(f"pages.settings.privacy.account.sync.image_form.option.{args.form}.label"))))
+        app.tap(in_dialog(by_text(tr(f"pages.account.sync.image_form.option.{args.form}.label"))))
     # The button stays disabled while the dialog reads the counts and the image form, and a tap on it then
     # does nothing; tap again until the dialog takes it.
     for _ in range(10):
@@ -962,7 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("mode", choices=["pass", "refuse", "drop"])
 
     sub.add_parser("state", help="the app's harness_state")
-    sub.add_parser("sync-state", help="the record sync as the sync section reads it")
+    sub.add_parser("sync-state", help="the record sync as the sync card reads it")
     sub.add_parser("list", help="open the records page; the listed records with their fan counts")
     p = sub.add_parser("notes", help="a record's ratings and memos, as written on disk")
     p.add_argument("record")

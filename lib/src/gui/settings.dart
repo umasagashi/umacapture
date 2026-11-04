@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' as intl;
 import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -30,7 +31,6 @@ import '/src/gui/app_widget.dart';
 import '/src/chara_detail/enhancement_merge.dart';
 import '/src/gui/chara_detail/enhancement_merge_dialog.dart';
 import '/src/gui/chara_detail/enhancement_review_list.dart';
-import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_activity.dart';
@@ -380,6 +380,17 @@ class _SoundSettingTile extends ConsumerStatefulWidget {
 }
 
 class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
+  /// The slider's width in the one-row arrangement.
+  static const _sliderWidth = 200.0;
+
+  /// Everything right of the name in the one-row arrangement: the volume icon, the slider and
+  /// three 48 px icon buttons.
+  static const _controlsWidth = 18.0 + _sliderWidth + 3 * 48.0;
+
+  /// The narrowest name column the one-row arrangement may leave: room for the longest sound name
+  /// and the default-source label at their text styles.
+  static const _minLabelWidth = 160.0;
+
   /// Whether the current custom file is absent. Kept out of [build] so the filesystem stat runs
   /// only when the tile is created or the path changes, not on every rebuild.
   bool _fileMissing = false;
@@ -507,24 +518,43 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
       onPressed: canReset ? notifier.resetToDefault : null,
     );
 
-    // Single row at any width: the path column takes the leftover space and ellipsizes (from the
-    // front, so the file name stays visible) rather than reflowing the controls.
+    final label = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, sourceLabel]);
+    final slider = _VolumeSlider(volume: setting.volume, onChangeEnd: notifier.setVolume);
+    // One row when the controls leave the name column [_minLabelWidth]; otherwise the volume and the
+    // buttons move to a second row, so the name is never squeezed into one character per line. In
+    // either arrangement the path ellipsizes from the front, so the file name stays visible.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, sourceLabel]),
-          ),
-          volumeIcon,
-          SizedBox(
-            width: 200,
-            child: _VolumeSlider(volume: setting.volume, onChangeEnd: notifier.setVolume),
-          ),
-          testButton,
-          pickButton,
-          resetButton,
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= _minLabelWidth + _controlsWidth) {
+            return Row(
+              children: [
+                Expanded(child: label),
+                volumeIcon,
+                SizedBox(width: _sliderWidth, child: slider),
+                testButton,
+                pickButton,
+                resetButton,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              label,
+              Row(
+                children: [
+                  volumeIcon,
+                  Expanded(child: slider),
+                  testButton,
+                  pickButton,
+                  resetButton,
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -581,16 +611,19 @@ class _VolumeSliderState extends State<_VolumeSlider> {
 /// unchanged.
 final settingsOnWebProvider = Provider<bool>((ref) => kIsWeb);
 
-class SystemGroup extends ConsumerWidget {
-  const SystemGroup({super.key});
+/// The data the app keeps: where it lives, what is in it, the whole-store maintenance runs over it,
+/// and how a record's image leaves the app through the clipboard.
+class DataManagementGroup extends ConsumerWidget {
+  const DataManagementGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final onWeb = ref.watch(settingsOnWebProvider);
     // Built as a list rather than inlined so the empty case stays decidable. Two
-    // of the three rows are platform-gated and both gates close on web; the
-    // storage row is not gated, which is what keeps the card from coming out
-    // empty there — see [StorageManagerTile] for why that row may not be gated.
+    // of the rows are platform-gated and both gates close on web; the storage
+    // row and the maintenance rows are not gated, which is what keeps the card
+    // from coming out empty there — see [StorageManagerTile] for why that row
+    // may not be gated.
     final rows = <Widget>[
       // Browsers can copy image bytes after a user gesture, but cannot place
       // native file references on the system clipboard, so there is no mode
@@ -612,6 +645,11 @@ class SystemGroup extends ConsumerWidget {
       // Where the data is, then what is in it. Ungated: this is the only way
       // into the storage view on web, where the two rows above are absent.
       const StorageManagerTile(),
+      // The whole-store maintenance runs: each rewrites or replaces what the
+      // storage row above lists.
+      const RegenerateAllRecordsTile(),
+      const ResolveInheritanceTile(),
+      const ModuleManualUpdateTile(),
     ];
     if (rows.isEmpty) {
       return const SizedBox.shrink();
@@ -647,7 +685,6 @@ class PrivacySettingsGroup extends ConsumerWidget {
           ),
           provider: allowPostUserDataStateProvider,
         ),
-        const ShareAccountSection(),
       ],
     );
   }
@@ -738,7 +775,9 @@ class AboutGroup extends ConsumerWidget {
           loading: () => loadingLabel,
           error: (e, _) => "ERROR: $e",
           data: (data) {
-            return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.about.version.unknown_version".tr();
+            final version = data?.recognizerVersion.toLocal();
+            if (version == null) return "$tr_settings.about.version.unknown_version".tr();
+            return intl.DateFormat('yyyy/MM/dd HH:mm').format(version);
           },
         );
   }
@@ -768,6 +807,7 @@ class AboutGroup extends ConsumerWidget {
         ListTile(
           title: Text("$tr_settings.about.license.title".tr()),
           subtitle: Text("$tr_settings.about.license.description".tr()),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.description_rounded)),
           onTap: () {
             _LicensePageDialog.show(ref.base);
           },
@@ -782,9 +822,6 @@ class AboutGroup extends ConsumerWidget {
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),
-        const RegenerateAllRecordsTile(),
-        const ResolveInheritanceTile(),
-        const ModuleManualUpdateTile(),
       ],
     );
   }
@@ -876,10 +913,10 @@ ResolveInheritanceBlocker? resolveInheritanceBlockerFor(WidgetRef ref, {required
   return resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
 }
 
-/// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
+/// The "re-resolve parent/child links across the whole store" entry of [DataManagementGroup].
 ///
 /// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a seam
-/// a test can mount without dragging in the version loaders and the license page.
+/// a test can mount without the rest of [DataManagementGroup].
 ///
 /// The resolution is asynchronous and fire-and-forget, so the entry disables itself while one is
 /// in flight instead of letting a second tap start another whole-store lock acquisition — and it
@@ -938,7 +975,7 @@ class ResolveInheritanceTile extends ConsumerWidget {
             isLabelVisible: pending > 0,
             backgroundColor: colorScheme.primaryContainer,
             textColor: colorScheme.onPrimaryContainer,
-            child: const Icon(Symbols.refresh_rounded),
+            child: const Icon(Symbols.family_history_rounded),
           ),
         ),
         onTap: () => _run(ref),
@@ -999,10 +1036,10 @@ String moduleInstallBlockerKey(ModuleInstallBlocker blocker) => switch (blocker)
   ModuleInstallBlocker.longRead => longReadBusyKey,
 };
 
-/// The "apply a manually downloaded modules.zip" entry of [AboutGroup].
+/// The "apply a manually downloaded modules.zip" entry of [DataManagementGroup].
 ///
 /// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a
-/// seam a test can mount without dragging in the version loaders and the license page.
+/// seam a test can mount without the rest of [DataManagementGroup].
 class ModuleManualUpdateTile extends ConsumerWidget {
   /// The import state to gate on, defaulting to the front end's own. Injectable because
   /// `video_import.dart` resolves to the desktop stub under `flutter test`, where the
@@ -1134,10 +1171,10 @@ String regenerateAllBlockerKey(RegenerateAllBlocker blocker) => switch (blocker)
   RegenerateAllBlocker.longRead => longReadBusyKey,
 };
 
-/// The whole-store "re-recognize captured records" entry of [AboutGroup].
+/// The whole-store "re-recognize captured records" entry of [DataManagementGroup].
 ///
-/// A widget of its own only so its gate has a seam a test can mount: [AboutGroup] pulls in
-/// the version loaders and the license page, none of which this gate has anything to do with.
+/// A widget of its own only so its gate has a seam a test can mount without the rest of
+/// [DataManagementGroup], whose other rows have nothing to do with this gate.
 class RegenerateAllRecordsTile extends ConsumerWidget {
   /// The import state to gate on, defaulting to the front end's own.
   ///
@@ -1232,11 +1269,12 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTilePageRootWidget(
+      maxContentWidth: settingsPageMaxContentWidth,
       children: [
         const StyleSettingsGroup(),
         const CaptureSettingsGroup(),
         const SoundSettingsGroup(),
-        const SystemGroup(),
+        const DataManagementGroup(),
         const PrivacySettingsGroup(),
         const AboutGroup(),
         if (rawFrameProbeEnabled) const RawFrameProbeGroup(),

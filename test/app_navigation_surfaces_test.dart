@@ -1,5 +1,5 @@
-// The two navigation surfaces, and the fact that neither of them offers storage
-// management any more.
+// The two navigation surfaces, the fact that neither of them offers storage
+// management any more, and the account tab they do offer.
 //
 //   .fvm/flutter_sdk/bin/flutter test test/app_navigation_surfaces_test.dart
 //
@@ -19,13 +19,24 @@
 // is not in the navigation" cannot be satisfied by the feature simply having no
 // way in at all. The full entry — the dialog, both platform arrangements, the
 // per-open re-read — is `storage_dialog_entry_test.dart`'s.
+//
+// WHERE THE ACCOUNT IS. The account is a tab, and its page is where the privacy
+// policy sends a user to delete the account; the last group opens that page
+// logged in and asserts the deletion is there beside the rest of the account.
+// What each card does is `record_share_test.dart`'s and `record_sync_test.dart`'s,
+// which mount the same page.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/app/pages.dart';
+import 'package:umacapture/src/app/route.dart';
+import 'package:umacapture/src/chara_detail/record_share_session.dart';
+import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/app_widget.dart';
+import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/storage_settings.dart';
+import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
 import 'support/localization.dart';
@@ -93,6 +104,30 @@ void main() {
         tester.widget<Icon>(find.descendant(of: find.byType(StorageManagerTile), matching: find.byType(Icon))).icon,
         Symbols.folder_managed_rounded,
       );
+    });
+  });
+
+  // The page reads the stored session, which is a Hive-backed store.
+  group('the account is a tab of its own', () {
+    useStorageBoxForTest();
+
+    testWidgets('logged in, the tab offers the account, its sync, its shares and its deletion', (tester) async {
+      final tab = Pages.labels.singleWhere((label) => label.route.routeName == AccountRoute.name);
+      expect(tab.label, 'アカウント', reason: 'a literal, because `.tr()` renders a missing key as the key');
+
+      await StorageBox(StorageBoxKey.recordShares).push(
+        shareSessionKey,
+        const ShareSession(token: 'token', expiresAt: 1792000000, accountId: 'acct-0001', deleting: false).toJson(),
+      );
+      // Tall enough for every card at once: the page lists its cards lazily.
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await _pump(tester, const DialogLayer(child: AccountPage()));
+
+      for (final text in ['Google アカウントでログインしています。', 'ログアウト', '端末間の同期', '共有したレコード', 'アカウントを削除…']) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
     });
   });
 }

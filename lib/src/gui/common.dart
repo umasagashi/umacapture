@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
@@ -70,16 +71,85 @@ class ListCard extends StatelessWidget {
   }
 }
 
+/// A translated sentence with links inline: each `{name}` marker in [text] whose name is a key of [links] becomes
+/// that link's label, so the word order stays the translation's. A marker with no entry in [links] is left as text.
+///
+/// **The tap lives on an [InkWell] in a [WidgetSpan], not on a [TapGestureRecognizer] inside the span.** A span
+/// takes no part in focus traversal, so a recognizer-only link is unreachable from the keyboard. The [Semantics]
+/// link flag and the [MergeSemantics] around it make each title arrive at assistive technology as one focusable
+/// link. Underlined and in the primary colour, which is how the app's text links are drawn.
+class LinkedText extends StatelessWidget {
+  final String text;
+  final Map<String, ({String label, Uri url})> links;
+
+  const LinkedText(this.text, {super.key, required this.links});
+
+  WidgetSpan _link(ThemeData theme, ({String label, Uri url}) link) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: MergeSemantics(
+        child: Semantics(
+          link: true,
+          child: InkWell(
+            onTap: () => launchUrl(link.url),
+            borderRadius: BorderRadius.circular(4),
+            // The hand on every platform, not the ink's default (the plain arrow off the web): this is a link,
+            // not a button, and the hand is how a reader is told the title is live.
+            mouseCursor: SystemMouseCursors.click,
+            child: Text(
+              link.label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final spans = <InlineSpan>[];
+    text.splitMapJoin(
+      RegExp(r"\{(\w+)\}"),
+      onMatch: (match) {
+        final link = links[match[1]];
+        spans.add(link == null ? TextSpan(text: match[0]) : _link(theme, link));
+        return "";
+      },
+      onNonMatch: (part) {
+        spans.add(TextSpan(text: part));
+        return "";
+      },
+    );
+    return Text.rich(TextSpan(children: spans), style: theme.textTheme.bodyMedium);
+  }
+}
+
+/// The content width of the pages that are lists of setting rows (the settings and account tabs). It is where
+/// Material 3 puts the boundary between medium and expanded windows, so on a wide window those rows keep the
+/// shape they have on a medium one instead of stretching a label and its switch to opposite edges.
+const settingsPageMaxContentWidth = 840.0;
+
 class ListTilePageRootWidget extends ConsumerStatefulWidget {
   final List<Widget> children;
   final EdgeInsetsGeometry? margin;
   final double? gap;
+
+  /// The widest the content may grow; beyond it the content stays centred and the extra width becomes side
+  /// space. Null lets the content span the page.
+  final double? maxContentWidth;
 
   const ListTilePageRootWidget({
     super.key,
     required this.children,
     this.margin = const EdgeInsets.all(8),
     this.gap = 8,
+    this.maxContentWidth,
   });
 
   @override
@@ -101,13 +171,28 @@ class _ListTilePageRootWidgetState extends ConsumerState<ListTilePageRootWidget>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final children = widget.gap == null
+        ? widget.children
+        : widget.children.insertSeparator(SizedBox(height: widget.gap)).toList();
+    final maxContentWidth = widget.maxContentWidth;
+    if (maxContentWidth == null) {
+      return Scaffold(
+        body: ListView(padding: widget.margin, controller: _scrollController, children: children),
+      );
+    }
+    // The side space is padding of the list itself rather than a box around it, so the whole page still scrolls
+    // and the scrollbar stays at the page's edge.
     return Scaffold(
-      body: ListView(
-        padding: widget.margin,
-        controller: _scrollController,
-        children: widget.gap == null
-            ? widget.children
-            : widget.children.insertSeparator(SizedBox(height: widget.gap)).toList(),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final margin = (widget.margin ?? EdgeInsets.zero).resolve(Directionality.of(context));
+          final side = ((constraints.maxWidth - margin.horizontal - maxContentWidth) / 2).clamp(0.0, double.infinity);
+          return ListView(
+            padding: margin.add(EdgeInsets.symmetric(horizontal: side)),
+            controller: _scrollController,
+            children: children,
+          );
+        },
       ),
     );
   }

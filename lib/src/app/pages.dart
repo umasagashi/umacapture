@@ -43,6 +43,16 @@ class Pages {
     // Storage management is not here: it is not something a session passes
     // through, so it is entered from the settings page as a dialog
     // (`StorageManagerTile` in `storage_settings.dart`) rather than as a tab.
+    //
+    // The account is a tab although no session passes through it either: it is
+    // the one place that gathers what takes data off the device — sharing,
+    // sync and deleting the account.
+    PageLabel(
+      route: const AccountRoute(),
+      label: "pages.account.title".tr(),
+      selectedIcon: const Icon(Symbols.account_circle_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.account_circle_rounded),
+    ),
     PageLabel(
       route: const SettingsRoute(),
       label: "pages.settings.title".tr(),

@@ -347,7 +347,7 @@ final syncImageFormProvider = FutureProvider.autoDispose<String?>((ref) => ref.w
 /// without a count (D6-1).
 bool syncImageFormSendsWhatWasHeld(String from, String to) => from == 'none' && to != 'none';
 
-/// What stops the rounds of this device, or holds back a part of what a round sends, as the sync section tells it (N8,
+/// What stops the rounds of this device, or holds back a part of what a round sends, as the sync card tells it (N8,
 /// D2-5, D2-7): one reason at a time ([syncHaltOf]).
 enum SyncHalt {
   /// The account is being deleted: the device holds no server to sync with ([syncServerProvider]).
@@ -407,7 +407,7 @@ bool syncRoundFailed(SyncRoundEnd end) => switch (end) {
   SyncRoundEnd.done || SyncRoundEnd.changedMeanwhile || SyncRoundEnd.heldByLongMemos || SyncRoundEnd.closing => false,
 };
 
-/// [syncHaltOf] for the session the device is logged in to: what the sync section (N8) and the sync icon of the table's
+/// [syncHaltOf] for the session the device is logged in to: what the sync card (N8) and the sync icon of the table's
 /// toolbar (N9) tell, and what the toasts of a stop follow ([syncHaltToastsProvider]).
 final syncHaltProvider = Provider<SyncHalt?>(
   (ref) => syncHaltOf(ref.watch(recordSyncProvider), ref.watch(recordShareSessionProvider)),
@@ -428,7 +428,7 @@ final syncHaltToastsProvider = Provider<void>((ref) {
 });
 
 /// The toasts' sentences of a stop (N10), one per [SyncHalt] the server makes.
-const trSyncHaltToast = "pages.settings.privacy.account.sync.halt_toast";
+const trSyncHaltToast = "pages.account.sync.halt_toast";
 
 /// N8: why the rounds of this device stop, or what of the last one waits, for the account of [session] — the
 /// account's deletion first, then what the last round told ([RecordSyncState.told]): the long memos it was held back

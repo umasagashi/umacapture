@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/const.dart';
 import 'package:umacapture/src/gui/dashboard.dart';
 
 import 'support/localization.dart';
@@ -35,6 +36,7 @@ void main() {
     await tester.tap(find.text('プライバシーポリシー'));
     await tester.pumpAndSettle();
 
-    expect(opened.map((url) => Uri.parse(url).path), ['/notice/', '/privacy/']);
+    // The sharing origin's pages, not ones resolved against the app's own location, which on Windows is a file URL.
+    expect(opened, ['${Const.sharingOrigin}/notice/', '${Const.sharingOrigin}/privacy/']);
   });
 }
