@@ -6188,6 +6188,102 @@ void main() {
         expect(toasts, hasLength(2), reason: 'a round that fails or syncs, and the logout, tell nothing in a toast');
       });
 
+      // The progress of a long step of the round running (N8, N9): a first round of a device holding records from
+      // before the binding, more than a chunk of them, asked for as the user syncs now.
+      testWidgets('the sync card leads with the share of the bindings a first round has worked out, a bar of it under '
+          "the line and the toolbar's hover the same line; the images tell theirs only in the part no other part "
+          'follows, each share goes up alone, and the round ending ends them', (tester) async {
+        a
+          ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
+          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+        final ids = [for (var i = 1; i <= 100; i++) 'L${'$i'.padLeft(4, '0')}'];
+        for (final (i, id) in ids.indexed) {
+          final dir = a.seedRecord(id, bodyWrittenAt: 1767225600100 + i, fans: 1000 + i);
+          File(dir.filePath('skill.png').path).writeAsBytesSync(utf8.encode('the skill image of $id'));
+        }
+        loadAppTranslations();
+        tester.view.physicalSize = const Size(1600, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final app = (await tester.runAsync(() async {
+          final app = await a.open();
+          await a.login(syncTestAccount);
+          await a.setSyncOn(true);
+          return app;
+        }))!;
+        final told = <SyncRoundProgress?>[];
+        app.listen(syncProgressProvider, (_, next) => told.add(next));
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: app,
+            child: MaterialApp(
+              theme: ThemeData(extensions: [AppSemanticColors.light(ThemeData().colorScheme)]),
+              home: const DialogLayer(
+                child: Scaffold(
+                  body: SingleChildScrollView(child: Column(children: [ColumnPresetBarWidget(), AccountSyncCard()])),
+                ),
+              ),
+            ),
+          ),
+        );
+        await settleUntilElapsing(
+          tester,
+          () => !app.read(syncImageFormProvider).isLoading,
+          describe: 'the section to read the image form',
+        );
+        // The round works the bindings out in the order of the records' parts; the work on the record after the first
+        // chunk is held, the share of the first chunk told.
+        final order = [...ids]
+          ..sort((x, y) {
+            final (px, py) = (syncRecordPartOf(x), syncRecordPartOf(y));
+            return px != py ? px.compareTo(py) : x.compareTo(y);
+          });
+        final gate = SyncBindingGateFsBackend({order[syncBindingChunk]});
+        final original = fsBackend;
+        fsBackend = gate;
+        addTearDown(() {
+          gate.goAll();
+          fsBackend = original;
+        });
+        await tester.tap(find.widgetWithText(OutlinedButton, '今すぐ同期'));
+        var entered = false;
+        unawaited(gate.entered(order[syncBindingChunk]).then((_) => entered = true));
+        await settleUntilElapsing(tester, () => entered, describe: 'the work on a binding after the first chunk');
+        await tester.pump();
+        const line = '同期しています…（画像の照合: 64%）。アプリを使いながらお待ちください。';
+        expect(find.text(line), findsOneWidget, reason: '64 of the 100 records are bound');
+        expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, 0.64);
+        final icon = find.descendant(
+          of: find.byType(ColumnPresetBarWidget),
+          matching: find.byWidgetPredicate((w) => w is Icon && w.icon == Symbols.sync_rounded),
+        );
+        expect(tester.widget<Tooltip>(find.ancestor(of: icon, matching: find.byType(Tooltip)).first).message, line);
+
+        gate.go(order[syncBindingChunk]);
+        await settleUntilElapsing(tester, () => !app.read(recordSyncProvider).running, describe: 'the round to end');
+        await tester.pump();
+        expect(app.read(recordSyncProvider).told?.end, SyncRoundEnd.done);
+        expect(find.byType(LinearProgressIndicator), findsNothing, reason: 'the round ended');
+        expect(find.textContaining('同期しています…'), findsNothing);
+        expect(told.last, isNull, reason: 'the round ending ends its progress');
+        final steps = told.nonNulls.toList();
+        final bindings = steps.where((p) => p.step == SyncLongStep.binding).toList();
+        expect((bindings.first.done, bindings.first.total), (0, 100), reason: 'none bound as the round began');
+        expect((bindings.last.done, bindings.last.total), (100, 100));
+        for (final step in SyncLongStep.values) {
+          final shares = [for (final p in steps.where((p) => p.step == step)) p.fraction];
+          expect(shares, orderedEquals([...shares]..sort()), reason: 'the share of $step goes up alone');
+        }
+        final images = steps.indexWhere((p) => p.step == SyncLongStep.images);
+        expect(
+          images,
+          greaterThan(steps.lastIndexWhere((p) => p.step == SyncLongStep.binding)),
+          reason: 'the images tell their share only once the last part has worked its bindings out',
+        );
+        expect(steps.last.step, SyncLongStep.images);
+        expect(steps.last.fraction, 1);
+      });
+
       testWidgets('T3b2 (C1): set back from none in the section, the form tells, without a count, that the images not '
           'sent go, and the next round sends them (D6-1)', (tester) async {
         a.syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount');
