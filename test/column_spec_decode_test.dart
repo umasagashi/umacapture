@@ -8,6 +8,9 @@
 // that behaviour so the registration cannot silently regress.
 //
 // Self-contained (no on-disk data), so it always runs in CI.
+import 'dart:io';
+import 'dart:isolate';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
@@ -16,6 +19,62 @@ import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+
+/// The discriminator of every dart_mappable subclass of [ColumnSpec] declared under [lib], directly or through
+/// another column type, read from the source.
+///
+/// Read from the source because nothing at run time can list them: the base mapper knows only the subclasses
+/// already registered with it, which is the very thing under test.
+Set<String> mappableColumnSpecDiscriminators(Directory lib) {
+  final declaration = RegExp(
+    r'((?:@\w+(?:\([^)]*\))?\s*)*)(?:(?:abstract|base|final|sealed|interface)\s+)*class\s+(\w+)\b([^{;]*)\{',
+  );
+  final generated = RegExp(r'\.(mapper|g|gr|freezed)\.dart$');
+  final declared = <String, ({String extended, String discriminator})>{};
+  for (final file in lib.listSync(recursive: true).whereType<File>()) {
+    if (!file.path.endsWith('.dart') || generated.hasMatch(file.path)) continue;
+    for (final match in declaration.allMatches(file.readAsStringSync())) {
+      final name = match.group(2) ?? '';
+      final header = match.group(3) ?? '';
+      final extended = RegExp(r'\bextends\s+(\w+)').firstMatch(header)?.group(1);
+      if (extended == null || !RegExp('\\b${name}Mappable\\b').hasMatch(header)) continue;
+      final annotations = match.group(1) ?? '';
+      final discriminator = RegExp(r"discriminatorValue:\s*'([^']*)'").firstMatch(annotations)?.group(1);
+      declared[name] = (extended: extended, discriminator: discriminator ?? name);
+    }
+  }
+  bool isColumnSpec(String name) {
+    if (name == 'ColumnSpec') return true;
+    final extended = declared[name]?.extended;
+    return extended != null && isColumnSpec(extended);
+  }
+
+  return {
+    for (final MapEntry(:key, :value) in declared.entries)
+      if (key != 'ColumnSpec' && isColumnSpec(value.extended)) value.discriminator,
+  };
+}
+
+/// Which of [discriminators] the base mapper cannot route to a subclass mapper once [initializeMappers] has run.
+List<String> unregisteredUnderBase(Set<String> discriminators) {
+  initializeMappers();
+  return [
+    for (final type in discriminators)
+      if (_baseCannotResolve(type)) type,
+  ];
+}
+
+bool _baseCannotResolve(String type) {
+  try {
+    ColumnSpecMapper.fromMap(<String, dynamic>{'type': type});
+    // Decoding succeeded from just the discriminator: clearly registered.
+    return false;
+  } catch (e) {
+    // Decoding may still fail because required fields are absent from this minimal map; that proves the base routed
+    // to the subclass mapper. Only the base failing to resolve the subclass at all is the regression.
+    return e.toString().contains('Cannot instantiate class ColumnSpec');
+  }
+}
 
 // A complete, current-format FactorColumnSpec map.
 Map<String, dynamic> completeFactorMap() => <String, dynamic>{
@@ -61,41 +120,17 @@ void main() {
     expect((spec as RangedIntegerColumnSpec).parser, isA<FansParser>());
   });
 
-  test('every ColumnSpec subclass mapper is registered with the base', () {
-    // discriminatorValue of each subclass (== its class name).
-    const discriminatorValues = <String>[
-      'RangedIntegerColumnSpec',
-      'RangedLabelColumnSpec',
-      'CharaRankColumnSpec',
-      'SimpleLabelColumnSpec',
-      'SkillColumnSpec',
-      'FactorColumnSpec',
-      'SkillDifferenceColumnSpec',
-      'FactorDifferenceColumnSpec',
-      'CharacterCardColumnSpec',
-      'DateTimeColumnSpec',
-      'RatingColumnSpec',
-      'MemoColumnSpec',
-      'ScriptColumnSpec',
-      'ShareStateColumnSpec',
-    ];
+  test('every ColumnSpec subclass mapper in lib is registered with the base', () async {
+    final discriminators = mappableColumnSpecDiscriminators(Directory('lib'));
+    // The two shapes a plain line match would miss: a declaration whose mixins continue on the next line, and a
+    // column type that extends another one.
+    expect(discriminators, containsAll(['FactorColumnSpec', 'CharaRankColumnSpec']), reason: 'the scan reads lib');
 
-    for (final type in discriminatorValues) {
-      try {
-        ColumnSpecMapper.fromMap(<String, dynamic>{'type': type});
-        // Decoding succeeded from just the discriminator: clearly registered.
-      } catch (e) {
-        // Decoding may still fail because required fields are absent from this
-        // minimal map — that is fine and proves the base routed to the subclass
-        // mapper. The regression we guard against is the base mapper being unable
-        // to resolve the subclass at all.
-        expect(
-          e.toString(),
-          isNot(contains('Cannot instantiate class ColumnSpec')),
-          reason: 'Subclass mapper for "$type" is not registered (regression in initializeMappers).',
-        );
-      }
-    }
+    // In a fresh isolate, so that initializeMappers is the only thing that has registered a mapper there. Encoding a
+    // spec (toMap, ==, hashCode, toString) registers its own subclass on the way, so in this isolate an earlier test
+    // that did so would hide a type initializeMappers leaves out; the app reads its saved columns before writing any.
+    final unregistered = await Isolate.run(() => unregisteredUnderBase(discriminators));
+    expect(unregistered, isEmpty, reason: 'Subclass mappers not registered in initializeMappers.');
   });
 
   test('legacy FactorColumnSpec missing factorTags/skillTags recovers with defaults', () {
