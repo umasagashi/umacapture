@@ -230,7 +230,7 @@ class _AppExitWaitDialog extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Text("$tr_addon.exit.message".tr())),
+            Padding(padding: const EdgeInsets.only(bottom: 16), child: Text("$tr_addon.exit.message".tr())),
             // The dialog already insets its content to the title's padding, so the tiles drop their own side padding.
             for (final exec in runs)
               ListTileTheme.merge(

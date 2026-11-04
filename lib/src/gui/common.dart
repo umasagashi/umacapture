@@ -936,6 +936,10 @@ class CardDialog extends ConsumerStatefulWidget {
   /// false. Leave false for content that uses `Expanded`/`Flexible` (the common
   /// case): such content must be placed directly under the dialog's `Column`, as
   /// a `SingleChildScrollView` cannot host an `Expanded` child.
+  ///
+  /// The dialog insets this content on all four sides, so callers add no margin
+  /// of their own around it. Content placed directly (this false) gets no inset:
+  /// it fills the space between the bars and lays out its own edges.
   final bool scrollableContent;
 
   const CardDialog({
@@ -956,6 +960,9 @@ class CardDialog extends ConsumerStatefulWidget {
 /// The title's start padding, which is also the side inset of self-sizing content so the two line up. It equals the
 /// Material 3 default for `ListTile`, written out because the content needs the value and the default is private.
 const double _titleStartPadding = 16;
+
+/// The space above and below self-sizing content, between it and the title and bottom bars.
+const double _contentVerticalPadding = 16;
 
 class _CardDialogState extends ConsumerState<CardDialog> {
   final ScrollController _controller = ScrollController();
@@ -1042,9 +1049,10 @@ class _CardDialogState extends ConsumerState<CardDialog> {
             //
             // The content spans the card's width and is inset by the title's
             // start padding, so its text starts where the title's text does
-            // and callers add no side padding of their own. The end inset
-            // mirrors the start rather than the title's end padding, which
-            // makes room for the close button the content does not have.
+            // and callers add no padding of their own. The end inset mirrors
+            // the start rather than the title's end padding, which makes room
+            // for the close button the content does not have. Above and below,
+            // the inset keeps the content off the title and bottom bars.
             Flexible(
               child: SizedBox(
                 width: double.infinity,
@@ -1052,15 +1060,21 @@ class _CardDialogState extends ConsumerState<CardDialog> {
                   controller: _controller,
                   child: SingleChildScrollView(
                     controller: _controller,
-                    padding: const EdgeInsets.symmetric(horizontal: _titleStartPadding),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: _titleStartPadding,
+                      vertical: _contentVerticalPadding,
+                    ),
                     child: widget.content,
                   ),
                 ),
               ),
             ),
           if (!widget.usePageView && !widget.scrollableContent) widget.content,
+          // The bar spans the card's full width, so its divider runs edge to edge whatever the width of
+          // the actions inside it. A dialog with no actions passes no [bottom] and gets no bar.
           if (widget.bottom != null)
             Container(
+              width: double.infinity,
               decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: theme.dividerColor)),
               ),
