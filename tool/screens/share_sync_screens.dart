@@ -381,6 +381,20 @@ class _SyncServer implements SyncServer {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError('${invocation.memberName}');
 }
 
+/// Holds the progress of a round a screen shows ([syncProgressProvider]).
+class _Progress extends SyncProgress {
+  _Progress(this.shown);
+
+  final SyncRoundProgress? shown;
+
+  @override
+  SyncRoundProgress? build() => shown;
+}
+
+/// A round of 5,000 records at [done] of [total] of [step], whose work in the round began at [from].
+SyncRoundProgress _progress(SyncLongStep step, int done, {int total = 5000, int from = 0}) =>
+    SyncRoundProgress(step, done: done, total: total, from: from);
+
 class _Dropped extends RecordShareSessionDropped {
   @override
   bool build() => true;
@@ -444,10 +458,12 @@ void main() {
     return c;
   }
 
-  /// A container for the account and sync screens: [sync] holds the state, [server] the account's image form.
+  /// A container for the account and sync screens: [sync] holds the state, [server] the account's image form,
+  /// [progress] the progress of the round running.
   ProviderContainer syncing(
     _Sync sync, {
     SyncServer? server,
+    SyncRoundProgress? progress,
     bool dropped = false,
     List<Object> answers = const [],
     List<CharaDetailRecord> shown = const [],
@@ -456,6 +472,7 @@ void main() {
       overrides: [
         if (shown.isNotEmpty) charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(shown)),
         recordSyncProvider.overrideWith(() => sync),
+        syncProgressProvider.overrideWith(() => _Progress(progress)),
         syncServerProvider.overrideWithValue(server),
         if (dropped) recordShareSessionDroppedProvider.overrideWith(_Dropped.new),
         recordShareDioProvider.overrideWith(
@@ -724,11 +741,20 @@ void main() {
     testWidgets('N8: every state of the sync card', (tester) async {
       const counts = SyncToldCounts(account: _accountId, restored: 1, splitOff: 2, added: 3);
       final undone = (records: 2, stops: <SyncImagesStop>{});
+      // The progress of the round running, by the name of the case that shows it.
+      final progressOf = {
+        // An ordinary round: a record bound, under the work a step needs for its share to show.
+        'running-short': _progress(SyncLongStep.binding, 4999, from: 4998),
+        'running-binding': _progress(SyncLongStep.binding, 1234),
+        'running-receiving': _progress(SyncLongStep.receiving, 1200),
+        'running-images': _progress(SyncLongStep.images, 2214, total: 2952),
+      };
       final cases = <(String, RecordSyncState, SyncServer?)>[
         ('off', const RecordSyncState(), _SyncServer()),
         ('on', _on(), _SyncServer()),
         ('not-synced-yet', _on(synced: false), _SyncServer()),
         ('running', _on(running: true), _SyncServer()),
+        for (final name in progressOf.keys) (name, _on(running: true), _SyncServer()),
         ('counts', _on(told: const SyncRoundOutcome(SyncRoundEnd.done), counts: counts), _SyncServer()),
         ('long-memos', _on(told: const SyncRoundOutcome(SyncRoundEnd.heldByLongMemos, longMemos: 2)), _SyncServer()),
         ('withheld', _on(told: const SyncRoundOutcome(SyncRoundEnd.done, withheld: 3)), _SyncServer()),
@@ -777,7 +803,7 @@ void main() {
       ];
       await _storeSession();
       for (final (name, state, server) in cases) {
-        final c = syncing(_Sync(state), server: server);
+        final c = syncing(_Sync(state), server: server, progress: progressOf[name]);
         await _mount(tester, c, const SingleChildScrollView(child: AccountSyncCard()));
         await tester.runAsync(() async {
           try {
@@ -844,9 +870,15 @@ void main() {
           ),
         ),
         ('error', _on(told: const SyncRoundOutcome(SyncRoundEnd.heldByLongMemos, longMemos: 2))),
+        ('running-binding', _on(running: true)),
       ];
       for (final (name, state) in cases) {
-        final c = syncing(_Sync(state), server: _SyncServer(), shown: [_record()]);
+        final c = syncing(
+          _Sync(state),
+          server: _SyncServer(),
+          shown: [_record()],
+          progress: name == 'running-binding' ? _progress(SyncLongStep.binding, 1234) : null,
+        );
         await tester.runAsync(() => c.read(charaDetailRecordStorageLoaderProvider.future));
         await _mount(
           tester,

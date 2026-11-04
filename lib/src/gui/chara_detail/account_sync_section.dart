@@ -2,8 +2,8 @@
 // and why they stop, the counts the last rounds told, and syncing now — N9: the sync icon of the table's toolbar,
 // whose hover tells the line N8 leads with — and N11: the dialog that turns sync on.
 //
-// What either decides to tell is the lib's: the switch and the last round ([recordSyncProvider]), why the rounds stop
-// ([syncHaltProvider]), whether the device holds a server to sync with ([syncServerProvider]), the account's image form
+// What either decides to tell is the lib's: the switch and the last round ([recordSyncProvider]), how far the round
+// running has got with a long step ([syncProgressProvider]), why the rounds stop ([syncHaltProvider]), whether the device holds a server to sync with ([syncServerProvider]), the account's image form
 // ([syncImageFormProvider]) and what setting it tells ([syncImageFormSendsWhatWasHeld]), and before sync is on what a
 // round would move and the memos that would hold it back ([RecordSync.beforeOn]).
 import 'dart:async';
@@ -78,6 +78,7 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
     final theme = Theme.of(context);
     final session = ref.watch(recordShareSessionProvider);
     final state = ref.watch(recordSyncProvider);
+    final progress = _shownProgress(state, ref.watch(syncProgressProvider));
     final server = ref.watch(syncServerProvider);
     if (session == null) {
       return ref.watch(recordShareSessionDroppedProvider)
@@ -91,7 +92,7 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
     final told = state.told;
     final halt = ref.watch(syncHaltProvider);
     final counts = state.countsFor(session.accountId);
-    final subtitle = on ? _roundsLine(state) : "$tr_account_sync.off".tr();
+    final subtitle = on ? _roundsLine(state, progress) : "$tr_account_sync.off".tr();
     Widget line(String key, int count) =>
         Text("$tr_account_sync.$key".tr(namedArgs: {"count": "$count"}), style: theme.textTheme.bodyMedium);
     // The card's title names sync, so the state of the rounds leads the card, beside the switch.
@@ -113,6 +114,8 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             spacing: 8,
             children: [
+              // The share of the long step the line above tells, under it while the step runs.
+              if (progress != null) LinearProgressIndicator(value: progress.fraction),
               if (halt != null) NoteCard(description: Text(_haltLine(halt, state), style: theme.textTheme.bodyMedium)),
               if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
                 if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
@@ -162,11 +165,24 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
   );
 }
 
-/// The state of the rounds, while sync is on: running, else when they last synced.
-String _roundsLine(RecordSyncState state) {
+/// The progress of the round running, where it is in a long step with work enough to show ([SyncRoundProgress.shown]);
+/// else none, and the rounds show as running alone.
+SyncRoundProgress? _shownProgress(RecordSyncState state, SyncRoundProgress? progress) =>
+    state.running && progress != null && progress.shown ? progress : null;
+
+/// The state of the rounds, while sync is on: running — with the share of the long step it is in, where [progress]
+/// is shown ([_shownProgress]) —, else when they last synced.
+String _roundsLine(RecordSyncState state, SyncRoundProgress? progress) {
   final lastSynced = state.lastSynced;
   return state.running
-      ? "$tr_account_sync.running".tr()
+      ? progress == null
+            ? "$tr_account_sync.running".tr()
+            : "$tr_account_sync.running_step".tr(
+                namedArgs: {
+                  "step": "$tr_account_sync.step.${progress.step.name}".tr(),
+                  "percent": "${(progress.fraction * 100).floor()}",
+                },
+              )
       : lastSynced == null
       ? "$tr_account_sync.not_synced_yet".tr()
       : "$tr_account_sync.last_synced".tr(
@@ -189,11 +205,12 @@ class SyncStatusIcon extends ConsumerWidget {
     final colors = Theme.of(context).colorScheme;
     final session = ref.watch(recordShareSessionProvider);
     final state = ref.watch(recordSyncProvider);
+    final progress = _shownProgress(state, ref.watch(syncProgressProvider));
     final halt = ref.watch(syncHaltProvider);
     final (String, Color?)? shown = switch (session) {
       null when ref.watch(recordShareSessionDroppedProvider) => ("$tr_account_sync.session_dropped".tr(), colors.error),
       final session? when state.onFor(session.accountId) => switch (halt) {
-        null => (_roundsLine(state), null),
+        null => (_roundsLine(state, progress), null),
         final halt => (_haltLine(halt, state), halt.holdsAll ? colors.error : Theme.of(context).semantic.warning),
       },
       _ => null,

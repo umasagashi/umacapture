@@ -457,6 +457,75 @@ final syncPlacingProvider = Provider<SyncPlacing>((ref) {
   return placing;
 });
 
+/// The steps of a round that work one item at a time over what the device or the server holds, and so are the ones a
+/// first round, or one after many changes, spends minutes to hours in. The rest of a round's steps are a request or a
+/// few, and pass in moments. What a round tells of its progress ([SyncProgress]) is of these.
+enum SyncLongStep {
+  /// Working out the bindings of the records that carry none ([SyncPlace.workOutBinding]): of every record the stores
+  /// hold, those bound. The bindings are written into the records, so a round after a restart goes on from where the
+  /// last one stopped, and so does what it tells.
+  binding,
+
+  /// Taking from the server the bodies the result shows: of those the round wants, those taken.
+  receiving,
+
+  /// Putting and taking the images of the records that have work left: of those, the ones worked.
+  images,
+}
+
+/// How many items of work a long step has to have ([SyncRoundProgress.from] to [SyncRoundProgress.total]) for its
+/// progress to be shown. Sixteen bindings are some fifteen seconds of work on a desktop and over a minute on a phone,
+/// long enough for a share of it to be read; a round with less — a few records captured since the last — shows as running
+/// alone rather than flashing a share for a moment. The same holds when a first sync is resumed with little of it left.
+const syncProgressShownFrom = 16;
+
+/// How far the round running has got with the long step it is in ([step]): [done] of [total] items. [from] is how many
+/// were done when the round first told this step, so that [total] − [from] is the work of the step in this round.
+class SyncRoundProgress {
+  const SyncRoundProgress(this.step, {required this.done, required this.total, required this.from});
+
+  final SyncLongStep step;
+  final int done;
+  final int total;
+  final int from;
+
+  /// [done] as a share of [total], from 0 to 1.
+  double get fraction => total <= 0 ? 1 : (done / total).clamp(0, 1);
+
+  /// Whether the step has work enough for its progress to be shown ([syncProgressShownFrom]).
+  bool get shown => total - from >= syncProgressShownFrom;
+}
+
+/// How far the round running has got with its long steps ([SyncLongStep]), which the app's rounds tell
+/// ([runSyncRound]): none while no round runs, or while a round is in none of them yet. Kept in memory and not on disk,
+/// and gone as the round ends. Within a round the share of a step never goes back: a step told again with a smaller
+/// share — the stores took in a record meanwhile, or the round reads its images again after a stale replacement — keeps
+/// the share it had.
+class SyncProgress extends Notifier<SyncRoundProgress?> {
+  @override
+  SyncRoundProgress? build() => null;
+
+  /// The round is at [done] of [total] items of [step].
+  void tell(SyncLongStep step, int done, int total) {
+    if (!ref.mounted) return;
+    final now = state;
+    if (now == null || now.step != step) {
+      state = SyncRoundProgress(step, done: done, total: total, from: done);
+    } else if (done * now.total >= now.done * total && (done, total) != (now.done, now.total)) {
+      state = SyncRoundProgress(step, done: done, total: total, from: now.from);
+    }
+  }
+
+  /// The round ended.
+  void end() {
+    if (ref.mounted) state = null;
+  }
+}
+
+/// The progress of this device's round running ([SyncProgress]), which every round of the app's tells
+/// ([runSyncRound]).
+final syncProgressProvider = NotifierProvider<SyncProgress, SyncRoundProgress?>(SyncProgress.new);
+
 /// Why the image step of a round left images undone ([SyncImagesUndone]), by the answer of the request that did not
 /// land (`docs/sync-protocol.md`).
 enum SyncImagesStop {
@@ -682,6 +751,10 @@ Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
 /// and the parts are few however many records wait.
 const syncBindingChunk = 64;
 
+/// How many items of a long step a round works between two tells of its progress ([SyncProgress]): a tell rebuilds
+/// what shows it, a few small widgets, so tens of items keep it a small cost beside the step's own work.
+const _progressEvery = 20;
+
 /// Runs one sync round of the app [ref] runs, whose session is of [account], against [server], on the app's place
 /// ([AppSyncPlace]). [effects] is what the records the round writes make stale, as an import's do. [bindingChunk]: see
 /// [syncBindingChunk].
@@ -705,6 +778,7 @@ Future<SyncRoundOutcome> runSyncRound(
     imageForm: ref.read(syncImageFormSettingProvider),
     roomStop: ref.read(syncRoomStopProvider),
     placing: ref.read(syncPlacingProvider),
+    progress: ref.read(syncProgressProvider.notifier),
   );
   if (place.changedRecords) {
     // A resolution that fails leaves the records as the round left them, only without the links it would have placed,
@@ -725,6 +799,8 @@ Future<SyncRoundOutcome> runSyncRound(
 /// then on (S-09); none, and they follow the form the round read. [roomStop]: the device's mark of being stopped for
 /// room, which the round reads and raises ([SyncRoomStop]); none, and the round keeps no mark from one round to the next.
 /// [placing]: what the close of the desktop app waits for ([SyncPlacing]); none, and nothing waits for the round.
+/// [progress]: where the round tells how far it has got with its long steps, and that it ended ([SyncProgress]); none,
+/// and it tells nothing.
 Future<SyncRoundOutcome> runSyncRoundOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
@@ -733,6 +809,33 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
   SyncImageFormSetting? imageForm,
   SyncRoomStop? roomStop,
   SyncPlacing? placing,
+  SyncProgress? progress,
+}) async {
+  try {
+    return await _runSyncRoundOn(
+      place,
+      server,
+      account: account,
+      bindingChunk: bindingChunk,
+      imageForm: imageForm,
+      roomStop: roomStop,
+      placing: placing,
+      progress: progress,
+    );
+  } finally {
+    progress?.end();
+  }
+}
+
+Future<SyncRoundOutcome> _runSyncRoundOn<C>(
+  SyncPlace<C> place,
+  SyncServer server, {
+  required String account,
+  required int bindingChunk,
+  required SyncImageFormSetting? imageForm,
+  required SyncRoomStop? roomStop,
+  required SyncPlacing? placing,
+  required SyncProgress? progress,
 }) async {
   var (replacements, restored, splitOff, added) = (0, 0, 0, 0);
   // The records the round has tried to work out the binding of: one it could not is not tried again in this round.
@@ -750,6 +853,7 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       tried: tried,
       images: images,
       placing: placed,
+      progress: progress,
     );
     // An attempt refused as stale had put its result in place, so what it told stays told after the next one.
     replacements += outcome.replacements;
@@ -845,6 +949,7 @@ Future<_Attempt> _attempt<C>(
   required Set<String> tried,
   required _RoundImages images,
   required SyncPlacing placing,
+  required SyncProgress? progress,
 }) async {
   // 0. A base of another account is no base, nor is its sent list. A device with no base of this account — one that
   // lost it, or meets another account — is not stopped for room ([N1-22]): the refusal that stopped it was of the
@@ -890,7 +995,7 @@ Future<_Attempt> _attempt<C>(
   // The device's records each go with their binding: one that carries none has it worked out first — of a first round,
   // a part of them, the rest held back for the next part.
   await place.loaded();
-  final (unbound, worked) = await _placeMissingBindings(place, chunk: bindingChunk, tried: tried);
+  final (unbound, worked) = await _placeMissingBindings(place, chunk: bindingChunk, tried: tried, progress: progress);
 
   final read = await place.read(previous: base == null ? null : LocalSyncRead(base.list));
   if (read == null) return _ended(const SyncRoundOutcome(SyncRoundEnd.failed));
@@ -972,11 +1077,13 @@ Future<_Attempt> _attempt<C>(
         if (p.source case _ServerBody(:final name)) name,
     }.toList()..sort();
     for (var i = 0; i < wanted.length; i += 10) {
+      if (i % _progressEvery == 0) progress?.tell(SyncLongStep.receiving, i, wanted.length);
       final names = wanted.sublist(i, i + 10 > wanted.length ? wanted.length : i + 10);
       for (final body in await server.bodies(names)) {
         if (syncObjectName(utf8.encode(body.body)) == body.name) fetched[body.name] = body.body;
       }
     }
+    if (wanted.isNotEmpty) progress?.tell(SyncLongStep.receiving, wanted.length, wanted.length);
     if (wanted.any((name) => !fetched.containsKey(name))) {
       logger.w('Sync applies nothing: the server holds not every body the result shows.');
       return _ended(_told(SyncRoundEnd.bodiesMissing, counts, local.list, placed: const {}, withheld: withheld));
@@ -1061,11 +1168,22 @@ Future<_Attempt> _attempt<C>(
     );
   }
 
-  // The round goes on with the next part where it held records back and worked some out.
+  // The round goes on with the next part where it held records back and worked some out. The image step of such a
+  // part tells no progress: the next part works its images out again over more records, so the share would go back.
   final more = heldBack.isNotEmpty && worked > 0;
+  final imagesProgress = more ? null : progress;
   final thereParts = syncListParts(there);
   if (_sameParts(syncListParts(next), thereParts)) {
-    final undone = await _syncImages(place, server, agreedBase.list, kept, changed, account: account, round: images);
+    final undone = await _syncImages(
+      place,
+      server,
+      agreedBase.list,
+      kept,
+      changed,
+      account: account,
+      round: images,
+      progress: imagesProgress,
+    );
     return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
   }
   try {
@@ -1159,6 +1277,7 @@ Future<_Attempt> _attempt<C>(
     changed,
     account: account,
     round: images,
+    progress: imagesProgress,
   );
   return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
 }
@@ -1200,6 +1319,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
   Set<String>? changed, {
   required String account,
   required _RoundImages round,
+  required SyncProgress? progress,
 }) async {
   final keptImages = await place.readKeptImages();
   final was = keptImages == null || keptImages.account != account
@@ -1268,7 +1388,8 @@ Future<SyncImagesUndone?> _syncImages<C>(
         if (!syncImagesOwed(binding, r.stage.value, held)) left[r.id] = it;
       }
 
-      for (final (r, binding, wanted) in work) {
+      for (final (i, (r, binding, wanted)) in work.indexed) {
+        if (i % _progressEvery == 0) progress?.tell(SyncLongStep.images, i, work.length);
         final stage = r.stage.value;
         final icon = r.body.icon;
         // What was kept of its files tells the work, where it is of the images the record wants now.
@@ -1344,6 +1465,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
           leave(r, binding, (wants: wanted, holds: before, stored: false));
         }
       }
+      if (work.isNotEmpty) progress?.tell(SyncLongStep.images, work.length, work.length);
     } catch (error, stackTrace) {
       logger.w('Sync could not put or take the images; the next round goes on with them.', error, stackTrace);
       round.note(_stopOf(error), syncServerStopOf(error));
@@ -1773,13 +1895,18 @@ SyncRoundOutcome _told(
 /// that every other operation of the app goes on meanwhile: in the order of their record parts ([syncRecordPartOf]),
 /// as many as [chunk], or as the stores hold with one, whichever is more, and then the rest of the record part the last
 /// of those is in; none the round [tried] before. Answers the ids of the records the stores still hold without one, and
-/// how many it tried.
+/// how many it tried. Tells [progress] how many of the records the stores hold are bound, as it starts, after each
+/// chunk, and as it stops, where any carried none.
 Future<(Set<String>, int)> _placeMissingBindings<C>(
   SyncPlace<C> place, {
   required int chunk,
   required Set<String> tried,
+  required SyncProgress? progress,
 }) async {
   final (:records, :held) = place.unbound();
+  void tell(({List<SyncUnbound> records, int held}) now) =>
+      progress?.tell(SyncLongStep.binding, now.held - now.records.length, now.held);
+  if (records.isNotEmpty) tell((records: records, held: held));
   // By record part, then id: a part ends at the end of a record part, so each part of the round changes the parts of
   // the list it reaches once, not again with every part after it.
   final missing = [for (final record in records) (syncRecordPartOf(record.id), record)]
@@ -1797,12 +1924,17 @@ Future<(Set<String>, int)> _placeMissingBindings<C>(
       // Published every [chunk] records, whatever the stage's length: while records wait unpublished a merge is
       // refused, and a stage grows to as many records as the stores hold bound, so the count bounds that refusal to
       // one chunk's work, not the stage's.
-      if (worked % chunk == 0) place.bindingsWorkedOut();
+      if (worked % chunk == 0) {
+        place.bindingsWorkedOut();
+        tell(place.unbound());
+      }
     }
   } finally {
     place.bindingsWorkedOut();
   }
-  return ({for (final record in place.unbound().records) record.id}, worked);
+  final left = place.unbound();
+  if (records.isNotEmpty) tell(left);
+  return ({for (final record in left.records) record.id}, worked);
 }
 
 /// Where the body a record of the result shows comes from.
