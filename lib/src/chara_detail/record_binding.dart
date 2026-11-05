@@ -319,6 +319,10 @@ bool _pngBound(Uint8List png, String? pngField, String? jpegField) {
   return reduced != null && _hash(reduced) == jpegField;
 }
 
+/// A record's `record.json` bytes with its binding, as [placeRecordBindingUnlocked] answers them, and whether the
+/// `record.json` in its directory holds those bytes: false where the binding was worked out but could not be written.
+typedef PlacedRecordJson = ({Uint8List bytes, bool stored});
+
 /// Places the binding on the record in [directory] when its `record.json` carries none, worked out from the images
 /// there now with their geometry and the icon ([computeRecordBodyImages]) and placed with them in one write, and returns
 /// that record's `record.json` bytes with its binding.
@@ -329,10 +333,11 @@ bool _pngBound(Uint8List png, String? pngField, String? jpegField) {
 /// stored and nothing is written. Placing changes no time ([placeOnRecord] leaves the body alone).
 ///
 /// A replacement that cannot happen (a read-only `record.json`, say) is logged and does not stop the caller: the
-/// bytes returned still carry the computed binding, so a zip built from them carries it too. Answers null, and
+/// bytes returned still carry the computed binding, so a zip built from them carries it too, and say the file does not
+/// hold them ([PlacedRecordJson.stored]), so that no store takes a binding its file lacks. Answers null, and
 /// writes nothing, where the directory holds no `record.json` this can decode; the caller goes on with the files as
 /// they are. The caller holds [directory]'s record lock or the store's root scope.
-Future<Uint8List?> placeRecordBindingUnlocked(DirectoryPath directory) async {
+Future<PlacedRecordJson?> placeRecordBindingUnlocked(DirectoryPath directory) async {
   final recordFile = directory.filePath('record.json');
   final CharaDetailRecord stored;
   try {
@@ -346,10 +351,11 @@ Future<Uint8List?> placeRecordBindingUnlocked(DirectoryPath directory) async {
     return null;
   }
   if (stored.metadata.binding != null) {
-    return stored.toRecordJsonBytes();
+    return (bytes: stored.toRecordJsonBytes(), stored: true);
   }
   final placed = placeOnRecord(stored, images: await computeRecordBodyImages(directory));
   final bytes = placed.toRecordJsonBytes();
+  var written = true;
   try {
     await CharaDetailRecord.replaceRecordJsonUnlocked(directory, bytes);
   } catch (error, stackTrace) {
@@ -358,6 +364,7 @@ Future<Uint8List?> placeRecordBindingUnlocked(DirectoryPath directory) async {
       error,
       stackTrace,
     );
+    written = false;
     // The replacement's staging file would otherwise go out in the record directory the caller is about to archive
     // or pack.
     try {
@@ -366,7 +373,7 @@ Future<Uint8List?> placeRecordBindingUnlocked(DirectoryPath directory) async {
       logger.w('The staging file of ${directory.name}\'s record.json could not be removed.', error, stackTrace);
     }
   }
-  return bytes;
+  return (bytes: bytes, stored: written);
 }
 
 /// The record directories the storage view's [target] is or holds: a store (`active/`, `archive/`) holds each of its
