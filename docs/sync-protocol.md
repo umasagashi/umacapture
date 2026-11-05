@@ -198,7 +198,7 @@ A record row:
 | `body.content` | The SHA-256 of the recognised content alone (`recognizedContentKey`): two bodies with the same content and bindings that agree are the same body, whatever else differs |
 | `body.parents` | The inheritance parents, `parent1` and `parent2`, each left out when empty; the whole key left out when both are |
 | `archive.state`, `archive.written_at` | The archive state and its time, from the record's `archive.json` and the store it is in |
-| `image` | The body's `metadata.binding`, `{}` where it names no image; left out where it is not worked out yet, which only a list the device has not sent holds (the server refuses such a row) |
+| `image` | The body's `metadata.binding`, `{}` where it names no image; left out where the device's `record.json` carries none — not worked out yet, or worked out and not written to it (a read-only file) —, which only a list the device has not sent holds (the server refuses such a row): a round leaves such a record as the server lists it, with every record of its operation, and tells how many it left so in its last attempt, whether that attempt ended the round done or failed after choosing them. Archiving takes the same course: a record whose binding could not be written goes into the archive store without one, so the next round works it out again |
 | `icon` | The body's `metadata.icon`; left out when the body has none |
 | `absorbed` | The ids the record absorbed in merges (`merged_ids.json`), sorted; left out when none |
 | `split_from` | The id a round split the record off, where it did |

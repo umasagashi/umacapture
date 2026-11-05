@@ -2103,6 +2103,7 @@
                 },
                 "waiting_for_room": "容量の空きを待っているレコード: {count} 件",
                 "waiting_for_the_day": "翌日に送るレコード: {count} 件",
+                "waiting_for_binding": "ファイルに書き込めず、同期を待っているレコード: {count} 件（次の同期で試し直します）",
                 "images_undone": "画像を送り終えていないレコード: {count} 件（次の同期で続けます）",
                 "withheld": "読み込めないレコード（隔離中）があるため、この端末で削除した {count} 件の削除は、まだ他の端末に届きません。",
                 "counts": "同期で残したレコード: 削除を取り消した {restored} 件・2 件に分けた {split_off} 件・片方の端末にだけあって足し合わせた {added} 件",

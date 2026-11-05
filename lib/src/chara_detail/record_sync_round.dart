@@ -599,6 +599,7 @@ class SyncRoundOutcome {
     this.longMemos = 0,
     this.waitingForRoom = 0,
     this.waitingForTheDay = 0,
+    this.waitingForBinding = 0,
     this.imagesUndone,
     this.serverStop,
   });
@@ -642,6 +643,14 @@ class SyncRoundOutcome {
   /// with nothing of the user's. None where the day's limit refused no body, or the round ended before.
   final int waitingForTheDay;
 
+  /// The ids the list sent left as the server lists them for want of a binding the round could not place: the records
+  /// whose `record.json` carries none after the round tried to work it out — it could not be written, a read-only
+  /// file, say —, with every record of their operations ([_heldBack]). They wait on the device as they are, and a round
+  /// that places their bindings sends them; a round that ends [SyncRoundEnd.done] with ids waiting is not one that sent
+  /// every change of the device's ([R7-1]). As the last attempt of the round held them back, whether it ended [SyncRoundEnd.done]
+  /// or failed after it chose them; none where the round ended before it put bodies.
+  final int waitingForBinding;
+
   /// What the image step of the round left undone for want of the server's room or answer ([SyncImagesUndone]):
   /// [end] tells of the list, and a round that ends [SyncRoundEnd.done] with images undone is not one whose images all
   /// reached the server ([R7-1]). Null where the step left none undone, or the round ended before it.
@@ -657,7 +666,7 @@ class SyncRoundOutcome {
   String toString() =>
       'SyncRoundOutcome(${end.name}, replacements: $replacements, restored: $restored, splitOff: $splitOff, '
       'added: $added, withheld: $withheld, longMemos: $longMemos, waitingForRoom: $waitingForRoom, '
-      'waitingForTheDay: $waitingForTheDay, imagesUndone: $imagesUndone, serverStop: ${serverStop?.name})';
+      'waitingForTheDay: $waitingForTheDay, waitingForBinding: $waitingForBinding, imagesUndone: $imagesUndone, serverStop: ${serverStop?.name})';
 }
 
 /// S-10: how many memos longer than [memoLengthLimit] the cells of the records [list] lists hold. A cell holds a memo
@@ -876,6 +885,7 @@ Future<SyncRoundOutcome> _runSyncRoundOn<C>(
       longMemos: outcome.longMemos,
       waitingForRoom: outcome.waitingForRoom,
       waitingForTheDay: outcome.waitingForTheDay,
+      waitingForBinding: outcome.waitingForBinding,
       imagesUndone: outcome.imagesUndone,
       serverStop: outcome.serverStop,
     );
@@ -1012,8 +1022,19 @@ Future<_Attempt> _attempt<C>(
   final merged = mergeRecordSync(agreed?.side, local.list.side, there.side);
   final result = merged.result;
   // A record still without a binding is held back, with every record of its operation. Those the base says nothing of
-  // stay so: the part of the round that reaches them merges them as a round with no base does.
-  final heldBack = _heldBack(unbound, merged, local.list, there);
+  // stay so: the part of the round that reaches them merges them as a round with no base does. A row the device read
+  // without one is held back as well: the list sent and the bodies put are read from the files, and the server refuses
+  // a row or a body with no binding, so what is sent decides it, not the stores the placing step reads.
+  final heldBack = _heldBack(
+    {
+      ...unbound,
+      for (final row in local.list.rows.values)
+        if (row.record.body.binding == null) row.record.id,
+    },
+    merged,
+    local.list,
+    there,
+  );
   // A record the device cannot read — on the quarantine shelf, one a store could not open, one that could not be read —
   // every id the device cannot tell it did not absorb, and every id joined to those, is kept as the server lists it; so
   // is a merge this device has not finished, the ids it retires, and every id joined to those. The base goes on holding
@@ -1163,6 +1184,8 @@ Future<_Attempt> _attempt<C>(
       withheld: withheld,
       waitingForRoom: forTheDay ? 0 : waiting.length,
       waitingForTheDay: forTheDay ? waiting.length : 0,
+      // What this attempt held back; an attempt the round goes on from tells nothing, as only the last one's is told.
+      waitingForBinding: heldBack.length,
       imagesUndone: imagesUndone,
       serverStop: stop ?? waitingFor ?? (imagesUndone == null ? null : images.serverStop),
     );
@@ -1872,6 +1895,7 @@ SyncRoundOutcome _told(
   int withheld = 0,
   int waitingForRoom = 0,
   int waitingForTheDay = 0,
+  int waitingForBinding = 0,
   SyncImagesUndone? imagesUndone,
   SyncServerStop? serverStop,
 }) {
@@ -1886,6 +1910,7 @@ SyncRoundOutcome _told(
     withheld: withheld,
     waitingForRoom: waitingForRoom,
     waitingForTheDay: waitingForTheDay,
+    waitingForBinding: waitingForBinding,
     imagesUndone: imagesUndone,
     serverStop: serverStop,
   );

@@ -60,6 +60,11 @@ Future<List<ArchivedRecord?>> archiveRecordsOnNative(ArchiveBatchArgs args) asyn
   return results;
 }
 
+/// The bytes the archive store takes for a record whose binding was placed: only those written to its `record.json`.
+/// Where the write was refused, none, so the store takes the record as it was before the move and a round works its
+/// binding out again instead of taking it as placed.
+Uint8List? _storedBytes(PlacedRecordJson? placed) => placed != null && placed.stored ? placed.bytes : null;
+
 /// Archives one record; answers what it carries in the archive store, or null where it was not archived.
 Future<ArchivedRecord?> archiveRecordOnNative(ArchiveRecordArgs args) async {
   try {
@@ -69,7 +74,7 @@ Future<ArchivedRecord?> archiveRecordOnNative(ArchiveRecordArgs args) async {
       logger.e('Cannot archive ${args.srcDirPath}: destination ${args.dstDirPath} already exists.');
       return null;
     }
-    final recordJson = await placeRecordBindingUnlocked(srcDir);
+    final recordJson = _storedBytes(await placeRecordBindingUnlocked(srcDir));
     // The rename carries the choice with the record: it is in archive/ with this state, or still in active/.
     final note = await noteArchiveChoiceUnlocked(srcDir, args.option);
     final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));
@@ -122,7 +127,7 @@ Future<ArchivedRecord?> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async 
     final srcDir = DirectoryPath(args.srcDirPath);
     final dstDir = DirectoryPath(args.dstDirPath);
     // Before the images are let go of, under the record lock this leg holds; the desktop leg does the same.
-    final recordJson = await placeRecordBindingUnlocked(srcDir);
+    final recordJson = _storedBytes(await placeRecordBindingUnlocked(srcDir));
     // The transaction carries the choice with the record, and a reload resumes or rolls back both together.
     final note = await noteArchiveChoiceUnlocked(srcDir, args.option);
     final result = await RecordDirectoryTransaction().execute(

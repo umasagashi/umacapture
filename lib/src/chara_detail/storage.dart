@@ -2681,8 +2681,9 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
 
 /// Places the binding on the record in each of [directories] whose `record.json` carries none
 /// ([placeRecordBindingUnlocked]), and puts each record that placing changed into the store that serves it, so the
-/// stores hold what the `record.json` files now hold. Answers each record's `record.json` bytes, with its binding, by
-/// the path of its directory; a directory holding no record that can be read is left out.
+/// stores hold what the `record.json` files now hold: a record whose binding could not be written stays in its store
+/// without one, as its file is. Answers each record's `record.json` bytes, with its binding, by the path of its
+/// directory, whether or not it could be written; a directory holding no record that can be read is left out.
 ///
 /// The one way a caller on the main isolate places a binding: the zip exports and the storage view's image delete. The
 /// archive is the exception, for a platform reason: on desktop it places in the worker isolate the batch runs in
@@ -2705,9 +2706,11 @@ Future<Map<String, Uint8List>> placeRecordBindingsUnlocked(
   final active = <CharaDetailRecord>[];
   final archived = <CharaDetailRecord>[];
   for (final directory in directories) {
-    final bytes = await placeRecordBindingUnlocked(directory);
-    if (bytes == null) continue;
+    final placedJson = await placeRecordBindingUnlocked(directory);
+    if (placedJson == null) continue;
+    final (:bytes, :stored) = placedJson;
     placed[directory.path] = bytes;
+    if (!stored) continue;
     (isInArchiveStore(directory) ? archived : active).add(CharaDetailRecord.fromRecordJson(utf8.decode(bytes)));
   }
   if (ref.exists(charaDetailRecordStorageLoaderProvider)) {

@@ -70,7 +70,7 @@ import 'support/held_write_fs_backend.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/long_read_declarations.dart';
-import 'support/record_binding_seed.dart' show expectedBinding;
+import 'support/record_binding_seed.dart' show expectedBinding, setReadOnly, windowsOnlyReadOnly;
 import 'support/record_sync_harness.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
@@ -6709,6 +6709,59 @@ void main() {
         expect([for (final record in shelf.kept) record.id], ['L0002']);
       });
 
+      test('ISS-0013: a first round with a record from before the binding whose record.json refuses the write ends, '
+          'the other records on the server and that one held back on the device, and tells it waits', () async {
+        final (x, there) = (SyncTestDevice('x'), FakeSyncServer());
+        addTearDown(x.dispose);
+        seedLegacy(x, 3);
+        final app = await x.open();
+        final refused = (x.charaDetail / 'active' / 'L0002').filePath('record.json').path;
+        final original = fsBackend;
+        fsBackend = _RefusingIoFsBackend((path) => path == refused);
+        addTearDown(() => fsBackend = original);
+
+        final outcome = await x.round(there);
+        expect(outcome.end, SyncRoundEnd.done);
+        expect(syncListOfParts(there.currentParts()).rows.keys, unorderedEquals({'L0001', 'L0003'}));
+        expect(outcome.waitingForBinding, 1);
+        expect(File(refused).readAsStringSync(), isNot(contains('"binding"')), reason: 'the write was refused');
+        final held = app.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: 'L0002');
+        expect(held?.metadata.binding, isNull, reason: 'the store holds what the file holds');
+      });
+
+      test(
+        'ISS-0013: a record from before the binding archived while its record.json refuses the write waits through a '
+        'round, and the round after the refusal is lifted sends it without opening the app again',
+        () async {
+          final (x, there) = (SyncTestDevice('x'), FakeSyncServer());
+          addTearDown(x.dispose);
+          seedLegacy(x, 3);
+          final app = await x.open();
+          await app.read(charaDetailArchiveStorageLoaderProvider.future);
+          await setReadOnly((x.charaDetail / 'active' / 'L0002').filePath('record.json').path, readOnly: true);
+          final archived = (x.charaDetail / 'archive' / 'L0002').filePath('record.json').path;
+          addTearDown(() async {
+            if (File(archived).existsSync()) await setReadOnly(archived, readOnly: false);
+          });
+          await app
+              .read(charaArchiveControllerProvider.notifier)
+              .archive(['L0002'], ArchiveImageOption.none, effects: archiveEffects(app));
+          expect(File(archived).existsSync(), isTrue, reason: 'the refused write does not stop the archive');
+
+          final refused = await x.round(there);
+          expect(refused.end, SyncRoundEnd.done);
+          expect(syncListOfParts(there.currentParts()).rows.keys, unorderedEquals({'L0001', 'L0003'}));
+          expect(refused.waitingForBinding, 1);
+
+          await setReadOnly(archived, readOnly: false);
+          final placed = await x.round(there);
+          expect(placed.end, SyncRoundEnd.done);
+          expect(syncListOfParts(there.currentParts()).rows.keys, unorderedEquals(legacyIds(3).toSet()));
+          expect(placed.waitingForBinding, 0);
+        },
+        skip: Platform.isWindows ? false : windowsOnlyReadOnly,
+      );
+
       test('[G240]: a record the user recognises again while a round works out the binding of another is written at '
           'once, not once the round has worked out every binding', () async {
         seedLegacy(a, 3);
@@ -7072,11 +7125,18 @@ CharaDetailRecord _pairRecord(String id, {required int stars, required int white
       capturedDate: capturedDate,
     );
 
-/// The io backend, refusing the deletes [refuse] picks, as for a file another program holds open.
+/// The io backend, refusing the deletes [refuse] picks, as for a file another program holds open, and the renames onto
+/// a path it picks, as for a read-only file.
 class _RefusingIoFsBackend extends IoFsBackend {
   const _RefusingIoFsBackend(this.refuse);
 
   final bool Function(String path) refuse;
+
+  @override
+  Future<void> rename(String source, String destination) async {
+    if (refuse(destination)) throw FileSystemException('Access is denied', destination);
+    return super.rename(source, destination);
+  }
 
   @override
   Future<void> delete(String path, {bool recursive = false}) async {

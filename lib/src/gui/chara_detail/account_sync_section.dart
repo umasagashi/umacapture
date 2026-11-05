@@ -120,6 +120,7 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
               if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
                 if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
                 if (told.waitingForTheDay > 0) line("waiting_for_the_day", told.waitingForTheDay),
+                if (told.waitingForBinding > 0) line("waiting_for_binding", told.waitingForBinding),
                 if (told.imagesUndone case final undone?) line("images_undone", undone.records),
                 if (told.withheld > 0) line("withheld", told.withheld),
               ],
