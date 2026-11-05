@@ -24,3 +24,10 @@
 # names carry no content hash.
 /og/fonts/*
   Cache-Control: public, max-age=86400
+
+# The public pages' font files, which tool/cloudflare/deploy_web.sh cuts out of M PLUS Rounded 1c at
+# every deploy (web/site/site.css names them). A day and not `immutable`, for the same reason as
+# above: the names carry no content hash. A day-old subset only lacks the characters a newer one
+# added, and the browser draws those with a system font.
+/site/fonts/*
+  Cache-Control: public, max-age=86400

@@ -136,3 +136,14 @@ export function recordSummary(form, tables) {
     evaluation: inheritanceOnly ? null : form.evaluation_value,
   };
 }
+
+/**
+ * The focus a record's page takes when nothing else chose one: an inheritance-only record leads
+ * with its factors and lineage, a standard one with what the training achieved.
+ *
+ * @param {object} record public JSON v1 (or anything carrying its `record_type`)
+ * @returns {"training" | "inheritance"}
+ */
+export function defaultFocus(record) {
+  return record.record_type === "inheritance_only" ? "inheritance" : "training";
+}

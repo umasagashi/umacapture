@@ -106,7 +106,12 @@ coverage/
 # tracked third-party vendored file and is intentionally NOT ignored here.
 /web/wasm/
 
-# Noto Sans JP for the OGP image function (about 9 MB), served from web/ like the wasm runtime.
+# M PLUS Rounded 1c, the public pages' font, and Noto Sans JP (about 16 MB together), served
+# from web/ like the wasm runtime. The OGP image function fetches all three files from the origin: M PLUS
+# for its text, Noto Sans JP for the characters M PLUS lacks. NotoSansJP-Bold.otf is read only by the
+# earlier OG function still in production, and is served until the current one is deployed there.
+# The public pages read woff2 subsets of
+# M PLUS that tool/cloudflare/deploy_web.sh cuts out of it into build/web/site/fonts/.
 # Pinned in tool/web_deps.json (provisioned_roots) and placed by tool/fetch_web_deps.py, so the
 # web build stops when they are missing instead of shipping without them.
 /web/og/fonts/
