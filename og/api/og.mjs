@@ -1,7 +1,7 @@
 // Vercel Function entry (Node.js runtime). vercel.json rewrites /r/* here; the handler reads the
 // path from the request URL and refuses everything that is not /r/<id>.png.
 //
-// PUBLIC_ORIGIN is where the public JSON and the fonts come from: https://umacapture.com in
+// PUBLIC_ORIGIN is where the public JSON, the fonts and the logo come from: https://umacapture.com in
 // production, the staging workers.dev origin on a preview deployment.
 
 import { createHandler } from "../src/handler.mjs";

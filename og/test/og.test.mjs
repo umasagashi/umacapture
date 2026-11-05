@@ -1,25 +1,37 @@
 // The OGP image function, driven through its handler with real HTTP requests. The upstream (the
-// public JSON and the fonts) is a local HTTP server; nothing leaves the machine. Any other fetch —
-// @vercel/og looks up glyphs the given fonts lack on Google Fonts — is refused.
+// public JSON, the fonts and the logo) is a local HTTP server; nothing leaves the machine. Any other
+// fetch — @vercel/og looks up glyphs the given fonts lack on Google Fonts — is refused and logged.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { buildFallbackCard } from "../src/card.mjs";
-import { CACHE_NONE, CACHE_NOT_FOUND, CACHE_SUCCESS, FALLBACK_PATH, FONT_FILES, createHandler } from "../src/handler.mjs";
+import { buildFallbackCard, svgDataUri } from "../src/card.mjs";
+import {
+  CACHE_NONE,
+  CACHE_NOT_FOUND,
+  CACHE_SUCCESS,
+  FALLBACK_PATH,
+  FONT_FILES,
+  LOGO_PATH,
+  createHandler,
+} from "../src/handler.mjs";
 
 const realFetch = globalThis.fetch;
+const externalFetches = [];
 globalThis.fetch = async (url) => {
+  externalFetches.push(String(url));
   throw new Error(`external fetch refused in tests: ${url}`);
 };
 
 const ID = "0123456789";
 const record = await readFile(new URL("./fixtures/record.json", import.meta.url));
-// A small Latin font stands in for the 4.5 MB Noto Sans JP files under web/og/fonts/; the card's
+// A small Latin font stands in for the multi-megabyte Japanese fonts under web/og/fonts/; the card's
 // Japanese labels render as missing glyphs, which these tests do not look at.
 const font = await readFile(new URL("../node_modules/@vercel/og/dist/Geist-Regular.ttf", import.meta.url));
+const web = new URL("../../web/", import.meta.url);
+const logo = await readFile(new URL(`.${LOGO_PATH}`, web));
 
 /** What the local upstream answers, per path; a test replaces entries. Every request is logged. */
 let routes;
@@ -47,10 +59,11 @@ after(() => {
 });
 beforeEach(() => {
   requests.length = 0;
+  externalFetches.length = 0;
   routes = {
     [`/r/${ID}.json`]: send(record, "application/json"),
-    "/og/fonts/NotoSansJP-Regular.otf": send(font, "font/otf"),
-    "/og/fonts/NotoSansJP-Bold.otf": send(font, "font/otf"),
+    [LOGO_PATH]: send(logo, "image/svg+xml"),
+    ...Object.fromEntries(FONT_FILES.map(({ path }) => [path, send(font, "font/ttf")])),
   };
 });
 
@@ -112,7 +125,7 @@ describe("OGP image", () => {
       // The bytes arrive, so ImageResponse is constructed; the font only fails to parse inside the
       // render, which runs while the body is read.
       "render fails inside the body": () => {
-        routes["/og/fonts/NotoSansJP-Regular.otf"] = send("not a font", "font/otf");
+        routes[FONT_FILES[0].path] = send("not a font", "font/ttf");
       },
     };
     for (const [name, arrange] of Object.entries(temporary)) {
@@ -129,7 +142,7 @@ describe("OGP image", () => {
 
 // The fonts are gitignored and placed by tool/fetch_web_deps.py, so they are not in this checkout.
 // Lying under a provisioned root is what makes the web build stop when one is missing.
-test("the fonts and the fallback image the function fetches are shipped under web/ and pinned", async () => {
+test("the fonts, the logo and the fallback image the function fetches are shipped under web/ and pinned", async () => {
   const manifest = JSON.parse(await readFile(new URL("../../tool/web_deps.json", import.meta.url), "utf8"));
   for (const { path } of FONT_FILES) {
     const key = path.slice(1);
@@ -139,6 +152,7 @@ test("the fonts and the fallback image the function fetches are shipped under we
       `${key} is not under a provisioned root`,
     );
   }
+  assert.ok(manifest.first_party.files.includes(LOGO_PATH.slice(1)), `${LOGO_PATH} is not listed as first-party`);
   const fallback = FALLBACK_PATH.slice(1);
   assert.ok(manifest.first_party.files.includes(fallback), `${fallback} is not listed as first-party`);
   const png = await readFile(new URL(`../../web/${fallback}`, import.meta.url));
@@ -152,7 +166,32 @@ test("the fallback card names what it stands for as 共有レコード", () => {
     else if (Array.isArray(node)) node.forEach(walk);
     else if (node?.props) walk(node.props.children);
   };
-  walk(buildFallbackCard());
+  walk(buildFallbackCard(svgDataUri(logo)));
   assert.ok(strings.includes("共有レコード"), JSON.stringify(strings));
   assert.equal(strings.includes("公開レコード"), false);
 });
+
+// A character the card's font lacks must be drawn from a font the function was given. Otherwise
+// @vercel/og asks Google Fonts for it, which sends the record's text off this origin. Needs the
+// real fonts, which tool/fetch_web_deps.py places under web/og/fonts/; skipped where they are absent.
+const realFontsPresent = await Promise.all(FONT_FILES.map(({ path }) => access(new URL(`.${path}`, web))))
+  .then(() => true)
+  .catch(() => false);
+test(
+  "a record with characters M PLUS Rounded 1c lacks is drawn without fetching anything off the origin",
+  { skip: !realFontsPresent && "the fonts under web/og/fonts/ are not provisioned" },
+  async () => {
+    for (const { path } of FONT_FILES) routes[path] = send(await readFile(new URL(`.${path}`, web)), "font/ttf");
+    const rare = JSON.parse(record.toString("utf8"));
+    rare.trainee.card.name = "[総攬]オルフェーヴル";
+    rare.factors.self.push({ gid: 3, name: "滾る想い", star: 2 }, { gid: 4, name: "夢寐に見る銀世界", star: 1 });
+    rare.scenario.name = "晴・稍重 驀逍悧迸濘";
+    routes[`/r/${ID}.json`] = send(JSON.stringify(rare), "application/json");
+
+    const response = await get(handler(), `/r/${ID}.png`);
+
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+    assert.deepEqual(externalFetches, []);
+  },
+);
