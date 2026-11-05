@@ -440,10 +440,18 @@ jobs:
       #     the files above were just re-downloaded from those URLs -- and that the committed
       #     coi-serviceworker.js, the committed license texts and the committed first-party
       #     allowlist are all consistent with the manifest.
-      #   * It does NOT validate the committed assets/web_license_info.json. CI cannot build
-      #     the emsdk core, so it regenerates a strictly smaller artifact (upstream entries
-      #     only) and overwrites the committed one; `git diff --exit-code` would therefore
-      #     always fail here. --ci-artifact asserts that smaller shape explicitly instead:
+      #   * It validates the committed assets/web_license_info.json against the manifest, and
+      #     does so FIRST, before build_runner overwrites it: --require-current asserts the
+      #     committed artifact is exactly what codegen writes from tool/web_deps.json for the
+      #     tree it lists as absent (every entry, version line and notice). That comparison
+      #     reads only the two committed files, so it holds here although CI cannot build the
+      #     emsdk core. It is what catches a manifest edited without re-running codegen.
+      #     What it cannot see is whether that tree is the one a release build provisions
+      #     (`verified`, nothing absent) -- tool/build_web.sh's --require-verified checks that
+      #     against the real web/.
+      #   * The regeneration that follows is a strictly smaller artifact (upstream entries
+      #     only), so `git diff --exit-code` against the committed one would always fail
+      #     here. --ci-artifact asserts that smaller shape explicitly instead:
       #     exactly the origin:in-tree entries must be absent, and the status must be the one
       #     that partially provisioned tree earns (`partially_provisioned`, not `verified` --
       #     `verified` means every provisioned_root entry is present, which CI cannot reach),
@@ -478,6 +486,7 @@ jobs:
       - name: Verify web license disclosure (build_runner)
         shell: bash
         run: |
+          dart run tool/check_web_pins.dart --licenses --require-current
           dart run build_runner build --force-jit --build-filter "assets/web_license_info.json"
           dart run tool/check_web_pins.dart --licenses --ci-artifact
           git checkout -- assets

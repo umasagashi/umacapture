@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -323,6 +324,57 @@ void main() {
         },
       );
       expect(verifyWebLicenses(manifest), isEmpty);
+    });
+  });
+
+  // The committed artifact is what the licence page shows, and every other check reads only its
+  // `status` and `absent`. These hold its content to the manifest: a pin added or bumped with
+  // codegen never re-run must not pass.
+  group("webDisclosureDrift", () {
+    Map<String, dynamic> upstreamEntry(String package, String version, String asset) => {
+      ...pinnedEntry(pinnedSha256),
+      "upstream": {"package": package, "version": version},
+      "license": {"id": "MIT", "asset": asset},
+    };
+    final manifest = manifestOf(
+      files: {
+        "coi-serviceworker.js": upstreamEntry("coi-serviceworker", "0.1.7", "assets/license/coi.txt"),
+        "wasm/ort/ort.wasm": upstreamEntry("onnxruntime-web", "1.27.0", "assets/license/ort.txt"),
+        "wasm/core.wasm": pinnedEntry(pinnedSha256, origin: "in-tree"),
+      },
+    );
+
+    /// The artifact codegen writes from [from], as the bytes on disk decode.
+    Map<String, dynamic> committed(Map<String, dynamic> from, [List<String> absent = const []]) =>
+        jsonDecode(jsonEncode(webLicenseDisclosure(from, absent))) as Map<String, dynamic>;
+
+    test("accepts the artifact codegen writes from the same manifest, for the tree it describes", () {
+      expect(webDisclosureDrift(committed(manifest), manifest), isEmpty);
+      // A partially provisioned tree is described as such and is no drift.
+      expect(webDisclosureDrift(committed(manifest, const ["wasm/ort/ort.wasm"]), manifest), isEmpty);
+    });
+
+    test("rejects an artifact that lacks a component the manifest gained", () {
+      final before = manifestOf(files: {...(manifest["files"] as Map<String, dynamic>)}..remove("wasm/ort/ort.wasm"));
+      expect(
+        webDisclosureDrift(committed(before), manifest),
+        contains(contains("no entry for assets/license/ort.txt")),
+      );
+    });
+
+    test("rejects an artifact that names a component's old version", () {
+      final bumped = manifestOf(
+        files: {
+          ...(manifest["files"] as Map<String, dynamic>),
+          "wasm/ort/ort.wasm": upstreamEntry("onnxruntime-web", "1.28.0", "assets/license/ort.txt"),
+        },
+      );
+      expect(
+        webDisclosureDrift(committed(manifest), bumped),
+        contains(contains("the entry for assets/license/ort.txt differs")),
+      );
+      final renumbered = {...manifest, "manifest_version": 2};
+      expect(webDisclosureDrift(committed(manifest), renumbered), contains(contains("'manifest_version' is 1")));
     });
   });
 

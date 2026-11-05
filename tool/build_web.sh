@@ -34,7 +34,7 @@ FLUTTER="${FLUTTER:-.fvm/flutter_sdk/bin/flutter}"
 # module older than the native/ sources in this tree must stop the build, not warn about it.
 if ! "$DART" run tool/check_web_pins.dart --licenses --require-verified; then
   echo "" >&2
-  echo "✖ Refusing to build: web/ does not match tool/web_deps.json (see above)." >&2
+  echo "✖ Refusing to build: web/ or assets/web_license_info.json does not match tool/web_deps.json (see above)." >&2
   echo "  Restore the pinned bytes with:" >&2
   echo "    uv run tool/fetch_web_deps.py" >&2
   echo "  or, if the change is deliberate, update the pins and regenerate the disclosure:" >&2
