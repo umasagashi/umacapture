@@ -44,6 +44,13 @@ fi
 # it a commit that nulls a license.asset, adds a relocation_required block or
 # points at a text that was never committed would pass here and only fail in CI.
 #
+# --require-current holds the artifact itself to the manifest: it must be exactly
+# what codegen writes from tool/web_deps.json for the tree it lists as absent. That
+# is the commit that skips codegen after editing the manifest -- a component added,
+# bumped or removed there while the licence page still lists the old set. It reads
+# only those two files, so it neither needs a provisioned web/ nor objects to an
+# artifact a Windows-only checkout regenerated as not_provisioned.
+#
 # --warn-stale-source-digest IS A DELIBERATE HOLE, and the only one. The manifest
 # pins the locally built web recognition core against a digest of the native/
 # sources it was compiled from; every other consumer treats a mismatch as fatal.
@@ -58,7 +65,7 @@ fi
 # `status=$?` inside `if ! cmd` would read the *negated* status (always 0), so
 # capture it on the command itself; `|| status=$?` also keeps `set -e` happy.
 status=0
-"$DART" run tool/check_web_pins.dart --licenses --warn-stale-source-digest || status=$?
+"$DART" run tool/check_web_pins.dart --licenses --require-current --warn-stale-source-digest || status=$?
 if [ "$status" -ne 0 ]; then
   if [ "$status" -eq 127 ] || [ "$status" -eq 126 ]; then
     echo "" >&2
@@ -68,7 +75,7 @@ if [ "$status" -ne 0 ]; then
     exit 1
   fi
   echo "" >&2
-  echo "✖ web/ does not match tool/web_deps.json (see above)." >&2
+  echo "✖ web/ or assets/web_license_info.json does not match tool/web_deps.json (see above)." >&2
   echo "  Restore the pinned bytes with:" >&2
   echo "    uv run tool/fetch_web_deps.py" >&2
   echo "  or, if the change is deliberate, update the pins in tool/web_deps.json" >&2

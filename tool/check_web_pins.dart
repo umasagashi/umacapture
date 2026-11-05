@@ -9,7 +9,8 @@
 ///
 ///     dart run tool/check_web_pins.dart                      # pins + closed-world scan
 ///     dart run tool/check_web_pins.dart --licenses           # + the license-side checks
-///     dart run tool/check_web_pins.dart --require-verified   # + the artifact must say 'verified'
+///     dart run tool/check_web_pins.dart --require-current    # + the artifact is codegen's output
+///     dart run tool/check_web_pins.dart --require-verified   # + ...and says 'verified' for this tree
 ///     dart run tool/check_web_pins.dart --ci-artifact        # + assert the CI-shaped artifact
 ///     dart run tool/check_web_pins.dart --source-digest      # print the in-tree source digests
 ///     dart run tool/check_web_pins.dart --warn-stale-source-digest   # report, don't fail, on stale
@@ -18,11 +19,18 @@
 ///   `relocation_required`, uncommitted license text, MPL without a source form, an upstream
 ///   file claimed under this repository's own license). Without it the check covers the bytes
 ///   only, which would make the pre-commit hook weaker than the artifact it defends.
-/// * `--require-verified` asserts the committed artifact exists, says `verified` (i.e. it was
-///   generated in a *fully* provisioned tree) and lists exactly what is missing from `web/`
-///   right now. This is what `tool/build_web.sh` gates the web build on; between them the two
-///   assertions are what stop a bundle shipping without the recognition core, whether the
-///   disclosure was regenerated from the partial tree or simply never regenerated at all.
+/// * `--require-current` asserts the committed artifact is exactly what codegen writes from
+///   this manifest for the tree the artifact lists as absent -- every entry, version line and
+///   notice (`webDisclosureDrift`). It reads nothing on disk but the two files, so it holds in a
+///   Windows-only checkout and in CI before CI regenerates the artifact. It is what catches a
+///   manifest edited without re-running codegen: a component added, bumped or removed there
+///   while the licence page still shows the old list.
+/// * `--require-verified` implies `--require-current`, and also asserts the artifact says
+///   `verified` (i.e. it was generated in a *fully* provisioned tree) and lists exactly what is
+///   missing from `web/` right now. This is what `tool/build_web.sh` gates the web build on;
+///   between them those assertions are what stop a bundle shipping without the recognition
+///   core, whether the disclosure was regenerated from the partial tree or simply never
+///   regenerated at all, and what stop it shipping a licence page the manifest has outgrown.
 /// * `--ci-artifact` requires the *generated* artifact to have the exact shape a CI
 ///   provisioning run must produce: every `origin: in-tree` entry -- and nothing else --
 ///   reported as absent, and the status that partial tree earns
@@ -61,6 +69,7 @@ const int failure = 1;
 /// Flags this script accepts.
 const List<String> knownFlags = [
   "--licenses",
+  "--require-current",
   "--require-verified",
   "--ci-artifact",
   "--source-digest",
@@ -96,9 +105,25 @@ Map<String, dynamic>? readArtifact() {
   return jsonDecode(artifact.readAsStringSync()) as Map<String, dynamic>;
 }
 
+/// Checks that the artifact exists and is what codegen writes from this manifest.
+///
+/// See `webDisclosureDrift`: the comparison is against the tree the artifact itself lists as
+/// absent, so it needs no provisioned `web/`.
+List<String> checkCurrentArtifact(Map<String, dynamic> manifest) {
+  final generated = readArtifact();
+  if (generated == null) {
+    return [
+      "$webLicenseArtifact is missing; run 'dart run build_runner build --force-jit' "
+          "(a failed run deletes it rather than writing a half-verified one)",
+    ];
+  }
+  return webDisclosureDrift(generated, manifest);
+}
+
 /// Checks that the artifact exists, claims a verified disclosure, and describes *this* tree.
 ///
-/// Two assertions, because the artifact is **committed** while the tree it describes is partly
+/// [checkCurrentArtifact] first: an artifact whose entries the manifest has outgrown misdescribes
+/// any tree. Then two assertions, because the artifact is **committed** while the tree it describes is partly
 /// gitignored. Its `status` records whatever tree the last codegen ran in, so a clone that
 /// provisioned only the upstream pins -- or nothing at all -- still reads `verified` off disk:
 ///
@@ -138,7 +163,7 @@ List<String> checkVerifiedArtifact(Map<String, dynamic> manifest) {
       "(uv run tool/fetch_web_deps.py, plus native/wasm/build.sh) and re-run codegen",
     );
   }
-  return problems;
+  return [...problems, ...webDisclosureDrift(generated, manifest)];
 }
 
 /// Checks the generated artifact against the shape a CI provisioning run must produce.
@@ -233,6 +258,8 @@ Future<void> main(List<String> arguments) async {
   );
   if (arguments.contains("--require-verified")) {
     requireNoProblems(checkVerifiedArtifact(manifest), "$webLicenseArtifact does not cover this tree:");
+  } else if (arguments.contains("--require-current")) {
+    requireNoProblems(checkCurrentArtifact(manifest), "$webLicenseArtifact was not generated from $webDepsManifest:");
   }
   if (arguments.contains("--ci-artifact")) {
     requireNoProblems(checkCiArtifact(manifest), "$webLicenseArtifact is not what this run should produce:");

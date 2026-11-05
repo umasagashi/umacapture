@@ -17,13 +17,18 @@
 /// * `tool/check_web_pins.dart`, which the pre-commit hook and CI run directly, and
 /// * `tool/build_web.sh`, which gates `flutter build web` on it.
 ///
-/// It intentionally depends on nothing but `dart:io`, `crypto` and `path` so the
-/// command-line entry point starts quickly enough to sit in a git hook.
+/// It is also the single implementation of what the disclosure *says*
+/// ([webLicenseDisclosure]): the builder writes it, and `tool/check_web_pins.dart` holds the
+/// committed artifact to it ([webDisclosureDrift]).
+///
+/// It intentionally depends on nothing but `dart:io`, `collection`, `crypto` and `path` so
+/// the command-line entry point starts quickly enough to sit in a git hook.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
 
@@ -455,6 +460,209 @@ bool isMozillaPublicLicense(String id) => id.toUpperCase().contains("MPL");
 bool hasCompleteSourceForm(Map<String, dynamic>? sourceForm) {
   const required = ["form", "url", "sha256", "git_url"];
   return sourceForm != null && required.every((key) => sourceForm[key] != null);
+}
+
+/// The disclosure of a single license text, and every claim that points at it.
+class _WebLicenseReference {
+  _WebLicenseReference({
+    required this.package,
+    required this.asset,
+    required this.licenseId,
+    required this.subNoticeOf,
+  });
+
+  /// Name the license page groups this text under.
+  final String package;
+
+  /// Repository-relative path of the committed license text.
+  final String asset;
+
+  /// SPDX-ish id as recorded in the manifest.
+  final String licenseId;
+
+  /// Package this text is a sub-notice of, or `null` when it stands alone.
+  final String? subNoticeOf;
+
+  /// Shipped files per `(component, relation)`, so files sharing a component collapse
+  /// into one line instead of repeating the component name for each of them.
+  final Map<(String, WebClaimRelation), List<String>> _coverage = {};
+
+  /// The first source form seen; only MPL texts render it, and those come from one node.
+  Map<String, dynamic>? sourceForm;
+
+  void add(WebLicenseClaim claim) {
+    _coverage.putIfAbsent((claim.component, claim.relation), () => []).add(claim.file);
+    sourceForm ??= claim.sourceForm;
+  }
+
+  /// One line per component, naming how well the relation is evidenced.
+  ///
+  /// The qualifier matters: "shipped as" is backed by a SHA-256 pin over the exact bytes,
+  /// while "statically linked into" is read off the build inputs. Rendering both in the same
+  /// voice would overstate the second.
+  List<String> get componentLines => [
+    for (final entry in _coverage.entries)
+      "${entry.key.$1} -- ${entry.key.$2.phrase} ${entry.value.join(", ")} (${entry.key.$2.qualifier})",
+  ];
+}
+
+/// Groups [claims] by the license text they point at, one disclosure per text.
+///
+/// Several files often share one text (the three onnxruntime-web files, the mediabunny
+/// bundle and its LICENSE), and a text with a `parent` is a sub-notice: it is disclosed
+/// under that already-listed package rather than as a dependency of its own.
+///
+/// Pure rendering: every way a claim can be *wrong* is detected by [verifyWebLicenses],
+/// which `DistributionInfoBuilder` runs first and aborts on, so the two cannot drift apart.
+/// Claims whose asset lies outside [licenseAssetDirectory] are this repository's own code,
+/// already covered by its `LICENSE`, and are not disclosed again.
+Map<String, _WebLicenseReference> _groupWebLicenses(List<WebLicenseClaim> claims) {
+  final references = <String, _WebLicenseReference>{};
+  for (final claim in claims) {
+    final asset = claim.licenseAsset;
+    if (asset == null || !asset.startsWith(licenseAssetDirectory)) {
+      continue;
+    }
+    final parent = claim.license["parent"] as String?;
+    references
+        .putIfAbsent(
+          asset,
+          () => _WebLicenseReference(
+            package: parent ?? path.basenameWithoutExtension(asset),
+            asset: asset,
+            licenseId: claim.license["id"] as String,
+            subNoticeOf: parent,
+          ),
+        )
+        .add(claim);
+  }
+  return references;
+}
+
+/// Renders the provenance header shown above [reference]'s license text.
+///
+/// Blocks are blank-line separated because `LicenseEntryWithLineBreaks` joins
+/// consecutive lines of equal indentation into a single paragraph.
+String _webLicenseNotice(_WebLicenseReference reference) {
+  final blocks = <String>[
+    "Included in the umacapture web build (inventory: $webDepsManifest).",
+    ...reference.componentLines,
+    "License: ${reference.licenseId}",
+  ];
+  if (reference.subNoticeOf != null) {
+    blocks.add(
+      "Disclosed under ${reference.subNoticeOf} because it is bundled inside it, and "
+      "${reference.subNoticeOf}'s own license text does not reproduce this notice.",
+    );
+  }
+  final sourceForm = reference.sourceForm;
+  if (isMozillaPublicLicense(reference.licenseId) && sourceForm != null) {
+    blocks.add(
+      "Source form (MPL-2.0 section 3.2): the file(s) above are shipped unmodified and hash-pinned in "
+      "$webDepsManifest. The corresponding source is ${sourceForm["url"]} (sha256 ${sourceForm["sha256"]}), "
+      "also published at ${sourceForm["git_url"]}.",
+    );
+  }
+  return blocks.join("\n\n");
+}
+
+/// Returns the content of [webLicenseArtifact] for a tree that lacks the manifest entries in
+/// [absent] and holds every other one.
+///
+/// This is the one place that decides what the disclosure says: `DistributionInfoBuilder` writes
+/// its output, and [webDisclosureDrift] holds a committed artifact to it. It reads nothing but its
+/// arguments -- the tree enters only through [absent] -- so a verifier can ask what codegen writes
+/// for the tree an artifact claims to describe without that tree being on disk.
+Map<String, dynamic> webLicenseDisclosure(Map<String, dynamic> manifest, List<String> absent) {
+  final files = (manifest["files"] as Map).cast<String, dynamic>();
+  final present = {
+    for (final entry in files.entries)
+      if (!absent.contains(entry.key)) entry.key: (entry.value as Map).cast<String, dynamic>(),
+  };
+  final references = _groupWebLicenses(webLicenseClaims(present));
+  final sorted = references.values.toList()..sort((a, b) => a.asset.compareTo(b.asset));
+  return {
+    "status": webProvisioningStatus(manifest, absent),
+    "status_scope":
+        "Every pinned file present under web/ hashes to its pin, nothing unpinned or "
+        "unlisted sits in the tree, and every license text referenced below is committed. "
+        "The components listed as 'statically linked into' a file are recorded from the "
+        "inputs of the build that produced it; they are not derived from the binary.",
+    "manifest_version": manifest["manifest_version"],
+    "generated_from": webDepsManifest,
+    "absent": absent,
+    "entries": [
+      for (final reference in sorted)
+        {
+          "package": reference.package,
+          "asset": reference.asset,
+          "license_id": reference.licenseId,
+          "sub_notice_of": reference.subNoticeOf,
+          "components": reference.componentLines,
+          "notice": _webLicenseNotice(reference),
+        },
+    ],
+  };
+}
+
+/// Returns one problem line per way [artifact] differs from what codegen writes from [manifest].
+///
+/// The expectation is [webLicenseDisclosure] for the tree the artifact itself lists as `absent`,
+/// so this answers "was this artifact generated from this manifest" and nothing about the disk;
+/// `tool/check_web_pins.dart --require-verified` adds that. Every other check reads only the
+/// artifact's `status` and `absent`, so without this one a pin added to, bumped in or removed from
+/// the manifest with codegen never re-run passes every gate while the licence page lacks the
+/// component, or names its old version.
+List<String> webDisclosureDrift(Map<String, dynamic> artifact, Map<String, dynamic> manifest) {
+  final claimedAbsent = artifact["absent"];
+  if (claimedAbsent is! List) {
+    return ["$webLicenseArtifact has no 'absent' list, so it cannot say which tree it describes"];
+  }
+  final expected = webLicenseDisclosure(manifest, claimedAbsent.cast<String>());
+  const equality = DeepCollectionEquality();
+  final problems = <String>[];
+  for (final key in {...expected.keys, ...artifact.keys}) {
+    if (key != "entries" && !equality.equals(artifact[key], expected[key])) {
+      problems.add("'$key' is ${_excerpt(artifact[key])}, but $webDepsManifest gives ${_excerpt(expected[key])}");
+    }
+  }
+  final actualEntries = artifact["entries"];
+  final expectedEntries = expected["entries"] as List;
+  if (actualEntries is! List) {
+    problems.add("'entries' is not a list");
+  } else if (!equality.equals(actualEntries, expectedEntries)) {
+    final actualByAsset = {for (final entry in actualEntries) (entry as Map)["asset"]: entry};
+    final expectedByAsset = {for (final entry in expectedEntries) (entry as Map)["asset"]: entry};
+    final before = problems.length;
+    for (final asset in expectedByAsset.keys) {
+      if (!actualByAsset.containsKey(asset)) {
+        problems.add("no entry for $asset, which $webDepsManifest discloses");
+      } else if (!equality.equals(actualByAsset[asset], expectedByAsset[asset])) {
+        problems.add("the entry for $asset differs from what $webDepsManifest gives");
+      }
+    }
+    for (final asset in actualByAsset.keys) {
+      if (!expectedByAsset.containsKey(asset)) {
+        problems.add("an entry for $asset, which $webDepsManifest does not disclose");
+      }
+    }
+    if (problems.length == before) {
+      problems.add("'entries' are not the list codegen writes (duplicated or out of order)");
+    }
+  }
+  if (problems.isEmpty) {
+    return problems;
+  }
+  return [
+    for (final problem in problems) "$webLicenseArtifact: $problem",
+    "it was not generated from this $webDepsManifest; run 'dart run build_runner build --force-jit'",
+  ];
+}
+
+/// Renders [value] as JSON, cut short enough for one problem line.
+String _excerpt(Object? value) {
+  final text = jsonEncode(value);
+  return text.length <= 80 ? text : "${text.substring(0, 77)}...";
 }
 
 /// Returns one problem line per license claim that must not be published as it stands.

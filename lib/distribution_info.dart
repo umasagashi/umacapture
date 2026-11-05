@@ -470,66 +470,6 @@ class DistributionInfoBuilder implements Builder {
     }
   }
 
-  /// Groups [claims] by the license text they point at, one disclosure per text.
-  ///
-  /// Several files often share one text (the three onnxruntime-web files, the mediabunny
-  /// bundle and its LICENSE), and a text with a `parent` is a sub-notice: it is disclosed
-  /// under that already-listed package rather than as a dependency of its own.
-  ///
-  /// Pure rendering: every way a claim can be *wrong* is detected by [verifyWebLicenses],
-  /// which runs first and aborts the build, so the two cannot drift apart. Claims whose
-  /// asset lies outside [licenseAssetDirectory] are this repository's own code, already
-  /// covered by its `LICENSE`, and are not disclosed again.
-  Map<String, _WebLicenseReference> _groupWebLicenses(List<WebLicenseClaim> claims) {
-    final references = <String, _WebLicenseReference>{};
-    for (final claim in claims) {
-      final asset = claim.licenseAsset;
-      if (asset == null || !asset.startsWith(licenseAssetDirectory)) {
-        continue;
-      }
-      final parent = claim.license["parent"] as String?;
-      references
-          .putIfAbsent(
-            asset,
-            () => _WebLicenseReference(
-              package: parent ?? path.basenameWithoutExtension(asset),
-              asset: asset,
-              licenseId: claim.license["id"] as String,
-              subNoticeOf: parent,
-            ),
-          )
-          .add(claim);
-    }
-    return references;
-  }
-
-  /// Renders the provenance header shown above [reference]'s license text.
-  ///
-  /// Blocks are blank-line separated because [LicenseEntryWithLineBreaks] joins
-  /// consecutive lines of equal indentation into a single paragraph.
-  String _webLicenseNotice(_WebLicenseReference reference) {
-    final blocks = <String>[
-      "Included in the umacapture web build (inventory: $webDepsManifest).",
-      ...reference.componentLines,
-      "License: ${reference.licenseId}",
-    ];
-    if (reference.subNoticeOf != null) {
-      blocks.add(
-        "Disclosed under ${reference.subNoticeOf} because it is bundled inside it, and "
-        "${reference.subNoticeOf}'s own license text does not reproduce this notice.",
-      );
-    }
-    final sourceForm = reference.sourceForm;
-    if (isMozillaPublicLicense(reference.licenseId) && sourceForm != null) {
-      blocks.add(
-        "Source form (MPL-2.0 section 3.2): the file(s) above are shipped unmodified and hash-pinned in "
-        "$webDepsManifest. The corresponding source is ${sourceForm["url"]} (sha256 ${sourceForm["sha256"]}), "
-        "also published at ${sourceForm["git_url"]}.",
-      );
-    }
-    return blocks.join("\n\n");
-  }
-
   /// Builds the license disclosure for everything this repository places under `web/`.
   ///
   /// The tree is treated as a closed world: every pinned file that exists must hash to its
@@ -559,37 +499,13 @@ class DistributionInfoBuilder implements Builder {
     final manifest = parseWebDepsManifest(await buildStep.readAsString(manifestId));
     final files = (manifest["files"] as Map).cast<String, dynamic>();
     await _trackWebAssets(buildStep, files.keys);
-    final (present, absent) = partitionWebFiles(files);
+    final (_, absent) = partitionWebFiles(files);
 
     final problems = await verifyWebTree(manifest, licenses: true);
     if (problems.isNotEmpty) {
       throw Exception("web/ does not match $webDepsManifest:\n  ${problems.join("\n  ")}");
     }
-
-    final references = _groupWebLicenses(webLicenseClaims(present));
-    final sorted = references.values.toList()..sort((a, b) => a.asset.compareTo(b.asset));
-    return jsonEncoder.convert({
-      "status": webProvisioningStatus(manifest, absent),
-      "status_scope":
-          "Every pinned file present under web/ hashes to its pin, nothing unpinned or "
-          "unlisted sits in the tree, and every license text referenced below is committed. "
-          "The components listed as 'statically linked into' a file are recorded from the "
-          "inputs of the build that produced it; they are not derived from the binary.",
-      "manifest_version": manifest["manifest_version"],
-      "generated_from": webDepsManifest,
-      "absent": absent,
-      "entries": [
-        for (final reference in sorted)
-          {
-            "package": reference.package,
-            "asset": reference.asset,
-            "license_id": reference.licenseId,
-            "sub_notice_of": reference.subNoticeOf,
-            "components": reference.componentLines,
-            "notice": _webLicenseNotice(reference),
-          },
-      ],
-    });
+    return jsonEncoder.convert(webLicenseDisclosure(manifest, absent));
   }
 
   FutureOr<String> _buildVersionInfo(String inputPath) async {
@@ -775,48 +691,4 @@ BundledWindowsDlls parseBundledWindowsDlls(String cmakeLists) {
     }
   }
   return BundledWindowsDlls(thirdParty: thirdParty, system: system, systemDirectory: systemDirectory);
-}
-
-/// The disclosure of a single license text, and every claim that points at it.
-class _WebLicenseReference {
-  _WebLicenseReference({
-    required this.package,
-    required this.asset,
-    required this.licenseId,
-    required this.subNoticeOf,
-  });
-
-  /// Name the license page groups this text under.
-  final String package;
-
-  /// Repository-relative path of the committed license text.
-  final String asset;
-
-  /// SPDX-ish id as recorded in the manifest.
-  final String licenseId;
-
-  /// Package this text is a sub-notice of, or `null` when it stands alone.
-  final String? subNoticeOf;
-
-  /// Shipped files per `(component, relation)`, so files sharing a component collapse
-  /// into one line instead of repeating the component name for each of them.
-  final Map<(String, WebClaimRelation), List<String>> _coverage = {};
-
-  /// The first source form seen; only MPL texts render it, and those come from one node.
-  Map<String, dynamic>? sourceForm;
-
-  void add(WebLicenseClaim claim) {
-    _coverage.putIfAbsent((claim.component, claim.relation), () => []).add(claim.file);
-    sourceForm ??= claim.sourceForm;
-  }
-
-  /// One line per component, naming how well the relation is evidenced.
-  ///
-  /// The qualifier matters: "shipped as" is backed by a SHA-256 pin over the exact bytes,
-  /// while "statically linked into" is read off the build inputs. Rendering both in the same
-  /// voice would overstate the second.
-  List<String> get componentLines => [
-    for (final entry in _coverage.entries)
-      "${entry.key.$1} -- ${entry.key.$2.phrase} ${entry.value.join(", ")} (${entry.key.$2.qualifier})",
-  ];
 }
