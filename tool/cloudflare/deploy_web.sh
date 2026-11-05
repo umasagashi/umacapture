@@ -31,11 +31,16 @@
 #     before the tree is fingerprinted and uploaded. Staging sends nothing to
 #     Sentry. Either way the maps are excluded from the deployment by
 #     web/.assetsignore.
-#   3 [sharing on] name tables: tool/cloudflare/build_share_tables.py writes
+#   3 name tables and page fonts:
+#     [sharing on] tool/cloudflare/build_share_tables.py writes
 #     server/src/tables.generated.json from the module archive the live
 #     pointer names, checked append-only against the target's own baseline
 #     tool/cloudflare/.deploy-backup/tables.<target>.json; the Worker bundles
 #     it. Each target has its own D1 and so its own baseline.
+#     Then, for either choice, tool/cloudflare/build_page_fonts.py writes the
+#     public pages' font files into build/web/site/fonts/ (the files
+#     web/site/site.css names): subsets of the pinned M PLUS Rounded 1c, cut to
+#     the pages' wording and, with sharing on, the names in those tables.
 #   4 write build/web/deploy.json (git_sha, build time, wasm sha256, and with
 #     sharing on the sha256 of the module archive the tables were built from)
 #   5 wrangler deploy --dry-run (config and asset collection, no upload)
@@ -161,8 +166,7 @@ cd "$REPO_ROOT"
 
 # ---- 0 preflight -------------------------------------------------------------
 step "0 preflight ($TARGET, sharing $SHARING)"
-tools=(git curl sha256sum npm)
-[[ "$SHARE_TABLES" == 1 ]] && tools+=(uv)
+tools=(git curl sha256sum npm uv)
 for tool in "${tools[@]}"; do
   command -v "$tool" >/dev/null || fail "$tool not found on PATH"
 done
@@ -193,8 +197,9 @@ if [[ "$SENTRY_MAPS" == 1 ]]; then
   bash tool/upload_web_sourcemaps.sh
 fi
 
-# ---- 3 name tables -----------------------------------------------------------
+# ---- 3 name tables and page fonts --------------------------------------------
 TABLES_ARCHIVE_SHA=""
+FONT_ARGS=()
 if [[ "$SHARE_TABLES" == 1 ]]; then
   step "3 name tables"
   rm -f "$TABLES_OUT"
@@ -205,7 +210,12 @@ if [[ "$SHARE_TABLES" == 1 ]]; then
   rm -f "$tables_source"
   [[ "$TABLES_ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ && -f "$TABLES_OUT" ]] \
     || fail "build_share_tables.py did not record the sha256 of the archive it read"
+  # The record pages print the names in these tables, so the font covers them too.
+  FONT_ARGS=(--tables "$TABLES_OUT")
 fi
+step "3 page fonts"
+uv run tool/cloudflare/build_page_fonts.py --web-out "$WEB_DIR" ${FONT_ARGS[@]+"${FONT_ARGS[@]}"} \
+  || fail "build_page_fonts.py did not write the public pages' fonts"
 
 # ---- 4 deploy.json -----------------------------------------------------------
 step "4 deploy.json"

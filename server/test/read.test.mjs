@@ -66,10 +66,21 @@ describe("published record", () => {
     assert.equal(html.includes("<b>"), false, "a raw table name reached the markup");
     assert.ok(html.includes("<h1>card &lt;b&gt;&amp;&quot;&#39;</h1>"), "escaped heading missing");
     assert.ok(html.includes("<title>card &lt;b&gt;&amp;&quot;&#39; rank 2 12345 | umacapture</title>"), "escaped title missing");
-    assert.ok(html.includes("<li>support 1 4凸 Lv50</li>"), "support cards missing");
-    assert.ok(html.includes("<tr><th>共有日</th><td>2026-09-29</td></tr>"), "share day row missing");
+    assert.ok(html.includes('<div class="rec-support">support 1<span class="rec-k">4凸 ・ Lv50</span></div>'), "support cards missing");
+    assert.ok(html.includes("<dt>共有日</dt><dd>2026-09-29</dd>"), "share day row missing");
     assert.equal(html.includes("公開日"), false, "the share day is still labelled 公開日");
     assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
+  });
+
+  test("page of an inheritance-only record is served and names both parents", async () => {
+    const id = "1123456789";
+    await worker.insertRecord(id, postedForm({ record_type: "InheritanceOnly" }), 20_725);
+    const res = await worker.fetch(`/r/${id}`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    for (const parent of ["chara 1", "chara 2"]) {
+      assert.ok(html.includes(`<strong>${parent}</strong>`), `parent ${parent} missing`);
+    }
   });
 });
 
@@ -229,6 +240,15 @@ describe("account list", () => {
     assert.ok(html.includes(`<a href="${ORIGIN}/r/${older}">`), "a listed record links to its page");
     assert.equal(html.includes("<b>"), false, "a raw table name reached the markup");
     assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
+
+    // The sort query reorders the same records, and an unknown value falls back to the default.
+    for (const query of ["?sort=evaluation", "?sort=bogus"]) {
+      const sorted = await worker.fetch(`/u/${owner}${query}`);
+      assert.equal(sorted.status, 200, query);
+      const listed = [...(await sorted.text()).matchAll(/<a href="[^"]*\/r\/([0-9a-z]{10})">/g)].map((m) => m[1]);
+      assert.deepEqual(listed.sort(), ["a000000000", "b000000000", older].sort(), query);
+      assert.equal(listed.includes(theirs), false, `another account's share is listed under ${query}`);
+    }
 
     // The records of the list read without a session too.
     for (const path of [`/r/${older}`, `/r/${older}.json`]) {

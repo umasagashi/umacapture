@@ -42,7 +42,7 @@ describe("login start page", () => {
     assert.equal(res.headers.get("referrer-policy"), "same-origin");
     const csp = res.headers.get("content-security-policy").split("; ");
     assert.ok(csp.includes("form-action 'self' https://accounts.google.com"), csp.join("; "));
-    assert.equal(csp.length, 7);
+    assert.equal(csp.length, 8);
     const html = await res.text();
     assert.match(html, /<form id="begin" method="POST" action="\/api\/auth\/begin">/);
     assert.ok(html.includes(`name="h" value="${h}"`));

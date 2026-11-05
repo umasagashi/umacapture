@@ -4,23 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>プライバシーポリシー — umacapture</title>
-  <!-- Self-contained on purpose: the site is served with COEP require-corp, so anything fetched
-       from another origin without CORP would be blocked. System fonts only, inline style only. -->
-  <style>
-    :root { color-scheme: light dark; }
-    body {
-      max-width: 44rem;
-      margin: 0 auto;
-      padding: 1.5rem 1rem 3rem;
-      font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
-      line-height: 1.8;
-    }
-    h1 { font-size: 1.5rem; line-height: 1.4; }
-    h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid; padding-bottom: .2rem; }
-  </style>
+  <!-- Same origin only: the site is served with COEP require-corp, so anything fetched from
+       another origin without CORP would be blocked. The look is web/site/site.css, shared with
+       every public page; the header below is the one that stylesheet defines. -->
+  <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/favicon.png">
 </head>
 <body>
+  <header class="site-header"><div class="site-header-inner">
+    <a class="site-brand" href="/"><img src="/site/logo.svg" alt="" width="28" height="28">umacapture</a>
+    <fieldset class="site-theme"><legend>表示の色</legend>
+      <input type="radio" name="site-theme" id="site-theme-auto" checked><label for="site-theme-auto">自動</label>
+      <input type="radio" name="site-theme" id="site-theme-light"><label for="site-theme-light">ライト</label>
+      <input type="radio" name="site-theme" id="site-theme-dark"><label for="site-theme-dark">ダーク</label>
+    </fieldset>
+  </div></header>
+  <main class="site-doc">
   <h1>プライバシーポリシー</h1>
 
   <p>umacapture（以下「このアプリ」）が、利用する人の情報をどのように扱うかを説明します。このページの内容は、Windows 版と web 版の両方に当てはまります。</p>
@@ -139,5 +138,6 @@
   <p>同期をオフにすると、その端末は新しく同期を始めません。オフにしたときに同期が動いていた場合は、その回は最後まで続き、レコードや画像を送ることがあります。そのほかに、オフの間にその端末からサーバーへレコードを送ることはありません（同期をオンにする画面を開いたときは、件数と画像の設定を示すために、サーバーの一覧表と設定を読みます）。</p>
   <p>端末のレコードは、そのまま残ります。サーバーのデータも残ります。サーバーのデータをすべて消すには、アカウントを削除してください。</p>
   <p>オフの間にその端末で変えたこと（削除を含みます）は、もう一度オンにしたときにサーバーへ反映されます。オフの間も、ほかの端末で同期を続けていれば、そこでの削除や項目 14 の期限によって、サーバーのものは消えます。</p>
+  </main>
 </body>
 </html>

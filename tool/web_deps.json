@@ -51,6 +51,8 @@
     "exactly does this repo place under web/, and under which license'. It does NOT cover the",
     "rest of build/web/: Flutter emits flutter.js, flutter_bootstrap.js, main.dart.js and the",
     "CanvasKit / Skwasm payload at build time, and those carry the Flutter SDK's own licensing.",
+    "tool/cloudflare/deploy_web.sh also writes build/web/site/fonts/, the public pages' woff2",
+    "subsets; they are cut from the pinned og/fonts/MPLUSRounded1c-*.ttf, whose entries disclose them.",
     "",
     "'first_party' below lists this repo's own hand-written files under web/ (verified against",
     "'git ls-files web/'). Anything under web/ that is neither pinned in 'files' nor allow-listed",
@@ -120,10 +122,52 @@
       "splash/style.css",
       "_headers",
       ".assetsignore",
-      "og/default.png"
+      "og/default.png",
+      "site/site.css",
+      "site/logo.svg"
     ]
   },
   "files": {
+    "og/fonts/MPLUSRounded1c-Regular.ttf": {
+      "sha256": "b75708b53e45b06d17d470aeeca5b766e3d1b3999f03f13ec4eb863ca846c14c",
+      "bytes": 3389792,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/fbe81817505e8aeadc53cc7a38a2b76fb57c333e/ofl/mplusrounded1c/MPLUSRounded1c-Regular.ttf",
+        "package": "M PLUS Rounded 1c",
+        "version": "1.059.20150529"
+      },
+      "license": {
+        "id": "OFL-1.1",
+        "asset": "assets/license/mplus_rounded_1c.txt"
+      },
+      "linked_note": "Nothing to link: this is a font file, not code. Its name table holds the copyright 'Copyright 2016 The Rounded M+ Project Authors.' and the OFL 1.1 licence description, and declares no Reserved Font Name; no other font or program is embedded.",
+      "source_form": {
+        "form": "git",
+        "git_url": "https://github.com/google/fonts/tree/fbe81817505e8aeadc53cc7a38a2b76fb57c333e/ofl/mplusrounded1c",
+        "note": "The TTF as Google Fonts distributes it, which is the app's font (google_fonts' mPlusRounded1c). google/fonts names coz-m/MPLUS_FONTS as the upstream with low confidence, so no other source form is pinned. Shipped for two readers: tool/cloudflare/build_page_fonts.py cuts the public pages' woff2 subsets out of it at deploy time (written into build/web/site/fonts/, keeping the name table, so each subset carries this copyright and licence), and the OGP image function can fetch it from this origin."
+      }
+    },
+    "og/fonts/MPLUSRounded1c-Bold.ttf": {
+      "sha256": "c358630584e8e2d8fbd6121d0f4693255ffef6d1e6d4f3441fd6e5a963a11f9e",
+      "bytes": 3542592,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/fbe81817505e8aeadc53cc7a38a2b76fb57c333e/ofl/mplusrounded1c/MPLUSRounded1c-Bold.ttf",
+        "package": "M PLUS Rounded 1c",
+        "version": "1.059.20150529"
+      },
+      "license": {
+        "id": "OFL-1.1",
+        "asset": "assets/license/mplus_rounded_1c.txt"
+      },
+      "linked_note": "Nothing to link: this is a font file, not code. Its name table holds the copyright 'Copyright 2016 The Rounded M+ Project Authors.' and the OFL 1.1 licence description, and declares no Reserved Font Name; no other font or program is embedded.",
+      "source_form": {
+        "form": "git",
+        "git_url": "https://github.com/google/fonts/tree/fbe81817505e8aeadc53cc7a38a2b76fb57c333e/ofl/mplusrounded1c",
+        "note": "The TTF as Google Fonts distributes it, which is the app's font (google_fonts' mPlusRounded1c). google/fonts names coz-m/MPLUS_FONTS as the upstream with low confidence, so no other source form is pinned. Shipped for two readers: tool/cloudflare/build_page_fonts.py cuts the public pages' woff2 subsets out of it at deploy time (written into build/web/site/fonts/, keeping the name table, so each subset carries this copyright and licence), and the OGP image function can fetch it from this origin."
+      }
+    },
     "og/fonts/NotoSansJP-Regular.otf": {
       "sha256": "dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073",
       "bytes": 4533028,
@@ -161,7 +205,7 @@
       "source_form": {
         "form": "git",
         "git_url": "https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans",
-        "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. Read at runtime by the OGP image function in og/, which fetches it from this origin instead of bundling it."
+        "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. The OGP function in og/ no longer reads it, but the earlier version of that function still running in production fetches it from this origin and draws no card without it, so the file stays served until the current og/ function is deployed to production; remove this pin in a commit after that deploy."
       }
     },
     "coi-serviceworker.js": {

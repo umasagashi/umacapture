@@ -1,0 +1,281 @@
+/*
+ * The look every public page shares: /notice/ and /privacy/ (static files under web/), and the
+ * pages the Worker builds (/r/<id>, /u/<id>, the login pages). This file is the one place the
+ * palette, the font and the site header are defined; a page links it and uses its classes.
+ *
+ * Palette: the app's own theme (lib/src/gui/app_widget.dart: FlexScheme.blue,
+ * FlexSurfaceMode.highScaffoldLowSurface, blend level 20 light / 15 dark, then modifyTheme), as
+ * the ColorScheme roles that construction produces. Each variable names its role. light-dark()
+ * picks the value from color-scheme, so each value is written once: the system setting decides
+ * by default, and the theme switch in the header overrides color-scheme alone.
+ *
+ * Font: M PLUS Rounded 1c, the app's font. tool/cloudflare/build_page_fonts.py writes the two
+ * files below at deploy time, cut down to the characters the pages and the name tables use. A
+ * character outside them, or a build without them, falls back to the system fonts listed in
+ * --font.
+ *
+ * Same origin only: the static pages are served with COEP require-corp, and the Worker's pages
+ * allow 'self' for styles and fonts and nothing else.
+ */
+
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/mplus-rounded-1c-regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/mplus-rounded-1c-bold.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: light dark;
+  --font: "M PLUS Rounded 1c", system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  /* The page background: modifyTheme's scaffoldBackgroundColor (surfaceContainerHigh). */
+  --page: light-dark(#E5E8EB, #202223);
+  /* A card on the page: cardTheme's colour (surface). */
+  --card: light-dark(#F3F6FA, #0C0D0F);
+  /* A header band: modifyTheme's tertiary (the blended scaffold of FlexThemeData). */
+  --band: light-dark(#C8DBF0, #1A242D);
+  /* A soft blue fill on a card: modifyTheme's surfaceContainerLow. */
+  --tint: light-dark(#DDEDFD, #052F46);
+  --ink: light-dark(#111111, #F1F1F1); /* onSurface */
+  --muted: light-dark(#393939, #CACACA); /* onSurfaceVariant */
+  --line: light-dark(#D1D1D1, #414141); /* outlineVariant */
+  --primary: light-dark(#1565C0, #90CAF9);
+  --on-primary: light-dark(#FFFFFF, #000000);
+  --primary-container: light-dark(#90CAF9, #0D47A1);
+  --on-primary-container: light-dark(#000000, #FFFFFF);
+  /* One column for the header and the page under it, so their left edges line up. */
+  --site-width: 48rem;
+  --site-gutter: 1rem;
+}
+:root:has(#site-theme-light:checked) { color-scheme: light; }
+:root:has(#site-theme-dark:checked) { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font);
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--primary); }
+
+/* The site header: the mark and the name, linking to the app, and the theme switch. */
+.site-header { background: var(--band); }
+.site-header-inner {
+  max-width: calc(var(--site-width) + 2 * var(--site-gutter));
+  margin: 0 auto;
+  padding: .6rem var(--site-gutter);
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+.site-brand {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.site-brand img { width: 28px; height: 28px; display: block; }
+.site-kind { color: var(--muted); font-size: .85rem; }
+
+/* Three radio buttons; the checked one sets color-scheme above. Without :has() the switch does
+   nothing and the system setting stays in charge. */
+.site-theme { margin: 0 0 0 auto; padding: 0; border: 0; display: flex; font-size: .8rem; }
+.site-theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.site-theme input { position: absolute; opacity: 0; pointer-events: none; }
+.site-theme label {
+  padding: .2rem .6rem;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.site-theme label:first-of-type { border-radius: 999px 0 0 999px; }
+.site-theme label:last-of-type { border-radius: 0 999px 999px 0; }
+.site-theme input:checked + label { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.site-theme input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* A page of prose (/notice/, /privacy/): one card. A long URL or path wraps anywhere rather than
+   widening the page. */
+.site-doc {
+  max-width: var(--site-width);
+  margin: 1rem max(var(--site-gutter), calc((100% - var(--site-width)) / 2)) 3rem;
+  padding: .4rem 1.4rem 1.4rem;
+  background: var(--card);
+  border-radius: 20px;
+}
+.site-doc h1 { font-size: 1.5rem; line-height: 1.4; }
+.site-doc h2 { font-size: 1.1rem; margin-top: 2rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); }
+.site-doc p, .site-doc li { line-height: 1.85; }
+.site-doc a, .site-doc code { overflow-wrap: anywhere; }
+
+/* The column of a page the Worker builds, under the header. */
+.site-main {
+  max-width: calc(var(--site-width) + 2 * var(--site-gutter));
+  margin: 0 auto;
+  padding: .6rem var(--site-gutter) 0;
+}
+.site-footer {
+  margin: 2.5rem 0 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: .82rem;
+  color: var(--muted);
+}
+
+/* /r/<id>: one shared record. */
+.rec h1 { margin: .1rem 0 .4rem; font-size: 2rem; line-height: 1.25; }
+.rec h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+.rec-k { display: block; color: var(--muted); font-size: .78rem; }
+.rec-n { color: var(--muted); font-size: .8rem; font-weight: 400; }
+.rec-none { margin: 0; color: var(--muted); font-size: .9rem; }
+.rec-hero {
+  background: linear-gradient(135deg, var(--tint), var(--card));
+  border-radius: 24px;
+  padding: 1.3rem 1.4rem;
+}
+.rec-costume { margin: 0; color: var(--muted); font-size: .95rem; }
+.rec-badges { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.rec-rank {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-radius: 12px;
+  padding: 0 .55rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.rec-eval { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rec-eval small { font-size: .75rem; color: var(--muted); font-weight: 400; margin-right: .25rem; }
+.rec-tag {
+  display: inline-block;
+  font-size: .78rem;
+  padding: .05rem .55rem;
+  border-radius: 999px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+.rec-meta { display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; margin: .8rem 0 0; font-size: .9rem; }
+.rec-meta div { display: flex; gap: .4rem; }
+.rec-meta dt { color: var(--muted); }
+.rec-meta dd { margin: 0; font-variant-numeric: tabular-nums; }
+.rec-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5rem; margin-top: .9rem; }
+.rec-stats div { text-align: center; padding: .5rem .2rem; background: var(--card); border-radius: 14px; }
+.rec-stats strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.rec-lineage { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+.rec-node { flex: 1; min-width: 9rem; padding: .4rem .7rem; background: var(--card); border-radius: 12px; line-height: 1.35; }
+.rec-node strong { display: block; font-size: 1.05rem; }
+.rec-node.rec-self { flex-basis: 100%; border: 2px solid var(--primary); }
+.rec-gp { display: block; color: var(--muted); font-size: .75rem; }
+.rec-jump { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .82rem; margin: 1rem 0; }
+.rec-jump a { text-decoration: none; padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); }
+.rec-card { background: var(--card); border-radius: 18px; padding: 1rem 1.1rem; margin-top: 1rem; }
+.rec-apts { display: grid; grid-template-columns: auto 1fr; gap: .35rem .8rem; font-size: .9rem; align-items: center; }
+.rec-apts > .rec-k { font-size: .9rem; }
+.rec-stats + .rec-apts { margin-top: .9rem; }
+.rec-cells { display: flex; flex-wrap: wrap; gap: .3rem; }
+.rec-apt { display: inline-flex; gap: .35rem; align-items: baseline; padding: .05rem .5rem; background: var(--tint); border-radius: 8px; }
+.rec-grade { font-weight: 700; }
+/* The aptitude grades: S and A in the primary colour, B and C in the ink, the rest muted. */
+.rec-gS, .rec-gA { color: var(--primary); }
+.rec-gD, .rec-gE, .rec-gF, .rec-gG { color: var(--muted); font-weight: 400; }
+.rec-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.rec-chips li { padding: .2rem .6rem; font-size: .88rem; background: var(--tint); border-radius: 999px; }
+.rec-lv, .rec-star { font-size: .72rem; color: var(--primary); font-weight: 700; }
+
+/* Whose factors: a radio button per tab, the checked one shows its panel. Without :has() the
+   trainee's panel stays shown. */
+.rec-tabs { display: flex; flex-wrap: wrap; margin: 0 0 .8rem; padding: 0; border: 0; border-bottom: 1px solid var(--line); }
+.rec-tabs legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.rec-tabs input { position: absolute; opacity: 0; pointer-events: none; }
+.rec-tabs label {
+  padding: .4rem .9rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .9rem;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.rec-tabs label small { font-size: .72rem; margin-left: .3rem; }
+.rec-tabs input:checked + label { color: var(--primary); border-bottom-color: var(--primary); font-weight: 700; }
+.rec-tabs input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rec-panel { display: none; }
+.rec-p-self,
+.rec-card:has(#rec-f-p1:checked) .rec-p-p1,
+.rec-card:has(#rec-f-p2:checked) .rec-p-p2 { display: block; }
+.rec-card:has(#rec-f-p1:checked) .rec-p-self,
+.rec-card:has(#rec-f-p2:checked) .rec-p-self { display: none; }
+.rec-who { margin: 0 0 .6rem; font-size: .9rem; }
+.rec-who .rec-k { display: inline; }
+
+.rec-supports { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.rec-support { padding: .5rem .7rem; font-size: .86rem; line-height: 1.35; background: var(--tint); border-radius: 12px; }
+
+.rec details > summary { cursor: pointer; display: flex; align-items: baseline; gap: .6rem; list-style: none; }
+.rec details > summary::-webkit-details-marker { display: none; }
+.rec details > summary::before { content: "▸"; color: var(--primary); }
+.rec details[open] > summary::before { content: "▾"; }
+.rec details > summary h2 { margin: 0; }
+.rec details[open] > summary { margin-bottom: .6rem; }
+.rec-races { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.rec-races td { padding: .35rem .4rem; border-top: 1px solid var(--line); vertical-align: top; }
+.rec-races td.rec-k { display: table-cell; white-space: nowrap; }
+.rec-pos { text-align: right; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rec-win { color: var(--primary); }
+.rec-prov { display: grid; grid-template-columns: auto 1fr; gap: .1rem 1rem; font-size: .8rem; color: var(--muted); margin: 1.4rem 0 0; }
+.rec-prov dd { margin: 0; }
+
+/* /u/<id>: an account's shared records, one card each. It reuses the record page's badges. */
+.list h1 { font-size: 1.6rem; }
+.list-lead { margin: 0 0 .8rem; color: var(--muted); font-size: .9rem; }
+.list-controls { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; align-items: center; margin: 0 0 1rem; font-size: .85rem; }
+.list-kinds { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0; padding: 0; border: 0; }
+.list-kinds legend { float: left; margin-right: .3rem; color: var(--muted); font-size: .78rem; align-self: center; }
+.list-kinds input { position: absolute; opacity: 0; pointer-events: none; }
+.list-kinds label,
+.list-sorts a,
+.list-sorts [aria-current] { padding: .15rem .7rem; border: 1px solid var(--line); border-radius: 999px; }
+.list-kinds label { cursor: pointer; }
+.list-kinds label small { color: var(--muted); margin-left: .2rem; }
+.list-kinds input:checked + label,
+.list-sorts [aria-current] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.list-kinds input:checked + label small { color: inherit; }
+.list-kinds input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 2px; }
+.list-sorts { display: flex; gap: .3rem; align-items: center; }
+.list-sorts .rec-k { margin-right: .3rem; }
+.list-sorts a { color: var(--ink); text-decoration: none; }
+.list-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.list-item a { display: block; height: 100%; padding: .8rem 1rem; background: var(--card); border-radius: 16px; color: var(--ink); text-decoration: none; }
+.list-item .rec-costume { display: block; font-size: .78rem; }
+.list-item strong { display: block; font-size: 1.1rem; line-height: 1.3; }
+.list-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .4rem; }
+.list-item .rec-rank { font-size: 1rem; border-radius: 8px; padding: 0 .4rem; }
+.list-item .rec-eval { font-size: 1rem; }
+.list-day { margin-left: auto; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+/* The kind filter: the checked radio button hides the other kind. Without :has() every card stays shown. */
+.list:has(#list-k-std:checked) .list-item[data-type="inheritance_only"],
+.list:has(#list-k-inh:checked) .list-item[data-type="standard"] { display: none; }
+
+@media (max-width: 640px) {
+  :root { --site-gutter: .5rem; }
+  .site-doc { margin-top: .6rem; margin-bottom: 2rem; padding: .2rem 1rem 1rem; border-radius: 16px; }
+  .site-theme label { padding: .15rem .45rem; }
+  .rec h1 { font-size: 1.6rem; }
+  .rec-hero { padding: 1rem; }
+  .rec-stats { gap: .25rem; }
+  .rec-stats strong { font-size: 1.1rem; }
+  .rec-stats .rec-k { font-size: .64rem; }
+  .rec-supports { grid-template-columns: 1fr 1fr; }
+  .rec-races td.rec-k { white-space: normal; }
+}

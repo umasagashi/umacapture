@@ -113,14 +113,24 @@ SH
 cat > "$BIN/uv" <<SH
 #!/usr/bin/env bash
 echo "uv \$*" >> "\$STUB_LOG"
-out=""; source_out=""
+script="\$2"
+out=""; source_out=""; web_out=""
 while [[ \$# -gt 0 ]]; do
-  case "\$1" in --out) out="\$2"; shift ;; --source-out) source_out="\$2"; shift ;; esac
+  case "\$1" in --out) out="\$2"; shift ;; --source-out) source_out="\$2"; shift ;; --web-out) web_out="\$2"; shift ;; esac
   shift
 done
-printf '{"version":"v1","names":{},"gids":{}}' > "\$out"
-[[ -n "\${STUB_NO_SOURCE:-}" ]] || echo "$MODULE_SHA" > "\$source_out"
-echo "wrote \$out"
+case "\$script" in
+  tool/cloudflare/build_page_fonts.py)
+    mkdir -p "\$web_out/site/fonts"
+    printf 'woff2' > "\$web_out/site/fonts/stub.woff2"
+    echo "wrote \$web_out/site/fonts"
+    ;;
+  *)
+    printf '{"version":"v1","names":{},"gids":{}}' > "\$out"
+    [[ -n "\${STUB_NO_SOURCE:-}" ]] || echo "$MODULE_SHA" > "\$source_out"
+    echo "wrote \$out"
+    ;;
+esac
 SH
 cat > "$BIN/curl" <<'SH'
 #!/usr/bin/env bash
@@ -227,7 +237,7 @@ check "exit 0" test "$STATUS" -eq 0
 check "assets-only config deployed to the staging env" \
   called "wrangler deploy -c server/wrangler.assets-only.jsonc --env staging"
 check "nothing deployed to production" not test -e "$STUB_WEB/umacapture.com"
-check "no tables built" not called_like "^uv "
+check "no tables built" not called_like "^uv run tool/cloudflare/build_share_tables.py"
 check "no baseline written" not test -e "$REPO/tool/cloudflare/.deploy-backup"
 check "deploy.json has no tables entry" not grep -q tables_module_sha256 "$STUB_WEB/$STAGING_HOST/deploy.json"
 check "verified on the staging host" called "curl GET https://$STAGING_HOST/r/0000000000"

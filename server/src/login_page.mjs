@@ -6,9 +6,10 @@
 // authorisation URL is never put where the page or its script could show it.
 //
 // The Worker serves these pages, so the COEP header the app's static files carry does not reach
-// them and the Turnstile iframe can load.
+// them and the Turnstile iframe can load. They wear the public pages' look: the shared stylesheet
+// (web/site/site.css), its header and colour switch, and its document column.
 
-import { esc } from "./page.mjs";
+import { PAGE_CSP, esc, siteHeader } from "./page.mjs";
 
 export const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
@@ -24,11 +25,20 @@ const PAGE_HEAD = (title) => `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${esc(title)} | umacapture</title>
-<style>
-body { font-family: sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
-</style>
+<link rel="stylesheet" href="/site/site.css">
 <link rel="icon" type="image/png" href="/favicon.png">
 </head>`;
+
+/** The body of a login page: the site header, then `content` in the document column. */
+const PAGE_BODY = (content) => `<body>
+${siteHeader("ログイン")}
+<main class="site-doc">
+<h1>ログイン</h1>
+${content}
+</main>
+</body>
+</html>
+`;
 
 /**
  * The start page for a login whose query was already checked: `h` (the app's secret hash), `p`
@@ -41,16 +51,17 @@ body { font-family: sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 
 export function loginPageResponse({ h, p, port }, env) {
   const n = scriptNonce();
   const portField = port === null ? "" : `\n<input type="hidden" name="port" value="${esc(String(port))}">`;
+  // data-theme="auto" follows the system's light or dark, which is what the page shows until the
+  // visitor uses the colour switch. Following the switch too would need a script that re-renders the
+  // widget, and a re-render discards a challenge already in progress.
   const html = `${PAGE_HEAD("ログイン")}
-<body>
-<h1>ログイン</h1>
-<p>アプリでログインを押した覚えが無ければ、このページを閉じてください。</p>
+${PAGE_BODY(`<p>アプリでログインを押した覚えが無ければ、このページを閉じてください。</p>
 <form id="begin" method="POST" action="/api/auth/begin">
 <input type="hidden" name="h" value="${esc(h)}">
 <input type="hidden" name="p" value="${esc(p)}">${portField}
 <input type="hidden" name="token" value="">
 </form>
-<div class="cf-turnstile" data-sitekey="${esc(env.TURNSTILE_SITEKEY)}" data-action="${esc(env.TURNSTILE_ACTION)}" data-callback="onTurnstile"></div>
+<div class="cf-turnstile" data-sitekey="${esc(env.TURNSTILE_SITEKEY)}" data-action="${esc(env.TURNSTILE_ACTION)}" data-callback="onTurnstile" data-theme="auto"></div>
 <script nonce="${n}">
 window.onTurnstile = (token) => {
   const form = document.getElementById("begin");
@@ -58,10 +69,7 @@ window.onTurnstile = (token) => {
   form.submit();
 };
 </script>
-<script src="${TURNSTILE_ORIGIN}/turnstile/v0/api.js" async defer></script>
-</body>
-</html>
-`;
+<script src="${TURNSTILE_ORIGIN}/turnstile/v0/api.js" async defer></script>`)}`;
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -71,7 +79,8 @@ window.onTurnstile = (token) => {
         `frame-src ${TURNSTILE_ORIGIN}`,
         "connect-src 'self'",
         "img-src 'self'",
-        "style-src 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
         // Stated rather than left to form-action's lack of a default-src fallback, so the begin's
         // redirect to the provider stays allowed where a browser applies form-action to it.
         "form-action 'self' https://accounts.google.com",
@@ -116,17 +125,12 @@ export function loginDoneResponse() {
 
 function loginMessageResponse(status, paragraph, headers = {}) {
   const html = `${PAGE_HEAD("ログイン")}
-<body>
-<h1>ログイン</h1>
-${paragraph}
-</body>
-</html>
-`;
+${PAGE_BODY(paragraph)}`;
   return new Response(html, {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
+      "Content-Security-Policy": PAGE_CSP,
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
       "X-Robots-Tag": "noindex",

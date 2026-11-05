@@ -4,23 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>試験公開について — umacapture</title>
-  <!-- Self-contained on purpose: the site is served with COEP require-corp, so anything fetched
-       from another origin without CORP would be blocked. System fonts only, inline style only. -->
-  <style>
-    :root { color-scheme: light dark; }
-    body {
-      max-width: 44rem;
-      margin: 0 auto;
-      padding: 1.5rem 1rem 3rem;
-      font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
-      line-height: 1.8;
-    }
-    h1 { font-size: 1.5rem; line-height: 1.4; }
-    h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid; padding-bottom: .2rem; }
-  </style>
+  <!-- Same origin only: the site is served with COEP require-corp, so anything fetched from
+       another origin without CORP would be blocked. The look is web/site/site.css, shared with
+       every public page; the header below is the one that stylesheet defines. -->
+  <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/favicon.png">
 </head>
 <body>
+  <header class="site-header"><div class="site-header-inner">
+    <a class="site-brand" href="/"><img src="/site/logo.svg" alt="" width="28" height="28">umacapture</a>
+    <fieldset class="site-theme"><legend>表示の色</legend>
+      <input type="radio" name="site-theme" id="site-theme-auto" checked><label for="site-theme-auto">自動</label>
+      <input type="radio" name="site-theme" id="site-theme-light"><label for="site-theme-light">ライト</label>
+      <input type="radio" name="site-theme" id="site-theme-dark"><label for="site-theme-dark">ダーク</label>
+    </fieldset>
+  </div></header>
+  <main class="site-doc">
   <h1>umacapture（web 版）をお使いの方へ</h1>
 
   <h2>試験公開です</h2>
@@ -53,5 +52,6 @@
   </ul>
 
   <p>最終更新: 2026-10-27</p>
+  </main>
 </body>
 </html>

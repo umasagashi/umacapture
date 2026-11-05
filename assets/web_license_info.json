@@ -97,6 +97,16 @@
             "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nminimal_uuid4 vendored (native/vendor/minimal_uuid4) -- statically linked into web/wasm/umacapture_core.wasm (recorded from the build inputs, not derived from the binary)\n\nLicense: MIT"
         },
         {
+            "package": "mplus_rounded_1c",
+            "asset": "assets/license/mplus_rounded_1c.txt",
+            "license_id": "OFL-1.1",
+            "sub_notice_of": null,
+            "components": [
+                "M PLUS Rounded 1c 1.059.20150529 -- shipped as web/og/fonts/MPLUSRounded1c-Regular.ttf, web/og/fonts/MPLUSRounded1c-Bold.ttf (bytes hash-pinned in tool/web_deps.json)"
+            ],
+            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nM PLUS Rounded 1c 1.059.20150529 -- shipped as web/og/fonts/MPLUSRounded1c-Regular.ttf, web/og/fonts/MPLUSRounded1c-Bold.ttf (bytes hash-pinned in tool/web_deps.json)\n\nLicense: OFL-1.1"
+        },
+        {
             "package": "musl",
             "asset": "assets/license/musl.txt",
             "license_id": "MIT",

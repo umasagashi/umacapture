@@ -4,9 +4,9 @@ import { getMe, postTrainer } from "./account.mjs";
 import { deleteAccount } from "./account_deletion.mjs";
 import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
-import { buildPublicList, renderListPage } from "./list.mjs";
-import { buildPublicRecord } from "./public_record.mjs";
-import { renderPage } from "./page.mjs";
+import { buildPublicList, listSort, renderListPage } from "./list.mjs";
+import { buildPublicRecord, defaultFocus } from "./public_record.mjs";
+import { PAGE_CSP, renderPage } from "./page.mjs";
 import { matchRoute } from "./routes.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
@@ -21,7 +21,6 @@ import { Tables } from "./tables.mjs";
 const CACHE = "public, max-age=300";
 // A list changes with every share and unshare: an unshared record stays listed for at most a minute.
 const LIST_CACHE = "public, max-age=60";
-const PAGE_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'";
 
 const notFound = () =>
   new Response("Not Found\n", {
@@ -67,7 +66,8 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
   const tables = new Tables(rawTables);
   return {
     async fetch(request, env, ctx) {
-      const route = matchRoute(request.method, new URL(request.url).pathname);
+      const url = new URL(request.url);
+      const route = matchRoute(request.method, url.pathname);
       if (route === null) return notFound();
       switch (route.name) {
         case "share":
@@ -120,14 +120,15 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
         case "listPage": {
           const list = await buildPublicList(env, tables, route.id);
           if (list === null) return notFound();
+          // The JSON is one document whatever the query; only the page reads `sort`.
           if (route.name === "listJson") return publicJson(list, LIST_CACHE);
-          return publicPage(renderListPage(list, env), LIST_CACHE);
+          return publicPage(renderListPage(list, env, listSort(url.searchParams.get("sort"))), LIST_CACHE);
         }
       }
       const record = await publicRecord(env, tables, route.id);
       if (record === null) return notFound();
       if (route.name === "recordJson") return publicJson(record, CACHE);
-      return publicPage(renderPage(record, env), CACHE);
+      return publicPage(renderPage(record, env, defaultFocus(record)), CACHE);
     },
     async scheduled(controller, env) {
       await runScheduled(env, now);

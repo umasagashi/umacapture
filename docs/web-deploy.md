@@ -26,9 +26,9 @@ migrations, which are applied by hand ("Applying a migration").
 | Files | `build/web/`, built in the same run by `tool/build_web.sh` from a clean `HEAD` |
 | Excluded files | `web/.assetsignore` (copied into `build/web/`): `*.map` (uploaded to Sentry, not public) and `.last_build_id` |
 | Response headers | `web/_headers` (copied into `build/web/`): `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `X-Content-Type-Options: nosniff` on every file |
-| Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`, except `/og/fonts/*` (one day, see the Vercel section). Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
+| Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`, except `/og/fonts/*` (one day, see the Vercel section) and `/site/fonts/*` (one day; the public pages' font subsets, whose names carry no content hash either, and a stale one only sends a few new characters to a system font). Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
 | CanvasKit | Served from the bundle's own `canvaskit/`. `tool/build_web.sh` always passes `--no-web-resources-cdn`, so nothing is loaded from `www.gstatic.com` |
-| Fonts | Still fetched at runtime from `fonts.gstatic.com` (not bundled) |
+| Fonts | The app still fetches its fonts at runtime from `fonts.gstatic.com` (not bundled). The public pages (`/notice/`, `/privacy/`, and the Worker's pages) read M PLUS Rounded 1c from this origin: `build/web/site/fonts/`, woff2 subsets the run cuts out of the pinned TTFs in `web/og/fonts/` ("Page fonts" below) |
 | Record pages, lists and API | `/r/*`, `/u/*` and `/api/*` run the Worker first (`assets.run_worker_first`), so a static file can never shadow an endpoint |
 | Unknown paths | `not_found_handling: "none"`: no SPA fallback. With `--sharing on`, the Worker's 404, which carries `X-Robots-Tag: noindex`; with `--sharing off`, the static 404. The app uses hash routing and needs no server-side path but `/` |
 | Build marker | `build/web/deploy.json`: `git_sha`, `built_at`, `wasm_sha256` of what was deployed, and with sharing on `tables_module_sha256`, the module archive the Worker's name tables were built from |
@@ -310,7 +310,7 @@ the script does not require it.
 
 The script stops on a dirty tree, rebuilds `build/web/` from scratch (never reusing an earlier
 build), uploads source maps (production only; this rewrites the JS files with debug ids, so it runs
-before the upload), builds the name tables (sharing on, below), writes `deploy.json`, runs
+before the upload), builds the name tables (sharing on, below) and the page fonts (below), writes `deploy.json`, runs
 `wrangler deploy --dry-run`, asks for confirmation, deploys, then verifies through the public URL
 that:
 
@@ -339,6 +339,12 @@ first run with sharing has no baseline, and the check is skipped. Only after the
 been verified does the run copy the deployed tables to the baseline, so a run that stopped earlier
 leaves the baseline as it was.
 
+**Page fonts.** With either `--sharing` choice, the run then writes the font files
+`web/site/site.css` names into `build/web/site/fonts/` with `tool/cloudflare/build_page_fonts.py`:
+subsets of the pinned M PLUS Rounded 1c TTFs, cut to the characters of `web/**/*.html`,
+`server/src/*.mjs` and, with sharing on, the names in the tables just built. The subsets are not
+pinned, the TTFs are; a character the font lacks is drawn with a system font.
+
 A redeploy is needed whenever the app, `web/`, or the wasm core changes. The app itself does not
 need one for a new recognizer module: it downloads modules from `data.umacapture.com` at runtime,
 and they are published there with `publish_modules.sh` (see "Publishing to data.umacapture.com"
@@ -358,7 +364,7 @@ confirm in the shell that will run the script:
 - `SENTRY_AUTH_TOKEN` is exported and not empty (the `export` above). Stage 0 stops without it.
 - `sentry-cli --version` runs (One-time preparation, step 2). Stage 0 does not check it; stage 2
   fails without it.
-- `uv` is on `PATH` (sharing on; stage 3).
+- `uv` is on `PATH` (stage 3: the name tables with sharing on, the page fonts always).
 - `web/` matches its pins: `.fvm/flutter_sdk/bin/dart run tool/check_web_pins.dart --licenses
   --require-verified`, the check stage 1 runs before it builds. It fails when the wasm module is
   older than the `native/` sources it was built from.
@@ -604,11 +610,21 @@ of the two ways above, to an earlier archive or an earlier version of the Worker
 ## OGP image function (Vercel)
 
 The record cards' OGP images are drawn by the function in `og/`, deployed to the Vercel project
-`umacapture-og` by `tool/vercel/deploy_og.sh`. The function fetches its fonts at run time from
-`/og/fonts/*` on the web app's origin (`PUBLIC_ORIGIN`), so a font change is deployed with
-`deploy_web.sh`, not with this script. `web/_headers` gives those fonts
+`umacapture-og` by `tool/vercel/deploy_og.sh`. The function bundles neither its fonts nor its
+mark: at run time it fetches M PLUS Rounded 1c and Noto Sans JP from `/og/fonts/*`, and the logo
+from `/site/logo.svg`, on the web app's origin (`PUBLIC_ORIGIN`). A font or logo change is
+therefore deployed with `deploy_web.sh`, not with this script. `web/_headers` gives those fonts
 `Cache-Control: public, max-age=86400`: a day, not `immutable`, because the file names carry no
 content hash.
+
+**Deploy the web app first, the function after**, whenever a change reaches both. A function that
+asks for a font or the logo the origin does not serve yet cannot draw, and answers every card with
+a redirect to `/og/default.png`. The current function reads M PLUS Rounded 1c, Noto Sans JP
+Regular and the logo, so the origin has to serve them first. The earlier function still running in
+production also reads `/og/fonts/NotoSansJP-Bold.otf`, which the current one does not; the web app
+keeps serving it (it stays pinned in `tool/web_deps.json`) so that the old function can still draw
+between the two deploys. Remove that pin only in a commit after the current function is deployed to
+production.
 
 ```bash
 bash tool/vercel/deploy_og.sh --target production --dry-run   # checks and tests; no upload
