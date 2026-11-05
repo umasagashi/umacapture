@@ -8,7 +8,7 @@
 //      `?a=2`… would each render again.
 //   3. Fetch <origin>/r/<id>.json. Upstream 404 is 404; any other failure is a temporary one.
 //   4. Check the JSON's shape.
-//   5. Load the fonts.
+//   5. Load the fonts and the logo.
 //   6. Render, awaiting the whole PNG before answering.
 // A temporary failure answers 302 to the static fallback image with `no-store`, so the CDN does
 // not keep it; a 404 is cached, because public ids are random and never requested before they
@@ -16,7 +16,7 @@
 
 import { ImageResponse } from "@vercel/og";
 
-import { buildCard, isRenderable } from "./card.mjs";
+import { FONT_FAMILY, buildCard, isRenderable, svgDataUri } from "./card.mjs";
 
 // Public ids: 10 lowercase Crockford base32 characters (no i, l, o, u), as the sharing Worker
 // issues them.
@@ -27,10 +27,17 @@ export const CACHE_NOT_FOUND = "public, s-maxage=86400";
 export const CACHE_NONE = "no-store";
 
 export const FALLBACK_PATH = "/og/default.png";
+// The card is set in M PLUS Rounded 1c, the app's font. It lacks a few characters the tables use
+// (稍 in 稍重, 攬 in [総攬]…), so Noto Sans JP is loaded after it: satori draws a character the first
+// font lacks from the next one. Without it, @vercel/og would ask Google Fonts for the character,
+// sending record text off the origin.
 export const FONT_FILES = [
-  { path: "/og/fonts/NotoSansJP-Regular.otf", weight: 400 },
-  { path: "/og/fonts/NotoSansJP-Bold.otf", weight: 700 },
+  { path: "/og/fonts/MPLUSRounded1c-Regular.ttf", name: FONT_FAMILY, weight: 400 },
+  { path: "/og/fonts/MPLUSRounded1c-Bold.ttf", name: FONT_FAMILY, weight: 700 },
+  { path: "/og/fonts/NotoSansJP-Regular.otf", name: "Noto Sans JP", weight: 400 },
 ];
+// The mark the public pages show, read from the same origin so it has one definition.
+export const LOGO_PATH = "/site/logo.svg";
 
 /**
  * Limits on the two fetches. Each covers the response headers and the whole body.
@@ -91,7 +98,7 @@ async function fetchBytes(fetchImpl, url, timeoutMs, maxBytes) {
 /**
  * @param {{origin: string, fetch?: typeof fetch, limits?: Partial<typeof DEFAULT_LIMITS>,
  *          log?: (message: string) => void}} options
- *   `origin` is where both the public JSON and the fonts come from (PUBLIC_ORIGIN).
+ *   `origin` is where the public JSON, the fonts and the logo come from (PUBLIC_ORIGIN).
  * @returns {(request: Request) => Promise<Response>}
  */
 export function createHandler({ origin, fetch: fetchImpl = globalThis.fetch, limits = {}, log = console.warn }) {
@@ -100,18 +107,22 @@ export function createHandler({ origin, fetch: fetchImpl = globalThis.fetch, lim
   const fallback = () =>
     empty(302, CACHE_NONE, { location: `${base}${FALLBACK_PATH}` });
 
+  const fetchAsset = async (path) => {
+    const data = await fetchBytes(fetchImpl, `${base}${path}`, assetTimeoutMs, assetMaxBytes);
+    if (data === null) throw new TemporaryFailure(`${path} is missing`);
+    return data;
+  };
   // Kept for the life of the instance once a render with them succeeded; dropped after a failed
   // one, so bytes that fail to parse are fetched again rather than kept.
-  let fonts = null;
-  const loadFonts = () =>
-    (fonts ??= Promise.all(
-      FONT_FILES.map(async ({ path, weight }) => {
-        const data = await fetchBytes(fetchImpl, `${base}${path}`, assetTimeoutMs, assetMaxBytes);
-        if (data === null) throw new TemporaryFailure(`${path} is missing`);
-        return { name: "Noto Sans JP", data, weight, style: "normal" };
-      }),
-    ).catch((error) => {
-      fonts = null;
+  let assets = null;
+  const loadAssets = () =>
+    (assets ??= Promise.all([
+      Promise.all(
+        FONT_FILES.map(async ({ path, name, weight }) => ({ name, data: await fetchAsset(path), weight, style: "normal" })),
+      ),
+      fetchAsset(LOGO_PATH).then(svgDataUri),
+    ]).catch((error) => {
+      assets = null;
       throw error;
     }));
 
@@ -137,8 +148,8 @@ export function createHandler({ origin, fetch: fetchImpl = globalThis.fetch, lim
       }
       if (!isRenderable(record)) throw new TemporaryFailure("the public JSON has an unexpected shape");
 
-      const png = await render(record, await loadFonts()).catch((error) => {
-        fonts = null;
+      const png = await render(record, await loadAssets()).catch((error) => {
+        assets = null;
         throw new TemporaryFailure(`render: ${error?.message ?? error}`);
       });
       return new Response(request.method === "HEAD" ? null : png, {
@@ -157,7 +168,7 @@ export function createHandler({ origin, fetch: fetchImpl = globalThis.fetch, lim
  * Draws the card and waits for the whole PNG. ImageResponse renders inside its body stream, so its
  * constructor returning says nothing; a failed render only shows when the body is read.
  */
-async function render(record, fonts) {
-  const response = new ImageResponse(buildCard(record), { width: 1200, height: 630, fonts });
+async function render(record, [fonts, logo]) {
+  const response = new ImageResponse(buildCard(record, logo), { width: 1200, height: 630, fonts });
   return new Uint8Array(await response.arrayBuffer());
 }
