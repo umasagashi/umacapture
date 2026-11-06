@@ -397,6 +397,13 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 
 ### If the release also publishes a web bundle
 
+**Worker first.** A Windows build that sends something the production Worker does not accept is
+published only after that Worker is deployed. The first Windows version that sends a share's focus
+(the key `view`) needs `0005_share_focus.sql` applied and a focus-aware Worker (one that accepts
+`view` and answers `PATCH /api/shares/<id>`) deployed beforehand, and once it is out production is
+not rolled back to a Worker without that route. See
+`docs/web-deploy.md` ("Ordering against a Windows release").
+
 Steps 8–11 publish the Windows build only. The web app is published by deploying
 it, and a deployment goes through `tool/cloudflare/deploy_web.sh` only: follow the
 **web-deploy** skill, which points into `docs/web-deploy.md` ("Deploying").

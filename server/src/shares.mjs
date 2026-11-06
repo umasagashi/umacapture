@@ -1,4 +1,5 @@
-// Sharing records under an account: POST /api/shares, DELETE /api/shares/<id> and GET /api/me/shares.
+// Sharing records under an account: POST /api/shares, PATCH and DELETE /api/shares/<id>, and GET
+// /api/me/shares.
 // The session says whose records they are. A share's client key, made by the app, is what makes a
 // resend find the record the first send created; the server keeps only its SHA-256.
 
@@ -13,13 +14,14 @@ import {
   SessionRequired,
   sharingEnabled,
   TooLarge,
+  untilTomorrow,
 } from "./api.mjs";
 import { requireSession } from "./auth.mjs";
 import * as limits from "./limits.mjs";
 import { canonicalPostedForm, InvalidPayload, parseVersion, SidOutOfRange } from "./posted_form.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { isClientKey, sha256, toHex } from "./secrets.mjs";
-import { findIdByClientKey, listOwnShares, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
+import { findIdByClientKey, listOwnShares, setShareFocus, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
 
 async function gzip(text) {
   const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -40,6 +42,26 @@ const located = (env, id) => {
   const url = `${env.PUBLIC_ORIGIN}/r/${id}`;
   return { id, url, json_url: `${url}.json` };
 };
+
+/** The focuses a sharer can choose for a share's pages; null leaves it to the record's type. */
+const FOCUSES = ["training", "inheritance"];
+
+/**
+ * The focus of a share's optional `view` `{focus}`: one of FOCUSES, or null (the record's type decides)
+ * when `nullable` and it is null, or when `view` is absent. Anything else is InvalidPayload.
+ */
+function focusOf(view, nullable) {
+  if (view === undefined) return null;
+  let focus;
+  try {
+    ({ focus } = envelope(view, ["focus"]));
+  } catch (error) {
+    if (error instanceof InvalidPayload) throw new InvalidPayload(error.field === "body" ? "view" : `view.${error.field}`);
+    throw error;
+  }
+  if (FOCUSES.includes(focus) || (nullable && focus === null)) return focus;
+  throw new InvalidPayload("view.focus");
+}
 
 const refused = (error, extra = {}) => ({ status: "refused", error, ...extra });
 
@@ -76,8 +98,10 @@ async function storedForm(record, tables) {
  */
 async function shareOne(item, env, tables, newId, owner, at) {
   let share;
+  let focus;
   try {
-    share = envelope(item, ["client_key", "record"]);
+    share = envelope(item, ["client_key", "record"], ["view"]);
+    focus = focusOf(share.view, false);
   } catch (error) {
     if (error instanceof InvalidPayload) return refused("invalid_payload", { field: error.field });
     throw error;
@@ -85,7 +109,8 @@ async function shareOne(item, env, tables, newId, owner, at) {
   if (!isClientKey(share.client_key)) return refused("invalid_payload", { field: "client_key" });
   const clientKey = await sha256(share.client_key);
 
-  // A resend of a share that already committed: same id, and nothing is charged again.
+  // A resend of a share that already committed: same id, nothing is charged again, and its view is
+  // the first send's (a resend is the same share, not a change of it).
   const existing = await findIdByClientKey(env.DB, clientKey);
   if (existing !== null) return { status: "existing", ...located(env, existing) };
 
@@ -95,6 +120,7 @@ async function shareOne(item, env, tables, newId, owner, at) {
     owner,
     clientKey,
     payload,
+    focus,
     charge: payload.byteLength + limits.ROW_CHARGE,
     day: at.day,
     budget: limits.STORAGE_BUDGET,
@@ -137,8 +163,8 @@ function sharesOf(body) {
 }
 
 /**
- * POST /api/shares `{shares: [{client_key, record}, ...]}`: shares each record in order, judging each
- * on its own, and answers 200 `{results}` with one result per share. A refusal of the server's
+ * POST /api/shares `{shares: [{client_key, record, view?: {focus}}, ...]}`: shares each record in order,
+ * judging each on its own, and answers 200 `{results}` with one result per share. A refusal of the server's
  * storage or daily limit ends the request: the shares after it are "skipped" without being tried.
  * `newId` draws each attempt's public id and `now` is the Worker's clock.
  */
@@ -188,9 +214,42 @@ export async function deleteShare(request, env, id, now) {
 }
 
 /**
+ * PATCH /api/shares/<id> `{view: {focus}}`: sets how the pages of a record the session's account holds
+ * present it (a focus of FOCUSES, or null for the one its type gives), answering 204. Authorised and
+ * refused as an unshare is, and like one it goes on while sharing is switched off. A change that
+ * writes the row counts as one ROW_CHARGE against the daily limits a share counts against, the
+ * account's and the server's, and is refused with 429 daily_limit `{scope}` ("account" or "service",
+ * as sync names them) once either is used up; setting the focus the share
+ * already has writes nothing and counts nothing.
+ */
+export async function patchShare(request, env, id, now) {
+  const at = clock(now);
+  const session = await requireSession(request, env, at.now);
+  const { view } = envelope(await readJson(request, limits.MAX_SMALL_BODY), ["view"]);
+  const focus = focusOf(view, true);
+  const outcome = await setShareFocus(env.DB, {
+    id,
+    owner: session.accountId,
+    focus,
+    day: at.day,
+    charge: limits.ROW_CHARGE,
+    dailyLimit: limits.DAILY_LIMIT,
+    accountDailyLimit: limits.ACCOUNT_DAILY_LIMIT,
+  });
+  if (outcome === "changed" || outcome === "unchanged") return noContent();
+  if (outcome === "deleting") throw new AccountDeleting();
+  if (outcome === "account" || outcome === "daily") {
+    const scope = outcome === "account" ? "account" : "service";
+    return fail(429, "daily_limit", { scope }, { "Retry-After": String(untilTomorrow(at)) });
+  }
+  return outcome === "forbidden" ? fail(403, "forbidden") : fail(404, "not_found");
+}
+
+/**
  * GET /api/me/shares: the session's account's records, newest share day first, each with
  * `client_key_hash`, the stored SHA-256 of its client key as 64 lowercase hex digits, which the app
- * matches against the key it kept. The client key itself is never stored, so it cannot be returned.
+ * matches against the key it kept, and `view` `{focus}`, the focus its sharer chose (null when the
+ * record's type decides, which the public record resolves). The client key itself is never stored, so it cannot be returned.
  */
 export async function getMyShares(request, env, tables, now) {
   const session = await requireSession(request, env, clock(now).now);
@@ -202,6 +261,7 @@ export async function getMyShares(request, env, tables, now) {
       url: located(env, share.id).url,
       shared_on: dayToIso(share.sharedDay),
       client_key_hash: toHex(share.clientKey),
+      view: { focus: share.focus },
       summary: recordSummary(share.form, tables),
     })),
   );

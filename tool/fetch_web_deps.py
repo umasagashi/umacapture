@@ -6,8 +6,8 @@
 
 The gitignored parts of ``web/`` -- the manifest's ``provisioned_roots``:
 ``web/wasm/`` (the onnxruntime-web runtime, the Mediabunny bundle and the
-locally built recognition core) and ``web/og/fonts/`` (the Noto Sans JP files
-the OGP image function fetches) -- are not in a checkout. This script restores
+locally built recognition core) and ``web/og/fonts/`` (the M PLUS Rounded 1c and
+Noto Sans JP files the OGP image function fetches) -- are not in a checkout. This script restores
 the fetchable part of them from pinned upstream artifacts, verifying every byte
 against ``tool/web_deps.json``. A file it places that is missing later is
 counted by ``tool/check_web_pins.dart`` wherever it lives, so a web build stops

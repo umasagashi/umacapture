@@ -159,7 +159,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
     | `PUBLIC_ORIGIN` | `https://umacapture.com` |
     | `OG_IMAGE_MODE` | `"vercel"`; `"static"` while `og.umacapture.com` does not answer (see the Vercel section) |
     | `OG_IMAGE_ORIGIN` | `https://og.umacapture.com` |
-    | `SHARING_ENABLED` | `"true"`; `"false"` stops new logins and shares (`503 sharing_paused`) while reads, unshares and logouts go on |
+    | `SHARING_ENABLED` | `"true"`; `"false"` stops new logins and shares (`503 sharing_paused`) while reads, changes of a share's focus, unshares and logouts go on |
     | `TURNSTILE_SITEKEY` | The widget's sitekey |
     | `TURNSTILE_TESTING_KEY` | `"false"`: answers issued for Turnstile's testing secrets are refused |
     | `TURNSTILE_HOSTNAME` | `umacapture.com` |
@@ -373,6 +373,19 @@ confirm in the shell that will run the script:
 to Sentry (an outward transmission like the real run's), and the real run builds and sends them
 again.
 
+### Ordering against a Windows release
+
+A Windows build that sends something the Worker in production does not accept is released only
+after that Worker is deployed. The Windows version that lets a sharer choose a share's focus
+needs a **focus-aware Worker**: one that accepts the key `view` on a share and answers
+`PATCH /api/shares/<id>`, and reads `records.focus` from `0005_share_focus.sql`. An older Worker
+refuses such a share as `invalid_payload`. So that Windows version goes out after
+`0005_share_focus.sql` is applied and a focus-aware Worker is deployed (the web app goes out with
+that Worker), and once it is released, production is not rolled back to a Worker that is not
+focus-aware ("Restoring a version"). To tell the two apart, send `PATCH /api/shares/0000000000`
+with no session: a focus-aware Worker answers `401 session_required`, an older one `404`, because
+it has no such route.
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
@@ -513,7 +526,7 @@ verified through the public URL.
   host; a staging run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging
   URL, so it logs in, shares and syncs through the staging Worker rather than `umacapture.com`.
 - **Stopping staging.** `env.staging.vars.SHARING_ENABLED: "false"` and a redeploy stop new
-  logins and shares while reads, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
+  logins and shares while reads, changes of a share's focus, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
   "false"` and a redeploy stop sync and staging's hourly run.
   `bash tool/cloudflare/deploy_web.sh --target staging --sharing off` takes the Worker off staging
   and keeps its assets: `/r/`, `/u/` and `/api/` get the static 404, the hourly run goes, and
@@ -716,6 +729,9 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
 - Bound resources are not rolled back: D1 and the B2 bucket keep their current contents, and D1
   keeps every migration applied since the version (below).
 - Only the 100 most recently published versions can be rolled back to.
+- Once a Windows version that sends a share's focus is released, do not roll back to a Worker that
+  is not focus-aware (no `PATCH /api/shares/<id>`): it refuses those shares ("Ordering against a
+  Windows release").
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
@@ -745,7 +761,7 @@ In this order of preference:
 | Means | Effect | Depends on |
 |---|---|---|
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), the data host's pointer and archive (for the tables), the pinned wrangler. Not usable while any of them is broken |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, changing a share's focus, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), the data host's pointer and archive (for the tables), the pinned wrangler. Not usable while any of them is broken |
 | `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except the data host: no tables are built. Use it once the version without the Worker is no longer among the last 100 |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |
 | On Vercel | Deny `/r/` with a Firewall rule | The Vercel dashboard. After `OG_IMAGE_MODE` is `"static"` |

@@ -79,11 +79,12 @@ function race(tables, r) {
 
 /**
  * @param {object} form the stored posted form v1
- * @param {{id: string, sharedDay: number, origin: string}} meta
+ * @param {{id: string, sharedDay: number, focus: ?("training" | "inheritance"), origin: string}} meta
+ *   `focus` is the sharer's stored choice, null when they chose none
  * @param {import("./tables.mjs").Tables} tables
  */
 export function buildPublicRecord(form, meta, tables) {
-  return {
+  const record = {
     schema: SCHEMA,
     id: meta.id,
     url: `${meta.origin}/r/${meta.id}`,
@@ -114,6 +115,9 @@ export function buildPublicRecord(form, meta, tables) {
     trained_on: trainedOn(form.trained_date),
     races: form.races.map((r) => race(tables, r)),
   };
+  // The one place the default is resolved: the page and every JSON reader see the same focus.
+  record.view = { focus: meta.focus ?? defaultFocus(record) };
+  return record;
 }
 
 /**

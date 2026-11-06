@@ -133,6 +133,7 @@ class _RecordShareListDialogState extends ConsumerState<RecordShareListDialog> {
       SharesListed(:final shares) => [
         for (final share in shares)
           _AccountShareRow(
+            key: ValueKey(share.id),
             share: share,
             noted: notes.containsKey(share.clientKeyHash),
             record: switch (notes[share.clientKeyHash]?.recordId) {
@@ -186,7 +187,7 @@ class _Note extends StatelessWidget {
   );
 }
 
-class _AccountShareRow extends ConsumerWidget {
+class _AccountShareRow extends ConsumerStatefulWidget {
   final AccountShare share;
 
   /// Whether the device holds a note of the share, which names the record it was shared from.
@@ -196,6 +197,7 @@ class _AccountShareRow extends ConsumerWidget {
   final VoidCallback onUnshared;
 
   const _AccountShareRow({
+    super.key,
     required this.share,
     required this.noted,
     required this.record,
@@ -203,24 +205,85 @@ class _AccountShareRow extends ConsumerWidget {
     required this.onUnshared,
   });
 
+  @override
+  ConsumerState<_AccountShareRow> createState() => _AccountShareRowState();
+}
+
+class _AccountShareRowState extends ConsumerState<_AccountShareRow> {
+  /// The focus the server holds as far as this row knows: the listed one, then the last change it accepted.
+  late ShareFocus _focus = widget.share.focus;
+  bool _changing = false;
+
+  /// What the last change answered, told in the row.
+  FocusChangeOutcome? _outcome;
+
+  /// What the last login ended with, told in place of the login-required sentence, as the unshare dialog tells it.
+  String? _loginText;
+  late final _login = LoginDriver(
+    ref,
+    onSettled: (outcome) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loginText = loginOutcomeText(outcome);
+        if (outcome == LoginOutcome.signedIn || outcome == LoginOutcome.trainerLimit) {
+          _outcome = null;
+        }
+      });
+    },
+  );
+
+  @override
+  void dispose() {
+    _login.dispose();
+    super.dispose();
+  }
+
+  Future<void> _change(ShareFocus focus) async {
+    setState(() {
+      _changing = true;
+      _outcome = null;
+      _loginText = null;
+    });
+    final outcome = await ref.read(recordSharesProvider.notifier).changeFocus(widget.share.id, focus);
+    if (!mounted) {
+      return;
+    }
+    // A share the server no longer holds is gone, as an unshare that finds none takes it out of the list.
+    if (outcome == FocusChangeOutcome.notFound) {
+      widget.onUnshared();
+      return;
+    }
+    setState(() {
+      _changing = false;
+      _outcome = outcome;
+      if (outcome == FocusChangeOutcome.changed) {
+        _focus = focus;
+      }
+    });
+  }
+
   /// The record's name, or that it was deleted when the note names a record neither store holds. A share with no
   /// note, as one shared from another device, names no record here, so it takes the name the server listed it with.
-  String? _title(WidgetRef ref) {
-    final record = this.record;
+  String? _title() {
+    final record = widget.record;
     if (record != null) {
       return ref.watch(charaCardNameProvider(record.trainee.card)) ?? record.trainee.card.toString();
     }
-    if (!noted) {
-      return share.cardName;
+    if (!widget.noted) {
+      return widget.share.cardName;
     }
-    return storesLoaded ? "$tr_record_share_list.dialog.deleted_record".tr() : null;
+    return widget.storesLoaded ? "$tr_record_share_list.dialog.deleted_record".tr() : null;
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dialog = "$tr_record_share_list.dialog";
-    final title = _title(ref);
+    final title = _title();
+    final share = widget.share;
+    final outcome = _outcome;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: NoteCard(
@@ -229,6 +292,14 @@ class _AccountShareRow extends ConsumerWidget {
           children: [
             if (title != null) Text(title, style: theme.textTheme.titleSmall),
             Text("$dialog.shared_on".tr(namedArgs: {"date": share.sharedOn}), style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 8),
+            ShareFocusSelector(focus: _focus, onChanged: _changing ? null : _change),
+            if (outcome != null)
+              Text(
+                (outcome == FocusChangeOutcome.loginRequired ? _loginText : null) ??
+                    "$dialog.focus_outcome.${_outcomeKey(outcome)}".tr(),
+                style: theme.textTheme.bodyMedium,
+              ),
           ],
         ),
         children: [
@@ -237,6 +308,8 @@ class _AccountShareRow extends ConsumerWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
+              if (outcome == FocusChangeOutcome.loginRequired)
+                _button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press),
               _button(
                 "$tr_record_share.open_shared".tr(),
                 Symbols.open_in_new_rounded,
@@ -246,7 +319,7 @@ class _AccountShareRow extends ConsumerWidget {
               _button(
                 "$dialog.unshare".tr(),
                 Symbols.public_off_rounded,
-                () => UnshareRecordDialog.show(ref.base, shareId: share.id, over: true, onUnshared: onUnshared),
+                () => UnshareRecordDialog.show(ref.base, shareId: share.id, over: true, onUnshared: widget.onUnshared),
               ),
             ],
           ),
@@ -255,6 +328,16 @@ class _AccountShareRow extends ConsumerWidget {
     );
   }
 }
+
+String _outcomeKey(FocusChangeOutcome outcome) => switch (outcome) {
+  FocusChangeOutcome.changed => "changed",
+  FocusChangeOutcome.notFound => "not_found",
+  FocusChangeOutcome.dailyLimit => "daily_limit",
+  FocusChangeOutcome.loginRequired => "login_required",
+  FocusChangeOutcome.forbidden => "forbidden",
+  FocusChangeOutcome.unreachable => "unreachable",
+  FocusChangeOutcome.failed => "failed",
+};
 
 Widget _button(String label, IconData icon, VoidCallback onPressed) =>
     OutlinedButton.icon(icon: Icon(icon), label: Text(label), onPressed: onPressed);
