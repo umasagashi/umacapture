@@ -5,19 +5,19 @@ import { deleteAccount } from "./account_deletion.mjs";
 import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
 import { buildPublicList, listSort, renderListPage } from "./list.mjs";
-import { buildPublicRecord, defaultFocus } from "./public_record.mjs";
+import { buildPublicRecord } from "./public_record.mjs";
 import { PAGE_CSP, renderPage } from "./page.mjs";
 import { matchRoute } from "./routes.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
-import { deleteShare, getMyShares, postShares } from "./shares.mjs";
+import { deleteShare, getMyShares, patchShare, postShares } from "./shares.mjs";
 import { answerSync, getBodies, getGeneration, getHeld, getImage, getSettings, putBodies, putImage, putSettings } from "./sync.mjs";
 import { getPart, getRoot, putPart, replaceRoot } from "./sync_list.mjs";
 import { Tables } from "./tables.mjs";
 
-// Shared records never change after sharing; five minutes bounds how long an unshared one stays
-// in caches.
+// A shared record's content never changes after sharing, but its sharer can change how it is
+// presented (view.focus) or unshare it; five minutes bounds how long either stays stale in caches.
 const CACHE = "public, max-age=300";
 // A list changes with every share and unshare: an unshared record stays listed for at most a minute.
 const LIST_CACHE = "public, max-age=60";
@@ -52,7 +52,7 @@ const publicPage = (html, cache) =>
 async function publicRecord(env, tables, id) {
   const stored = await readRecord(env.DB, id);
   if (stored === null) return null;
-  return buildPublicRecord(stored.form, { id, sharedDay: stored.sharedDay, origin: env.PUBLIC_ORIGIN }, tables);
+  return buildPublicRecord(stored.form, { id, sharedDay: stored.sharedDay, focus: stored.focus, origin: env.PUBLIC_ORIGIN }, tables);
 }
 
 /**
@@ -72,6 +72,8 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
       switch (route.name) {
         case "share":
           return answerApi(() => postShares(request, env, tables, newId, now));
+        case "shareView":
+          return answerApi(() => patchShare(request, env, route.id, now));
         case "unshare":
           return answerApi(() => deleteShare(request, env, route.id, now));
         case "myShares":
@@ -128,7 +130,7 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
       const record = await publicRecord(env, tables, route.id);
       if (record === null) return notFound();
       if (route.name === "recordJson") return publicJson(record, CACHE);
-      return publicPage(renderPage(record, env, defaultFocus(record)), CACHE);
+      return publicPage(renderPage(record, env, record.view.focus), CACHE);
     },
     async scheduled(controller, env) {
       await runScheduled(env, now);

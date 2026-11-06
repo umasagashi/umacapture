@@ -51,7 +51,7 @@
     // "static" gives every card /og/default.png; "vercel" points og:image at OG_IMAGE_ORIGIN.
     "OG_IMAGE_MODE": "vercel",
     "OG_IMAGE_ORIGIN": "https://og.umacapture.com",
-    // "false" stops new logins and shares (503 sharing_paused); reads, unshares and logouts go on.
+    // "false" stops new logins and shares (503 sharing_paused); reads, changes of a share's focus, unshares and logouts go on.
     "SHARING_ENABLED": "true",
     // The Managed widget for umacapture.com. Its secret, TURNSTILE_SECRET, is a Worker secret
     // (`wrangler secret put`), never a var.
@@ -115,7 +115,7 @@
         // its Worker back.
         "OG_IMAGE_MODE": "static",
         "OG_IMAGE_ORIGIN": "https://og-staging.invalid",
-        // "false" stops new logins and shares (503 sharing_paused); reads, unshares and logouts go on.
+        // "false" stops new logins and shares (503 sharing_paused); reads, changes of a share's focus, unshares and logouts go on.
         "SHARING_ENABLED": "true",
         // Turnstile's always-passing test sitekey: staging's login has no abuse protection.
         // The matching test secret, TURNSTILE_SECRET, is a Worker secret (`wrangler secret put`), never a var.

@@ -52,7 +52,8 @@ export const ACCOUNT_SHARE_CAP = 300;
 
 /**
  * Upper bound on the charge one account shares in one UTC day: a quarter of DAILY_LIMIT, so one
- * account cannot use up a day by itself.
+ * account cannot use up a day by itself. A change of a share's focus counts against it, and against
+ * DAILY_LIMIT, as one ROW_CHARGE, which bounds the rows those changes write.
  */
 export const ACCOUNT_DAILY_LIMIT = 262_144;
 
