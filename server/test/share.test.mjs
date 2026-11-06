@@ -154,7 +154,14 @@ describe("share, list and unshare", () => {
 
     assert.equal((await answer(worker.unshare(mine, id))).status, 204);
     assert.equal((await answer(worker.fetch(`/r/${id}.json`))).status, 404);
-    assert.equal((await answer(worker.fetch(`/r/${id}`))).status, 404);
+    // The page of an unshared record is the one an id never shared, or not an id at all, gets.
+    const [unshared, never, malformed] = await Promise.all(
+      [`/r/${id}`, `/r/${id === "zzzzzzzzzz" ? "yyyyyyyyyy" : "zzzzzzzzzz"}`, "/r/NOT-AN-ID"].map((path) => answer(worker.fetch(path))),
+    );
+    assert.equal(unshared.status, 404);
+    assert.match(unshared.headers.get("content-type"), /^text\/html/);
+    assert.deepEqual([never.status, never.text], [404, unshared.text], "an unshared id is told from one never shared");
+    assert.deepEqual([malformed.status, malformed.text], [404, unshared.text], "an unshared id is told from a malformed one");
     assert.deepEqual(await worker.totals(), { bytes: 0, count: 0 });
     assert.equal((await worker.account(owner)).share_count, 0);
     assert.equal((await answer(worker.unshare(mine, id))).status, 404);

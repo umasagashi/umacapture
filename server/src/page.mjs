@@ -43,6 +43,34 @@ export function pageFooter(url) {
 </footer>`;
 }
 
+/**
+ * The page a viewer gets for /r/<id> or /u/<id> when there is nothing to show: the id never
+ * existed, was unshared, or is not an id at all. One page for all three, so the answer does not
+ * tell which ids once existed. `kind` is the site header's name of the page asked for.
+ */
+export function renderNotFoundPage(kind) {
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>見つかりませんでした | umacapture</title>
+<link rel="stylesheet" href="/site/site.css">
+<link rel="icon" type="image/png" href="/favicon.png">
+</head>
+<body>
+${siteHeader(kind)}
+<main class="site-doc">
+<h1>見つかりませんでした</h1>
+<p>この共有は見つかりませんでした。取り消されたか、URL が違う可能性があります。</p>
+<p><a href="/">umacapture のトップへ</a></p>
+</main>
+</body>
+</html>
+`;
+}
+
 /** The og:image / twitter:card set for one page, chosen by `vars.OG_IMAGE_MODE`. */
 export function ogImage(env, id) {
   switch (env.OG_IMAGE_MODE) {

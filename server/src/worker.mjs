@@ -6,8 +6,8 @@ import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
 import { buildPublicList, listSort, renderListPage } from "./list.mjs";
 import { buildPublicRecord } from "./public_record.mjs";
-import { PAGE_CSP, renderPage } from "./page.mjs";
-import { matchRoute } from "./routes.mjs";
+import { PAGE_CSP, renderNotFoundPage, renderPage } from "./page.mjs";
+import { matchRoute, pagePathKind } from "./routes.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
@@ -27,6 +27,22 @@ const notFound = () =>
     status: 404,
     headers: { "Content-Type": "text/plain; charset=utf-8", "X-Robots-Tag": "noindex" },
   });
+
+const PAGE_KINDS = { r: "共有レコード", u: "共有レコード一覧" };
+
+/** The 404 for `pathname`: the shared look on a public page's path, plain text on any other. */
+function notFoundFor(method, pathname) {
+  const kind = pagePathKind(method, pathname);
+  if (kind === null) return notFound();
+  return new Response(renderNotFoundPage(PAGE_KINDS[kind]), {
+    status: 404,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": PAGE_CSP,
+      "X-Robots-Tag": "noindex",
+    },
+  });
+}
 
 const publicJson = (body, cache) =>
   new Response(JSON.stringify(body), {
@@ -68,7 +84,7 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       const route = matchRoute(request.method, url.pathname);
-      if (route === null) return notFound();
+      if (route === null) return notFoundFor(request.method, url.pathname);
       switch (route.name) {
         case "share":
           return answerApi(() => postShares(request, env, tables, newId, now));
@@ -121,14 +137,14 @@ export function createWorker(rawTables, { newId = newPublicId, now = Date.now } 
         case "listJson":
         case "listPage": {
           const list = await buildPublicList(env, tables, route.id);
-          if (list === null) return notFound();
+          if (list === null) return notFoundFor(request.method, url.pathname);
           // The JSON is one document whatever the query; only the page reads `sort`.
           if (route.name === "listJson") return publicJson(list, LIST_CACHE);
           return publicPage(renderListPage(list, env, listSort(url.searchParams.get("sort"))), LIST_CACHE);
         }
       }
       const record = await publicRecord(env, tables, route.id);
-      if (record === null) return notFound();
+      if (record === null) return notFoundFor(request.method, url.pathname);
       if (route.name === "recordJson") return publicJson(record, CACHE);
       return publicPage(renderPage(record, env, record.view.focus), CACHE);
     },

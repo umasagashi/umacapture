@@ -44,6 +44,16 @@ export const ROUTES = [
   ["GET", "syncGetRoot", /^\/api\/sync\/roots\/([0-9a-f]{64})$/],
 ];
 
+// The paths a viewer opens as a page: /r/ or /u/ and one segment with no extension, whatever that
+// segment is. A 404 on one of them is a page too; .json, .png and every other path keep the plain 404.
+const PAGE_PATH = /^\/(r|u)\/[^/.]*$/;
+
+/** "r" or "u" when a GET (or HEAD) of `pathname` asks for a public page, else null. */
+export function pagePathKind(method, pathname) {
+  if (method !== "GET" && method !== "HEAD") return null;
+  return PAGE_PATH.exec(pathname)?.[1] ?? null;
+}
+
 /** `{name, id}` for a recognised route (`id` only on routes that carry one), or null. */
 export function matchRoute(method, pathname) {
   const asMethod = method === "HEAD" ? "GET" : method;
