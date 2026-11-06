@@ -1,4 +1,4 @@
-// Request handling for the record-sharing Worker, independent of where the tables come from.
+// Request handling for the record-sharing Worker.
 
 import { getMe, postTrainer } from "./account.mjs";
 import { deleteAccount } from "./account_deletion.mjs";
@@ -14,7 +14,7 @@ import { newPublicId } from "./secrets.mjs";
 import { deleteShare, getMyShares, patchShare, postShares } from "./shares.mjs";
 import { answerSync, getBodies, getGeneration, getHeld, getImage, getSettings, putBodies, putImage, putSettings } from "./sync.mjs";
 import { getPart, getRoot, putPart, replaceRoot } from "./sync_list.mjs";
-import { Tables } from "./tables.mjs";
+import { TableSource, withTables } from "./tables.mjs";
 
 // A shared record's content never changes after sharing, but its sharer can change how it is
 // presented (view.focus) or unshare it; five minutes bounds how long either stays stale in caches.
@@ -68,18 +68,19 @@ const publicPage = (html, cache) =>
 async function publicRecord(env, tables, id) {
   const stored = await readRecord(env.DB, id);
   if (stored === null) return null;
-  return buildPublicRecord(stored.form, { id, sharedDay: stored.sharedDay, focus: stored.focus, origin: env.PUBLIC_ORIGIN }, tables);
+  const meta = { id, sharedDay: stored.sharedDay, focus: stored.focus, origin: env.PUBLIC_ORIGIN };
+  return withTables(tables, env.DB, (t) => buildPublicRecord(stored.form, meta, t));
 }
 
 /**
- * A Worker module (`{fetch, scheduled}`) answering from `rawTables`, and running the hourly run
- * (scheduled.mjs) on its cron trigger. `newId` draws the candidate public id of
- * each share attempt, and `now` is the clock every expiry and UTC day is read from (milliseconds
- * since the epoch); only tests replace them, to make a candidate collide with a stored id and to
- * move time.
+ * A Worker module (`{fetch, scheduled}`) answering from the name tables in its D1 (one TableSource
+ * per isolate), and running the hourly run (scheduled.mjs) on its cron trigger. `newId` draws the
+ * candidate public id of each share attempt, and `now` is the clock every expiry and UTC day is read
+ * from (milliseconds since the epoch); only tests replace them, to make a candidate collide with a
+ * stored id and to move time.
  */
-export function createWorker(rawTables, { newId = newPublicId, now = Date.now } = {}) {
-  const tables = new Tables(rawTables);
+export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
+  const tables = new TableSource();
   return {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);

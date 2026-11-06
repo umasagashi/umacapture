@@ -1,6 +1,6 @@
 // Runs the real Worker entry (src/index.mjs) in workerd through Miniflare, with an in-memory D1
-// that carries every file of migrations/ applied in name order, and the synthetic tables in place
-// of the generated ones. The Worker's outbound fetches (Turnstile's siteverify, Google's token
+// that carries every file of migrations/ applied in name order and the synthetic tables
+// (test/fixtures/tables.json) loaded into it as the publishing step loads a module set. The Worker's outbound fetches (Turnstile's siteverify, Google's token
 // endpoint, the B2 bucket) are answered here and never leave the process.
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -349,15 +349,18 @@ export const subjectHmac = (sub, provider = "google") =>
 // runs from then on report \`add\` bytes more in \`meta.size_after\` than the in-memory D1 holds, as a
 // database that much fuller would; \`{add: 0}\` ends it.
 //
+// A write landing between two reads: \`POST /__test/d1-before\` with \`{match, sql}\` makes the next D1
+// statement whose SQL contains \`match\` run the statements \`sql\` (an array of SQL strings, one batch)
+// just before it runs, as another writer committing at that moment would.
+//
 // The scheduled handler gets the same D1, so the daily run can be ordered against requests too.
 const TEST_ENTRY = `
-import tables from "./tables.generated.json";
 import { newPublicId } from "./secrets.mjs";
 import { createWorker } from "./worker.mjs";
 let forcedIds = [];
 let offsetMs = 0;
 const now = () => Date.now() + offsetMs;
-const worker = createWorker(tables, { newId: () => forcedIds.shift() ?? newPublicId(), now });
+const worker = createWorker({ newId: () => forcedIds.shift() ?? newPublicId(), now });
 let armed = null;
 let last = { expected: 0, arrived: 0 };
 let fault = null;
@@ -393,9 +396,22 @@ function committedThenCut(real) {
   };
   return wrap(real);
 }
+let writeBefore = null;
+function precededBy(db, writes, statement) {
+  const run = (op) => async (...args) => {
+    await db.batch(writes.map((sql) => db.prepare(sql)));
+    return statement[op](...args);
+  };
+  return { bind: (...args) => precededBy(db, writes, statement.bind(...args)), all: run("all"), run: run("run"), first: run("first"), raw: run("raw"), real: statement };
+}
 function gated(db) {
   const prepare = (sql) => {
     if (cut) return failing(sql);
+    if (writeBefore !== null && sql.includes(writeBefore.match)) {
+      const writes = writeBefore.sql;
+      writeBefore = null;
+      return precededBy(db, writes, db.prepare(sql));
+    }
     if (fault !== null && sql.includes(fault.match)) {
       const mode = fault.cut;
       fault = null;
@@ -461,6 +477,10 @@ export default {
       }
       return Response.json(fault?.match ?? null);
     }
+    if (url.pathname === "/__test/d1-before" && request.method === "POST") {
+      writeBefore = await request.json();
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === "/__test/d1-size" && request.method === "POST") {
       sizeAdded = (await request.json()).add;
       return new Response(null, { status: 204 });
@@ -477,16 +497,9 @@ function modules(testEntry) {
   const own = readdirSync(SRC)
     .filter((f) => f.endsWith(".mjs"))
     .map((f) => ({ type: "ESModule", path: join(SRC, f), contents: readFileSync(join(SRC, f), "utf8") }));
-  // workerd has no JSON module type. wrangler's bundler turns the JSON import into a default
-  // export, and so does this module.
-  const tables = {
-    type: "ESModule",
-    path: join(SRC, "tables.generated.json"),
-    contents: `export default ${JSON.stringify(FIXTURE_TABLES)};`,
-  };
   const isEntry = (m) => m.path.endsWith("index.mjs");
   const entry = own.find(isEntry);
-  const rest = [...own.filter((m) => !isEntry(m)), tables];
+  const rest = own.filter((m) => !isEntry(m));
   if (!testEntry) return [entry, ...rest];
   return [{ type: "ESModule", path: join(SRC, "test_entry.mjs"), contents: TEST_ENTRY }, entry, ...rest];
 }
@@ -518,6 +531,34 @@ export function migrationStatements(dir = join(ROOT, "migrations")) {
       }
       return statements.filter(Boolean);
     });
+}
+
+/**
+ * Appends to D1's name tables what `raw` (`{version, names, gids}`, the shape tables.mjs reads back)
+ * holds past their end, then records the load, as the publishing step does: rows first, the load row
+ * last, one generation past the greatest. Returns the number of rows added; a load adding none
+ * writes nothing.
+ */
+export async function appendTables(db, raw, archiveSha256 = "0".repeat(64)) {
+  const rows = [];
+  for (const [table, field, lists] of [["share_table_name", "name", raw.names], ["share_table_gid", "gid", raw.gids]]) {
+    for (const [key, list] of Object.entries(lists)) {
+      const { held } = await db.prepare(`SELECT COUNT(*) AS held FROM ${table} WHERE key = ?`).bind(key).first();
+      for (let pos = held; pos < list.length; pos++) {
+        rows.push(db.prepare(`INSERT INTO ${table} (key, pos, ${field}) VALUES (?, ?, ?)`).bind(key, pos, list[pos]));
+      }
+    }
+  }
+  if (rows.length === 0) return 0;
+  await db.batch(rows);
+  await db
+    .prepare(
+      `INSERT INTO share_table_load (generation, archive_sha256, recognizer_version, rows_added, loaded_at)
+       VALUES ((SELECT COALESCE(MAX(generation), 0) + 1 FROM share_table_load), ?, ?, ?, ?)`,
+    )
+    .bind(archiveSha256, raw.version, rows.length, Math.floor(Date.now() / 1000))
+    .run();
+  return rows.length;
 }
 
 /**
@@ -588,8 +629,8 @@ function tokenAnswer({ sub, nonce, claims: overrides }, now) {
 }
 
 /**
- * Starts the Worker. `migrate: false` leaves D1 without any table, so any query the Worker makes
- * throws: a request answered 404 there provably never reached D1. `testEntry: true` runs the
+ * Starts the Worker, its D1 migrated and holding FIXTURE_TABLES. `migrate: false` leaves D1 without
+ * any table, so any query the Worker makes throws: a request answered 404 there provably never reached D1. `testEntry: true` runs the
  * test-only entry described above (the batch gate and forced public ids). `vars` overrides the
  * environment variables.
  */
@@ -663,7 +704,10 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     },
   });
   const db = await mf.getD1Database("DB");
-  if (migrate) await db.batch(migrationStatements().map((s) => db.prepare(s)));
+  if (migrate) {
+    await db.batch(migrationStatements().map((s) => db.prepare(s)));
+    await appendTables(db, FIXTURE_TABLES);
+  }
   const fetch = (path, init) => mf.dispatchFetch(`${ORIGIN}${path}`, init);
   const post = (path, body) =>
     fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -809,6 +853,13 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     /** As `cutD1At`, but the matching statement runs and commits first. */
     async cutD1After(match) {
       (await fetch("/__test/d1-fault", { method: "POST", body: JSON.stringify({ match, cut: "after" }) })).body?.cancel();
+    },
+    /**
+     * Makes the next D1 statement whose SQL contains `match` run the statements `sql` (SQL strings,
+     * one batch) just before it runs (needs `testEntry: true`).
+     */
+    async writeD1Before(match, sql) {
+      (await fetch("/__test/d1-before", { method: "POST", body: JSON.stringify({ match, sql }) })).body?.cancel();
     },
     /** Ends what `cutD1At` or `cutD1After` started: D1 answers again. */
     async restoreD1() {

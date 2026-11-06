@@ -3,7 +3,7 @@
 # Stub test for tool/cloudflare/publish_modules.sh. Touches nothing outside a
 # temporary directory: each scenario runs a copy of the script inside a
 # throwaway git repository that holds the deployed paths (server/data-site/,
-# server/wrangler.data.jsonc, tool/cloudflare/), with fake `npm` and `curl`
+# server/wrangler.data.jsonc, server/wrangler.jsonc, tool/cloudflare/), with fake `npm` and `curl`
 # first on PATH. The fake `npm ci` installs the fake `wrangler` as
 # server/node_modules/.bin/wrangler, the pinned one the script runs; the
 # `wrangler` on PATH only logs "PATH wrangler" and fails. Every fake records
@@ -61,6 +61,10 @@
 #  (20) the previous version is the most recently published archive other
 #       than the one served, also when the live archive is re-published (no
 #       zip, or the same zip given): it stays past 30 days, an older one goes
+#  (21) the name tables are loaded into production and staging from the
+#       published archive's bytes after phase 1 and before phase 2, also on a
+#       re-publish; a refusal for either target leaves the pointer unchanged;
+#       --dry-run loads nothing
 #
 # Run from Git Bash:  bash tool/cloudflare/test/publish_modules_test.sh
 # Needs python (to build the test archives), git, jq, unzip, sha256sum.
@@ -111,7 +115,7 @@ TEMPLATE="$ROOT/template"
 mkdir -p "$TEMPLATE/tool/cloudflare" "$TEMPLATE/server"
 cp "$SRC_ROOT/$SCRIPT_REL" "$TEMPLATE/$SCRIPT_REL"
 cp -R "$SRC_ROOT/server/data-site" "$TEMPLATE/server/"
-cp "$SRC_ROOT/server/wrangler.data.jsonc" "$SRC_ROOT/server/package.json" "$SRC_ROOT/server/package-lock.json" \
+cp "$SRC_ROOT/server/wrangler.data.jsonc" "$SRC_ROOT/server/wrangler.jsonc" "$SRC_ROOT/server/package.json" "$SRC_ROOT/server/package-lock.json" \
   "$TEMPLATE/server/"
 printf '/build/\n/server/node_modules/\n/tool/cloudflare/.publish-backup/\n' > "$TEMPLATE/.gitignore"
 git -C "$TEMPLATE" init -q
@@ -199,7 +203,24 @@ cat > "$BIN/wrangler" <<'SH'
 echo "PATH wrangler $*" >> "$STUB_LOG"
 exit 1
 SH
-chmod +x "$FAKE_WRANGLER" "$BIN/npm" "$BIN/wrangler" "$BIN/curl"
+# The fake `uv run tool/cloudflare/load_share_tables.py` logs its target and
+# the sha256 of the archive it was given; the targets in STUB_TABLES_FAIL exit
+# non-zero. The loader itself is tested by test_build_share_tables.py.
+cat > "$BIN/uv" <<'SH'
+#!/usr/bin/env bash
+target=""; archive=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target) target="$2"; shift ;;
+    --archive) archive="$2"; shift ;;
+  esac
+  shift
+done
+echo "tables $target archive=$(sha256sum "$archive" | cut -d' ' -f1)" >> "$STUB_LOG"
+for f in ${STUB_TABLES_FAIL:-}; do [[ "$f" == "$target" ]] && { echo "stub: tables refused" >&2; exit 1; }; done
+exit 0
+SH
+chmod +x "$FAKE_WRANGLER" "$BIN/npm" "$BIN/wrangler" "$BIN/curl" "$BIN/uv"
 
 # ---- Scenario runner --------------------------------------------------------
 LIVE="https://data.umacapture.com"
@@ -483,11 +504,12 @@ check "the new archive is verified on the verify host" \
 dump_on_failure "$f0"
 
 echo "(16) the deployed paths must be committed"
-for dirt in modified untracked_site untracked_tool lockfile; do
+for dirt in modified untracked_site untracked_tool lockfile table_target; do
   new_world "dirty_$dirt"; f0=$FAILED
   case "$dirt" in
     modified) printf 'edited\n' >> "$REPO/server/data-site/umacapture/news.md" ;;
     lockfile) printf '\n' >> "$REPO/server/package-lock.json" ;;
+    table_target) printf '\n' >> "$REPO/server/wrangler.jsonc" ;;
     untracked_site) printf 'x\n' > "$REPO/server/data-site/umacapture/extra.txt" ;;
     untracked_tool) printf 'x\n' > "$REPO/tool/cloudflare/notes.txt" ;;
   esac
@@ -635,6 +657,40 @@ for how in none same newer; do
   fi
   dump_on_failure "$f0"
 done
+
+echo "(21) the name tables go into every target before the pointer changes"
+# tables_before <deploy n> <sha>: both targets were loaded with archive <sha>
+# before deploy <n>.
+tables_before() {
+  local d p s
+  d="$(grep -n "^deploy $1 " "$LOG" | cut -d: -f1)"
+  p="$(line_of "tables production archive=$2")"
+  s="$(line_of "tables staging archive=$2")"
+  [[ -n "$d" && -n "$p" && -n "$s" ]] && (( p < d && s < d ))
+}
+new_world tables; f0=$FAILED; run_scenario --yes
+check "new archive: exits 0" [ "$RC" = 0 ]
+check "new archive: both targets loaded from the published bytes before phase 2" tables_before 2 "$NEW_SHA"
+check "new archive: after phase 1 is verified" \
+  bash -c "(( \$(grep -n -F 'curl GET $LIVE/$(vkey "$NEW_SHA")' '$LOG' | tail -n1 | cut -d: -f1) < \$(grep -n -m1 '^tables ' '$LOG' | cut -d: -f1) ))"
+dump_on_failure "$f0"
+new_world tables_republish; f0=$FAILED; ZIP_UNDER_TEST=none run_scenario --yes
+check "re-publish: exits 0" [ "$RC" = 0 ]
+check "re-publish: both targets loaded from the live archive before its one deploy" tables_before 1 "$OLD_SHA"
+dump_on_failure "$f0"
+for failing in production staging; do
+  new_world "tables_fail_$failing"; f0=$FAILED
+  STUB_TABLES_FAIL="$failing" run_scenario --yes
+  check "$failing refused: exits non-zero" [ "$RC" != 0 ]
+  check "$failing refused: no phase 2" [ "$(deploys)" = 1 ]
+  check "$failing refused: the served pointer is the old one" same "$EDGE/$PKEY" "$FIX/old_pointer.json"
+  check "$failing refused: says the pointer was not changed" \
+    grep -q "name tables of $failing were not loaded. The pointer was not changed" "$OUT"
+  dump_on_failure "$f0"
+done
+new_world tables_dry; f0=$FAILED; run_scenario --dry-run
+check "--dry-run: no table load" never "tables "
+dump_on_failure "$f0"
 
 echo
 echo "passed: $PASSED, failed: $FAILED"
