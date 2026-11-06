@@ -44,9 +44,13 @@
 #                                             --yes answers it without a prompt
 #   4 phase 1: deploy, verify deploy.json and the new archive
 #     (skipped when the live pointer already names this archive)
-#   5 phase 2: deploy, verify deploy.json, pointer and alias; on failure
+#   5 name tables: tool/cloudflare/load_share_tables.py appends the names this
+#     archive adds to the D1 of every share Worker (production and staging),
+#     from the same bytes phase 1 verified; any refusal or failure stops the
+#     run before the pointer changes, and running it again completes the load
+#   6 phase 2: deploy, verify deploy.json, pointer and alias; on failure
 #     deploy phase 1 again and verify it
-#   6 summary
+#   7 summary
 #
 # Reading and verifying may target different hosts: DATA_READ_ROOT is where the
 # live pointer, deploy.json and archives are read from, DATA_VERIFY_ROOT is the
@@ -95,10 +99,12 @@ SERVER_DIR="server"
 WRANGLER="$REPO_ROOT/$SERVER_DIR/node_modules/.bin/wrangler"
 SITE_SOURCE="server/data-site"
 TREE="build/data-site"
-# The paths whose committed bytes are deployed, plus the npm ci inputs that pick
-# the wrangler doing the deploy; any change or untracked file under them stops
-# the run, so deploy.json's git_sha names what is served and what served it.
-DEPLOYED_PATHS=("$SITE_SOURCE" "$WRANGLER_CONFIG" "tool/cloudflare"
+# The paths whose committed bytes are deployed, the web Worker config whose D1
+# bindings name where load_share_tables.py writes the name tables, and the npm
+# ci inputs that pick the wrangler doing the deploy; any change or untracked
+# file under them stops the run, so deploy.json's git_sha names what is served,
+# where its tables went, and what served it.
+DEPLOYED_PATHS=("$SITE_SOURCE" "$WRANGLER_CONFIG" "$SERVER_DIR/wrangler.jsonc" "tool/cloudflare"
   "$SERVER_DIR/package.json" "$SERVER_DIR/package-lock.json")
 KEY_PREFIX="umacapture"
 POINTER_KEY="$KEY_PREFIX/version_info.json"
@@ -202,7 +208,7 @@ wait_for_deploy_json() {
 
 # ---- 0. Preflight ----------------------------------------------------------
 step "0. Preflight"
-for tool in npm jq unzip sha256sum curl git; do
+for tool in npm uv jq unzip sha256sum curl git; do
   command -v "$tool" >/dev/null || fail "'$tool' not found on PATH."
 done
 cd "$REPO_ROOT"
@@ -473,8 +479,23 @@ else
   step "4. Phase 1: skipped (the live pointer already names this archive)"
 fi
 
-# ---- 5. Phase 2 --------------------------------------------------------------
-step "5. Phase 2: pointer and alias"
+# ---- 5. Name tables ----------------------------------------------------------
+# Every share Worker has to know the sids of an archive before a client can be
+# pointed at it, so the tables go in here, on both paths (a new archive and a
+# re-publish), and every target is required: one left behind would refuse
+# records a client of the new modules shares.
+step "5. Name tables"
+SHARE_TABLE_TARGETS=(production staging)
+# Windows Python cannot open a /c/... path.
+TABLES_ARCHIVE="$ZIP"
+command -v cygpath >/dev/null && TABLES_ARCHIVE="$(cygpath -m "$ZIP")"
+for target in "${SHARE_TABLE_TARGETS[@]}"; do
+  uv run tool/cloudflare/load_share_tables.py --target "$target" --archive "$TABLES_ARCHIVE" \
+    || fail "the name tables of $target were not loaded. The pointer was not changed; run this again once the cause is fixed."
+done
+
+# ---- 6. Phase 2 --------------------------------------------------------------
+step "6. Phase 2: pointer and alias"
 # verify_phase2: deploy.json, the pointer byte for byte, the alias, CORS.
 verify_phase2() {
   wait_for_deploy_json "$WORK/phase2/deploy.json" \
@@ -507,8 +528,8 @@ if [[ -n "$PHASE2_ERROR" ]]; then
 fi
 echo "    deploy.json is phase 2; the pointer matches byte for byte; the alias matches."
 
-# ---- 6. Summary ------------------------------------------------------------
-step "6. Published"
+# ---- 7. Summary ------------------------------------------------------------
+step "7. Published"
 echo "    recognizer_version: $RECOGNIZER_VERSION"
 echo "    $DATA_VERIFY_ROOT/$VERSIONED_KEY"
 echo "    sha256 $SHA, $SIZE bytes"

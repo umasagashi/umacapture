@@ -65,12 +65,11 @@ lib/*.g.dart
 .wrangler/
 # Pointer/alias backups written by tool/cloudflare/publish_modules.sh.
 /tool/cloudflare/.publish-backup/
-# The share tables last deployed: the append-only baseline of tool/cloudflare/build_share_tables.py.
+# The name tables each target's Worker bundled before Workers read them from D1 (game text): the
+# --baseline of tool/cloudflare/load_share_tables.py for the first load into an empty D1.
 /tool/cloudflare/.deploy-backup/
-# The sharing Worker's npm dependencies (pinned by server/package-lock.json, which is tracked) and
-# its name tables, which are generated at deploy time from the module set and carry game text.
+# The sharing Worker's npm dependencies (pinned by server/package-lock.json, which is tracked).
 /server/node_modules/
-/server/src/tables.generated.json
 # The OGP image function's npm dependencies (pinned by og/package-lock.json, which is tracked) and
 # the Vercel CLI's local project state.
 /og/node_modules/

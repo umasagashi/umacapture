@@ -25,7 +25,8 @@ first time the script changes. **If a step is missing from the document, add it 
 | Stop or resume file sync | "Stopping file sync" |
 | Go back to an earlier version | "The version record", then "Restoring a version" |
 | Take the Worker off staging | "Staging" (Stopping staging) |
-| New recognizer modules or news | "Publishing to data.umacapture.com" — then redeploy each sharing-on target ("Deploying", the paragraph on when a redeploy is needed) |
+| New recognizer modules or news | "Publishing to data.umacapture.com". It also appends the names to both D1s; no web deployment follows ("Deploying", the paragraph on when a redeploy is needed) |
+| A target whose live Worker still bundles its name tables | "Switching the name tables to D1", before its next deployment |
 | OG image function | "OGP image function (Vercel)" |
 | A first deployment to a new environment | "One-time preparation" before anything else |
 
@@ -47,6 +48,9 @@ Know these before starting, and get the decision for each one before the step th
 - **A changed custom domain** may override a DNS record without asking ("Changing the custom
   domain: only from a terminal").
 - **The first write to a production bucket**, and anything a user then stores there.
+- **A module publish's names.** Every publish writes the names its archive adds to the D1 of
+  production and of staging, and nothing removes or changes them ("Publishing to
+  data.umacapture.com", Name tables; "A name in D1 is final").
 
 A rollback restores the Worker only. It does not undo any of the above.
 
@@ -72,8 +76,7 @@ A rollback restores the Worker only. It does not undo any of the above.
    its pin is removed after the current function is deployed to production.
 7. **Check what the script does not.** Stage 8 verifies `deploy.json`, COOP/COEP, the hidden source
    map and which side answers 404. After that:
-   - write down the version id with the `git_sha` and `tables_module_sha256` ("The version record");
-     a rollback needs them;
+   - write down the version id with the `git_sha` ("The version record"); a rollback needs them;
    - with sharing on in production, the Turnstile check ("After a deployment with sharing on");
    - after a first deployment, the browser checks ("After the first deployment") and the
      dashboard checks under "Entrance list";
@@ -89,7 +92,8 @@ Stop and report, rather than retry, when any check fails after step 5: the state
 "Restoring a version" lists the conditions; check every one of them against the version you return
 to:
 
-- the same `tables_module_sha256` (sharing on to sharing on);
+- if the version has the Worker, its `deploy.json` carries `"name_tables": "d1"`; publishing
+  module sets since then is no obstacle;
 - no migration applied since that version, if it has the Worker; a version without the Worker reads
   no schema, and returning to it is the first means of stopping sharing ("Stopping record sharing");
 - the version is still among those that can be rolled back to (the limit is in "Restoring a
@@ -111,7 +115,11 @@ When a condition fails, the way back is a new deployment, not a rollback. Always
 - **A run with sharing off removes the hourly run** as well as the Worker ("Deploying", the options;
   "Stopping file sync" explains
   what a long stop costs: hidden images are lost after the window it names).
-- **Staging and production have their own D1, bucket and name-table baseline.** A check on one says
-  nothing about the other ("Deploying", Name tables).
+- **Staging and production have their own D1, with its own name tables, and their own bucket.** A
+  check on one says nothing about the other ("Deploying", Name tables). A module publish writes the
+  names to both D1s, so the staging database is needed even while staging runs without the Worker
+  ("Staging", Stopping staging).
+- **A sharing-on run stops at stage 3 when the target's D1 holds no name tables.** Nothing is
+  deployed; the way forward is "Switching the name tables to D1", not a retry.
 - **The first production deployment** has its own list under "Deploying"; read it whenever
   production has not yet run the current schema.

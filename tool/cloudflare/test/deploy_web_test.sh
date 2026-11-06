@@ -19,26 +19,25 @@
 #
 # Asserts:
 #   (1) production: source maps go to Sentry, server/wrangler.jsonc is
-#       deployed to umacapture.com, the tables are built against production's
-#       own baseline, deploy.json names the module archive, the deployed tables
-#       become production's baseline, and the build keeps the app's sharing
-#       origin
+#       deployed to umacapture.com, the name tables are read back from
+#       production's D1 and the page fonts are cut from them, no tables are
+#       built, bundled or kept as a baseline, deploy.json says the Worker reads
+#       its tables from D1 and names no module archive, and the build keeps the
+#       app's sharing origin
 #   (2) staging: nothing goes to Sentry (and no Sentry token is needed), the
-#       tables are built against staging's own baseline, server/wrangler.jsonc
-#       is deployed with --env staging, verification reads the staging host,
-#       deploy.json names the module archive, the deployed tables become
-#       staging's baseline, and the build points the app's sharing origin at
+#       tables are read back from staging's D1, server/wrangler.jsonc is
+#       deployed with --env staging, verification reads the staging host,
+#       deploy.json says D1, and the build points the app's sharing origin at
 #       the staging host
-#   (3) staging --dry-run: no deploy without --dry-run, and the baseline is
-#       left alone
+#   (3) staging --dry-run: no deploy without --dry-run
 #   (4) production --dry-run: no deploy without --dry-run (stage 2 still runs)
-#   (5) staging where the table builder records no source sha256: the run
-#       stops before anything is deployed
+#   (5) staging whose D1 records no load of the name tables: the run stops
+#       before anything is deployed
 #   (6) staging --sharing off: the assets-only config is deployed with
-#       --env staging, no tables are built and no baseline is written,
-#       deploy.json has no tables entry, and stage 8 accepts the static 404
+#       --env staging, D1 is not read and the fonts take no tables, deploy.json
+#       still says D1, and stage 8 accepts the static 404
 #   (7) production where the deploy brings up no Worker: stage 8 fails on the
-#       static 404, and the tables do not become the baseline
+#       static 404
 #
 # Run from Git Bash:  bash tool/cloudflare/test/deploy_web_test.sh
 # Needs git and sha256sum.
@@ -57,7 +56,6 @@ flunk() { echo "  FAIL: $*"; FAILED=$((FAILED + 1)); }
 check() { local name="$1"; shift; if "$@"; then pass "$name"; else flunk "$name"; fi; }
 
 STAGING_HOST="umacapture-web-staging.umasagashi.workers.dev"
-MODULE_SHA="$(printf 'a%.0s' {1..64})"
 
 # ---- A repository holding the script and fake build steps, committed ---------
 TEMPLATE="$ROOT/template"
@@ -73,7 +71,7 @@ cat > "$TEMPLATE/tool/upload_web_sourcemaps.sh" <<'SH'
 echo "sentry upload" >> "$STUB_LOG"
 SH
 printf '{}\n' > "$TEMPLATE/server/package.json"
-printf '/build/\n/server/node_modules/\n/server/src/tables.generated.json\n/tool/cloudflare/.deploy-backup/\n/tool/cloudflare/.env\n' \
+printf '/build/\n/server/node_modules/\n/tool/cloudflare/.env\n' \
   > "$TEMPLATE/.gitignore"
 git -C "$TEMPLATE" init -q
 git -C "$TEMPLATE" config core.autocrlf false
@@ -114,22 +112,26 @@ cat > "$BIN/uv" <<SH
 #!/usr/bin/env bash
 echo "uv \$*" >> "\$STUB_LOG"
 script="\$2"
-out=""; source_out=""; web_out=""
+read_to=""; web_out=""; tables=""
 while [[ \$# -gt 0 ]]; do
-  case "\$1" in --out) out="\$2"; shift ;; --source-out) source_out="\$2"; shift ;; --web-out) web_out="\$2"; shift ;; esac
+  case "\$1" in --read-to) read_to="\$2"; shift ;; --web-out) web_out="\$2"; shift ;; --tables) tables="\$2"; shift ;; esac
   shift
 done
 case "\$script" in
   tool/cloudflare/build_page_fonts.py)
+    # The fonts are cut from the tables the D1 read wrote, which must exist by then.
+    [[ -z "\$tables" || -f "\$tables" ]] || exit 1
     mkdir -p "\$web_out/site/fonts"
     printf 'woff2' > "\$web_out/site/fonts/stub.woff2"
     echo "wrote \$web_out/site/fonts"
     ;;
-  *)
-    printf '{"version":"v1","names":{},"gids":{}}' > "\$out"
-    [[ -n "\${STUB_NO_SOURCE:-}" ]] || echo "$MODULE_SHA" > "\$source_out"
-    echo "wrote \$out"
+  tool/cloudflare/load_share_tables.py)
+    # A D1 that records no load is refused, as load_share_tables.py --read-to refuses it.
+    [[ -n "\${STUB_NO_LOAD:-}" ]] && { echo "D1 records no load of the name tables" >&2; exit 1; }
+    printf '{"version":"v1","generation":1,"names":{},"gids":{}}' > "\$read_to"
+    echo "read \$read_to"
     ;;
+  *) exit 2 ;;
 esac
 SH
 cat > "$BIN/curl" <<'SH'
@@ -181,18 +183,25 @@ called() { grep -qx -- "$1" "$STUB_LOG"; }
 called_like() { grep -q -- "$1" "$STUB_LOG"; }
 not() { ! "$@"; }
 
+# no_baked_tables <host>: nothing of the bundled-tables era is left behind or served.
+no_baked_tables() {
+  ! test -e "$REPO/server/src/tables.generated.json" && ! test -e "$REPO/tool/cloudflare/.deploy-backup" \
+    && ! called_like "^uv run tool/cloudflare/build_share_tables.py" \
+    && ! grep -q tables_module_sha256 "$STUB_WEB/$1/deploy.json"
+}
+
 echo "(1) production"
 SENTRY_AUTH_TOKEN=stub-sentry run_world prod --yes
 check "exit 0" test "$STATUS" -eq 0
 check "source maps sent to Sentry" called "sentry upload"
 check "Worker config deployed" called "wrangler deploy -c server/wrangler.jsonc"
-check "tables built against production's baseline" \
-  called_like "^uv run tool/cloudflare/build_share_tables.py --previous tool/cloudflare/.deploy-backup/tables.production.json --out server/src/tables.generated.json --source-out "
+check "tables read back from production's D1" \
+  called "uv run tool/cloudflare/load_share_tables.py --target production --read-to build/share_tables.json"
+check "fonts cut from the tables read back" \
+  called "uv run tool/cloudflare/build_page_fonts.py --web-out build/web --tables build/share_tables.json"
 check "verified on umacapture.com" called "curl GET https://umacapture.com/deploy.json"
-check "deploy.json names the module archive" \
-  grep -q "\"tables_module_sha256\": \"$MODULE_SHA\"" "$STUB_WEB/umacapture.com/deploy.json"
-check "deployed tables became production's baseline" \
-  cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.production.json"
+check "deploy.json says the Worker reads D1" grep -q '"name_tables": "d1"' "$STUB_WEB/umacapture.com/deploy.json"
+check "no tables built, bundled or kept" no_baked_tables umacapture.com
 check "build keeps the app's sharing origin" called "build_web --source-maps"
 
 echo "(2) staging"
@@ -201,15 +210,13 @@ STATUS="$(cat "$ROOT/staging.status")"
 REPO="$ROOT/staging/repo"; STUB_LOG="$ROOT/staging/calls.log"; STUB_WEB="$ROOT/staging/web"
 check "exit 0 without a Sentry token" test "$STATUS" -eq 0
 check "nothing sent to Sentry" not called "sentry upload"
-check "tables built against staging's baseline" \
-  called_like "^uv run tool/cloudflare/build_share_tables.py --previous tool/cloudflare/.deploy-backup/tables.staging.json --out server/src/tables.generated.json --source-out "
+check "tables read back from staging's D1" \
+  called "uv run tool/cloudflare/load_share_tables.py --target staging --read-to build/share_tables.json"
 check "staging env deployed" called "wrangler deploy -c server/wrangler.jsonc --env staging"
 check "nothing deployed to production" not test -e "$STUB_WEB/umacapture.com"
 check "verified on the staging host" called "curl GET https://$STAGING_HOST/deploy.json"
-check "deploy.json names the module archive" \
-  grep -q "\"tables_module_sha256\": \"$MODULE_SHA\"" "$STUB_WEB/$STAGING_HOST/deploy.json"
-check "deployed tables became staging's baseline" \
-  cmp -s "$REPO/server/src/tables.generated.json" "$REPO/tool/cloudflare/.deploy-backup/tables.staging.json"
+check "deploy.json says the Worker reads D1" grep -q '"name_tables": "d1"' "$STUB_WEB/$STAGING_HOST/deploy.json"
+check "no tables built, bundled or kept" no_baked_tables "$STAGING_HOST"
 check "build shares through the staging host" \
   called "build_web --source-maps --dart-define=UMACAPTURE_SHARING_ORIGIN=https://$STAGING_HOST"
 
@@ -218,7 +225,6 @@ run_world staging_dry --target staging --dry-run
 check "exit 0" test "$STATUS" -eq 0
 check "dry run only" called "wrangler deploy -c server/wrangler.jsonc --env staging --dry-run"
 check "no real deploy" not called "wrangler deploy -c server/wrangler.jsonc --env staging"
-check "baseline untouched" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.staging.json"
 
 echo "(4) production --dry-run"
 SENTRY_AUTH_TOKEN=stub-sentry run_world prod_dry --dry-run
@@ -226,10 +232,11 @@ check "exit 0" test "$STATUS" -eq 0
 check "source maps still sent" called "sentry upload"
 check "no real deploy" not called "wrangler deploy -c server/wrangler.jsonc"
 
-echo "(5) staging, the source archive's sha256 not recorded"
-STUB_NO_SOURCE=1 run_world staging_no_source --target staging --yes
+echo "(5) staging, D1 records no load of the name tables"
+STUB_NO_LOAD=1 run_world staging_no_load --target staging --yes
 check "stops" test "$STATUS" -ne 0
-check "nothing deployed" not called_like "^wrangler deploy"
+check "says D1 has no tables" grep -q "the staging D1 holds no name tables" "$ROOT/staging_no_load/out.log"
+check "nothing deployed, not even a dry run" not called_like "^wrangler deploy"
 
 echo "(6) staging --sharing off"
 run_world staging_off --target staging --sharing off --yes
@@ -237,16 +244,16 @@ check "exit 0" test "$STATUS" -eq 0
 check "assets-only config deployed to the staging env" \
   called "wrangler deploy -c server/wrangler.assets-only.jsonc --env staging"
 check "nothing deployed to production" not test -e "$STUB_WEB/umacapture.com"
-check "no tables built" not called_like "^uv run tool/cloudflare/build_share_tables.py"
-check "no baseline written" not test -e "$REPO/tool/cloudflare/.deploy-backup"
-check "deploy.json has no tables entry" not grep -q tables_module_sha256 "$STUB_WEB/$STAGING_HOST/deploy.json"
+check "D1 not read" not called_like "^uv run tool/cloudflare/load_share_tables.py"
+check "fonts take no tables" called "uv run tool/cloudflare/build_page_fonts.py --web-out build/web"
+check "deploy.json says D1" grep -q '"name_tables": "d1"' "$STUB_WEB/$STAGING_HOST/deploy.json"
+check "no tables built, bundled or kept" no_baked_tables "$STAGING_HOST"
 check "verified on the staging host" called "curl GET https://$STAGING_HOST/r/0000000000"
 
 echo "(7) production, the deploy brings up no Worker"
 SENTRY_AUTH_TOKEN=stub-sentry STUB_NO_WORKER=1 run_world prod_no_worker --yes
 check "stops" test "$STATUS" -ne 0
 check "stops at the Worker check" grep -q "is not answered by the sharing and sync Worker" "$ROOT/prod_no_worker/out.log"
-check "tables not promoted" not test -e "$REPO/tool/cloudflare/.deploy-backup/tables.production.json"
 
 echo
 echo "passed $PASSED, failed $FAILED"

@@ -9,7 +9,16 @@
 import { after, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
-import { newClientKey, newLoginHash, ORIGIN, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
+import {
+  appendTables,
+  FIXTURE_TABLES,
+  newClientKey,
+  newLoginHash,
+  ORIGIN,
+  postedForm,
+  secretHash,
+  startWorker,
+} from "./support/worker_harness.mjs";
 
 /** Status and parsed body of one response (null for a body that is not JSON). */
 async function answer(resPromise) {
@@ -628,5 +637,124 @@ describe("the session's account", () => {
     const other = await worker.signIn("100000000000000000033");
     assert.equal((await trainer(other, { trainer_id: uuid(1) })).status, 200);
     assert.equal((await trainer(newClientKey(), { trainer_id: uuid(99) })).status, 401);
+  });
+});
+
+describe("name tables loaded into D1 after the Worker started", () => {
+  let worker;
+  let token;
+  before(async () => {
+    worker = await startWorker({ testEntry: true });
+    token = await worker.signIn();
+  });
+  after(() => worker.dispose());
+
+  /** FIXTURE_TABLES with the skill table grown to `size` entries (gids 2001 onwards), at `version`. */
+  const grown = (size, version) => ({
+    version,
+    names: { ...FIXTURE_TABLES.names, "skill.name": Array.from({ length: size }, (_, i) => `skill ${i}`) },
+    gids: { ...FIXTURE_TABLES.gids, "skill.name": Array.from({ length: size }, (_, i) => 2001 + i) },
+  });
+
+  test("a stored name is never changed or deleted, and a key's names are added only at its end", async () => {
+    const { db } = worker;
+    for (const [sql, args, message] of [
+      ["UPDATE share_table_name SET name = 'x' WHERE key = 'skill.name' AND pos = 0", [], /never changed/],
+      ["DELETE FROM share_table_name WHERE key = 'skill.name' AND pos = 2", [], /never deleted/],
+      ["UPDATE share_table_gid SET gid = 1 WHERE key = 'skill.name' AND pos = 0", [], /never changed/],
+      ["DELETE FROM share_table_gid WHERE key = 'skill.name'", [], /never deleted/],
+      ["INSERT INTO share_table_name (key, pos, name) VALUES (?, ?, ?)", ["skill.name", 4, "gap"], /added at the end/],
+      ["INSERT INTO share_table_name (key, pos, name) VALUES (?, ?, ?)", ["new.key", 1, "gap"], /added at the end/],
+      ["INSERT INTO share_table_gid (key, pos, gid) VALUES (?, ?, ?)", ["skill.name", 5, 9], /added at the end/],
+    ]) {
+      await assert.rejects(db.prepare(sql).bind(...args).run(), message, sql);
+    }
+    // A batch that fails part way commits none of its rows.
+    const add = (pos) => db.prepare("INSERT INTO share_table_name (key, pos, name) VALUES ('skill.name', ?, 'x')").bind(pos);
+    await assert.rejects(db.batch([add(3), add(5)]), /added at the end/);
+    const { names } = await db.prepare("SELECT COUNT(*) AS names FROM share_table_name WHERE key = 'skill.name'").first();
+    assert.equal(names, 3);
+  });
+
+  test("a sid D1 gained after the Worker read its tables is shared and published, under the latest version", async () => {
+    // The Worker reads its tables (generation 1, skills 0 to 2) and keeps them.
+    assert.equal((await results(worker, token, [share()]))[0].status, "created");
+
+    // A module set adds skill 3: a stored record naming it is published.
+    assert.equal(await appendTables(worker.db, grown(4, "2026-02-01T00:00:00Z")), 2);
+    await worker.insertRecord("0123456789", postedForm({ skills: [{ id: 3 }] }));
+    const page = await worker.fetch("/r/0123456789.json");
+    assert.equal(page.status, 200);
+    const json = await page.json();
+    assert.deepEqual(json.skills, [{ gid: 2004, name: "skill 3" }]);
+    assert.equal(json.tables_version, "2026-02-01T00:00:00Z");
+
+    // Another adds skill 4: a share naming it is stored, and its page names it.
+    await appendTables(worker.db, grown(5, "2026-03-01T00:00:00Z"));
+    const [created] = await results(worker, token, [share(postedForm({ skills: [{ id: 4 }] }))]);
+    assert.equal(created.status, "created", JSON.stringify(created));
+    const shared = await (await worker.fetch(`/r/${created.id}.json`)).json();
+    assert.deepEqual(shared.skills, [{ gid: 2005, name: "skill 4" }]);
+    assert.equal(shared.tables_version, "2026-03-01T00:00:00Z");
+  });
+
+  test("names D1 holds without a load row are not read: the generation has not moved, so the sid stays refused", async () => {
+    await worker.fetch("/r/0123456789.json"); // the Worker holds the latest generation's tables
+    const { held } = await worker.db.prepare("SELECT COUNT(*) AS held FROM share_table_name WHERE key = 'skill.name'").first();
+    for (const [table, value] of [["share_table_name", "skill late"], ["share_table_gid", 2999]]) {
+      const field = table === "share_table_name" ? "name" : "gid";
+      await worker.db.prepare(`INSERT INTO ${table} (key, pos, ${field}) VALUES ('skill.name', ?, ?)`).bind(held, value).run();
+    }
+    const [result] = await results(worker, token, [share(postedForm({ skills: [{ id: held }] }))]);
+    assert.deepEqual(result, { status: "refused", error: "invalid_payload", field: "record.skills[0].id" });
+  });
+
+  // The rows of skill `pos`, and a load row, as SQL a test writes directly: a load's statements one
+  // at a time, so a test can stop between them where appendTables writes them in one batch.
+  const nameRow = (pos) => `INSERT INTO share_table_name (key, pos, name) VALUES ('skill.name', ${pos}, 'skill ${pos}')`;
+  const gidRow = (pos) => `INSERT INTO share_table_gid (key, pos, gid) VALUES ('skill.name', ${pos}, ${2001 + pos})`;
+  const loadRow = `INSERT INTO share_table_load (generation, archive_sha256, recognizer_version, rows_added, loaded_at)
+    VALUES ((SELECT COALESCE(MAX(generation), 0) + 1 FROM share_table_load), '${"0".repeat(64)}', '2026-04-01T00:00:00Z', 1, 0)`;
+  const write = (...sql) => worker.db.batch(sql.map((s) => worker.db.prepare(s)));
+  const skillNames = async () =>
+    (await worker.db.prepare("SELECT COUNT(*) AS n FROM share_table_name WHERE key = 'skill.name'").first()).n;
+  const shareSkill = (id) => results(worker, token, [share(postedForm({ skills: [{ id }] }))]).then(([r]) => r);
+  /** Makes the next read of the tables fail, with a newer generation in D1 so a request reads them. */
+  async function failNextRead(id) {
+    await write(loadRow);
+    await worker.failD1At("FROM share_table_name ORDER BY");
+    (await worker.share(token, [share(postedForm({ skills: [{ id }] }))])).body?.cancel();
+    assert.equal(await worker.d1FaultLeft(), null, "the tables were not read");
+  }
+
+  test("a failed read of the tables is not kept: once D1 answers, the next request reads them", async () => {
+    // The late skill of the previous test gets its load row, and the read it starts fails.
+    const late = (await skillNames()) - 1;
+    await failNextRead(late);
+    const created = await shareSkill(late);
+    assert.equal(created.status, "created", JSON.stringify(created));
+  });
+
+  test("the generation is read before the rows: a load committing between the two is read again later", async () => {
+    const next = await skillNames();
+    await failNextRead(next); // the Worker holds no tables now: the next request reads them first
+    // A load commits all its rows and its generation just before the Worker reads the generation.
+    await worker.writeD1Before("FROM share_table_load ORDER BY generation DESC", [nameRow(next), gidRow(next), loadRow]);
+    const created = await shareSkill(next);
+    assert.equal(created.status, "created", JSON.stringify(created));
+  });
+
+  test("a name whose gid is not written yet is not held: its sid is read again once the load ends", async () => {
+    const first = await skillNames();
+    await write(nameRow(first), gidRow(first), loadRow);
+    // A load has written skill first + 1's name but not its gid when a request reads the tables.
+    await write(nameRow(first + 1));
+    assert.equal((await shareSkill(first)).status, "created");
+    // The load ends: the gid, then its load row.
+    await write(gidRow(first + 1), loadRow);
+    const created = await shareSkill(first + 1);
+    assert.equal(created.status, "created", JSON.stringify(created));
+    const shared = await (await worker.fetch(`/r/${created.id}.json`)).json();
+    assert.deepEqual(shared.skills, [{ gid: 2001 + first + 1, name: `skill ${first + 1}` }]);
   });
 });

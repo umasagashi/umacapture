@@ -4,6 +4,7 @@
 import { RECORD_TYPE_LABELS, esc, num, pageFooter, siteHeader, splitCard } from "./page.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { accountExists, listOwnShares } from "./store.mjs";
+import { withTables } from "./tables.mjs";
 
 const SCHEMA = 1;
 
@@ -14,18 +15,15 @@ const SCHEMA = 1;
 export async function buildPublicList(env, tables, id) {
   if (!(await accountExists(env.DB, id))) return null;
   const shares = await listOwnShares(env.DB, id);
-  return {
-    schema: SCHEMA,
-    id,
-    url: `${env.PUBLIC_ORIGIN}/u/${id}`,
-    count: shares.length,
-    records: shares.map((share) => ({
+  const records = await withTables(tables, env.DB, (t) =>
+    shares.map((share) => ({
       id: share.id,
       url: `${env.PUBLIC_ORIGIN}/r/${share.id}`,
       shared_on: dayToIso(share.sharedDay),
-      ...recordSummary(share.form, tables),
+      ...recordSummary(share.form, t),
     })),
-  };
+  );
+  return { schema: SCHEMA, id, url: `${env.PUBLIC_ORIGIN}/u/${id}`, count: shares.length, records };
 }
 
 const TITLE = "共有レコード一覧 | umacapture";

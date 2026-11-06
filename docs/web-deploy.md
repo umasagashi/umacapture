@@ -31,7 +31,7 @@ migrations, which are applied by hand ("Applying a migration").
 | Fonts | The app still fetches its fonts at runtime from `fonts.gstatic.com` (not bundled). The public pages (`/notice/`, `/privacy/`, and the Worker's pages) read M PLUS Rounded 1c from this origin: `build/web/site/fonts/`, woff2 subsets the run cuts out of the pinned TTFs in `web/og/fonts/` ("Page fonts" below) |
 | Record pages, lists and API | `/r/*`, `/u/*` and `/api/*` run the Worker first (`assets.run_worker_first`), so a static file can never shadow an endpoint |
 | Unknown paths | `not_found_handling: "none"`: no SPA fallback. With `--sharing on`, the Worker's 404, which carries `X-Robots-Tag: noindex`; with `--sharing off`, the static 404. The app uses hash routing and needs no server-side path but `/` |
-| Build marker | `build/web/deploy.json`: `git_sha`, `built_at`, `wasm_sha256` of what was deployed, and with sharing on `tables_module_sha256`, the module archive the Worker's name tables were built from |
+| Build marker | `build/web/deploy.json`: `git_sha`, `built_at`, `wasm_sha256` of what was deployed, and `"name_tables": "d1"`, which says that a Worker of this version reads its name tables from its D1 (written with either `--sharing` choice) |
 
 With the real COOP/COEP headers the page is cross-origin isolated on the first load, and
 `web/coi-serviceworker.js` returns before registering a service worker. The shim stays in
@@ -48,7 +48,8 @@ These are outward-facing or account-level operations. Nothing in the repository 
    `tool/cloudflare/.env.example`):
    - Account › Workers Scripts › Edit
    - Zone › Workers Routes › Edit (zone `umacapture.com`)
-   - Account › D1 › Edit (create the databases, apply migrations)
+   - Account › D1 › Edit (create the databases, apply migrations; `publish_modules.sh` appends the
+     name tables to both databases and `deploy_web.sh` reads them back, "Name tables" below)
    - For the release checks, read only: Account › Turnstile › Read, Zone › Zone WAF › Read,
      Account › Billing › Read
 
@@ -258,7 +259,9 @@ turns sync on after it (item 7).
 5. **Apply the migrations right before the deployment** ("Applying a migration", below).
    `0002_accounts.sql` and `0003_sync.sql` go together; deploy straight after them (item 6).
    From the apply until the new Worker is up, the Worker in production still runs code that reads
-   the tables `0002_accounts.sql` dropped.
+   the tables `0002_accounts.sql` dropped. A D1 that has never held name tables also needs its
+   first load before item 6, which otherwise stops at stage 3 ("Switching the name tables to D1",
+   step 2; without `--baseline` when no Worker of that target ever ran with sharing).
 6. **Deploy with sync off.** Run `deploy_web.sh --target production` (below) on the commit of
    item 3. The deployment also adds the hourly run `30 * * * *`
    (`triggers.crons`). Confirm that sync answers `503`:
@@ -310,7 +313,8 @@ the script does not require it.
 
 The script stops on a dirty tree, rebuilds `build/web/` from scratch (never reusing an earlier
 build), uploads source maps (production only; this rewrites the JS files with debug ids, so it runs
-before the upload), builds the name tables (sharing on, below) and the page fonts (below), writes `deploy.json`, runs
+before the upload), reads the name tables back from the target's D1 (sharing on, below), cuts the
+page fonts (below), writes `deploy.json`, runs
 `wrangler deploy --dry-run`, asks for confirmation, deploys, then verifies through the public URL
 that:
 
@@ -323,33 +327,35 @@ that:
   here.
 
 Stage 7, `wrangler deploy`, prints the new version's id in the run's output, on the line
-`Current Version ID: <id>`. Write it down with the `git_sha` and
-`tables_module_sha256` of that `deploy.json`: a rollback names the version it returns to (see
-"Rolling back and switching off").
+`Current Version ID: <id>`. Write it down with the `git_sha` of that `deploy.json`: a rollback
+names the version it returns to (see "Rolling back and switching off").
 
-**Name tables.** With sharing on, the run builds `server/src/tables.generated.json` with
-`tool/cloudflare/build_share_tables.py` from the module archive the live pointer on
-`data.umacapture.com` names, and records that archive's sha256 in `deploy.json` as
-`tables_module_sha256`. A shared record stores ids, and its names are looked up in the tables
-deployed when it is read, so the tables must only grow at the end. Each target has its own D1 and
-so its own baseline, `tool/cloudflare/.deploy-backup/tables.<target>.json` (gitignored; it holds
-game text), which the script passes as `--previous`; `build_share_tables.py` has no default
-baseline. The run stops before deploying if the tables are not append-only against it. A target's
-first run with sharing has no baseline, and the check is skipped. Only after the deployment has
-been verified does the run copy the deployed tables to the baseline, so a run that stopped earlier
-leaves the baseline as it was.
+**Name tables.** A shared record stores ids, and the Worker looks their names up when the record is
+read, in the name tables of its own D1 (`share_table_name`, `share_table_gid` and
+`share_table_load`, from `server/migrations/0006_share_tables.sql`). Each target's D1 holds its
+own. They are not part of a deployment: `publish_modules.sh` appends the names each module set adds
+to both D1s before it switches the pointer ("Publishing to data.umacapture.com"), and the Worker
+reads them from D1. A stored name is never changed or deleted, and a list only grows at its end:
+the migration's triggers refuse anything else. The tables' version, which a share from a newer
+module set is compared against, is the `recognizer_version` of the latest load.
+
+With sharing on, stage 3 reads the target's tables back with
+`tool/cloudflare/load_share_tables.py --read-to build/share_tables.json`, for the page fonts. It
+writes nothing to D1. When that D1 records no load, or does not have the tables at all, the run
+stops there, before anything is deployed: a Worker there would answer every request that looks a
+name up with a `500` ("Switching the name tables to D1"). With sharing off D1 is not read.
 
 **Page fonts.** With either `--sharing` choice, the run then writes the font files
 `web/site/site.css` names into `build/web/site/fonts/` with `tool/cloudflare/build_page_fonts.py`:
 subsets of the pinned M PLUS Rounded 1c TTFs, cut to the characters of `web/**/*.html`,
-`server/src/*.mjs` and, with sharing on, the names in the tables just built. The subsets are not
-pinned, the TTFs are; a character the font lacks is drawn with a system font.
+`server/src/*.mjs` and, with sharing on, the names just read back from D1. The subsets are not
+pinned, the TTFs are; a character the font lacks is drawn with a system font. So is a character
+that only names published after the deployment use, until the next deployment cuts it in.
 
-A redeploy is needed whenever the app, `web/`, or the wasm core changes. The app itself does not
-need one for a new recognizer module: it downloads modules from `data.umacapture.com` at runtime,
-and they are published there with `publish_modules.sh` (see "Publishing to data.umacapture.com"
-below). The Worker does: it resolves names only through the tables it was deployed with, so after
-publishing a new module set, deploy each target that has sharing on again.
+A redeploy is needed whenever the app, `web/`, or the wasm core changes. A new recognizer module
+set needs none: the app downloads modules from `data.umacapture.com` at runtime, and the Worker
+reads the names they add from its D1, which publishing them with `publish_modules.sh` brings up to
+date on both targets (see "Publishing to data.umacapture.com" below).
 
 ### Checks before a production run
 
@@ -364,7 +370,12 @@ confirm in the shell that will run the script:
 - `SENTRY_AUTH_TOKEN` is exported and not empty (the `export` above). Stage 0 stops without it.
 - `sentry-cli --version` runs (One-time preparation, step 2). Stage 0 does not check it; stage 2
   fails without it.
-- `uv` is on `PATH` (stage 3: the name tables with sharing on, the page fonts always).
+- `uv` and `node` are on `PATH` (stage 3: reading the name tables back with sharing on, the page
+  fonts always). Stage 0 checks both.
+- With sharing on, the target's D1 holds name tables: the stage 3 read,
+  `uv run tool/cloudflare/load_share_tables.py --target <target> --read-to build/share_tables.json`
+  after `npm ci` in `server/` and with `tool/cloudflare/.env` exported ("The pinned wrangler"),
+  prints the entries and the generation it read and exits 0. It only reads D1.
 - `web/` matches its pins: `.fvm/flutter_sdk/bin/dart run tool/check_web_pins.dart --licenses
   --require-verified`, the check stage 1 runs before it builds. It fails when the wasm module is
   older than the `native/` sources it was built from.
@@ -403,8 +414,58 @@ server/node_modules/.bin/wrangler d1 migrations apply umacapture-share --remote 
 - When a migration drops or reshapes what the live Worker reads, the live Worker is broken from the
   apply until the new one is up. Run the checks above first, then apply, then deploy at once.
 - That window is the whole run that follows it: the build, in production the upload to Sentry,
-  the tables, `wrangler deploy` and the checks, about four minutes for a production run. A run that
-  stops partway keeps it open until a later run gets through, which is why the checks come first.
+  reading the name tables back, `wrangler deploy` and the checks, about four minutes for a
+  production run. A run that stops partway keeps it open until a later run gets through, which is
+  why the checks come first.
+
+### Switching the name tables to D1
+
+Once per target whose live Worker bundles its name tables — its live `deploy.json` lacks
+`"name_tables": "d1"` — and before the first deployment of a Worker that reads them from D1. Take
+these steps in this order:
+
+1. **Apply `0006_share_tables.sql`** to both D1s ("Applying a migration"). It only adds tables the
+   live Worker does not read, so the apply opens no broken window. Do it before anyone publishes a
+   module set from a checkout whose `publish_modules.sh` has the name-tables stage: that stage
+   writes to both D1s, and a D1 without these tables stops the publish before the pointer changes
+   ("Publishing to data.umacapture.com").
+2. **Load the archive the live pointer names** into each D1, with the tables the target's Worker
+   bundles as `--baseline`. They are in `tool/cloudflare/.deploy-backup/tables.<target>.json`
+   (gitignored; it holds game text), written by that target's last verified deployment with sharing.
+   From Git Bash at the repository root:
+
+   ```bash
+   mkdir -p build
+   curl -fsS -o build/pointer.json https://data.umacapture.com/umacapture/version_info.json
+   sha=$(jq -r .module_archive.sha256 build/pointer.json | tr -d '\r')
+   curl -fsS -o build/live-modules.zip "https://data.umacapture.com/umacapture/modules/$sha.zip"
+   echo "$sha  build/live-modules.zip" | sha256sum -c
+   (cd server && npm ci --no-audit --no-fund)
+   set -a; source tool/cloudflare/.env; set +a
+   for t in production staging; do
+     uv run tool/cloudflare/load_share_tables.py --target "$t" --archive build/live-modules.zip \
+       --baseline "tool/cloudflare/.deploy-backup/tables.$t.json" --dry-run
+   done
+   ```
+
+   then the same loop without `--dry-run`. Each run prints how many entries it adds. `--baseline`
+   refuses, and writes nothing, when the result would drop a name the target's Worker bundles, or
+   when the file does not exist; a refusal means that target is not switched. Running the loop
+   again after a failure completes the load, and a target already loaded adds nothing.
+3. **Deploy each target that runs with sharing** with `deploy_web.sh` ("Deploying"; staging first,
+   as always). Stage 3 now finds the tables. From this deployment on, the target's Worker serves the
+   names its D1 holds: a target whose bundled tables came from another archive than the one the
+   pointer names, as production's do, gets the pointer's names at this point and not before.
+
+The order is what keeps names answering. `deploy_web.sh` refuses a sharing-on deployment to a D1
+without the tables or without a load, at stage 3, with nothing deployed. A Worker of this version
+that reached such a D1 another way (a bare `wrangler deploy`, which "Deploying" rules out) would
+answer with a `500` wherever it has a name to look up: `/r/<id>` and `/r/<id>.json` of a record
+that exists, `POST /api/shares` of a record, and `/u/<id>`, `/u/<id>.json` and `GET /api/me/shares`
+of an account that shares something. Without the tables those three answer `500` for an account
+that shares nothing too; with the tables but no load they answer its empty list. A record or account that does not exist still gets its `404`, so stage 8's
+check of `/r/0000000000` would not notice. After step 3, do not roll a target back to a version
+with the Worker from before it ("Restoring a version").
 
 ### After a deployment with sharing on — the Turnstile check
 
@@ -518,9 +579,9 @@ verified through the public URL.
   usage with production, while its daily limits are counted in its own D1.
 - **No Sentry.** A staging run uploads no source maps and needs neither `SENTRY_AUTH_TOKEN` nor
   `sentry-cli`; the maps are still excluded from the deployment by `.assetsignore`.
-- **Name tables.** With sharing on, a staging run builds and checks the tables as production does
-  (see "Deploying"), against staging's own baseline
-  `tool/cloudflare/.deploy-backup/tables.staging.json`.
+- **Name tables.** Staging's Worker reads them from the staging database, which every module
+  publish writes along with production's (see "Deploying", Name tables). With sharing on, a staging
+  run reads them back from there at stage 3, as a production run does from production's.
 - **Local web builds.** A web app served locally (`serve_web_build.py`) cannot call the staging
   API: the API is same-origin only. Test logins, sharing and sync from the web app on the staging
   host; a staging run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging
@@ -532,7 +593,9 @@ verified through the public URL.
   and keeps its assets: `/r/`, `/u/` and `/api/` get the static 404, the hourly run goes, and
   staging no longer uses the Worker and D1 usage it shares with production. Do this before the
   Worker ships to production. The staging database and bucket are left as they are; deleting them
-  is a separate step.
+  is a separate step. Every module publish still writes its name tables to the staging database,
+  sharing or not, so deleting it stops every publish before the pointer changes, for as long as
+  `publish_modules.sh` names staging among its targets.
 
 ## Publishing to data.umacapture.com
 
@@ -564,11 +627,15 @@ bash tool/cloudflare/publish_modules.sh <modules.zip>             # the same, th
 bash tool/cloudflare/publish_modules.sh                           # no zip: re-publish the live archive
 ```
 
-- **Preconditions.** `server/data-site/`, `server/wrangler.data.jsonc`, `tool/cloudflare/`, and the
+- **Preconditions.** `server/data-site/`, `server/wrangler.data.jsonc`, `server/wrangler.jsonc`
+  (whose D1 bindings name the databases the name tables are written to), `tool/cloudflare/`, and the
   `npm ci` inputs `server/package.json` and `server/package-lock.json` that pin the deploying
   wrangler, are committed with nothing modified or untracked under them, so `deploy.json`'s
-  `git_sha` names what is served and what deployed it. The rest of the tree may be dirty. Any committed `HEAD` will do; it need not be `develop`. The credentials are the
-  `tool/cloudflare/.env` ones `deploy_web.sh` uses (Workers Scripts and Workers Routes, Edit).
+  `git_sha` names what is served, where its name tables went, and what deployed it. A new file under `tool/cloudflare/` counts:
+  until it is committed, the run stops here. The rest of the tree may be dirty. Any committed
+  `HEAD` will do; it need not be `develop`. The credentials are the `tool/cloudflare/.env` ones
+  `deploy_web.sh` uses: Workers Scripts and Workers Routes, Edit, for the data host, and D1, Edit,
+  for the name tables. `uv` has to be on `PATH`.
 - **`--yes`** skips only the confirmation, for a caller that has already decided to publish:
   umasagashi-trainer runs `publish_modules.sh <zip> --yes` at the end of its deploy. Every check
   still runs, and `--dry-run` still wins over it.
@@ -580,6 +647,21 @@ bash tool/cloudflare/publish_modules.sh                           # no zip: re-p
   a GET of the new archive; only then does phase 2 switch the pointer and the alias together. A
   phase 2 that cannot be verified is answered by deploying phase 1 again. When the live pointer
   already names the archive (a re-publish), phase 1 is skipped and the run deploys once.
+- **Name tables, between the two phases.** Before phase 2, on both paths (a new archive and a
+  re-publish), the run appends the names the archive adds to the D1 of production and then of
+  staging, with `tool/cloudflare/load_share_tables.py --archive`, from the same bytes phase 1
+  verified. Every list has to agree with the rows D1 already holds over the range both hold; only
+  the entries D1 lacks are added, so an older archive adds nothing and writes nothing. The rows are
+  read back and checked, and only then is the load recorded (`share_table_load`). A Worker that
+  reads D1 in the middle of a load counts, per key, only the entries both its names and, where the
+  key has them, its gids already hold; a sid past those makes it check D1 once for a newer load. Any refusal or
+  failure on either target stops the run before phase 2, so no client is pointed at modules whose
+  names a Worker does not have; running the publish again completes the load. Both D1s need
+  `0006_share_tables.sql` ("Applying a migration"). `--dry-run` stops before this stage and writes
+  nothing to D1. A share Worker picks the new names up from D1 by itself; no web deployment follows.
+- **A name in D1 is final.** Once a load has written a name, no later archive can change it: an
+  archive whose lists disagree with D1's rows is refused, and its publish stops before the pointer
+  changes.
 - **Archives already published stay published.** A client may fetch an archive long after it read
   the pointer, so every archive the live `deploy.json` lists is fetched back, checked against its
   name and size, and carried into the new tree; one that does not match stops the run before any
@@ -615,6 +697,10 @@ input from a file, or starting it as a subprocess all count as no terminal.
   same zip, or publishing with no zip, deploys once. Without a version-id, `rollback` returns to the
   immediately preceding version, which after a two-deploy publish is that publish's own phase 1.
   The next publish carries over whatever the rolled-back `deploy.json` lists.
+
+Neither way rolls the name tables back. D1 keeps every name the later publish loaded, and the
+tables' version stays that of the latest load. That is safe: an older module set uses only sids
+the tables already hold, and records shared under the later set stay readable.
 
 `umacapture-data` is the only origin of this host. The R2 bucket `umasagashi-data` that served it
 before has been deleted, so there is no other origin to fall back to: going back always means one
@@ -707,8 +793,8 @@ after a stop.
 
 Every deployment and every `wrangler secret put` makes a new version of the Worker. Keep a record
 of each one: its version id (`wrangler deploy` prints `Current Version ID:`; after a `secret put`
-or a rollback read it from the list below) and, for a deployment, the `git_sha` and
-`tables_module_sha256` of its `deploy.json`. A rollback names one of these ids.
+or a rollback read it from the list below) and, for a deployment, the `git_sha` of its
+`deploy.json` and whether it carries `"name_tables": "d1"`. A rollback names one of these ids.
 
 ```bash
 server/node_modules/.bin/wrangler deployments list --name umacapture-web -c server/wrangler.jsonc
@@ -736,14 +822,14 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
 
-**Between two versions with sharing on**, roll back only when both `deploy.json` files name the
-same `tables_module_sha256`. The tables only grow, a record shared under longer tables cannot be
-read with shorter ones, and D1 is not rolled back. If they differ, stop sharing instead (below), or
-deploy a new version whose tables are at least as long. Before a redeploy you may want to roll back
-from, compare `module_archive.sha256` in `https://data.umacapture.com/umacapture/version_info.json`
-with the live `tables_module_sha256`: if they differ, the new version's tables come from another
-archive, and rolling back from it is ruled out. Do not publish a new module set while such a
-rollback has to stay possible.
+**Name tables.** Do not roll back to a version with the Worker whose `deploy.json` lacks
+`"name_tables": "d1"`. Its Worker resolves names through tables bundled when it was deployed,
+which can be shorter than the ones in D1, and a record shared under longer tables cannot be read
+with shorter ones. To undo such a step, stop sharing instead (below), or deploy a new version.
+Between two versions that both carry `"name_tables": "d1"` the name tables set no condition: both
+Workers read the same tables from D1, which a rollback leaves as they are, so publishing module
+sets does not narrow which of them can be returned to. A version deployed with sharing off has no
+Worker and reads no names.
 
 **Across a migration**, do not roll back to a version whose Worker reads a schema D1 no longer has:
 a version with the Worker deployed before a migration was applied to its database reads the schema
@@ -761,8 +847,8 @@ In this order of preference:
 | Means | Effect | Depends on |
 |---|---|---|
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, changing a share's focus, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), the data host's pointer and archive (for the tables), the pinned wrangler. Not usable while any of them is broken |
-| `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except the data host: no tables are built. Use it once the version without the Worker is no longer among the last 100 |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, changing a share's focus, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
+| `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except D1: the name tables are not read. Use it once the version without the Worker is no longer among the last 100 |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |
 | On Vercel | Deny `/r/` with a Firewall rule | The Vercel dashboard. After `OG_IMAGE_MODE` is `"static"` |
 
@@ -808,7 +894,8 @@ Separate from a stop, and decided on its own: the D1 database, the B2 buckets an
 Turnstile widget, the Google OAuth client, the zone's rate limiting rule and the Vercel Firewall
 rule, the `og` DNS record, the Vercel domain, deployments and environment variables, and the extra
 token permissions. While D1 holds shared records or accounts, it is not deleted; while D1 lists
-synced objects, their bucket is not deleted. `b2_list_file_versions`, under the same authorization
+synced objects, their bucket is not deleted; while `publish_modules.sh` writes name tables to a
+D1, deleting it stops every module publish ("Publishing to data.umacapture.com"). `b2_list_file_versions`, under the same authorization
 as the lifecycle check (One-time preparation, step 10), lists every version a bucket holds, hidden
 ones included. The kept copy of `IDENTITY_HMAC_KEY` goes only with
 the accounts it reaches.

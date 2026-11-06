@@ -63,7 +63,7 @@ Then take the union of the rows every changed path hits. **R** = required, **r**
 | other `lib/`, `test/` | R | R | | r | | stage 1's `flutter test` is the cover; stage 4 is the cheap end-to-end smoke |
 | `test_driver/`, `tool/live_capture_test/`, `native/tool/mimic_player/` | R | R | | R | R | the instrument itself changed. Also run the harness's pure tests (§5.1), after a `mimic_player.cpp` change the player's fidelity check (`docs/live-capture-harness.md`, *Parts*), and after an `app_drive_run.py` change to the merge or the per-clip signals the matching falsification in §5.6 |
 | `web/`, `tool/*.mjs` | R | R | | | | stage 1 runs the node tests. Nothing here runs a browser against the real wasm: see §8 |
-| `tool/cloudflare/` | R | R (publish test) | | | | `tool/cloudflare/test/publish_modules_test.sh` is not in CI |
+| `tool/cloudflare/` | R | R (cloudflare tests) | | | | 2.5–2.7 are not in CI |
 | `docs/`, `.claude/` only | R | | | | | nothing executable changed |
 
 Stage 3 is conditional because the golden suite drives only `umacapture_cli`, which is built from
@@ -139,6 +139,8 @@ on some steps (analyze 219 s, `flutter test` 507 s, build_runner 92 s).
 | 2.3c | `sha256sum` of `umacapture_core.js` and `umacapture_core.wasm` in the directory `build.sh` names on its `Done. Artifacts in <dir>:` line (`$BUILD_DIR` in the script, whose default lies outside the repository), against `grep -A1 '^    "wasm/umacapture_core' tool/web_deps.json`. That line is near the end, not the last: an `ls -la` of the two artifacts follows it | both hashes equal their pin | — |
 | 2.4 | `.fvm/flutter_sdk/bin/dart run tool/check_web_pins.dart --licenses --require-verified` | exit 0, `N pinned file(s) verified, 0 not provisioned` | 2 s |
 | 2.5 | `bash tool/cloudflare/test/publish_modules_test.sh` | exit 0, 0 failed | 160 s |
+| 2.6 | `uv run tool/cloudflare/test/test_build_share_tables.py` | exit 0, `OK` | 1 s |
+| 2.7 | `bash tool/cloudflare/test/deploy_web_test.sh` | exit 0, `failed 0` | 34 s |
 
 Measured as stage 1 (§2), in the same run; 2.1 was measured on 2026-09-27 at `0aa3813e` after the
 deletion below.
@@ -164,6 +166,8 @@ deletion below.
   directory the `Done.` line names, not the default one. Do not repin here;
   what a repin involves is in `.claude/skills/native-change-verification/SKILL.md` §7.
 * 2.5 works inside a `mktemp -d` sandbox with stubbed `wrangler` and `curl`; it contacts nothing.
+  2.6 likewise stays in a temporary directory, against a fake D1 (SQLite with the Worker's
+  migrations); 2.7 runs copies of `deploy_web.sh` with fake `wrangler`, `curl` and `uv`. 2.6 and 2.7 were measured on 2026-11-06 while another agent was editing `server/`.
 
 ## 4. Stage 3 — native ctest, golden and dual-decode
 

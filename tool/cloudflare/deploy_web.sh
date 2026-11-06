@@ -32,17 +32,21 @@
 #     Sentry. Either way the maps are excluded from the deployment by
 #     web/.assetsignore.
 #   3 name tables and page fonts:
-#     [sharing on] tool/cloudflare/build_share_tables.py writes
-#     server/src/tables.generated.json from the module archive the live
-#     pointer names, checked append-only against the target's own baseline
-#     tool/cloudflare/.deploy-backup/tables.<target>.json; the Worker bundles
-#     it. Each target has its own D1 and so its own baseline.
+#     [sharing on] the Worker reads its name tables from the target's own D1,
+#     where tool/cloudflare/publish_modules.sh appends them with every module
+#     set, so this script neither builds nor bundles them.
+#     tool/cloudflare/load_share_tables.py --read-to reads them back from that
+#     D1 and stops the run, before anything is deployed, when D1 records no
+#     load: a Worker there would answer every name lookup with a 500. With
+#     sharing off no Worker is deployed, so nothing looks a name up and D1 is
+#     not read.
 #     Then, for either choice, tool/cloudflare/build_page_fonts.py writes the
 #     public pages' font files into build/web/site/fonts/ (the files
 #     web/site/site.css names): subsets of the pinned M PLUS Rounded 1c, cut to
-#     the pages' wording and, with sharing on, the names in those tables.
-#   4 write build/web/deploy.json (git_sha, build time, wasm sha256, and with
-#     sharing on the sha256 of the module archive the tables were built from)
+#     the pages' wording and, with sharing on, the names read back from D1.
+#   4 write build/web/deploy.json (git_sha, build time, wasm sha256, and
+#     "name_tables": "d1", which says that any Worker of this version reads its
+#     name tables from D1)
 #   5 wrangler deploy --dry-run (config and asset collection, no upload)
 #   6 confirmation gate ('yes')          <- --dry-run stops here;
 #                                           --yes answers it without a prompt
@@ -51,18 +55,18 @@
 #     COOP/COEP, a source map answers 404, and /r/0000000000 answers 404 from
 #     the side the --sharing choice expects: the Worker's 404 carries
 #     X-Robots-Tag: noindex, the static 404 carries no X-Robots-Tag
-#   9 [sharing on] promote the deployed tables to the target's baseline
 #
 # --dry-run still runs stages 1 to 3, because stage 5 needs a real tree; for
 # production stage 2 therefore still uploads source maps to Sentry.
 #
 # Rolling back does not go through this script: `wrangler rollback <version-id>
 # --name <worker>` with the id of the version to return to, never without one
-# (see docs/web-deploy.md). It needs no build, no Sentry and no clean tree. A
-# rollback from one sharing-on version to another is safe only when both
-# deploy.json files name the same tables_module_sha256: records published
-# under longer tables cannot be read with shorter ones, and D1 is not rolled
-# back.
+# (see docs/web-deploy.md). It needs no build, no Sentry and no clean tree.
+# Never roll back to a version with the Worker whose deploy.json lacks
+# "name_tables": "d1": its Worker resolves names through tables bundled when it was deployed, which
+# can be shorter than D1's, so records shared under D1's tables would not be
+# readable. D1 is not rolled back. A version deployed with --sharing off has no
+# Worker and reads no names, so returning to one stays a way to stop sharing.
 #
 # Run from Git Bash at the repository root:
 #   export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"   # production only
@@ -85,7 +89,9 @@ WEB_DIR="build/web"
 ENV_FILE="$SCRIPT_DIR/.env"
 SERVER_DIR="server"
 WRANGLER="$REPO_ROOT/$SERVER_DIR/node_modules/.bin/wrangler"
-TABLES_OUT="server/src/tables.generated.json"
+# The name tables stage 3 reads back from D1, for the page fonts. Relative, so the Windows Python
+# reads the same path; build/ is ignored and outside the uploaded build/web/.
+TABLES_READ="build/share_tables.json"
 # The edge may take a moment to switch versions; retry a mismatching
 # deploy.json for this long before failing.
 VERIFY_WAIT_SECONDS=120
@@ -112,14 +118,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Everything that differs between the choices is set here and nowhere else. The target and the
-# sharing choice are independent: each sets its own variables, and only the two lines after them
-# (WRANGLER_ARGS, TABLES_BASELINE) combine the two.
+# sharing choice are independent: each sets its own variables, and only the line after them
+# (WRANGLER_ARGS) combines the two.
 #   PUBLIC_ROOT      where stage 8 verifies
 #   SENTRY_MAPS      upload source maps to Sentry (stage 2)
 #   BUILD_ARGS       extra arguments for the web build (stage 1)
 #   ENV_ARGS         the config environment the target lives in
 #   CONFIG           the wrangler config of the sharing choice
-#   SHARE_TABLES     build the name tables the Worker bundles (stages 3 and 9)
+#   SHARE_TABLES     read the name tables back from the target's D1 (stage 3)
 #   NOT_FOUND_FROM   what stage 8 expects to answer /r/0000000000 with a 404, and
 #   NOT_FOUND_ROBOTS the X-Robots-Tag that tells it apart: the Worker's own 404 says noindex
 #                    (server/src/worker.mjs), the static 404 says nothing
@@ -158,15 +164,12 @@ case "$SHARING" in
   *) fail "$usage" ;;
 esac
 WRANGLER_ARGS=(-c "$CONFIG" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"})
-# The tables last deployed to this target. Each target has its own D1, holding records shared
-# under its own tables, so one target's tables say nothing about what the other may drop.
-TABLES_BASELINE="tool/cloudflare/.deploy-backup/tables.$TARGET.json"
 
 cd "$REPO_ROOT"
 
 # ---- 0 preflight -------------------------------------------------------------
 step "0 preflight ($TARGET, sharing $SHARING)"
-tools=(git curl sha256sum npm uv)
+tools=(git curl sha256sum npm node uv)
 for tool in "${tools[@]}"; do
   command -v "$tool" >/dev/null || fail "$tool not found on PATH"
 done
@@ -198,20 +201,15 @@ if [[ "$SENTRY_MAPS" == 1 ]]; then
 fi
 
 # ---- 3 name tables and page fonts --------------------------------------------
-TABLES_ARCHIVE_SHA=""
 FONT_ARGS=()
 if [[ "$SHARE_TABLES" == 1 ]]; then
-  step "3 name tables"
-  rm -f "$TABLES_OUT"
-  tables_source="$(mktemp)"
-  uv run tool/cloudflare/build_share_tables.py --previous "$TABLES_BASELINE" --out "$TABLES_OUT" \
-    --source-out "$tables_source" || { rm -f "$tables_source"; fail "build_share_tables.py refused to build the tables"; }
-  TABLES_ARCHIVE_SHA="$(tr -d '\r\n' < "$tables_source")"
-  rm -f "$tables_source"
-  [[ "$TABLES_ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ && -f "$TABLES_OUT" ]] \
-    || fail "build_share_tables.py did not record the sha256 of the archive it read"
+  step "3 name tables in the $TARGET D1"
+  rm -f "$TABLES_READ"
+  uv run tool/cloudflare/load_share_tables.py --target "$TARGET" --read-to "$TABLES_READ" \
+    || fail "the $TARGET D1 holds no name tables the Worker could read; publish a module set first"
+  [[ -f "$TABLES_READ" ]] || fail "load_share_tables.py did not write $TABLES_READ"
   # The record pages print the names in these tables, so the font covers them too.
-  FONT_ARGS=(--tables "$TABLES_OUT")
+  FONT_ARGS=(--tables "$TABLES_READ")
 fi
 step "3 page fonts"
 uv run tool/cloudflare/build_page_fonts.py --web-out "$WEB_DIR" ${FONT_ARGS[@]+"${FONT_ARGS[@]}"} \
@@ -221,13 +219,8 @@ uv run tool/cloudflare/build_page_fonts.py --web-out "$WEB_DIR" ${FONT_ARGS[@]+"
 step "4 deploy.json"
 WASM_SHA="$(sha_of "$WEB_DIR/wasm/umacapture_core.wasm")"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-if [[ "$SHARE_TABLES" == 1 ]]; then
-  printf '{\n  "git_sha": "%s",\n  "built_at": "%s",\n  "wasm_sha256": "%s",\n  "tables_module_sha256": "%s"\n}\n' \
-    "$GIT_SHA" "$BUILT_AT" "$WASM_SHA" "$TABLES_ARCHIVE_SHA" > "$WEB_DIR/deploy.json"
-else
-  printf '{\n  "git_sha": "%s",\n  "built_at": "%s",\n  "wasm_sha256": "%s"\n}\n' \
-    "$GIT_SHA" "$BUILT_AT" "$WASM_SHA" > "$WEB_DIR/deploy.json"
-fi
+printf '{\n  "git_sha": "%s",\n  "built_at": "%s",\n  "wasm_sha256": "%s",\n  "name_tables": "d1"\n}\n' \
+  "$GIT_SHA" "$BUILT_AT" "$WASM_SHA" > "$WEB_DIR/deploy.json"
 DEPLOY_SHA="$(sha_of "$WEB_DIR/deploy.json")"
 cat "$WEB_DIR/deploy.json"
 
@@ -281,21 +274,12 @@ echo "    source map answers 404"
 
 # A 404 alone cannot tell the Worker from the static assets: both answer an unknown /r/ id with 404.
 # The X-Robots-Tag tells them apart, so a deploy whose Worker did not come up (or did not go away)
-# stops here, before stage 9 promotes its tables.
+# stops here.
 code="$(curl -sS -D "$work/record.headers" -o /dev/null -w '%{http_code}' "$PUBLIC_ROOT/r/0000000000" || echo "000")"
 [[ "$code" == "404" ]] || fail "/r/0000000000: HTTP $code, not a 404"
 robots="$(header "$work/record.headers" x-robots-tag)"
 [[ "$robots" == "$NOT_FOUND_ROBOTS" ]] \
   || fail "/r/0000000000 is not answered by $NOT_FOUND_FROM (X-Robots-Tag '$robots', expected '$NOT_FOUND_ROBOTS')"
 echo "    /r/0000000000 is the 404 of $NOT_FOUND_FROM"
-
-# ---- 9 baseline --------------------------------------------------------------
-# Only tables that are now live become the baseline: a run that stopped earlier
-# leaves the previous baseline in place.
-if [[ "$SHARE_TABLES" == 1 ]]; then
-  step "9 promote the deployed tables to $TABLES_BASELINE"
-  mkdir -p "$(dirname "$TABLES_BASELINE")"
-  cp "$TABLES_OUT" "$TABLES_BASELINE"
-fi
 
 step "done: $GIT_SHA is live at $PUBLIC_ROOT"

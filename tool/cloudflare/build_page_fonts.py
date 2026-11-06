@@ -4,7 +4,7 @@
 # ///
 """Cut the public pages' font files out of the pinned M PLUS Rounded 1c.
 
-    uv run tool/cloudflare/build_page_fonts.py --web-out build/web [--tables server/src/tables.generated.json]
+    uv run tool/cloudflare/build_page_fonts.py --web-out build/web [--tables <tables.json>]
 
 web/site/site.css is the one place that says which font files the public pages read: every
 @font-face of "M PLUS Rounded 1c" names a weight and a url. This script writes exactly those files,
@@ -16,8 +16,9 @@ The subset holds every character of:
   - the pages' own wording: every web/**/*.html, and server/src/*.mjs, where the Worker builds its
     pages. Whole files are read, markup and code included, so a new page or a moved string is
     covered without naming it here; the extra Latin letters cost nothing;
-  - with --tables, every name in the share Worker's tables (server/src/tables.generated.json), which
-    the record pages print. Without it (deploy_web.sh --sharing off, no Worker) only the wording;
+  - with --tables, every name in the share Worker's tables, which the record pages print: the file
+    tool/cloudflare/load_share_tables.py --read-to writes from the target's D1. Without it
+    (deploy_web.sh --sharing off, no Worker) only the wording;
   - a fixed base: printable ASCII, hiragana, katakana, CJK punctuation and the fullwidth forms.
 A character the font has no glyph for is left out, and the browser draws it with the next font in
 the stylesheet's --font list; the script prints how many there were.
@@ -107,7 +108,7 @@ def cut(source: Path, text: str) -> tuple[TTFont, int]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--web-out", type=Path, required=True, help="the built web root (build/web)")
-    parser.add_argument("--tables", type=Path, help="the share Worker's name tables")
+    parser.add_argument("--tables", type=Path, help="the share Worker's name tables, as read back from D1")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 

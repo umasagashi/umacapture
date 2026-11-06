@@ -22,6 +22,7 @@ import { canonicalPostedForm, InvalidPayload, parseVersion, SidOutOfRange } from
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { isClientKey, sha256, toHex } from "./secrets.mjs";
 import { findIdByClientKey, listOwnShares, setShareFocus, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
+import { TableLookupError, withTables } from "./tables.mjs";
 
 async function gzip(text) {
   const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -30,7 +31,8 @@ async function gzip(text) {
 
 /**
  * Whether the client's module set is newer than the server's tables, so a sid past the end of a
- * table means "the server has not caught up" rather than a bad value.
+ * table means "the server has not caught up" (D1 holds no load of the client's module set yet, even
+ * after reading it again) rather than a bad value.
  */
 function clientTablesNewer(moduleVersion, tables) {
   const client = parseVersion(moduleVersion);
@@ -75,13 +77,28 @@ class Stop {
   }
 }
 
+/**
+ * The canonical posted form of `record`, checked against the request's tables (a RequestTables),
+ * and checked once more against newer ones when a sid lies past their end and D1 has caught up
+ * since they were read.
+ */
+async function checkedForm(record, copy) {
+  try {
+    return canonicalPostedForm(record, copy.tables);
+  } catch (error) {
+    const missing = error instanceof SidOutOfRange || error instanceof TableLookupError;
+    if (missing && (await copy.renew())) return canonicalPostedForm(record, copy.tables);
+    throw error;
+  }
+}
+
 /** The posted form of `record` as stored (gzip of its canonical JSON), or a refusal result. */
-async function storedForm(record, tables) {
+async function storedForm(record, copy) {
   let form;
   try {
-    form = canonicalPostedForm(record, tables);
+    form = await checkedForm(record, copy);
   } catch (error) {
-    if (error instanceof SidOutOfRange && clientTablesNewer(record.module_version, tables)) {
+    if (error instanceof SidOutOfRange && clientTablesNewer(record.module_version, copy.tables)) {
       return { refusal: refused("server_tables_older", { field: error.field }) };
     }
     if (error instanceof InvalidPayload) return { refusal: refused("invalid_payload", { field: error.field }) };
@@ -96,7 +113,7 @@ async function storedForm(record, tables) {
  * One share of a POST /api/shares, judged on its own: its result, or a Stop carrying its result
  * when the whole server refused it.
  */
-async function shareOne(item, env, tables, newId, owner, at) {
+async function shareOne(item, env, copy, newId, owner, at) {
   let share;
   let focus;
   try {
@@ -114,7 +131,7 @@ async function shareOne(item, env, tables, newId, owner, at) {
   const existing = await findIdByClientKey(env.DB, clientKey);
   if (existing !== null) return { status: "existing", ...located(env, existing) };
 
-  const { payload, refusal } = await storedForm(share.record, tables);
+  const { payload, refusal } = await storedForm(share.record, copy);
   if (refusal !== undefined) return refusal;
   const row = {
     owner,
@@ -166,6 +183,7 @@ function sharesOf(body) {
  * POST /api/shares `{shares: [{client_key, record, view?: {focus}}, ...]}`: shares each record in order,
  * judging each on its own, and answers 200 `{results}` with one result per share. A refusal of the server's
  * storage or daily limit ends the request: the shares after it are "skipped" without being tried.
+ * Every share is checked against one copy of `tables`' tables (a TableSource), renewed at most once.
  * `newId` draws each attempt's public id and `now` is the Worker's clock.
  */
 export async function postShares(request, env, tables, newId, now) {
@@ -179,6 +197,7 @@ export async function postShares(request, env, tables, newId, now) {
     if (error instanceof TooLarge) return fail(413, "payload_too_large");
     throw error;
   }
+  const copy = await tables.forRequest(env.DB);
   const results = [];
   let stopped = false;
   for (const item of shares) {
@@ -188,7 +207,7 @@ export async function postShares(request, env, tables, newId, now) {
     }
     let result;
     try {
-      result = await shareOne(item, env, tables, newId, session.accountId, at);
+      result = await shareOne(item, env, copy, newId, session.accountId, at);
     } catch (error) {
       // D1 failed: this share committed nothing, and the ones after it are not tried against a
       // database that is failing.
@@ -254,15 +273,15 @@ export async function patchShare(request, env, id, now) {
 export async function getMyShares(request, env, tables, now) {
   const session = await requireSession(request, env, clock(now).now);
   const shares = await listOwnShares(env.DB, session.accountId);
-  return json(
-    200,
+  const mine = await withTables(tables, env.DB, (t) =>
     shares.map((share) => ({
       id: share.id,
       url: located(env, share.id).url,
       shared_on: dayToIso(share.sharedDay),
       client_key_hash: toHex(share.clientKey),
       view: { focus: share.focus },
-      summary: recordSummary(share.form, tables),
+      summary: recordSummary(share.form, t),
     })),
   );
+  return json(200, mine);
 }
