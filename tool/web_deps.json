@@ -115,16 +115,15 @@
       "manifest.json",
       "favicon.png",
       "icons/Icon-192.png",
-      "icons/Icon-512.png",
-      "icons/Icon-maskable-192.png",
-      "icons/Icon-maskable-512.png",
+      "icons/Icon-256.png",
       "splash/splash.js",
       "splash/style.css",
       "_headers",
       ".assetsignore",
       "og/default.png",
       "site/site.css",
-      "site/logo.svg"
+      "site/logo.svg",
+      "site/logo.png"
     ]
   },
   "files": {

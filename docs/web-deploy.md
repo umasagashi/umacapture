@@ -783,7 +783,7 @@ of the two ways above, to an earlier archive or an earlier version of the Worker
 The record cards' OGP images are drawn by the function in `og/`, deployed to the Vercel project
 `umacapture-og` by `tool/vercel/deploy_og.sh`. The function bundles neither its fonts nor its
 mark: at run time it fetches M PLUS Rounded 1c and Noto Sans JP from `/og/fonts/*`, and the logo
-from `/site/logo.svg`, on the web app's origin (`PUBLIC_ORIGIN`). A font or logo change is
+from `/site/logo.png`, on the web app's origin (`PUBLIC_ORIGIN`). A font or logo change is
 therefore deployed with `deploy_web.sh`, not with this script. `web/_headers` gives those fonts
 `Cache-Control: public, max-age=86400`: a day, not `immutable`, because the file names carry no
 content hash.
