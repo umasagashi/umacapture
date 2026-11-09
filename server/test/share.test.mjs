@@ -679,4 +679,28 @@ describe("name tables loaded into D1 after the Worker started", () => {
     const shared = await (await worker.fetch(`/r/${created.id}.json`)).json();
     assert.deepEqual(shared.skills, [{ gid: 2001 + first + 1, name: `skill ${first + 1}` }]);
   });
+
+  test("a factor whose tags are not written yet is not held: the tables are read again once the load ends", async () => {
+    const next = (await worker.db.prepare("SELECT COUNT(*) AS n FROM share_table_name WHERE key = 'factor.name'").first())
+      .n;
+    // A load has written the factor's name and gid but not its tags when a request reads the tables
+    // (a newer generation than the Worker holds, so the request reads them).
+    await write(
+      loadRow,
+      `INSERT INTO share_table_name (key, pos, name) VALUES ('factor.name', ${next}, 'factor ${next}')`,
+      `INSERT INTO share_table_gid (key, pos, gid) VALUES ('factor.name', ${next}, ${3001 + next})`,
+    );
+    // A skill the tables do not hold makes the Worker read them again, part way through the load.
+    assert.equal((await shareSkill(await skillNames())).status, "refused");
+    // The load ends: the tags, then its load row.
+    await write(`INSERT INTO share_table_tags (key, pos, tags) VALUES ('factor.name', ${next}, '["factor_aptitude"]')`, loadRow);
+    const factors = { self: [{ id: next, star: 2 }], parent1: [], parent2: [] };
+    const [created] = await results(worker, token, [share(postedForm({ factors }))]);
+    assert.equal(created.status, "created", JSON.stringify(created));
+    const json = await worker.fetch(`/r/${created.id}.json`);
+    assert.equal(json.status, 200);
+    const factor = { gid: 3001 + next, name: `factor ${next}`, color: "red", star: 2 };
+    assert.deepEqual((await json.json()).factors.self, [factor]);
+    assert.equal((await worker.fetch(`/r/${created.id}`)).status, 200);
+  });
 });
