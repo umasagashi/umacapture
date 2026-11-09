@@ -1,7 +1,7 @@
 // The public page /r/<id>: HTML built as a string from public JSON v1. It carries no script and
 // loads nothing from another origin; the CSP sent with it says the same. Its look comes from the
-// shared stylesheet (web/site/site.css); the viewer's switches (colour, whose factors, the race
-// table) are radio buttons and <details>, driven by that stylesheet alone.
+// shared stylesheet (web/site/site.css); the viewer's switches (colour, each slot's factors or their
+// totals, the folded sections) are radio buttons and <details>, driven by that stylesheet alone.
 //
 // Every interpolated value goes through `esc`, table names included: the tables come from the
 // module set, not from this repository, and are not trusted to be markup-free.
@@ -107,11 +107,14 @@ const APTITUDE_LABELS = [
 /** How a record's kind is named on every page: /r/<id> and the cards of /u/<id>. */
 export const RECORD_TYPE_LABELS = { standard: "育成", inheritance_only: "継承用" };
 
-/** The two parents: key in `factors` / `family`, label, and the id suffix of their tab. */
+/** The two parents: key in `factors` / `family`, and label. */
 const PARENTS = [
-  ["parent1", "親1", "p1"],
-  ["parent2", "親2", "p2"],
+  ["parent1", "親1"],
+  ["parent2", "親2"],
 ];
+
+/** The heading of each factor colour public JSON v1 writes in `color`. */
+const FACTOR_COLOR_LABELS = { blue: "青因子", red: "赤因子", green: "緑因子", white: "白因子" };
 
 function title(record) {
   const parts = [record.trainee.card.name];
@@ -154,22 +157,20 @@ export const num = (n) => esc(Number(n).toLocaleString("en-US"));
 const starSum = (factors) => factors.reduce((sum, f) => sum + f.star, 0);
 const NONE = '<p class="rec-none">なし</p>';
 
-/** A list of chips; every item is markup already escaped by the caller. */
-const chips = (items) => (items.length ? `<ul class="rec-chips">${items.map((i) => `<li>${i}</li>`).join("")}</ul>` : NONE);
+/**
+ * A list of chips. Every item is [markup already escaped by the caller, class or null]; the class
+ * marks a factor chip with its colour.
+ */
+const chips = (items) =>
+  items.length
+    ? `<ul class="rec-chips">${items.map(([markup, cls]) => `<li${cls ? ` class="${cls}"` : ""}>${markup}</li>`).join("")}</ul>`
+    : NONE;
 
+/** Factor chips, each marked with its colour; `star` is a slot's stars or a total's. */
 function factorChips(factors) {
-  return chips(factors.map((f) => `${esc(f.name)} <span class="rec-star">★${esc(f.star)}</span>`));
-}
-
-function meta(record) {
-  const items = [
-    ["シナリオ", esc(record.scenario.name)],
-    ["育成日", record.trained_on === null ? null : esc(record.trained_on)],
-    ["作戦", esc(record.strategy.name)],
-    ["ファン数", readsTraining(record) ? num(record.fans) : null],
-    ["重賞ボーナス", record.relation_bonus === null ? null : esc(record.relation_bonus)],
-  ].filter(([, value]) => value !== null);
-  return `<dl class="rec-meta">${items.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
+  return chips(
+    factors.map((f) => [`${esc(f.name)} <span class="rec-star">★${esc(f.star)}</span>`, `rec-c-${esc(f.color)}`]),
+  );
 }
 
 function stats(record) {
@@ -179,21 +180,7 @@ function stats(record) {
   return `<div class="rec-stats">${cells.join("")}</div>`;
 }
 
-/** The hero's strip under focus "inheritance": the trainee and both parents, with their factors. */
-function lineage(record) {
-  const node = (cls, label, name, factors, extra) =>
-    `<div class="rec-node${cls}"><span class="rec-k">${label}</span><strong>${esc(name)}</strong>${extra}<span class="rec-k">因子 ${factors.length} ・ ★${starSum(factors)}</span></div>`;
-  const nodes = [node(" rec-self", "本人", record.trainee.character.name, record.factors.self, "")];
-  for (const [key, label] of PARENTS) {
-    const p = record.family[key];
-    const rental = p.rental ? '<span class="rec-tag">レンタル</span>' : "";
-    const grand = `<span class="rec-gp">${esc(p.parent1.character.name)} ／ ${esc(p.parent2.character.name)}</span>`;
-    nodes.push(node("", label, p.self.character.name, record.factors[key], rental + grand));
-  }
-  return `<div class="rec-lineage">${nodes.join("")}</div>`;
-}
-
-function hero(record, focus) {
+function hero(record) {
   const { costume, name } = splitCard(record.trainee.card.name);
   const rank = record.trainee.rank ? `<span class="rec-rank">${esc(record.trainee.rank.name)}</span>` : "";
   const evaluation =
@@ -201,8 +188,6 @@ function hero(record, focus) {
   return `<section class="rec-hero">
 ${costume === null ? "" : `<p class="rec-costume">${esc(costume)}</p>`}<h1>${esc(name)}</h1>
 <div class="rec-badges">${rank}${evaluation}<span class="rec-tag">${RECORD_TYPE_LABELS[record.record_type]}</span></div>
-${meta(record)}
-${focus === "training" && readsTraining(record) ? stats(record) : lineage(record)}
 </section>`;
 }
 
@@ -221,118 +206,150 @@ function aptitudes(record) {
 
 function skills(record) {
   return chips(
-    record.skills.map((s) =>
+    record.skills.map((s) => [
       s.level === undefined ? esc(s.name) : `${esc(s.name)} <span class="rec-lv">Lv${esc(s.level)}</span>`,
-    ),
+      null,
+    ]),
   );
 }
 
-/** Tabs for whose factors are shown: the trainee, then each parent with who that parent is. */
-function factorTabs(record) {
-  const tab = (id, label, count, checked) =>
-    `<input type="radio" name="rec-factor" id="rec-f-${id}"${checked ? " checked" : ""}><label for="rec-f-${id}">${label}<small>${count}</small></label>`;
-  const tabs = [tab("self", "本人", record.factors.self.length, true)];
-  const panels = [`<div class="rec-panel rec-p-self">${factorChips(record.factors.self)}</div>`];
-  for (const [key, label, id] of PARENTS) {
-    const p = record.family[key];
-    const { costume } = splitCard(p.self.card.name);
-    tabs.push(tab(id, `${label} ${esc(p.self.character.name)}`, record.factors[key].length, false));
-    const who = [
-      `<strong>${esc(p.self.character.name)}</strong>`,
-      costume === null ? "" : ` <span class="rec-k">${esc(costume)}</span>`,
-      p.rental ? ' <span class="rec-tag">レンタル</span>' : "",
-      `<span class="rec-gp">${label}の親: ${esc(p.parent1.character.name)} ／ ${esc(p.parent2.character.name)}</span>`,
-    ].join("");
-    panels.push(`<div class="rec-panel rec-p-${id}"><p class="rec-who">${who}</p>${factorChips(record.factors[key])}</div>`);
-  }
-  return `<fieldset class="rec-tabs"><legend>誰の因子か</legend>${tabs.join("")}</fieldset>${panels.join("")}`;
+/** One slot's factors under "each": who the slot is, then its factors in the record's order. */
+function slot(heading, under, factors) {
+  const count = `<span class="rec-n">因子 ${factors.length} ・ ★${starSum(factors)}</span>`;
+  return `<div class="rec-slot"><h3>${heading}${count}</h3>${under}${factorChips(factors)}</div>`;
 }
 
+/** The trainee's factors, then each parent's under who that parent is, one under the other. */
+function eachSlot(record) {
+  const slots = [slot("<span>本人</span>", "", record.factors.self)];
+  for (const [key, label] of PARENTS) {
+    const p = record.family[key];
+    const { costume } = splitCard(p.self.card.name);
+    const heading = [
+      `<span>${label}</span><strong>${esc(p.self.character.name)}</strong>`,
+      costume === null ? "" : `<span class="rec-k">${esc(costume)}</span>`,
+      p.rental ? '<span class="rec-tag">レンタル</span>' : "",
+    ].join("");
+    const grand = `<p class="rec-gp">${label}の親: ${esc(p.parent1.character.name)} ／ ${esc(p.parent2.character.name)}</p>`;
+    slots.push(slot(heading, grand, record.factors[key]));
+  }
+  return slots.join("");
+}
+
+/**
+ * The factor totals in the order public JSON lists them, under a heading for each run of one
+ * colour. The order, colours first, is factor_totals' own; the page does not sort it.
+ */
+function totals(record) {
+  const runs = [];
+  for (const f of record.factor_totals) {
+    const last = runs.at(-1);
+    if (last && last.color === f.color) last.factors.push(f);
+    else runs.push({ color: f.color, factors: [f] });
+  }
+  if (runs.length === 0) return NONE;
+  return runs
+    .map((r) => {
+      const heading = `<span>${FACTOR_COLOR_LABELS[r.color]}</span><span class="rec-n">${r.factors.length}種</span>`;
+      return `<div class="rec-slot"><h3>${heading}</h3>${factorChips(r.factors)}</div>`;
+    })
+    .join("");
+}
+
+/** The factors, each slot (checked by default) or the totals, switched by a radio button. */
+function factorViews() {
+  const tab = (id, label, checked) =>
+    `<input type="radio" name="rec-factor" id="rec-f-${id}"${checked ? " checked" : ""}><label for="rec-f-${id}">${label}</label>`;
+  return `<fieldset class="rec-tabs"><legend>因子の表示</legend>${tab("each", "個別", true)}${tab("total", "合計", false)}</fieldset>`;
+}
+
+function factorsBody(record) {
+  return `${factorViews()}<div class="rec-p-each">${eachSlot(record)}</div><div class="rec-p-total">${totals(record)}</div>`;
+}
+
+/** The support cards, without their limit breaks: the recognizer misreads those. */
 function supports(record) {
   if (record.support_cards.length === 0) return NONE;
   const cards = record.support_cards.map((c) => {
     const { costume, name } = splitCard(c.name);
     // A level of 0 is left out rather than shown as "Lv0".
-    const level = c.level ? ` ・ Lv${esc(c.level)}` : "";
+    const level = c.level ? `<span class="rec-k">Lv${esc(c.level)}</span>` : "";
     const costumeLine = costume === null ? "" : `<span class="rec-k">${esc(costume)}</span>`;
-    return `<div class="rec-support">${costumeLine}${esc(name)}<span class="rec-k">${esc(c.limit_break)}凸${level}</span></div>`;
+    return `<div class="rec-support">${costumeLine}${esc(name)}${level}</div>`;
   });
   return `<div class="rec-supports">${cards.join("")}</div>`;
 }
 
-/** The races, folded: the summary line carries how many were run and won. */
-function races(record) {
-  const wins = record.races.filter((r) => r.position.name === "1").length;
+function raceTable(record) {
   const rows = record.races.map((r) => {
     const where = [r.place.name, r.ground.name, `${r.distance}m`, r.variation.name, r.weather.name, r.strategy.name];
     const win = r.position.name === "1" ? " rec-win" : "";
     return `<tr><td class="rec-k">${esc(r.turn.name)}</td><td>${esc(r.title.name)}<span class="rec-k">${where.map(esc).join(" ")}</span></td><td class="rec-pos${win}">${esc(r.position.name)}着</td></tr>`;
   });
-  const table = rows.length ? `<table class="rec-races">${rows.join("")}</table>` : NONE;
-  return `<details><summary><h2>レース</h2><span class="rec-n">${record.races.length}戦 ${wins}勝</span></summary>${table}</details>`;
+  return rows.length ? `<table class="rec-races">${rows.join("")}</table>` : NONE;
 }
 
-function provenance(record) {
+/** What the record is beyond the trainee: the training's facts, then the share's own. */
+function info(record) {
   const rows = [
-    ["共有日", record.shared_on],
-    ["地域", record.region],
-    ["認識器の版", record.recognizer_version],
-    ["表の版", record.tables_version],
-  ];
-  return `<dl class="rec-prov">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
+    ["シナリオ", esc(record.scenario.name)],
+    ["育成日", record.trained_on === null ? null : esc(record.trained_on)],
+    ["作戦", esc(record.strategy.name)],
+    ["ファン数", readsTraining(record) ? num(record.fans) : null],
+    ["重賞ボーナス", record.relation_bonus === null ? null : esc(record.relation_bonus)],
+    ["共有日", esc(record.shared_on)],
+    ["地域", esc(record.region)],
+    ["認識器の版", esc(record.recognizer_version)],
+    ["表の版", esc(record.tables_version)],
+  ].filter(([, value]) => value !== null);
+  return `<dl class="rec-info">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
 }
 
 const card = (id, heading, content) => `<section class="rec-card" id="${id}"><h2>${heading}</h2>${content}</section>`;
 
+/** A section folded by default; the summary line carries the heading and a short count. */
+const folded = (id, heading, count, content) =>
+  `<section class="rec-card" id="${id}"><details><summary><h2>${heading}</h2>${count}</summary>${content}</details></section>`;
+
 /**
- * The sections of the page by anchor: [jump label, markup]; a section the record cannot fill is
- * absent. Under focus "training" the stats sit in the hero, so "status" holds the aptitudes alone;
- * under "inheritance" the hero holds the lineage and "status" holds both, unless the record is
- * inheritance-only and has no stats to show.
+ * The sections of the page in order, each [anchor, jump label, markup]. The first ones are always
+ * open, the last three folded; a section the record cannot fill is absent.
  */
-function sections(record, focus) {
-  const withStats = focus === "inheritance" && readsTraining(record);
-  const statusHeading = withStats ? "ステータスと適性" : "適性";
-  const statusBody = withStats ? stats(record) + aptitudes(record) : aptitudes(record);
-  const skillsHeading = `スキル <span class="rec-n">${record.skills.length}</span>`;
-  return {
-    status: [statusHeading, card("status", statusHeading, statusBody)],
-    ...(readsTraining(record) && { skills: ["スキル", card("skills", skillsHeading, skills(record))] }),
-    factors: ["因子と継承", card("factors", "因子と継承", factorTabs(record))],
-    supports: ["サポート", card("supports", "サポートカード", supports(record))],
-    races: ["レース", `<section class="rec-card" id="races">${races(record)}</section>`],
-  };
+function sections(record) {
+  const wins = record.races.filter((r) => r.position.name === "1").length;
+  const n = (text) => `<span class="rec-n">${text}</span>`;
+  return [
+    ["aptitudes", "適性", card("aptitudes", "適性", aptitudes(record))],
+    ["factors", "因子", card("factors", "因子", factorsBody(record))],
+    ...(readsTraining(record)
+      ? [
+          ["status", "ステータス", card("status", "ステータス", stats(record))],
+          ["skills", "スキル", card("skills", `スキル ${n(record.skills.length)}`, skills(record))],
+        ]
+      : []),
+    ["supports", "サポート", folded("supports", "サポートカード", n(record.support_cards.length), supports(record))],
+    ["races", "レース", folded("races", "レース", n(`${record.races.length}戦 ${wins}勝`), raceTable(record))],
+    ["info", "記録の情報", folded("info", "記録の情報", "", info(record))],
+  ];
 }
 
-/** The order of the sections, and of the jump links to them, for each focus. */
-const ORDER = {
-  training: ["status", "skills", "factors", "supports", "races"],
-  inheritance: ["factors", "status", "skills", "supports", "races"],
-};
-
-function body(record, focus) {
-  const all = sections(record, focus);
-  const order = ORDER[focus].filter((key) => key in all);
-  const jump = order.map((key) => `<a href="#${key}">${all[key][0]}</a>`).join("");
-  return `${hero(record, focus)}
+function body(record) {
+  const all = sections(record);
+  const jump = all.map(([id, label]) => `<a href="#${id}">${label}</a>`).join("");
+  return `${hero(record)}
 <nav class="rec-jump" aria-label="区分へ移動">${jump}</nav>
-${order.map((key) => all[key][1]).join("\n")}
-${provenance(record)}`;
+${all.map(([, , markup]) => markup).join("\n")}`;
 }
 
 /**
- * The full HTML document for one shared record.
+ * The full HTML document for one shared record. Every record is laid out the same way: the trainee,
+ * aptitudes, factors, stats and skills open, then the support cards, races and the record's
+ * information folded.
  *
  * @param {object} record public JSON v1
  * @param {object} env the Worker's vars (for og:image)
- * @param {"training" | "inheritance"} focus what the page leads with: the hero's strip and the
- *   order of the sections. The caller decides it; `defaultFocus` in public_record.mjs is the rule
- *   for a record that carries no choice.
  */
-export function renderPage(record, env, focus) {
-  if (!Object.hasOwn(ORDER, focus)) {
-    throw new Error(`focus must be "training" or "inheritance", got ${JSON.stringify(focus)}`);
-  }
+export function renderPage(record, env) {
   const og = ogImage(env, record.id);
   const t = title(record);
   const d = description(record);
@@ -362,7 +379,7 @@ export function renderPage(record, env, focus) {
 <body>
 ${siteHeader("共有レコード")}
 <main class="site-main rec">
-${body(record, focus)}
+${body(record)}
 ${pageFooter(record.url)}
 </main>
 </body>
