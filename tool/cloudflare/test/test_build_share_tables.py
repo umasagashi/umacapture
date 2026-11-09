@@ -43,12 +43,17 @@ def labels(extra: int = 0) -> dict:
     return out
 
 
+def tags_of(sid: int) -> list[str]:
+    return [f"tag {sid}"] if sid % 2 else [f"tag {sid}", "second"]
+
+
 def write_archive(path: Path, names: dict) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("modules/version_info.json", json.dumps({"recognizer_version": "2026-01-01T00:00:00Z"}))
         archive.writestr("modules/labels.json", json.dumps(names))
         for key, source in GID_KEYS.items():
-            info = [{"sid": sid, "gid": 1000 + sid} for sid in range(len(names[key]))]
+            # Listed in reverse sid order, so the columns have to be read by sid, not by position.
+            info = [{"sid": sid, "gid": 1000 + sid, "tags": tags_of(sid)} for sid in reversed(range(len(names[key])))]
             archive.writestr(f"modules/{source}", json.dumps(info))
 
 
@@ -69,6 +74,7 @@ class AppendOnlyTest(unittest.TestCase):
         self.assertEqual(build_share_tables.append_only_violations(self.previous, tables), [])
         self.assertEqual(len(tables["names"]["skill.name"]), 3)
         self.assertNotIn("campaign_field.name", tables["names"])
+        self.assertEqual(tables["tags"], {"factor.name": [tags_of(sid) for sid in range(3)]})
 
     def test_reordered_names_stop(self) -> None:
         """A previous list that is not a prefix of the new one is a violation."""
@@ -198,7 +204,7 @@ class LoadTest(unittest.TestCase):
         self.assertEqual(self.load(names), 1)
         self.d1.fail_on_load = False
         self.assertEqual(self.d1.count("share_table_load"), 0)
-        return self.d1.count("share_table_name") + self.d1.count("share_table_gid")
+        return sum(self.d1.count(table) for table, _ in load_share_tables.TABLES.values())
 
     def test_rerun_records_a_load_stopped_before_its_record(self) -> None:
         """(h) Rows written without their record are recorded by the next run, which adds none."""
@@ -251,6 +257,38 @@ class LoadTest(unittest.TestCase):
         write_archive(self.dir / "modules.zip", labels(extra=1))
         expected = build_share_tables.build_tables((self.dir / "modules.zip").read_bytes())
         self.assertEqual(tables, {**expected, "generation": 1})
+
+    def load_without_tags(self, names: dict) -> None:
+        """Loads `names` the way a checkout from before 0007_share_table_tags.sql did: names and gids only."""
+        tag_sources = build_share_tables.TAG_SOURCES.copy()
+        build_share_tables.TAG_SOURCES.clear()
+        try:
+            self.assertEqual(self.load(names), 0)
+        finally:
+            build_share_tables.TAG_SOURCES.update(tag_sources)
+        self.assertEqual(self.d1.count("share_table_tags"), 0)
+
+    def test_untagged_d1_gets_only_the_tags(self) -> None:
+        """A D1 loaded before tags were read gets only the tags from the same archive, under one new load."""
+        self.load_without_tags(labels())
+        names, gids = self.d1.count("share_table_name"), self.d1.count("share_table_gid")
+        self.d1.calls.clear()
+        self.assertEqual(self.load(labels()), 0)
+        self.assertEqual((self.d1.count("share_table_name"), self.d1.count("share_table_gid")), (names, gids))
+        rows = self.d1.db.execute("SELECT pos, tags FROM share_table_tags WHERE key = 'factor.name' ORDER BY pos")
+        self.assertEqual([(r[0], json.loads(r[1])) for r in rows], [(0, tags_of(0)), (1, tags_of(1))])
+        self.assertEqual(self.d1.count("share_table_tags"), 2)
+        record = self.d1.db.execute("SELECT generation, rows_added FROM share_table_load ORDER BY generation")
+        self.assertEqual([tuple(r) for r in record][1:], [(2, 2)])
+
+    def test_read_to_refuses_a_d1_without_tags(self) -> None:
+        """A D1 whose factor names have no tags is refused, and no file is written."""
+        self.load_without_tags(labels())
+        out = self.dir / "read.json"
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(load_share_tables.main(["--target", "staging", "--read-to", str(out)], wrangler=self.d1), 1)
+        self.assertIn("fewer tags than names for factor.name", err.getvalue())
+        self.assertFalse(out.exists())
 
     def test_read_to_refuses_a_d1_without_a_load(self) -> None:
         """A D1 that records no load is refused, and no file is written."""

@@ -9,7 +9,7 @@
     uv run tool/cloudflare/load_share_tables.py --target production|staging --read-to <tables.json>
 
 The share Worker resolves sids through the tables in its own D1 (share_table_name, share_table_gid,
-share_table_load). A shared record stores sids, so a list may only ever grow at the end. This script
+share_table_tags, share_table_load). share_table_tags holds each tags list as JSON with no spaces. A shared record stores sids, so a list may only ever grow at the end. This script
 reads the target's rows back, builds the tables of the archive with build_share_tables.build_tables,
 and requires every list to agree with the rows over the range both hold
 (build_share_tables.append_only_violations with allow_shorter). It then inserts only the entries
@@ -33,10 +33,13 @@ D1 (tool/cloudflare/.deploy-backup/tables.<target>.json, written by the last suc
 of the result, for the first load into a D1 that is still empty. It is refused when the file does not
 exist.
 
---read-to <file> writes the tables the target's D1 holds as {version, generation, names, gids} and
+--read-to <file> writes the tables the target's D1 holds as {version, generation, names, gids, tags} and
 writes nothing to D1 (tool/cloudflare/deploy_web.sh checks with it that the target has tables, and cuts
 the page fonts from them). It is refused when D1 records no load: the Worker then has no tables and
-answers every name lookup with a 500.
+answers every name lookup with a 500. It is also refused when a key of
+build_share_tables.TAG_SOURCES holds fewer tags than names: the Worker holds such a key only with its
+tags, so it would answer a 500 for every sid without them. A D1 loaded before 0007_share_table_tags.sql
+gets its tags by loading the same archive again: only the tags are added.
 
 --dry-run prints how many entries would be added and writes nothing.
 Exit status: 0 loaded or nothing to add, 1 refused or failed (the message says whether anything was
@@ -55,7 +58,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_share_tables import BuildError, append_only_violations, build_tables  # noqa: E402
+from build_share_tables import TAG_SOURCES, BuildError, append_only_violations, build_tables  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 WRANGLER_JS = REPO / "server" / "node_modules" / "wrangler" / "bin" / "wrangler.js"
@@ -63,7 +66,11 @@ WRANGLER_CONFIG = REPO / "server" / "wrangler.jsonc"
 # The D1 binding of server/wrangler.jsonc; wrangler resolves it in the environment the target names.
 BINDING = "DB"
 TARGET_ENV_ARGS = {"production": [], "staging": ["--env", "staging"]}
-TABLES = {"names": ("share_table_name", "name"), "gids": ("share_table_gid", "gid")}
+TABLES = {
+    "names": ("share_table_name", "name"),
+    "gids": ("share_table_gid", "gid"),
+    "tags": ("share_table_tags", "tags"),
+}
 # Characters of SQL per write command. A Windows command line holds 32767 UTF-16 units and D1 takes
 # statements under 100 KB, so a write stays far below both.
 CHUNK_CHARS = 8000
@@ -116,7 +123,7 @@ class Target:
                 values = lists.setdefault(row["key"], [])
                 if row["pos"] != len(values):
                     raise BuildError(f"{self.name}: {table} rows of {row['key']} are not numbered 0, 1, 2, ...")
-                values.append(row["value"])
+                values.append(json.loads(row["value"]) if section == "tags" else row["value"])
             tables[section] = lists
         return tables
 
@@ -130,6 +137,12 @@ def read_back(target: Target, out: Path) -> int:
     if not last:
         raise BuildError(f"{target.name}: D1 records no load of the name tables. Publish a module set first")
     tables = {"version": last[0]["recognizer_version"], "generation": last[0]["generation"], **target.read_tables()}
+    untagged = [key for key in TAG_SOURCES if len(tables["tags"].get(key, ())) < len(tables["names"].get(key, ()))]
+    if untagged:
+        raise BuildError(
+            f"{target.name}: D1 holds fewer tags than names for {', '.join(untagged)}. Load the module set "
+            "again with a checkout whose build_share_tables.py reads tags"
+        )
     out.write_text(json.dumps(tables, ensure_ascii=False, separators=(",", ":")), encoding="utf-8", newline="\n")
     print(f"{target.name}: read {count_rows(tables)} entries of generation {tables['generation']} into {out}")
     return 0
@@ -161,6 +174,14 @@ def plan(loaded: dict, archive_tables: dict) -> tuple[list[tuple[str, str, int, 
     return rows, merged
 
 
+def sql_literal(section: str, value) -> str:
+    if section == "gids":
+        return str(int(value))
+    if section == "tags":
+        return sql_text(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    return sql_text(value)
+
+
 def insert_commands(rows: list[tuple[str, str, int, object]]) -> list[str]:
     """INSERT statements of consecutive rows of one table, each under CHUNK_CHARS."""
     commands: list[str] = []
@@ -172,7 +193,7 @@ def insert_commands(rows: list[tuple[str, str, int, object]]) -> list[str]:
             commands.append(f"INSERT INTO {table} (key, pos, {column}) VALUES " + ",".join(values))
 
     for section, key, pos, value in rows:
-        literal = sql_text(value) if section == "names" else str(int(value))
+        literal = sql_literal(section, value)
         tuple_sql = f"({sql_text(key)},{pos},{literal})"
         head = len("INSERT INTO share_table_name (key, pos, name) VALUES ")
         if section != current_section or head + sum(len(v) + 1 for v in values) + len(tuple_sql) > CHUNK_CHARS:
