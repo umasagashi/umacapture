@@ -1,6 +1,7 @@
-// The 1200×630 card drawn for one public record. Text only: every string on it comes from public
+// The 1200×630 card drawn for one public record: the trainee (card, rank, evaluation), the
+// aptitudes and the factor totals, and nothing else. Text only: every string on it comes from public
 // JSON v1, whose names the sharing Worker resolved from its own tables, so the image says nothing
-// the JSON does not. The fixed labels ("スキル", "親1", …) are the only other words on it.
+// the JSON does not. The fixed labels ("因子（合計）", "芝", …) are the only other words on it.
 //
 // Elements are plain {type, props} objects, which satori accepts without React.
 
@@ -8,7 +9,7 @@
 // from the app's FlexScheme.blue theme. Copied because satori cannot read a stylesheet: change both.
 //   page = --page, card = --card, tint = --tint, ink = --ink, muted = --muted,
 //   primary = --primary, onPrimary = --on-primary, container = --primary-container,
-//   onContainer = --on-primary-container
+//   onContainer = --on-primary-container, factor.<color> = --factor-<color>
 const COLOR = {
   page: "#E5E8EB",
   card: "#F3F6FA",
@@ -19,6 +20,7 @@ const COLOR = {
   onPrimary: "#FFFFFF",
   container: "#90CAF9",
   onContainer: "#000000",
+  factor: { blue: "#1E88E5", red: "#E53935", green: "#43A047", white: "#9E9E9E" },
 };
 
 /** The family the card is set in; the handler and the default-image script load it under this name. */
@@ -34,28 +36,33 @@ const text = (style, value) =>
   h("div", { display: "flex", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", ...style }, value);
 const image = (src, size) => ({ type: "img", props: { src, width: size, height: size } });
 
-const STATUS = [
-  ["speed", "スピード"],
-  ["stamina", "スタミナ"],
-  ["power", "パワー"],
-  ["guts", "根性"],
-  ["intelligence", "賢さ"],
+/** The aptitude groups in the order the public page lists them: key in `aptitudes`, cells. */
+const APTITUDES = [
+  ["ground", [["turf", "芝"], ["dirt", "ダート"]]],
+  ["distance", [["short", "短距離"], ["mile", "マイル"], ["middle", "中距離"], ["long", "長距離"]]],
+  ["style", [["lead_pace", "逃げ"], ["with_pace", "先行"], ["off_pace", "差し"], ["late_charge", "追込"]]],
 ];
 
-// Chips wrap into rows of a fixed height, and each list gets a box of whole rows: rows past the
-// box are clipped whole, never cut through. The section title carries the full count.
-const CHIP_ROW = 46;
+/** The factor colours public JSON v1 writes in `color`. */
+const FACTOR_COLORS = ["blue", "red", "green", "white"];
 
-/** The two ways a card can present a record. */
-export const FOCI = ["training", "inheritance"];
+// Factor chips wrap into rows of a fixed height inside a box of whole rows: rows past the box are
+// clipped whole, never cut through. factor_totals lists the white factors last and most stars first,
+// so the clipped ones are the white factors with the fewest stars. The title carries the full count.
+const CHIP_ROW = 46;
+const FACTOR_ROWS = 7;
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNamed = (v) => isObject(v) && typeof v.name === "string";
-const isFactorList = (v) => Array.isArray(v) && v.every((f) => isNamed(f) && Number.isInteger(f.star));
 const isTrainee = (v) => isObject(v) && isNamed(v.card) && isNamed(v.character);
-const isParent = (v) => isObject(v) && isTrainee(v.self) && typeof v.rental === "boolean";
+const isTotal = (v) => isNamed(v) && Number.isInteger(v.star) && FACTOR_COLORS.includes(v.color);
+const isAptitudes = (v) =>
+  isObject(v) && APTITUDES.every(([group, cells]) => isObject(v[group]) && cells.every(([key]) => isNamed(v[group][key])));
 
-/** Whether `record` is public JSON v1 with every key the card reads. */
+/**
+ * Whether `record` is public JSON v1 with every key the card reads. JSON from a Worker that does not
+ * write `factor_totals` is not, so the handler answers it with the fallback image.
+ */
 export function isRenderable(record) {
   return (
     isObject(record) &&
@@ -64,72 +71,17 @@ export function isRenderable(record) {
     isTrainee(record.trainee) &&
     (record.trainee.rank === null || isNamed(record.trainee.rank)) &&
     (record.evaluation === null || Number.isInteger(record.evaluation)) &&
-    isObject(record.status) &&
-    STATUS.every(([key]) => Number.isInteger(record.status[key])) &&
-    Array.isArray(record.skills) &&
-    record.skills.every(isNamed) &&
-    isObject(record.factors) &&
-    isFactorList(record.factors.self) &&
-    isFactorList(record.factors.parent1) &&
-    isFactorList(record.factors.parent2) &&
-    isObject(record.family) &&
-    isParent(record.family.parent1) &&
-    isParent(record.family.parent2) &&
-    Array.isArray(record.races) &&
-    record.races.every((r) => isObject(r) && isNamed(r.position)) &&
-    isObject(record.scenario) &&
-    typeof record.scenario.name === "string" &&
-    (record.trained_on === null || typeof record.trained_on === "string")
+    isAptitudes(record.aptitudes) &&
+    Array.isArray(record.factor_totals) &&
+    record.factor_totals.every(isTotal)
   );
 }
-
-/**
- * Which of FOCI the card presents `record` with: the sharer's choice in `view.focus` when the JSON
- * carries a known one, else the record's kind. JSON written before `view` existed, and a focus this
- * function does not know, fall back to the kind, so every renderable record has a card.
- */
-export function focusOf(record) {
-  const focus = record.view?.focus;
-  if (FOCI.includes(focus)) return focus;
-  return record.record_type === "inheritance_only" ? "inheritance" : "training";
-}
-
-const starTotal = (factors) => factors.reduce((sum, f) => sum + f.star, 0);
 
 // "[costume]name" with name equal to the character is split so the name can be drawn large; any
 // other card name is drawn whole.
 function splitCard(card, character) {
   const match = /^\[(.+)\](.+)$/.exec(card);
   return match && match[2] === character ? [match[1], match[2]] : ["", card];
-}
-
-const chip = (label, extra, style = {}) =>
-  row(
-    {
-      alignItems: "center",
-      maxWidth: 520,
-      height: CHIP_ROW - 8,
-      padding: "0 14px",
-      margin: "0 8px 8px 0",
-      borderRadius: 19,
-      background: COLOR.tint,
-      fontSize: 20,
-      ...style,
-    },
-    text({ flexShrink: 1, minWidth: 0 }, label),
-    extra ? text({ flexShrink: 0, marginLeft: 6, fontSize: 16, color: COLOR.primary }, extra) : null,
-  );
-
-function chips(items, rows, toChip) {
-  const shown = items.map(toChip);
-  if (shown.length === 0) shown.push(chip("なし", null, { color: COLOR.muted }));
-  return row({ flexWrap: "wrap", height: rows * CHIP_ROW, flexShrink: 0, overflow: "hidden" }, ...shown);
-}
-
-const factorChip = (f) => chip(f.name, "★".repeat(f.star));
-
-function section(title, body) {
-  return column({ marginTop: 14, flexShrink: 0 }, text({ fontSize: 18, color: COLOR.muted, marginBottom: 6 }, title), body);
 }
 
 function header(record) {
@@ -173,20 +125,78 @@ function header(record) {
   );
 }
 
-function footer(left, logo) {
-  return row(
-    { marginTop: "auto", alignItems: "center", justifyContent: "space-between", fontSize: 21, color: COLOR.muted },
-    text({ flexShrink: 1, minWidth: 0 }, left),
+// The grade colours of the public page: S and A in the primary colour, B and C in the ink, the rest
+// muted.
+function gradeColor(grade) {
+  if (grade === "S" || grade === "A") return COLOR.primary;
+  if (/^[D-G]$/.test(grade)) return COLOR.muted;
+  return COLOR.ink;
+}
+
+function aptitudes(record) {
+  const groups = APTITUDES.map(([group, cells]) =>
     row(
-      { alignItems: "center", flexShrink: 0, marginLeft: 20, color: COLOR.ink, fontWeight: 700 },
-      image(logo, 34),
-      text({ marginLeft: 8 }, "umacapture"),
+      { flexShrink: 0 },
+      ...cells.map(([key, label]) => {
+        const grade = record.aptitudes[group][key].name;
+        return row(
+          { alignItems: "baseline", padding: "4px 10px", marginRight: 6, borderRadius: 10, background: COLOR.tint },
+          text({ fontSize: 17, color: COLOR.muted, marginRight: 6 }, label),
+          text({ fontSize: 24, fontWeight: 700, color: gradeColor(grade) }, grade),
+        );
+      }),
     ),
+  );
+  const divider = row({ width: 1, alignSelf: "stretch", margin: "0 10px 0 4px", background: COLOR.muted, opacity: 0.25 });
+  return row(
+    { marginTop: 16, flexShrink: 0, justifyContent: "space-between" },
+    ...groups.flatMap((group, i) => (i === 0 ? [group] : [divider, group])),
   );
 }
 
-const frame = (...children) =>
-  column(
+// The colour is a band on the chip's left edge; the chip keeps the tint behind its text, so the
+// text contrast is the same for every colour.
+const factorChip = (f) =>
+  row(
+    {
+      alignItems: "center",
+      maxWidth: 520,
+      height: CHIP_ROW - 8,
+      padding: "0 14px 0 10px",
+      margin: "0 8px 8px 0",
+      borderRadius: 19,
+      borderLeft: `8px solid ${COLOR.factor[f.color]}`,
+      background: COLOR.tint,
+      fontSize: 20,
+    },
+    text({ flexShrink: 1, minWidth: 0 }, f.name),
+    text({ flexShrink: 0, marginLeft: 6, fontSize: 16, color: COLOR.primary }, `★${f.star}`),
+  );
+
+function factors(record) {
+  const totals = record.factor_totals;
+  const shown = totals.length > 0 ? totals.map(factorChip) : [text({ fontSize: 20, color: COLOR.muted }, "なし")];
+  return column(
+    { marginTop: 14, flexShrink: 0 },
+    text({ fontSize: 18, color: COLOR.muted, marginBottom: 6 }, `因子（合計） ${totals.length}種`),
+    row({ flexWrap: "wrap", height: FACTOR_ROWS * CHIP_ROW, flexShrink: 0, overflow: "hidden" }, ...shown),
+  );
+}
+
+function footer(logo) {
+  return row(
+    { marginTop: "auto", alignItems: "center", justifyContent: "flex-end", fontSize: 21, color: COLOR.ink, fontWeight: 700 },
+    image(logo, 34),
+    text({ marginLeft: 8 }, "umacapture"),
+  );
+}
+
+/**
+ * The card for `record`, which must satisfy isRenderable.
+ * `logo` is web/site/logo.svg as an image source (a data URI).
+ */
+export function buildCard(record, logo) {
+  return column(
     {
       width: 1200,
       height: 630,
@@ -195,67 +205,14 @@ const frame = (...children) =>
       color: COLOR.ink,
       fontFamily: FONT_FAMILY,
     },
-    column({ flexGrow: 1, borderRadius: 28, padding: "24px 30px 18px", background: COLOR.card }, ...children),
-  );
-
-function training(record, logo) {
-  const wins = record.races.filter((r) => r.position.name === "1").length;
-  const races = record.races.length > 0 ? `${record.races.length}戦${wins}勝` : null;
-  return frame(
-    header(record),
-    row(
-      { justifyContent: "space-between", marginTop: 14, flexShrink: 0 },
-      ...STATUS.map(([key, label]) =>
-        column(
-          { alignItems: "center", width: 200, padding: "6px 0", borderRadius: 16, background: COLOR.tint },
-          text({ fontSize: 18, color: COLOR.muted }, label),
-          text({ fontSize: 36, fontWeight: 700 }, String(record.status[key])),
-        ),
-      ),
+    column(
+      { flexGrow: 1, borderRadius: 28, padding: "24px 30px 18px", background: COLOR.card },
+      header(record),
+      aptitudes(record),
+      factors(record),
+      footer(logo),
     ),
-    section(
-      `スキル ${record.skills.length}`,
-      chips(record.skills, 2, (s) => chip(s.name, s.level === undefined ? null : `Lv${s.level}`)),
-    ),
-    section(`因子 ${record.factors.self.length}`, chips(record.factors.self, 2, factorChip)),
-    footer([record.scenario.name, races, record.trained_on].filter(Boolean).join(" ・ "), logo),
   );
-}
-
-function parentPanel(label, parent, factors) {
-  return column(
-    { flexGrow: 1, flexBasis: 0, minWidth: 0, padding: "10px 14px", borderRadius: 16, background: COLOR.tint },
-    row(
-      { alignItems: "baseline" },
-      text({ flexShrink: 0, fontSize: 16, color: COLOR.muted, marginRight: 8 }, label),
-      text({ flexShrink: 1, minWidth: 0, fontSize: 22, fontWeight: 700 }, parent.self.character.name),
-      parent.rental ? text({ flexShrink: 0, fontSize: 14, marginLeft: 8, color: COLOR.primary }, "レンタル") : null,
-    ),
-    text({ fontSize: 16, color: COLOR.muted, marginTop: 4 }, `因子 ${factors.length} ・ ★${starTotal(factors)}`),
-  );
-}
-
-function inheritance(record, logo) {
-  const self = record.factors.self;
-  return frame(
-    header(record),
-    section(`本人の因子 ${self.length} ・ ★${starTotal(self)}`, chips(self, 4, factorChip)),
-    row(
-      { marginTop: 10, flexShrink: 0 },
-      parentPanel("親1", record.family.parent1, record.factors.parent1),
-      row({ width: 12 }),
-      parentPanel("親2", record.family.parent2, record.factors.parent2),
-    ),
-    footer([record.scenario.name, record.trained_on].filter(Boolean).join(" ・ "), logo),
-  );
-}
-
-/**
- * The card for `record`, which must satisfy isRenderable, laid out for focusOf(record).
- * `logo` is web/site/logo.svg as an image source (a data URI).
- */
-export function buildCard(record, logo) {
-  return focusOf(record) === "inheritance" ? inheritance(record, logo) : training(record, logo);
 }
 
 /**

@@ -184,8 +184,11 @@ test(
     for (const { path } of FONT_FILES) routes[path] = send(await readFile(new URL(`.${path}`, web)), "font/ttf");
     const rare = JSON.parse(record.toString("utf8"));
     rare.trainee.card.name = "[総攬]オルフェーヴル";
-    rare.factors.self.push({ gid: 3, name: "滾る想い", star: 2 }, { gid: 4, name: "夢寐に見る銀世界", star: 1 });
-    rare.scenario.name = "晴・稍重 驀逍悧迸濘";
+    rare.factor_totals.push(
+      { gid: 3, name: "滾る想い", star: 2, color: "green" },
+      { gid: 4, name: "夢寐に見る銀世界", star: 1, color: "white" },
+      { gid: 5, name: "晴・稍重 驀逍悧迸濘", star: 1, color: "white" },
+    );
     routes[`/r/${ID}.json`] = send(JSON.stringify(rare), "application/json");
 
     const response = await get(handler(), `/r/${ID}.png`);
