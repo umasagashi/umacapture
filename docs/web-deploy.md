@@ -482,9 +482,10 @@ from `factor_totals`. Take these steps in this order:
 1. **Apply `0007_share_table_tags.sql`** to both D1s ("Applying a migration"). It only adds a table
    the live Worker does not read, so the apply opens no broken window. Do it before anyone publishes
    a module set from a checkout that loads tags: on a D1 without the table, that publish stops at
-   its name-tables stage, before the pointer changes ("Publishing to data.umacapture.com"). Apply it
-   from a checkout without `0008_drop_share_focus.sql` (step 6): the apply takes every migration the
-   database lacks, and `0008` breaks a Worker from before step 3 or 4.
+   its name-tables stage, before the pointer changes ("Publishing to data.umacapture.com"). The
+   apply takes every migration the database lacks, and the tree carries
+   `0008_drop_share_focus.sql` (step 6), which breaks a Worker from before step 3 or 4. So a D1
+   whose live Worker is from before step 3 or 4 gets `0007` from a commit before step 6 only.
 2. **Load the archive the live pointer names into both D1s again**: the commands of step 2 under
    "Switching the name tables to D1", without `--baseline` and its file, `--dry-run` first and then
    without it. Both D1s already hold the archive's names and gids, so each run adds only the tags,
@@ -504,9 +505,12 @@ from `factor_totals`. Take these steps in this order:
    redirect to `/og/default.png`; it also reads its logo from the origin step 4 deployed. Check a
    production card, and write down the deployment URL the script prints last.
 6. **Afterwards, in a commit of its own**: `0008_drop_share_focus.sql` drops `records.focus`, and
-   `web/site/logo.svg` goes, with its line in `tool/web_deps.json`. Apply `0008` to a D1 only when
-   its live Worker is from step 3 or 4 or later, staging first, then deploy that commit to staging
-   and production.
+   the tree no longer has `web/site/logo.svg` or its line in `tool/web_deps.json`. Apply `0008` to a
+   D1 only when its live Worker is from step 3 or 4 or later, staging first, then deploy a commit
+   from step 6 or later to staging and production. A D1 has had step 6 once
+   `server/node_modules/.bin/wrangler d1 migrations list <database> --remote -c server/wrangler.jsonc`
+   no longer lists `0008` as unapplied; the origin has, once the `git_sha` of the deployed
+   version's `deploy.json` is a commit without `web/site/logo.svg`.
 
 Until step 6 a rollback of the Worker is bounded only as "Restoring a version" says. A Worker from
 before step 4 serves a record JSON without `factor_totals`, so once the OG function of step 5 is
