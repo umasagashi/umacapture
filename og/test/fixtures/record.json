@@ -32,10 +32,14 @@
   "strategy": { "name": "Pace" },
   "skills": [{ "gid": 200011, "name": "Sample Skill", "level": 3 }, { "gid": 200012, "name": "Another Skill" }],
   "factors": {
-    "self": [{ "gid": 1, "name": "Speed", "star": 3 }, { "gid": 2, "name": "Turf", "star": 1 }],
+    "self": [{ "gid": 1, "name": "Speed", "star": 3, "color": "blue" }, { "gid": 2, "name": "Turf", "star": 1, "color": "red" }],
     "parent1": [],
     "parent2": []
   },
+  "factor_totals": [
+    { "gid": 1, "name": "Speed", "star": 3, "color": "blue" },
+    { "gid": 2, "name": "Turf", "star": 1, "color": "red" }
+  ],
   "support_cards": [],
   "family": {
     "parent1": {
