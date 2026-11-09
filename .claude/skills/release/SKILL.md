@@ -398,10 +398,9 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 ### If the release also publishes a web bundle
 
 **Worker first.** A Windows build that sends something the production Worker does not accept is
-published only after that Worker is deployed. The first Windows version that sends a share's focus
-(the key `view`) needs `0005_share_focus.sql` applied and a focus-aware Worker (one that accepts
-`view` and answers `PATCH /api/shares/<id>`) deployed beforehand, and once it is out production is
-not rolled back to a Worker without that route. See
+published only after that Worker is deployed. Sharers do not choose how a shared record is shown:
+the app sends no share `view` and no `PATCH /api/shares/<id>`, and the Worker has no such route.
+Do not release a Windows build that sends either. See
 `docs/web-deploy.md` ("Ordering against a Windows release").
 
 Steps 8–11 publish the Windows build only. The web app is published by deploying
