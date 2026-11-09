@@ -207,39 +207,6 @@ bool _sendsAgain(ShareOutcome? outcome) => switch (outcome) {
   _ => false,
 };
 
-/// How a shared page is laid out ([ShareFocus]), chosen with the choices' own labels.
-class ShareFocusSelector extends StatelessWidget {
-  final ShareFocus focus;
-
-  /// Null disables the choice.
-  final ValueChanged<ShareFocus>? onChanged;
-
-  const ShareFocusSelector({super.key, required this.focus, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final onChanged = this.onChanged;
-    final selector = SegmentedButton<ShareFocus>(
-      segments: [
-        for (final f in ShareFocus.values)
-          ButtonSegment(value: f, label: Text("$tr_record_share.focus.${f.name}".tr())),
-      ],
-      selected: {focus},
-      showSelectedIcon: false,
-      onSelectionChanged: onChanged == null ? null : (selected) => onChanged(selected.single),
-    );
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      runSpacing: 8,
-      children: [
-        Text("$tr_record_share.focus.label".tr(), style: Theme.of(context).textTheme.bodyMedium),
-        selector,
-      ],
-    );
-  }
-}
-
 /// P1: confirms a share, then shows its URL or why it did not happen.
 class ShareRecordDialog extends ConsumerStatefulWidget {
   final String recordId;
@@ -257,7 +224,6 @@ class ShareRecordDialog extends ConsumerStatefulWidget {
 
 class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
   ShareOutcome? _outcome;
-  ShareFocus _focus = ShareFocus.auto;
 
   /// What the last login ended with, told where a failure is; a login that signed in also clears [_outcome].
   String? _loginText;
@@ -295,9 +261,7 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     final ShareOutcome outcome;
     try {
-      outcome =
-          (await ref.read(recordSharesProvider.notifier).shareAll([record], focus: _focus))[record.id] ??
-          const ShareSkipped();
+      outcome = (await ref.read(recordSharesProvider.notifier).shareAll([record]))[record.id] ?? const ShareSkipped();
     } finally {
       dialogs.setBarrierDismissible(token, barrierDismissible: true);
       if (mounted) {
@@ -381,11 +345,6 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _ShareDescription("$tr_share_record.dialog.description"),
-          // Only while a share can still be sent: a settled outcome leaves nothing for the choice to reach.
-          if (_sendsAgain(outcome)) ...[
-            const SizedBox(height: 12),
-            ShareFocusSelector(focus: _focus, onChanged: _sending ? null : (f) => setState(() => _focus = f)),
-          ],
           if (outcome != null) ...[
             const SizedBox(height: 12),
             NoteCard(
@@ -458,9 +417,6 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
   String? _loginText;
   bool _signedIn = false;
   bool _sending = false;
-
-  /// One focus for every record of the batch, retries included.
-  ShareFocus _focus = ShareFocus.auto;
   late final _selection = SelectionConfirmation(widget.selection);
   late final _login = LoginDriver(
     ref,
@@ -528,7 +484,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
     final Map<String, ShareOutcome> answered;
     try {
-      answered = await ref.read(recordSharesProvider.notifier).shareAll(records, focus: _focus);
+      answered = await ref.read(recordSharesProvider.notifier).shareAll(records);
     } finally {
       dialogs.setBarrierDismissible(token, barrierDismissible: true);
       if (mounted) {
@@ -639,8 +595,6 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
               ],
               const SizedBox(height: 12),
               const _ShareDescription("$tr_share_record.bulk.description"),
-              const SizedBox(height: 12),
-              ShareFocusSelector(focus: _focus, onChanged: _sending ? null : (f) => setState(() => _focus = f)),
               // Stated as body text and not only as the confirm's tooltip, as the other bulk confirmations state
               // their refusals: a tooltip needs a hover.
               if (withdrawn) ...[const SizedBox(height: 12), NoteCard(description: Text(selectionEndedMessage()))],
