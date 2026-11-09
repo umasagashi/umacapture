@@ -98,7 +98,9 @@ describe("published record", () => {
     assert.equal(html.includes("<b>"), false, "a raw table name reached the markup");
     assert.ok(html.includes("<h1>card &lt;b&gt;&amp;&quot;&#39;</h1>"), "escaped heading missing");
     assert.ok(html.includes("<title>card &lt;b&gt;&amp;&quot;&#39; rank 2 12345 | umacapture</title>"), "escaped title missing");
-    assert.ok(html.includes('<div class="rec-support">support 1<span class="rec-k">4凸 ・ Lv50</span></div>'), "support cards missing");
+    assert.ok(html.includes('<div class="rec-support">support 1<span class="rec-k">Lv50</span></div>'), "support cards missing");
+    // The recognizer misreads limit breaks, so the page leaves them out; public JSON still has them.
+    assert.equal(html.includes("凸"), false, "a limit break reached the page");
     assert.ok(html.includes("<dt>共有日</dt><dd>2026-09-29</dd>"), "share day row missing");
     assert.equal(html.includes("公開日"), false, "the share day is still labelled 公開日");
     assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");

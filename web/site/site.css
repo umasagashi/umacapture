@@ -49,6 +49,13 @@
   --on-primary: light-dark(#FFFFFF, #000000);
   --primary-container: light-dark(#90CAF9, #0D47A1);
   --on-primary-container: light-dark(#000000, #FFFFFF);
+  /* The factor colours of public JSON's `color`, as the band on a factor chip's left edge. The
+     light values are the OG card's (og/src/card.mjs COLOR.factor, which copies them: change both);
+     the dark ones are lighter tones of the same hues, so the band stands out from the dark tint. */
+  --factor-blue: light-dark(#1E88E5, #64B5F6);
+  --factor-red: light-dark(#E53935, #EF5350);
+  --factor-green: light-dark(#43A047, #66BB6A);
+  --factor-white: light-dark(#9E9E9E, #BDBDBD);
   /* One column for the header and the page under it, so their left edges line up. */
   --site-width: 48rem;
   --site-gutter: 1rem;
@@ -166,24 +173,14 @@ a { color: var(--primary); }
   background: var(--primary-container);
   color: var(--on-primary-container);
 }
-.rec-meta { display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; margin: .8rem 0 0; font-size: .9rem; }
-.rec-meta div { display: flex; gap: .4rem; }
-.rec-meta dt { color: var(--muted); }
-.rec-meta dd { margin: 0; font-variant-numeric: tabular-nums; }
-.rec-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5rem; margin-top: .9rem; }
-.rec-stats div { text-align: center; padding: .5rem .2rem; background: var(--card); border-radius: 14px; }
+.rec-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5rem; }
+.rec-stats div { text-align: center; padding: .5rem .2rem; background: var(--tint); border-radius: 14px; }
 .rec-stats strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
-.rec-lineage { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
-.rec-node { flex: 1; min-width: 9rem; padding: .4rem .7rem; background: var(--card); border-radius: 12px; line-height: 1.35; }
-.rec-node strong { display: block; font-size: 1.05rem; }
-.rec-node.rec-self { flex-basis: 100%; border: 2px solid var(--primary); }
-.rec-gp { display: block; color: var(--muted); font-size: .75rem; }
 .rec-jump { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .82rem; margin: 1rem 0; }
 .rec-jump a { text-decoration: none; padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); }
 .rec-card { background: var(--card); border-radius: 18px; padding: 1rem 1.1rem; margin-top: 1rem; }
 .rec-apts { display: grid; grid-template-columns: auto 1fr; gap: .35rem .8rem; font-size: .9rem; align-items: center; }
 .rec-apts > .rec-k { font-size: .9rem; }
-.rec-stats + .rec-apts { margin-top: .9rem; }
 .rec-cells { display: flex; flex-wrap: wrap; gap: .3rem; }
 .rec-apt { display: inline-flex; gap: .35rem; align-items: baseline; padding: .05rem .5rem; background: var(--tint); border-radius: 8px; }
 .rec-grade { font-weight: 700; }
@@ -193,9 +190,16 @@ a { color: var(--primary); }
 .rec-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0; padding: 0; list-style: none; }
 .rec-chips li { padding: .2rem .6rem; font-size: .88rem; background: var(--tint); border-radius: 999px; }
 .rec-lv, .rec-star { font-size: .72rem; color: var(--primary); font-weight: 700; }
+/* A factor chip's colour is a band on its left edge; the tint stays behind the text, so the text
+   contrast is the same for every colour. */
+.rec-chips li[class^="rec-c-"] { border-left: 6px solid var(--factor); padding-left: .5rem; }
+.rec-c-blue { --factor: var(--factor-blue); }
+.rec-c-red { --factor: var(--factor-red); }
+.rec-c-green { --factor: var(--factor-green); }
+.rec-c-white { --factor: var(--factor-white); }
 
-/* Whose factors: a radio button per tab, the checked one shows its panel. Without :has() the
-   trainee's panel stays shown. */
+/* The factors: each slot's or the totals, a radio button per tab, the checked one shows its panel.
+   Without :has() each slot's panel stays shown. */
 .rec-tabs { display: flex; flex-wrap: wrap; margin: 0 0 .8rem; padding: 0; border: 0; border-bottom: 1px solid var(--line); }
 .rec-tabs legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .rec-tabs input { position: absolute; opacity: 0; pointer-events: none; }
@@ -207,17 +211,17 @@ a { color: var(--primary); }
   border-bottom: 3px solid transparent;
   margin-bottom: -1px;
 }
-.rec-tabs label small { font-size: .72rem; margin-left: .3rem; }
 .rec-tabs input:checked + label { color: var(--primary); border-bottom-color: var(--primary); font-weight: 700; }
 .rec-tabs input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 2px; }
-.rec-panel { display: none; }
-.rec-p-self,
-.rec-card:has(#rec-f-p1:checked) .rec-p-p1,
-.rec-card:has(#rec-f-p2:checked) .rec-p-p2 { display: block; }
-.rec-card:has(#rec-f-p1:checked) .rec-p-self,
-.rec-card:has(#rec-f-p2:checked) .rec-p-self { display: none; }
-.rec-who { margin: 0 0 .6rem; font-size: .9rem; }
-.rec-who .rec-k { display: inline; }
+.rec-p-total,
+.rec-card:has(#rec-f-total:checked) .rec-p-each { display: none; }
+.rec-card:has(#rec-f-total:checked) .rec-p-total { display: block; }
+/* One block of factors: a slot (the trainee or a parent) or a run of one colour of the totals. */
+.rec-slot + .rec-slot { margin-top: 1rem; }
+.rec-slot h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .5rem; margin: 0 0 .4rem; font-size: .95rem; }
+.rec-slot h3 .rec-k { display: inline; }
+.rec-slot h3 .rec-tag { align-self: center; font-weight: 400; }
+.rec-gp { margin: -.3rem 0 .4rem; color: var(--muted); font-size: .75rem; }
 
 .rec-supports { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
 .rec-support { padding: .5rem .7rem; font-size: .86rem; line-height: 1.35; background: var(--tint); border-radius: 12px; }
@@ -233,8 +237,9 @@ a { color: var(--primary); }
 .rec-races td.rec-k { display: table-cell; white-space: nowrap; }
 .rec-pos { text-align: right; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rec-win { color: var(--primary); }
-.rec-prov { display: grid; grid-template-columns: auto 1fr; gap: .1rem 1rem; font-size: .8rem; color: var(--muted); margin: 1.4rem 0 0; }
-.rec-prov dd { margin: 0; }
+.rec-info { display: grid; grid-template-columns: auto 1fr; gap: .1rem 1rem; font-size: .88rem; margin: 0; }
+.rec-info dt { color: var(--muted); }
+.rec-info dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 /* /u/<id>: an account's shared records, one card each. It reuses the record page's badges. */
 .list h1 { font-size: 1.6rem; }

@@ -145,7 +145,7 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
       const record = await publicRecord(env, tables, route.id);
       if (record === null) return notFoundFor(request.method, url.pathname);
       if (route.name === "recordJson") return publicJson(record, CACHE);
-      return publicPage(renderPage(record, env, record.view.focus), CACHE);
+      return publicPage(renderPage(record, env), CACHE);
     },
     async scheduled(controller, env) {
       await runScheduled(env, now);
