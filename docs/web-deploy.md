@@ -160,7 +160,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
     | `PUBLIC_ORIGIN` | `https://umacapture.com` |
     | `OG_IMAGE_MODE` | `"vercel"`; `"static"` while `og.umacapture.com` does not answer (see the Vercel section) |
     | `OG_IMAGE_ORIGIN` | `https://og.umacapture.com` |
-    | `SHARING_ENABLED` | `"true"`; `"false"` stops new logins and shares (`503 sharing_paused`) while reads, changes of a share's focus, unshares and logouts go on |
+    | `SHARING_ENABLED` | `"true"`; `"false"` stops new logins and shares (`503 sharing_paused`) while reads, unshares and logouts go on |
     | `TURNSTILE_SITEKEY` | The widget's sitekey |
     | `TURNSTILE_TESTING_KEY` | `"false"`: answers issued for Turnstile's testing secrets are refused |
     | `TURNSTILE_HOSTNAME` | `umacapture.com` |
@@ -332,7 +332,9 @@ names the version it returns to (see "Rolling back and switching off").
 
 **Name tables.** A shared record stores ids, and the Worker looks their names up when the record is
 read, in the name tables of its own D1 (`share_table_name`, `share_table_gid` and
-`share_table_load`, from `server/migrations/0006_share_tables.sql`). Each target's D1 holds its
+`share_table_load`, from `server/migrations/0006_share_tables.sql`, and `share_table_tags`, from
+`0007_share_table_tags.sql`: each factor's tags in the module set, from which the public record
+takes the factor's colour). Each target's D1 holds its
 own. They are not part of a deployment: `publish_modules.sh` appends the names each module set adds
 to both D1s before it switches the pointer ("Publishing to data.umacapture.com"), and the Worker
 reads them from D1. A stored name is never changed or deleted, and a list only grows at its end:
@@ -343,7 +345,12 @@ With sharing on, stage 3 reads the target's tables back with
 `tool/cloudflare/load_share_tables.py --read-to build/share_tables.json`, for the page fonts. It
 writes nothing to D1. When that D1 records no load, or does not have the tables at all, the run
 stops there, before anything is deployed: a Worker there would answer every request that looks a
-name up with a `500` ("Switching the name tables to D1"). With sharing off D1 is not read.
+name up with a `500` ("Switching the name tables to D1"). It stops there too when the D1 holds fewer
+factor tags than factor names: the Worker holds a factor only together with its tags, so it would
+answer a `500` for every record with a factor whose tags are missing ("Rolling out factor colours
+and the end of share focus").
+The line `load_share_tables.py` prints just before the run's own message says which of the two it
+is. With sharing off D1 is not read.
 
 **Page fonts.** With either `--sharing` choice, the run then writes the font files
 `web/site/site.css` names into `build/web/site/fonts/` with `tool/cloudflare/build_page_fonts.py`:
@@ -387,15 +394,14 @@ again.
 ### Ordering against a Windows release
 
 A Windows build that sends something the Worker in production does not accept is released only
-after that Worker is deployed. The Windows version that lets a sharer choose a share's focus
-needs a **focus-aware Worker**: one that accepts the key `view` on a share and answers
-`PATCH /api/shares/<id>`, and reads `records.focus` from `0005_share_focus.sql`. An older Worker
-refuses such a share as `invalid_payload`. So that Windows version goes out after
-`0005_share_focus.sql` is applied and a focus-aware Worker is deployed (the web app goes out with
-that Worker), and once it is released, production is not rolled back to a Worker that is not
-focus-aware ("Restoring a version"). To tell the two apart, send `PATCH /api/shares/0000000000`
-with no session: a focus-aware Worker answers `401 session_required`, an older one `404`, because
-it has no such route.
+after that Worker is deployed.
+
+Sharers no longer choose how a shared record is shown. A web app tab opened before that still
+sends a share's `view` `{focus}` (`"training"` or `"inheritance"`) and `PATCH /api/shares/<id>` to
+change it. The Worker accepts such a share and keeps nothing of its `view`; it has no `PATCH` route,
+so the change gets the plain-text `404`, which the tab shows as a failure and which leaves its
+shares as they are. No Windows release has sent either. Do not release a Windows build that does:
+its shares would keep the Worker accepting `view` for good, and its changes would always fail.
 
 ### Applying a migration
 
@@ -466,6 +472,65 @@ of an account that shares something. Without the tables those three answer `500`
 that shares nothing too; with the tables but no load they answer its empty list. A record or account that does not exist still gets its `404`, so stage 8's
 check of `/r/0000000000` would not notice. After step 3, do not roll a target back to a version
 with the Worker from before it ("Restoring a version").
+
+### Rolling out factor colours and the end of share focus
+
+Once, for the release whose Worker gives each public factor a colour and `factor_totals`, takes no
+share focus, and has no `PATCH /api/shares/<id>`, together with the OG function that draws a card
+from `factor_totals`. Take these steps in this order:
+
+1. **Apply `0007_share_table_tags.sql`** to both D1s ("Applying a migration"). It only adds a table
+   the live Worker does not read, so the apply opens no broken window. Do it before anyone publishes
+   a module set from a checkout that loads tags: on a D1 without the table, that publish stops at
+   its name-tables stage, before the pointer changes ("Publishing to data.umacapture.com"). Apply it
+   from a checkout without `0008_drop_share_focus.sql` (step 6): the apply takes every migration the
+   database lacks, and `0008` breaks a Worker from before step 3 or 4.
+2. **Load the archive the live pointer names into both D1s again**: the commands of step 2 under
+   "Switching the name tables to D1", without `--baseline` and its file, `--dry-run` first and then
+   without it. Both D1s already hold the archive's names and gids, so each run adds only the tags,
+   one per entry of the archive's `factor_info.json`, and records a new load. The live Worker does
+   not read the tags; readers see no change. Then
+   `uv run tool/cloudflare/load_share_tables.py --target <target> --read-to build/share_tables.json`
+   exits 0 for both targets: it refuses a D1 with fewer factor tags than factor names, as stage 3 of
+   `deploy_web.sh` does.
+3. **Staging.** Deploy it ("Deploying") and check there: `/r/<id>.json` of a record shared on
+   staging gives every factor a `color` and carries `factor_totals`; `/r/<id>` answers `200`; a web
+   app tab opened before the deployment still shares. Then deploy the OG function as a preview
+   (`deploy_og.sh`, whose preview reads the staging origin) and check that a staging record's card
+   draws, rather than redirecting to `/og/default.png`.
+4. **Production web app and Worker** ("Checks before a production run", then "Deploying").
+5. **Production OG function**, after step 4 (`deploy_og.sh --target production`): it draws a card
+   only from a record JSON that carries `factor_totals`, and answers one without it with the
+   redirect to `/og/default.png`; it also reads its logo from the origin step 4 deployed. Check a
+   production card, and write down the deployment URL the script prints last.
+6. **Afterwards, in a commit of its own**: `0008_drop_share_focus.sql` drops `records.focus`, and
+   `web/site/logo.svg` goes, with its line in `tool/web_deps.json`. Apply `0008` to a D1 only when
+   its live Worker is from step 3 or 4 or later, staging first, then deploy that commit to staging
+   and production.
+
+Until step 6 a rollback of the Worker is bounded only as "Restoring a version" says. A Worker from
+before step 4 serves a record JSON without `factor_totals`, so once the OG function of step 5 is
+live, rolling the Worker back past step 4 makes every card the default image; roll the OG function
+back with it, or roll neither back.
+
+After step 6 two more limits hold:
+
+- **Worker.** Do not roll a target back to a version whose Worker reads `records.focus`: every
+  version deployed before step 3 (staging) or step 4 (production), the version production ran before
+  this release included. That Worker names a column D1 no longer has in every query that reads or
+  writes a shared record, so each of them fails. A version reads it
+  when `git grep -n focus <git_sha> -- server/src/store.mjs` prints anything for its `deploy.json`'s
+  `git_sha`. The way back is a new deployment.
+- **OG function.** Do not roll the OG function back on its own to a deployment from before step 5.
+  Such a function reads `/site/logo.svg`, which the origin no longer serves, so it answers every
+  card with the redirect to `/og/default.png`. An instance that fetched the logo before keeps
+  drawing until it is replaced, so a card checked right after the rollback can still look right.
+  `deploy_og.sh` records the commit of each deployment as its `git_sha` meta; a deployment reads
+  `/site/logo.svg` when `og/src/handler.mjs` at that commit sets `LOGO_PATH` to it. Cards draw again
+  once either holds: a deployment from step 5 or later is the production one again
+  (`og/node_modules/.bin/vercel promote <deployment url>`, or `deploy_og.sh --target production`),
+  or the origin serves `/site/logo.svg` again (a rollback to the version deployed in step 3 or 4,
+  which still serves it and reads no `records.focus`, or a new deployment that restores the file).
 
 ### After a deployment with sharing on — the Turnstile check
 
@@ -587,7 +652,7 @@ verified through the public URL.
   host; a staging run builds it with `--dart-define=UMACAPTURE_SHARING_ORIGIN=` set to the staging
   URL, so it logs in, shares and syncs through the staging Worker rather than `umacapture.com`.
 - **Stopping staging.** `env.staging.vars.SHARING_ENABLED: "false"` and a redeploy stop new
-  logins and shares while reads, changes of a share's focus, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
+  logins and shares while reads, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
   "false"` and a redeploy stop sync and staging's hourly run.
   `bash tool/cloudflare/deploy_web.sh --target staging --sharing off` takes the Worker off staging
   and keeps its assets: `/r/`, `/u/` and `/api/` get the static 404, the hourly run goes, and
@@ -653,12 +718,19 @@ bash tool/cloudflare/publish_modules.sh                           # no zip: re-p
   verified. Every list has to agree with the rows D1 already holds over the range both hold; only
   the entries D1 lacks are added, so an older archive adds nothing and writes nothing. The rows are
   read back and checked, and only then is the load recorded (`share_table_load`). A Worker that
-  reads D1 in the middle of a load counts, per key, only the entries both its names and, where the
-  key has them, its gids already hold; a sid past those makes it check D1 once for a newer load. Any refusal or
+  reads D1 in the middle of a load counts, per key, only the entries its names and, where the
+  key has them, its gids and its tags (factors only) already hold; a sid past those makes it check D1 once for a newer load. Any refusal or
   failure on either target stops the run before phase 2, so no client is pointed at modules whose
   names a Worker does not have; running the publish again completes the load. Both D1s need
-  `0006_share_tables.sql` ("Applying a migration"). `--dry-run` stops before this stage and writes
+  `0006_share_tables.sql` and `0007_share_table_tags.sql` ("Applying a migration"); a D1 without
+  the tags table stops the run here. `--dry-run` stops before this stage and writes
   nothing to D1. A share Worker picks the new names up from D1 by itself; no web deployment follows.
+- **Publish from a checkout that loads tags.** A `load_share_tables.py` older than
+  `0007_share_table_tags.sql` writes names and gids but no tags, and the run succeeds. The Worker
+  then holds none of the factors that publish added: a shared record carrying one of them answers
+  `500`, and a share of one is refused as `invalid_payload`. The next publish from a current
+  checkout (a re-publish with no zip will do) adds the missing tags, and the Worker picks them up by
+  itself.
 - **A name in D1 is final.** Once a load has written a name, no later archive can change it: an
   archive whose lists disagree with D1's rows is refused, and its publish stops before the pointer
   changes.
@@ -811,9 +883,10 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
 - Bound resources are not rolled back: D1 and the B2 bucket keep their current contents, and D1
   keeps every migration applied since the version (below).
 - Only the 100 most recently published versions can be rolled back to.
-- Once a Windows version that sends a share's focus is released, do not roll back to a Worker that
-  is not focus-aware (no `PATCH /api/shares/<id>`): it refuses those shares ("Ordering against a
-  Windows release").
+- After step 6 of "Rolling out factor colours and the end of share focus" (`records.focus` dropped,
+  `/site/logo.svg` no longer served), do not roll a target back to a version whose Worker reads
+  `records.focus`, and do not roll the OG function back on its own to a deployment that reads
+  `/site/logo.svg`. That section says how to tell them, and what brings the cards back.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
@@ -843,7 +916,7 @@ In this order of preference:
 | Means | Effect | Depends on |
 |---|---|---|
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, changing a share's focus, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
 | `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except D1: the name tables are not read. Use it once the version without the Worker is no longer among the last 100 |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |
 | On Vercel | Deny `/r/` with a Firewall rule | The Vercel dashboard. After `OG_IMAGE_MODE` is `"static"` |

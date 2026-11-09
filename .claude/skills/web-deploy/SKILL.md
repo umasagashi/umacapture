@@ -27,6 +27,7 @@ first time the script changes. **If a step is missing from the document, add it 
 | Take the Worker off staging | "Staging" (Stopping staging) |
 | New recognizer modules or news | "Publishing to data.umacapture.com". It also appends the names to both D1s; no web deployment follows ("Deploying", the paragraph on when a redeploy is needed) |
 | A target whose live Worker still bundles its name tables | "Switching the name tables to D1", before its next deployment |
+| The release that gives factors colours and ends share focus | "Rolling out factor colours and the end of share focus": its migrations, the D1 loads, both deployments and the OG function, in its order |
 | OG image function | "OGP image function (Vercel)" |
 | A first deployment to a new environment | "One-time preparation" before anything else |
 
@@ -95,7 +96,10 @@ to:
 - no migration applied since that version, if it has the Worker; a version without the Worker reads
   no schema, and returning to it is the first means of stopping sharing ("Stopping record sharing");
 - the version is still among those that can be rolled back to (the limit is in "Restoring a
-  version").
+  version");
+- after step 6 of "Rolling out factor colours and the end of share focus", its Worker reads no
+  `records.focus`; and the OG function is never rolled back on its own to a deployment that reads
+  `/site/logo.svg` (that section says how to tell, and what brings the cards back).
 
 When a condition fails, the way back is a new deployment, not a rollback. Always pass the version id.
 
@@ -118,6 +122,9 @@ When a condition fails, the way back is a new deployment, not a rollback. Always
   names to both D1s, so the staging database is needed even while staging runs without the Worker
   ("Staging", Stopping staging).
 - **A sharing-on run stops at stage 3 when the target's D1 holds no name tables.** Nothing is
-  deployed; the way forward is "Switching the name tables to D1", not a retry.
+  deployed; the way forward is "Switching the name tables to D1", not a retry. It stops there too
+  when the D1 holds fewer factor tags than factor names; the way forward is the load in step 2 of
+  "Rolling out factor colours and the end of share focus", or a publish from a current checkout
+  ("Publishing to data.umacapture.com", Publish from a checkout that loads tags).
 - **The first production deployment** has its own list under "Deploying"; read it whenever
   production has not yet run the current schema.

@@ -11,13 +11,13 @@ import { matchRoute, pagePathKind } from "./routes.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
-import { deleteShare, getMyShares, patchShare, postShares } from "./shares.mjs";
+import { deleteShare, getMyShares, postShares } from "./shares.mjs";
 import { answerSync, getBodies, getGeneration, getHeld, getImage, getSettings, putBodies, putImage, putSettings } from "./sync.mjs";
 import { getPart, getRoot, putPart, replaceRoot } from "./sync_list.mjs";
 import { TableSource, withTables } from "./tables.mjs";
 
-// A shared record's content never changes after sharing, but its sharer can change how it is
-// presented (view.focus) or unshare it; five minutes bounds how long either stays stale in caches.
+// A shared record's content never changes after sharing, but its sharer can unshare it; five minutes
+// bounds how long caches keep serving it after that.
 const CACHE = "public, max-age=300";
 // A list changes with every share and unshare: an unshared record stays listed for at most a minute.
 const LIST_CACHE = "public, max-age=60";
@@ -68,7 +68,7 @@ const publicPage = (html, cache) =>
 async function publicRecord(env, tables, id) {
   const stored = await readRecord(env.DB, id);
   if (stored === null) return null;
-  const meta = { id, sharedDay: stored.sharedDay, focus: stored.focus, origin: env.PUBLIC_ORIGIN };
+  const meta = { id, sharedDay: stored.sharedDay, origin: env.PUBLIC_ORIGIN };
   return withTables(tables, env.DB, (t) => buildPublicRecord(stored.form, meta, t));
 }
 
@@ -89,8 +89,6 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
       switch (route.name) {
         case "share":
           return answerApi(() => postShares(request, env, tables, newId, now));
-        case "shareView":
-          return answerApi(() => patchShare(request, env, route.id, now));
         case "unshare":
           return answerApi(() => deleteShare(request, env, route.id, now));
         case "myShares":

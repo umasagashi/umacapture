@@ -1,4 +1,4 @@
-// Sharing under an account (POST /api/shares, PATCH and DELETE /api/shares/<id>, GET /api/me/shares) and the
+// Sharing under an account (POST /api/shares, DELETE /api/shares/<id>, GET /api/me/shares) and the
 // sharing switch, driven over HTTP against a real (local) D1 with sessions claimed through the login.
 //
 // The concurrency cases run through the batch gate (see worker_harness.mjs): every racing request
@@ -38,14 +38,6 @@ async function results(worker, token, shares) {
   return res.body.results;
 }
 
-/** PATCH /api/shares/<id> with `body` as JSON. */
-const changeView = (worker, token, id, body) =>
-  worker.fetch(`/api/shares/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-
 const statuses = (list) => list.map((r) => (r.error === undefined ? r.status : `${r.status} ${r.error}`));
 
 /** The charge of a stored record; every share of the fixture's form carries the same one. */
@@ -65,9 +57,9 @@ describe("share checks", () => {
   });
   after(() => worker.dispose());
 
-  /** Shares `record` (with `view`, if given) and asserts that share alone was refused, storing and charging nothing. */
-  async function refused(record, error, field, view) {
-    const [result] = await results(worker, token, [view === undefined ? share(record) : { ...share(record), view }]);
+  /** Shares `record` and asserts that share alone was refused, storing and charging nothing. */
+  async function refused(record, error, field) {
+    const [result] = await results(worker, token, [share(record)]);
     assert.deepEqual(result, field === undefined ? { status: "refused", error } : { status: "refused", error, field });
     assert.equal(await worker.count("records"), 0);
     assert.deepEqual(await worker.account(owner), { share_count: 0, quota_day: 0, quota_bytes: 0 });
@@ -82,27 +74,6 @@ describe("share checks", () => {
     const pastEnd = [{ id: 3 }]; // the fixture's skill table holds sids 0 to 2
     await refused(postedForm({ skills: pastEnd }), "invalid_payload", "record.skills[0].id");
     await refused(postedForm({ skills: pastEnd, module_version: "2027-01-01T00:00:00+0900" }), "server_tables_older", "record.skills[0].id");
-  });
-
-  test("a focus other than training or inheritance is refused, when sharing and when changing a share", async () => {
-    await refused(postedForm(), "invalid_payload", "view.focus", { focus: "bogus" });
-
-    // A share of its own Worker: the one above stays clean for the other refusals.
-    const other = await startWorker();
-    try {
-      const token = await other.signIn();
-      const [created] = await results(other, token, [share()]);
-      assert.equal(created.status, "created");
-      for (const view of [{ focus: "bogus" }, {}]) {
-        const res = await answer(changeView(other, token, created.id, { view }));
-        assert.equal(res.status, 400, JSON.stringify(view));
-        assert.equal(res.body.error, "invalid_payload");
-      }
-      const [mine] = (await answer(other.myShares(token))).body;
-      assert.deepEqual(mine.view, { focus: null });
-    } finally {
-      await other.dispose();
-    }
   });
 
   test("a friend's record is refused", async () => {
@@ -206,7 +177,6 @@ describe("share, list and unshare", () => {
         url: `${ORIGIN}/r/${mine.id}`,
         shared_on: day,
         client_key_hash: secretHash(kept.client_key).toString("hex"),
-        view: { focus: null },
         summary: {
           record_type: "standard",
           trainee: { card: { gid: 1004, name: "card <b>&\"'" }, character: { name: "chara 3" }, rank: { name: "rank 2" } },
@@ -315,53 +285,6 @@ describe("several shares in one request", () => {
 });
 
 describe("limits", () => {
-  test("a change of a share's focus counts against the account's daily quota, and is refused once it is used up", async () => {
-    const worker = await startWorker({ testEntry: true });
-    try {
-      const token = await worker.signIn();
-      const owner = await worker.accountOf(token);
-      const [created] = await results(worker, token, [share()]);
-      const quota = (await worker.account(owner)).quota_bytes;
-
-      assert.equal((await changeView(worker, token, created.id, { view: { focus: "inheritance" } })).status, 204);
-      assert.equal((await worker.account(owner)).quota_bytes, quota + limits.ROW_CHARGE);
-
-      await worker.db
-        .prepare("UPDATE accounts SET quota_bytes = ? WHERE id = ?")
-        .bind(limits.ACCOUNT_DAILY_LIMIT - limits.ROW_CHARGE + 1, owner)
-        .run();
-      const full = await answer(changeView(worker, token, created.id, { view: { focus: "training" } }));
-      assert.deepEqual([full.status, full.body], [429, { error: "daily_limit", scope: "account" }]);
-      const [mine] = (await answer(worker.myShares(token))).body;
-      assert.deepEqual(mine.view, { focus: "inheritance" });
-    } finally {
-      await worker.dispose();
-    }
-  });
-
-  test("a change of a share's focus counts against the server's daily limit, and is refused once it is used up", async () => {
-    const worker = await startWorker({ testEntry: true });
-    try {
-      const token = await worker.signIn();
-      const [created] = await results(worker, token, [share()]);
-      const [{ share_bytes: shared }] = await worker.daily();
-
-      assert.equal((await changeView(worker, token, created.id, { view: { focus: "inheritance" } })).status, 204);
-      assert.deepEqual((await worker.daily()).map((d) => d.share_bytes), [shared + limits.ROW_CHARGE]);
-
-      await worker.db
-        .prepare("UPDATE daily SET share_bytes = ? WHERE day = ?")
-        .bind(limits.DAILY_LIMIT - limits.ROW_CHARGE + 1, await today(worker))
-        .run();
-      const full = await answer(changeView(worker, token, created.id, { view: { focus: "training" } }));
-      assert.deepEqual([full.status, full.body], [429, { error: "daily_limit", scope: "service" }]);
-      const [mine] = (await answer(worker.myShares(token))).body;
-      assert.deepEqual(mine.view, { focus: "inheritance" });
-    } finally {
-      await worker.dispose();
-    }
-  });
-
   test("the storage budget refuses with storage_full, charging nothing", async () => {
     const worker = await startWorker();
     try {
@@ -522,7 +445,7 @@ describe("concurrent writes", () => {
 });
 
 describe("sharing switch", () => {
-  test('SHARING_ENABLED "false" refuses the login begin and shares, and lets reading, changing the focus of a share, unsharing and logging out through', async () => {
+  test('SHARING_ENABLED "false" refuses the login begin and shares, and lets reading, unsharing and logging out through', async () => {
     const worker = await startWorker({ vars: { SHARING_ENABLED: "false" } });
     try {
       // A session and a record from before the switch, stored directly: this Worker cannot make them.
@@ -548,7 +471,6 @@ describe("sharing switch", () => {
 
       assert.equal((await answer(worker.fetch("/r/0123456789.json"))).status, 200);
       assert.equal((await answer(worker.myShares(token))).status, 200);
-      assert.equal((await changeView(worker, token, "0123456789", { view: { focus: "inheritance" } })).status, 204);
       assert.equal((await answer(worker.unshare(token, "0123456789"))).status, 204);
       assert.equal((await answer(worker.logout(token))).status, 204);
     } finally {
