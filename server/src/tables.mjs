@@ -7,12 +7,14 @@
 //   {
 //     "version": "<recognizer_version of the latest load, null while D1 holds none>",
 //     "names": { "<labels.json key>": ["<name of sid 0>", "<name of sid 1>", ...], ... },
-//     "gids":  { "<labels.json key>": [<gid of sid 0>, <gid of sid 1>, ...], ... }
+//     "gids":  { "<labels.json key>": [<gid of sid 0>, <gid of sid 1>, ...], ... },
+//     "tags":  { "<labels.json key>": [[<tag of sid 0>, ...], [<tag of sid 1>, ...], ...], ... }
 //   }
 //
 // `names` holds every labels.json key except campaign_field.name. `gids` holds only the keys an info
 // table gives a gid column to (character.card, skill.name, factor.name, race_title.name); a key
-// absent from `gids` has no gid, and the public JSON then carries the name alone. Both lists are
+// absent from `gids` has no gid, and the public JSON then carries the name alone. `tags` holds the
+// info table's tags of the keys in TAG_KEYS (migrations/0007_share_table_tags.sql). Every list is
 // indexed by sid, and a newer module set only ever appends to them.
 
 /** The labels.json keys the public form reads. */
@@ -36,6 +38,14 @@ export const Keys = Object.freeze({
   supportCard: "support_card.name",
 });
 
+/**
+ * The keys whose entries are held only with their tags. Tags reached D1 after the names and gids
+ * (0007 came after 0006), so a key's tags cannot be told apart from absent by whether its rows
+ * exist: D1 holding no tags for factor.name means the tags are not loaded yet, and its sids are not
+ * held until they are, which makes a Worker that met them read D1 again.
+ */
+export const TAG_KEYS = Object.freeze([Keys.factor]);
+
 /** A name table whose index is not the stored value itself. */
 export class TableLookupError extends Error {}
 
@@ -44,19 +54,24 @@ export class Tables {
     this.version = raw.version;
     this.names = raw.names;
     this.gids = raw.gids;
+    this.tagLists = raw.tags;
   }
 
   /**
    * How many entries table `key` holds: valid sids are 0 to size − 1. An entry is held only once
-   * every column the key has is: its name, and its gid when the key has a gid column. A load writes
-   * the names before the gids, so tables read part way through it can hold a name whose gid is not
-   * there yet; that sid is not held until its gid is.
+   * every column the key has is: its name, its gid when the key has a gid column, and its tags when
+   * the key is one of TAG_KEYS. A load writes the names before the gids and the gids before the
+   * tags, so tables read part way through it can hold a name whose gid or tags are not there yet;
+   * that sid is not held until they are.
    */
   size(key) {
     const list = this.names[key];
     if (!list) throw new TableLookupError(`${key} is not in the tables`);
+    let size = list.length;
     const gids = this.gids[key];
-    return gids ? Math.min(list.length, gids.length) : list.length;
+    if (gids) size = Math.min(size, gids.length);
+    if (TAG_KEYS.includes(key)) size = Math.min(size, this.tagLists[key]?.length ?? 0);
+    return size;
   }
 
   /** The name stored at `index` of table `key`. Throws for an index the table does not hold. */
@@ -72,6 +87,13 @@ export class Tables {
     const name = this.name(key, sid);
     const gids = this.gids[key];
     return gids ? { gid: gids[sid], name } : { name };
+  }
+
+  /** The tags of `sid` in table `key`, one of TAG_KEYS. Throws for a sid the table does not hold. */
+  tags(key, sid) {
+    if (!TAG_KEYS.includes(key)) throw new Error(`${key} carries no tags`);
+    this.name(key, sid);
+    return this.tagLists[key][sid];
   }
 }
 
@@ -102,16 +124,22 @@ function listsOf(rows, field) {
  * The tables D1 holds now. The generation is read before the rows: a load commits its rows before
  * its generation, so rows read after a generation are never fewer than that generation's. A
  * snapshot can hold more rows than its generation says, never fewer; rows of a load still being
- * written can hold a name without its gid, which `Tables.size` does not count as held.
+ * written can hold a name without its gid or tags, which `Tables.size` does not count as held.
  */
 async function load(db) {
   const head = await latestLoad(db);
   const names = await db.prepare("SELECT key, pos, name FROM share_table_name ORDER BY key, pos").all();
   const gids = await db.prepare("SELECT key, pos, gid FROM share_table_gid ORDER BY key, pos").all();
+  const tags = await db.prepare("SELECT key, pos, tags FROM share_table_tags ORDER BY key, pos").all();
   const tables = new Tables({
     version: head?.recognizer_version ?? null,
     names: listsOf(names.results, "name"),
     gids: listsOf(gids.results, "gid"),
+    // Each row holds its tags as a JSON array.
+    tags: listsOf(
+      tags.results.map((row) => ({ ...row, tags: JSON.parse(row.tags) })),
+      "tags",
+    ),
   });
   return new Snapshot(head?.generation ?? 0, tables);
 }

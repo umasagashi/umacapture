@@ -534,14 +534,20 @@ export function migrationStatements(dir = join(ROOT, "migrations")) {
 }
 
 /**
- * Appends to D1's name tables what `raw` (`{version, names, gids}`, the shape tables.mjs reads back)
- * holds past their end, then records the load, as the publishing step does: rows first, the load row
+ * Appends to D1's name tables what `raw` (`{version, names, gids, tags}`, the shape tables.mjs reads
+ * back; `tags` may be absent, as from a module set loaded before 0007) holds past their end, then records the load, as the publishing step does: rows first, the load row
  * last, one generation past the greatest. Returns the number of rows added; a load adding none
  * writes nothing.
  */
 export async function appendTables(db, raw, archiveSha256 = "0".repeat(64)) {
   const rows = [];
-  for (const [table, field, lists] of [["share_table_name", "name", raw.names], ["share_table_gid", "gid", raw.gids]]) {
+  // Tags are written as load_share_tables.py writes them: a JSON array with no spaces.
+  const tags = Object.fromEntries(Object.entries(raw.tags ?? {}).map(([key, list]) => [key, list.map((t) => JSON.stringify(t))]));
+  for (const [table, field, lists] of [
+    ["share_table_name", "name", raw.names],
+    ["share_table_gid", "gid", raw.gids],
+    ["share_table_tags", "tags", tags],
+  ]) {
     for (const [key, list] of Object.entries(lists)) {
       const { held } = await db.prepare(`SELECT COUNT(*) AS held FROM ${table} WHERE key = ?`).bind(key).first();
       for (let pos = held; pos < list.length; pos++) {

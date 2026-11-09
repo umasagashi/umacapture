@@ -3,7 +3,8 @@
 A library of tool/cloudflare/load_share_tables.py, which appends these tables to each deploy target's
 D1 when tool/cloudflare/publish_modules.sh publishes a module set; the Worker reads them from there.
 The tables are read out of the archive's modules/labels.json and modules/*_info.json, in the shape
-{version, names, gids} that server/src/tables.mjs reads from D1.
+{version, names, gids, tags} that server/src/tables.mjs reads from D1. tags holds, per key of
+TAG_SOURCES, the info table's tags of each sid as the module states them (a list of strings).
 
 A shared record stores sids, so the tables may only ever grow at the end;
 append_only_violations states what a set of tables may not do to another.
@@ -24,6 +25,12 @@ GID_SOURCES = {
     "factor.name": "factor_info.json",
     "race_title.name": "race_title_info.json",
 }
+# labels.json key -> the info table that carries its tags column (a list of strings per sid).
+TAG_SOURCES = {
+    "factor.name": "factor_info.json",
+}
+# The per-sid lists of a set of tables, each one append-only.
+SECTIONS = ("names", "gids", "tags")
 
 
 class BuildError(Exception):
@@ -37,12 +44,18 @@ def read_json(archive: zipfile.ZipFile, name: str):
         raise BuildError(f"the archive has no modules/{name}") from None
 
 
-def gid_column(info: list, key: str, count: int) -> list[int]:
-    """The gid of every sid, in sid order. The info table has to hold sids 0..count-1 exactly once."""
-    by_sid = {entry["sid"]: entry["gid"] for entry in info}
+def info_column(info: list, field: str, key: str, count: int) -> list:
+    """`field` of every sid, in sid order. The info table has to hold sids 0..count-1 exactly once."""
+    by_sid = {entry["sid"]: entry[field] for entry in info}
     if len(info) != count or sorted(by_sid) != list(range(count)):
         raise BuildError(f"the info table for {key} does not hold sids 0..{count - 1} exactly once")
     return [by_sid[sid] for sid in range(count)]
+
+
+def tag_list(value, key: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(tag, str) for tag in value):
+        raise BuildError(f"the info table for {key} has tags that are not a list of strings")
+    return value
 
 
 def build_tables(archive_bytes: bytes) -> dict:
@@ -50,13 +63,18 @@ def build_tables(archive_bytes: bytes) -> dict:
         version = read_json(archive, "version_info.json")["recognizer_version"]
         labels = read_json(archive, "labels.json")
         names = {key: value for key, value in labels.items() if key not in EXCLUDED_KEYS}
-        missing = [key for key in GID_SOURCES if key not in names]
+        missing = [key for key in {**GID_SOURCES, **TAG_SOURCES} if key not in names]
         if missing:
             raise BuildError(f"labels.json has no {', '.join(missing)}")
         gids = {
-            key: gid_column(read_json(archive, source), key, len(names[key])) for key, source in GID_SOURCES.items()
+            key: info_column(read_json(archive, source), "gid", key, len(names[key]))
+            for key, source in GID_SOURCES.items()
         }
-    return {"version": version, "names": names, "gids": gids}
+        tags = {
+            key: [tag_list(v, key) for v in info_column(read_json(archive, source), "tags", key, len(names[key]))]
+            for key, source in TAG_SOURCES.items()
+        }
+    return {"version": version, "names": names, "gids": gids, "tags": tags}
 
 
 def append_only_violations(previous: dict, current: dict, *, allow_shorter: bool = False) -> list[str]:
@@ -68,9 +86,9 @@ def append_only_violations(previous: dict, current: dict, *, allow_shorter: bool
     D1's. With allow_shorter, `current` may stop early or lack a key: the
     caller keeps what `previous` holds beyond it (load_share_tables.py, where D1 keeps its rows)."""
     violations = []
-    for section in ("names", "gids"):
+    for section in SECTIONS:
         for key, old in previous.get(section, {}).items():
-            new = current[section].get(key)
+            new = current.get(section, {}).get(key)
             if new is None:
                 if not allow_shorter:
                     violations.append(f"{section}[{key}] is gone")

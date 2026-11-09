@@ -5,7 +5,7 @@
     "character.character": ["chara 0", "chara 1", "chara 2", "chara 3"],
     "character.card": ["card 0", "card 1", "card 2", "card <b>&\"'"],
     "character_rank.name": ["rank 0", "rank 1", "rank 2"],
-    "factor.name": ["factor 0", "factor 1", "factor 2", "factor 3"],
+    "factor.name": ["factor 0", "factor 1", "factor 2", "factor 3", "factor 4", "factor 5"],
     "factor_rank.name": ["star 1", "star 2", "star 3"],
     "race_place.place": ["place 0", "place 1"],
     "race_place.ground": ["turf", "dirt"],
@@ -24,7 +24,17 @@
   "gids": {
     "character.card": [1001, 1002, 1003, 1004],
     "skill.name": [2001, 2002, 2003],
-    "factor.name": [3001, 3002, 3003, 3004],
+    "factor.name": [3001, 3002, 3003, 3004, 3005, 3006],
     "race_title.name": [4001, 4002, 4003]
+  },
+  "tags": {
+    "factor.name": [
+      ["factor_status"],
+      ["factor_aptitude"],
+      ["factor_unique_skill"],
+      ["factor_normal_skill"],
+      ["factor_status_gene"],
+      ["factor_scenario", "other"]
+    ]
   }
 }
