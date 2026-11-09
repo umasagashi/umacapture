@@ -206,8 +206,7 @@ final class Shared extends ShareOutcome {
   const Shared(this.entry);
 }
 
-/// The record is already shared; it is unshared and shared again to change what it holds. Its focus is changed
-/// in place ([RecordShares.changeFocus]).
+/// The record is already shared; it is unshared and shared again to change what it holds.
 final class AlreadyShared extends ShareOutcome {
   final RecordShare entry;
 
@@ -248,39 +247,9 @@ final class ShareUnreachable extends ShareOutcome {
 
 enum UnshareOutcome { unshared, forbidden, loginRequired, unreachable, failed }
 
-/// How a share's public page is laid out: [auto] leaves it to the server, which decides from the record's
-/// kind; the others name the focus the sharer chose. Held by the server only, never in a [RecordShare].
-enum ShareFocus {
-  auto(null),
-  training("training"),
-  inheritance("inheritance");
-
-  /// The `view.focus` value on the wire; null for [auto].
-  final String? wire;
-
-  const ShareFocus(this.wire);
-
-  /// The focus a stored `view` names. A missing or unknown `view` (an older server) reads as [auto].
-  static ShareFocus fromView(Object? view) => switch (view) {
-    {"focus": final String focus} => values.firstWhere((f) => f.wire == focus, orElse: () => auto),
-    _ => auto,
-  };
-}
-
-/// What changing a share's focus answered. [notFound]: the share is gone. [dailyLimit]: a change is counted against
-/// both the account's daily limit and the service's, by the fixed charge of one stored row, and one of them is used up.
-enum FocusChangeOutcome { changed, notFound, forbidden, dailyLimit, loginRequired, unreachable, failed }
-
 /// One share of the account, as `GET /api/me/shares` lists it. [cardName] is the trainee's card as the server's name
 /// tables label it (its own form, not the app's), or null when the listing names none.
-typedef AccountShare = ({
-  String id,
-  String url,
-  String sharedOn,
-  String clientKeyHash,
-  String? cardName,
-  ShareFocus focus,
-});
+typedef AccountShare = ({String id, String url, String sharedOn, String clientKeyHash, String? cardName});
 
 /// What listing the account's shares answered.
 sealed class ShareListing {
@@ -380,11 +349,8 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   RecordShare? entryOf(String recordId) => state.values.where((e) => e.recordId == recordId).firstOrNull;
 
   /// Shares [records] under the session, [maxSharesPerRequest] to a request, and answers each record's outcome
-  /// by its id. Each share's note is written from its own result only. Every share sent carries [focus].
-  Future<Map<String, ShareOutcome>> shareAll(
-    List<CharaDetailRecord> records, {
-    ShareFocus focus = ShareFocus.auto,
-  }) async {
+  /// by its id. Each share's note is written from its own result only.
+  Future<Map<String, ShareOutcome>> shareAll(List<CharaDetailRecord> records) async {
     final session = ref.read(recordShareSessionProvider);
     if (session == null) {
       return {for (final r in records) r.id: const LoginRequired()};
@@ -397,7 +363,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     final outcomes = {...settled};
     for (var start = 0; start < toSend.length; start += maxSharesPerRequest) {
       final chunk = toSend.sublist(start, min(start + maxSharesPerRequest, toSend.length));
-      final answered = await _shareChunk(chunk, session, moduleVersion, focus);
+      final answered = await _shareChunk(chunk, session, moduleVersion);
       outcomes.addAll(answered);
       final stop = answered.values.any(
         (o) => o is LoginRequired || o is ShareUnreachable || o is ShareRefused && o.reason == ShareRefusal.busy,
@@ -481,7 +447,6 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     List<CharaDetailRecord> chunk,
     ShareSession session,
     String moduleVersion,
-    ShareFocus focus,
   ) async {
     Map<String, ShareOutcome> everyOne(ShareOutcome o) => {for (final r in chunk) r.id: o};
     // A share begun under one account sends nothing once the device holds another: the server would publish the
@@ -506,11 +471,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     }
     final shares = [
       for (final (i, note) in pending.indexed)
-        {
-          "client_key": note.clientKey,
-          "record": postedForm(chunk[i], moduleVersion: moduleVersion),
-          if (focus.wire case final wire?) "view": {"focus": wire},
-        },
+        {"client_key": note.clientKey, "record": postedForm(chunk[i], moduleVersion: moduleVersion)},
     ];
     final ShareAnswer answer;
     try {
@@ -579,43 +540,6 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     };
   }
 
-  /// Changes the focus of the account's share [id]. The note keeps no focus, so only a gone share touches it:
-  /// the API's own 404 drops the note, as unsharing would.
-  Future<FocusChangeOutcome> changeFocus(String id, ShareFocus focus) async {
-    final ShareAnswer answer;
-    try {
-      answer = await _session.send(
-        "PATCH",
-        "/api/shares/$id",
-        data: {
-          "view": {"focus": focus.wire},
-        },
-      );
-    } on DioException {
-      return FocusChangeOutcome.unreachable;
-    } on StateError {
-      return FocusChangeOutcome.loginRequired;
-    }
-    if (answer.status == 204) {
-      return FocusChangeOutcome.changed;
-    }
-    if (_apiSaysNotFound(answer)) {
-      await _drop([
-        for (final e in state.entries)
-          if (e.value.id == id) e.key,
-      ]);
-      return FocusChangeOutcome.notFound;
-    }
-    if (answer.status == 429 && answer.body?["error"] == "daily_limit") {
-      return FocusChangeOutcome.dailyLimit;
-    }
-    return switch (answer.status) {
-      401 => FocusChangeOutcome.loginRequired,
-      403 => FocusChangeOutcome.forbidden,
-      _ => FocusChangeOutcome.failed,
-    };
-  }
-
   /// Lists the account's shares and matches the notes against them by `client_key_hash`: a pending note the list
   /// holds becomes shared, and a note of this account the list does not hold is dropped.
   Future<ShareListing> refreshFromServer() async {
@@ -681,14 +605,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         {"trainee": {"card": {"name": final String name}}} when name.isNotEmpty => name,
         _ => null,
       };
-      shares.add((
-        id: id,
-        url: url,
-        sharedOn: sharedOn,
-        clientKeyHash: hash,
-        cardName: cardName,
-        focus: ShareFocus.fromView(item["view"]),
-      ));
+      shares.add((id: id, url: url, sharedOn: sharedOn, clientKeyHash: hash, cardName: cardName));
     }
     return shares;
   }

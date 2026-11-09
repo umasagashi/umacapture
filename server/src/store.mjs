@@ -36,10 +36,10 @@ const gunzipJson = (payload) =>
 
 /** The posted form and share day of record `id`, or null when no such row exists. */
 export async function readRecord(db, id) {
-  const row = await db.prepare("SELECT schema, payload, shared_day, focus FROM records WHERE id = ?").bind(id).first();
+  const row = await db.prepare("SELECT schema, payload, shared_day FROM records WHERE id = ?").bind(id).first();
   if (row === null) return null;
   if (row.schema !== 1) throw new Error(`record ${id} has posted-form schema ${row.schema}`);
-  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day, focus: row.focus };
+  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day };
 }
 
 /**
@@ -107,8 +107,7 @@ const ACCOUNT_SHARED_TODAY = "(SELECT CASE WHEN quota_day = ?3 THEN quota_bytes 
 /**
  * Shares one record for account `owner` (one batch) and judges the outcome.
  *
- * `p`: `{id, owner, clientKey, payload, focus, charge, day, budget, dailyLimit, accountCap, accountDailyLimit}`
- * (`focus` as setShareFocus takes it).
+ * `p`: `{id, owner, clientKey, payload, charge, day, budget, dailyLimit, accountCap, accountDailyLimit}`.
  * Returns `{status: "created"}`, `{status: "existing", id}` (the same client key committed first),
  * `{status: "refused", reason: "gone" | "deleting" | "storage" | "daily" | "account" | "changed"}` or
  * `{status: "idCollision"}`.
@@ -121,8 +120,8 @@ export async function shareRecord(db, p) {
     // condition fails, so a refused share can never find that row and commit statements 2 to 4.
     db
       .prepare(
-        `INSERT INTO records (id, owner_id, client_key, schema, payload, charge, shared_day, focus)
-         SELECT ?2, ?1, ?4, 1, ?5, ?6, ?3, ?11
+        `INSERT INTO records (id, owner_id, client_key, schema, payload, charge, shared_day)
+         SELECT ?2, ?1, ?4, 1, ?5, ?6, ?3
          WHERE EXISTS (SELECT 1 FROM records WHERE id = ?2)
             OR (EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)
                 AND (SELECT bytes FROM totals WHERE id = 1) + ?6 <= ?7
@@ -130,7 +129,7 @@ export async function shareRecord(db, p) {
                 AND (SELECT share_count FROM accounts WHERE id = ?1) < ?9
                 AND ${ACCOUNT_SHARED_TODAY} + ?6 <= ?10)`,
       )
-      .bind(p.owner, p.id, p.day, p.clientKey, p.payload, p.charge, p.budget, p.dailyLimit, p.accountCap, p.accountDailyLimit, p.focus),
+      .bind(p.owner, p.id, p.day, p.clientKey, p.payload, p.charge, p.budget, p.dailyLimit, p.accountCap, p.accountDailyLimit),
     db
       .prepare(
         `UPDATE accounts SET share_count = share_count + 1,
@@ -440,66 +439,6 @@ export async function unshareRecord(db, id, owner) {
 }
 
 /**
- * Sets the focus (how its pages present it: "training", "inheritance", or null for the one its type
- * gives) of record `id` if account `owner` holds it, while the account is not being deleted (one
- * batch). A change that writes the row is charged `charge` to the account's day and to the server's
- * day, the two daily limits its shares count against, and is refused when either has no room left;
- * setting the focus the row already holds writes nothing and charges nothing.
- *
- * `p`: `{id, owner, focus, day, charge, dailyLimit, accountDailyLimit}`. Returns "changed", "unchanged",
- * "deleting" (the account is being deleted, or its deletion completed), "forbidden" (another account
- * holds it), "notFound", "daily" (the server's day is used up) or "account" (the account's is). Throws Unavailable.
- */
-export async function setShareFocus(db, p) {
-  // ?1 the account, ?2 the record, ?3 the day: the binding ACCOUNT_SHARED_TODAY reads.
-  const writable = "EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)";
-  const results = await query(() =>
-    db.batch([
-      db
-        .prepare(
-          `UPDATE records SET focus = ?4
-           WHERE id = ?2 AND owner_id = ?1 AND focus IS NOT ?4 AND ${writable}
-             AND COALESCE((SELECT share_bytes FROM daily WHERE day = ?3), 0) + ?5 <= ?7
-             AND ${ACCOUNT_SHARED_TODAY} + ?5 <= ?6`,
-        )
-        .bind(p.owner, p.id, p.day, p.focus, p.charge, p.accountDailyLimit, p.dailyLimit),
-      // The two charges run only when the statement before each wrote its row (the first, the record).
-      // The server's day counts the change's bytes and not a share: share_count stays the shares made.
-      db
-        .prepare(
-          `INSERT INTO daily (day, share_bytes, share_count) SELECT ?1, ?2, 0 WHERE changes() = 1
-           ON CONFLICT (day) DO UPDATE SET share_bytes = share_bytes + excluded.share_bytes`,
-        )
-        .bind(p.day, p.charge),
-      db
-        .prepare(
-          `UPDATE accounts SET quota_bytes = CASE WHEN quota_day = ?3 THEN quota_bytes + ?4 ELSE ?4 END, quota_day = ?3
-           WHERE id = ?1 AND changes() = 1`,
-        )
-        .bind(p.owner, null, p.day, p.charge),
-    ]),
-  );
-  if (results[0].meta.changes === 1) return "changed";
-  const row = await query(() =>
-    db
-      .prepare(
-        `SELECT (SELECT owner_id FROM records WHERE id = ?2) AS owner_id,
-                (SELECT focus FROM records WHERE id = ?2) AS focus,
-                COALESCE((SELECT share_bytes FROM daily WHERE day = ?3), 0) AS shared,
-                ${writable} AS writable`,
-      )
-      .bind(p.owner, p.id, p.day)
-      .first(),
-  );
-  if (row.writable === 0) return "deleting";
-  if (row.owner_id === null) return "notFound";
-  if (row.owner_id !== p.owner) return "forbidden";
-  // A focus another request set in between counts as this one's: either way the row holds it now.
-  if (row.focus === p.focus) return "unchanged";
-  return row.shared + p.charge > p.dailyLimit ? "daily" : "account";
-}
-
-/**
  * Begins deleting account `accountId` from its full session `tokenHash` (one batch): marks the
  * account as being deleted since `now`, removes every other session of it, and turns this one into a
  * deletion-only session (scope "delete") expiring at `expiresAt`. Returns "begun", "deleting" (the
@@ -607,20 +546,20 @@ export async function finishAccountDeletion(db, accountId) {
 }
 
 /**
- * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, focus, form}`
+ * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, form}`
  * each. ACCOUNT_SHARE_CAP bounds how many there are. Throws Unavailable.
  */
 export async function listOwnShares(db, owner) {
   const { results } = await query(() =>
     db
-      .prepare("SELECT id, client_key, schema, payload, shared_day, focus FROM records WHERE owner_id = ?1 ORDER BY shared_day DESC, id")
+      .prepare("SELECT id, client_key, schema, payload, shared_day FROM records WHERE owner_id = ?1 ORDER BY shared_day DESC, id")
       .bind(owner)
       .all(),
   );
   return Promise.all(
     results.map(async (row) => {
       if (row.schema !== 1) throw new Error(`record ${row.id} has posted-form schema ${row.schema}`);
-      return { id: row.id, clientKey: row.client_key, sharedDay: row.shared_day, focus: row.focus, form: await gunzipJson(row.payload) };
+      return { id: row.id, clientKey: row.client_key, sharedDay: row.shared_day, form: await gunzipJson(row.payload) };
     }),
   );
 }
