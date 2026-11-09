@@ -142,9 +142,9 @@
             "license_id": "OFL-1.1",
             "sub_notice_of": null,
             "components": [
-                "noto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf, web/og/fonts/NotoSansJP-Bold.otf (bytes hash-pinned in tool/web_deps.json)"
+                "noto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf (bytes hash-pinned in tool/web_deps.json)"
             ],
-            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nnoto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf, web/og/fonts/NotoSansJP-Bold.otf (bytes hash-pinned in tool/web_deps.json)\n\nLicense: OFL-1.1"
+            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nnoto-cjk Sans2.004 -- shipped as web/og/fonts/NotoSansJP-Regular.otf (bytes hash-pinned in tool/web_deps.json)\n\nLicense: OFL-1.1"
         },
         {
             "package": "onnxruntime",
