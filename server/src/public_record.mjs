@@ -52,8 +52,53 @@ function aptitudes(tables, a) {
   };
 }
 
+/**
+ * The colours of factors, in the order a total lists them. A factor's colour is read from its tags
+ * in factor_info.json: factor_status is blue, factor_aptitude red, factor_unique_skill green, and
+ * every other factor (the *_gene ones included) white. The app draws the same line between coloured
+ * and white factors in FactorClassifier (lib/src/chara_detail/factor_enhancement.dart); the two are
+ * in different languages, so a change to one has to be made to the other.
+ */
+const COLORS = ["blue", "red", "green", "white"];
+const TAG_COLORS = new Map([
+  ["factor_status", "blue"],
+  ["factor_aptitude", "red"],
+  ["factor_unique_skill", "green"],
+]);
+
+function colorOf(tags) {
+  for (const tag of tags) {
+    const color = TAG_COLORS.get(tag);
+    if (color) return color;
+  }
+  return "white";
+}
+
 const factors = (tables, list) =>
-  list.map((f) => ({ ...tables.label(Keys.factor, f.id), star: f.star }));
+  list.map((f) => ({
+    ...tables.label(Keys.factor, f.id),
+    color: colorOf(tables.tags(Keys.factor, f.id)),
+    star: f.star,
+  }));
+
+/**
+ * The factors of the three slots totalled per factor: `{gid, name, color, star}` with the stars of
+ * every occurrence summed, ordered by colour (COLORS), within a colour by most stars first, and
+ * between equal stars by first occurrence (self, then parent 1, then parent 2, each in its own
+ * order). This is the one place a total is made, so the page and the OG card list the same one.
+ */
+function factorTotals(slots) {
+  const totals = new Map();
+  for (const factor of [...slots.self, ...slots.parent1, ...slots.parent2]) {
+    const total = totals.get(factor.gid);
+    if (total) total.star += factor.star;
+    else totals.set(factor.gid, { ...factor });
+  }
+  // Array.prototype.sort is stable, so equal stars keep their first-occurrence order.
+  return [...totals.values()].sort(
+    (a, b) => COLORS.indexOf(a.color) - COLORS.indexOf(b.color) || b.star - a.star,
+  );
+}
 
 function skill(tables, s) {
   const out = tables.label(Keys.skill, s.id);
@@ -79,11 +124,15 @@ function race(tables, r) {
 
 /**
  * @param {object} form the stored posted form v1
- * @param {{id: string, sharedDay: number, focus: ?("training" | "inheritance"), origin: string}} meta
- *   `focus` is the sharer's stored choice, null when they chose none
+ * @param {{id: string, sharedDay: number, origin: string}} meta
  * @param {import("./tables.mjs").Tables} tables
  */
 export function buildPublicRecord(form, meta, tables) {
+  const slots = {
+    self: factors(tables, form.factors.self),
+    parent1: factors(tables, form.factors.parent1),
+    parent2: factors(tables, form.factors.parent2),
+  };
   const record = {
     schema: SCHEMA,
     id: meta.id,
@@ -97,11 +146,8 @@ export function buildPublicRecord(form, meta, tables) {
     aptitudes: aptitudes(tables, form.aptitudes),
     strategy: tables.label(Keys.strategy, form.strategy),
     skills: form.skills.map((s) => skill(tables, s)),
-    factors: {
-      self: factors(tables, form.factors.self),
-      parent1: factors(tables, form.factors.parent1),
-      parent2: factors(tables, form.factors.parent2),
-    },
+    factors: slots,
+    factor_totals: factorTotals(slots),
     support_cards: form.support_cards.map((c) => ({
       ...tables.label(Keys.supportCard, c.id),
       limit_break: c.rank,
@@ -115,8 +161,9 @@ export function buildPublicRecord(form, meta, tables) {
     trained_on: trainedOn(form.trained_date),
     races: form.races.map((r) => race(tables, r)),
   };
-  // The one place the default is resolved: the page and every JSON reader see the same focus.
-  record.view = { focus: meta.focus ?? defaultFocus(record) };
+  // v1 only ever adds keys, so view.focus stays; a sharer no longer chooses it, and it is the focus
+  // the record's type gives. OG cards older than the single layout pick their layout by it.
+  record.view = { focus: defaultFocus(record) };
   return record;
 }
 
@@ -142,8 +189,8 @@ export function recordSummary(form, tables) {
 }
 
 /**
- * The focus a record's page takes when nothing else chose one: an inheritance-only record leads
- * with its factors and lineage, a standard one with what the training achieved.
+ * The focus a record's type gives: an inheritance-only record leads with its factors and lineage, a
+ * standard one with what the training achieved.
  *
  * @param {object} record public JSON v1 (or anything carrying its `record_type`)
  * @returns {"training" | "inheritance"}

@@ -36,7 +36,7 @@ describe("published record", () => {
       { gid: 2003, name: "skill 2", level: 3 },
       { gid: 2001, name: "skill 0" },
     ]);
-    assert.deepEqual(json.factors.self, [{ gid: 3002, name: "factor 1", star: 3 }]);
+    assert.deepEqual(json.factors.self, [{ gid: 3002, name: "factor 1", color: "red", star: 3 }]);
     assert.deepEqual(json.support_cards, [{ name: "support 1", limit_break: 4, level: 50 }]);
     assert.deepEqual(json.aptitudes.distance.middle, { name: "A", value: 6 });
     assert.deepEqual(json.family.parent1.self, { card: { gid: 1002, name: "card 1" }, character: { name: "chara 1" } });
@@ -47,6 +47,38 @@ describe("published record", () => {
     assert.deepEqual(json.races[0].title, { gid: 4003, name: "race 2" });
     assert.equal(json.races[0].distance, 2400);
     for (const key of ["trainer_id", "module_version", "evaluation_value"]) assert.equal(key in json, false, key);
+  });
+
+  test("JSON colours each factor by its tags and totals the factors of the three slots", async () => {
+    const id = "2123456789";
+    const f = (id, star) => ({ id, star });
+    const factors = {
+      self: [f(4, 1), f(0, 3), f(3, 1)],
+      parent1: [f(1, 2), f(5, 3), f(2, 1), f(4, 2)],
+      parent2: [f(3, 2), f(0, 2), f(2, 3), f(5, 1)],
+    };
+    await worker.insertRecord(id, postedForm({ factors }), 20_725);
+    const json = await (await worker.fetch(`/r/${id}.json`)).json();
+    // Tagged factor_status, factor_aptitude, factor_unique_skill, factor_normal_skill,
+    // factor_status_gene, and factor_scenario with other (test/fixtures/tables.json).
+    const factor = (n, color, star) => ({ gid: 3001 + n, name: `factor ${n}`, color, star });
+    assert.deepEqual(json.factors.parent1, [
+      factor(1, "red", 2),
+      factor(5, "white", 3),
+      factor(2, "green", 1),
+      factor(4, "white", 2),
+    ]);
+    // Blue, red, green, white; most stars first; equal stars (factors 4 and 3) in the order they
+    // first occur, self before the parents.
+    assert.deepEqual(json.factor_totals, [
+      factor(0, "blue", 5),
+      factor(1, "red", 2),
+      factor(2, "green", 4),
+      factor(5, "white", 4),
+      factor(4, "white", 3),
+      factor(3, "white", 3),
+    ]);
+    assert.deepEqual(json.view, { focus: "training" });
   });
 
   test('JSON names finishing positions 1st and 18th as "1" and "18"', async () => {
