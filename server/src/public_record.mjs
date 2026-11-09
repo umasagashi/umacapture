@@ -189,8 +189,9 @@ export function recordSummary(form, tables) {
 }
 
 /**
- * The focus a record's type gives: an inheritance-only record leads with its factors and lineage, a
- * standard one with what the training achieved.
+ * The `view.focus` value public JSON v1 carries for a record: "inheritance" for an inheritance-only
+ * record, "training" otherwise. The page and the current OG card read neither; it is there for the
+ * clients of v1 that still pick a layout by it.
  *
  * @param {object} record public JSON v1 (or anything carrying its `record_type`)
  * @returns {"training" | "inheritance"}

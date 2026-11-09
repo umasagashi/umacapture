@@ -26,7 +26,7 @@ export const PAGE_CSP = "default-src 'none'; img-src 'self'; style-src 'self'; f
  */
 export function siteHeader(kind) {
   return `<header class="site-header"><div class="site-header-inner">
-<a class="site-brand" href="/"><img src="/site/logo.svg" alt="" width="28" height="28">umacapture</a>
+<a class="site-brand" href="/"><img src="/site/logo.png" alt="" width="28" height="28">umacapture</a>
 <span class="site-kind">${esc(kind)}</span>
 <fieldset class="site-theme"><legend>表示の色</legend>
 <input type="radio" name="site-theme" id="site-theme-auto" checked><label for="site-theme-auto">自動</label>

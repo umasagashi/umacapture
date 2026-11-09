@@ -206,7 +206,7 @@ if [[ "$SHARE_TABLES" == 1 ]]; then
   step "3 name tables in the $TARGET D1"
   rm -f "$TABLES_READ"
   uv run tool/cloudflare/load_share_tables.py --target "$TARGET" --read-to "$TABLES_READ" \
-    || fail "the $TARGET D1 holds no name tables the Worker could read; publish a module set first"
+    || fail "the $TARGET D1 holds no name tables the Worker could read (none loaded, or loaded without their tags); load_share_tables.py says which above"
   [[ -f "$TABLES_READ" ]] || fail "load_share_tables.py did not write $TABLES_READ"
   # The record pages print the names in these tables, so the font covers them too.
   FONT_ARGS=(--tables "$TABLES_READ")

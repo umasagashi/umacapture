@@ -193,7 +193,7 @@ function footer(logo) {
 
 /**
  * The card for `record`, which must satisfy isRenderable.
- * `logo` is web/site/logo.svg as an image source (a data URI).
+ * `logo` is web/site/logo.png as an image source (a data URI).
  */
 export function buildCard(record, logo) {
   return column(
@@ -240,5 +240,5 @@ export function buildFallbackCard(logo) {
   );
 }
 
-/** `svg` (the bytes of web/site/logo.svg) as an image source satori accepts. */
-export const svgDataUri = (svg) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+/** `png` (the bytes of web/site/logo.png) as an image source satori accepts. */
+export const pngDataUri = (png) => `data:image/png;base64,${Buffer.from(png).toString("base64")}`;

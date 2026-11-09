@@ -7,7 +7,7 @@ import { access, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { buildFallbackCard, svgDataUri } from "../src/card.mjs";
+import { buildFallbackCard, pngDataUri } from "../src/card.mjs";
 import {
   CACHE_NONE,
   CACHE_NOT_FOUND,
@@ -62,7 +62,7 @@ beforeEach(() => {
   externalFetches.length = 0;
   routes = {
     [`/r/${ID}.json`]: send(record, "application/json"),
-    [LOGO_PATH]: send(logo, "image/svg+xml"),
+    [LOGO_PATH]: send(logo, "image/png"),
     ...Object.fromEntries(FONT_FILES.map(({ path }) => [path, send(font, "font/ttf")])),
   };
 });
@@ -166,7 +166,7 @@ test("the fallback card names what it stands for as 共有レコード", () => {
     else if (Array.isArray(node)) node.forEach(walk);
     else if (node?.props) walk(node.props.children);
   };
-  walk(buildFallbackCard(svgDataUri(logo)));
+  walk(buildFallbackCard(pngDataUri(logo)));
   assert.ok(strings.includes("共有レコード"), JSON.stringify(strings));
   assert.equal(strings.includes("公開レコード"), false);
 });

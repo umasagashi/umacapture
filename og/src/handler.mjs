@@ -16,7 +16,7 @@
 
 import { ImageResponse } from "@vercel/og";
 
-import { FONT_FAMILY, buildCard, isRenderable, svgDataUri } from "./card.mjs";
+import { FONT_FAMILY, buildCard, isRenderable, pngDataUri } from "./card.mjs";
 
 // Public ids: 10 lowercase Crockford base32 characters (no i, l, o, u), as the sharing Worker
 // issues them.
@@ -37,7 +37,7 @@ export const FONT_FILES = [
   { path: "/og/fonts/NotoSansJP-Regular.otf", name: "Noto Sans JP", weight: 400 },
 ];
 // The mark the public pages show, read from the same origin so it has one definition.
-export const LOGO_PATH = "/site/logo.svg";
+export const LOGO_PATH = "/site/logo.png";
 
 /**
  * Limits on the two fetches. Each covers the response headers and the whole body.
@@ -120,7 +120,7 @@ export function createHandler({ origin, fetch: fetchImpl = globalThis.fetch, lim
       Promise.all(
         FONT_FILES.map(async ({ path, name, weight }) => ({ name, data: await fetchAsset(path), weight, style: "normal" })),
       ),
-      fetchAsset(LOGO_PATH).then(svgDataUri),
+      fetchAsset(LOGO_PATH).then(pngDataUri),
     ]).catch((error) => {
       assets = null;
       throw error;
