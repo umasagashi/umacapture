@@ -719,11 +719,7 @@ content hash.
 **Deploy the web app first, the function after**, whenever a change reaches both. A function that
 asks for a font or the logo the origin does not serve yet cannot draw, and answers every card with
 a redirect to `/og/default.png`. The current function reads M PLUS Rounded 1c, Noto Sans JP
-Regular and the logo, so the origin has to serve them first. The earlier function still running in
-production also reads `/og/fonts/NotoSansJP-Bold.otf`, which the current one does not; the web app
-keeps serving it (it stays pinned in `tool/web_deps.json`) so that the old function can still draw
-between the two deploys. Remove that pin only in a commit after the current function is deployed to
-production.
+Regular and the logo, so the origin has to serve them first.
 
 ```bash
 bash tool/vercel/deploy_og.sh --target production --dry-run   # checks and tests; no upload

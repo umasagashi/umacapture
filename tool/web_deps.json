@@ -188,26 +188,6 @@
         "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. Read at runtime by the OGP image function in og/, which fetches it from this origin instead of bundling it."
       }
     },
-    "og/fonts/NotoSansJP-Bold.otf": {
-      "sha256": "1b0edfb500b73a4fa8a4fcaae1bbbd403994e08e73e3e0da37e70d3853f42c5f",
-      "bytes": 4656448,
-      "origin": "upstream",
-      "upstream": {
-        "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/SubsetOTF/JP/NotoSansJP-Bold.otf",
-        "package": "noto-cjk",
-        "version": "Sans2.004"
-      },
-      "license": {
-        "id": "OFL-1.1",
-        "asset": "assets/license/noto_sans_jp.txt"
-      },
-      "linked_note": "Nothing to link: this is a font file, not code. It is the full-glyph Japanese subset OTF of Noto Sans CJK, and its name table credits Adobe as the designer under the OFL; no other font or program is embedded.",
-      "source_form": {
-        "form": "git",
-        "git_url": "https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans",
-        "note": "Commit 523d033d is the Sans2.004 release tag. The OTF is itself the font's preferred form for modification under the OFL, so the shipped bytes are the source form. The OGP function in og/ no longer reads it, but the earlier version of that function still running in production fetches it from this origin and draws no card without it, so the file stays served until the current og/ function is deployed to production; remove this pin in a commit after that deploy."
-      }
-    },
     "coi-serviceworker.js": {
       "sha256": "d12bd536e27e39a773d7dc7adb1a1167d24002293e97ac81c995fb00cf8d4d5a",
       "bytes": 4678,

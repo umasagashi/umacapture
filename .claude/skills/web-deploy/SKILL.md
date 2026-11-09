@@ -71,9 +71,7 @@ A rollback restores the Worker only. It does not undo any of the above.
    after it: the live Worker is broken from the apply until the new one is up.
 6. **Deploy** ("Deploying"). Without a terminal, `--yes` is required; with one, the script asks.
    When the OG image function changes too, deploy it after `deploy_web.sh` on the same target: it
-   reads its fonts and logo from the web app's origin ("OGP image function (Vercel)"). The web app
-   also keeps serving `NotoSansJP-Bold.otf`, which only the earlier function in production reads;
-   its pin is removed after the current function is deployed to production.
+   reads its fonts and logo from the web app's origin ("OGP image function (Vercel)").
 7. **Check what the script does not.** Stage 8 verifies `deploy.json`, COOP/COEP, the hidden source
    map and which side answers 404. After that:
    - write down the version id with the `git_sha` ("The version record"); a rollback needs them;
