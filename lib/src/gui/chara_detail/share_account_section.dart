@@ -1,5 +1,5 @@
 // N3: the account tab's cards of the device's login to the sharing server — the account (its state, logging in and
-// out, the account's list page) and, set apart below the rest of the tab, deleting the account (and continuing a
+// out) and, set apart below the rest of the tab, deleting the account (and continuing a
 // deletion cut short).
 //
 // Nothing here reaches the server while it is built: what it shows comes from the stored session alone, and only a
@@ -23,7 +23,7 @@ const tr_share_account = "pages.account";
 /// The page that lists the shares of the account [accountId], as the server serves it.
 String accountListUrl(String accountId) => "${Const.sharingOrigin}/u/$accountId";
 
-/// The account card: logged out, a login; logged in, the list page and logging out; an account being deleted, only
+/// The account card: logged out, a login; logged in, logging out (the list page leads the shares' card); an account being deleted, only
 /// that it is — continuing the deletion is [AccountDeletionCard]'s.
 class AccountCard extends ConsumerStatefulWidget {
   const AccountCard({super.key});
@@ -75,21 +75,9 @@ class _AccountCardState extends ConsumerState<AccountCard> {
         [_button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press)],
       ),
       ShareSession(deleting: true) => ("$tr_share_account.deleting".tr(), const <Widget>[]),
-      ShareSession(:final accountId) => (
+      ShareSession() => (
         "$tr_share_account.logged_in".tr(),
-        [
-          _button(
-            "$tr_share_account.open_list".tr(),
-            Symbols.open_in_new_rounded,
-            () => openSharedPage(accountListUrl(accountId)),
-          ),
-          _button(
-            "$tr_record_share.copy_url".tr(),
-            Symbols.content_copy_rounded,
-            () => copySharedUrl(accountListUrl(accountId)),
-          ),
-          _button("$tr_share_account.logout".tr(), Symbols.logout_rounded, _loggingOut ? null : _logout),
-        ],
+        [_button("$tr_share_account.logout".tr(), Symbols.logout_rounded, _loggingOut ? null : _logout)],
       ),
     };
     final note = _note;

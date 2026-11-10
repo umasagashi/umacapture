@@ -1,6 +1,6 @@
 // Request handling for the record-sharing Worker.
 
-import { getMe, postTrainer } from "./account.mjs";
+import { getMe, getUsage, postTrainer } from "./account.mjs";
 import { deleteAccount } from "./account_deletion.mjs";
 import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
@@ -117,6 +117,8 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => logout(request, env, now));
         case "me":
           return answerApi(() => getMe(request, env, now));
+        case "meUsage":
+          return answerApi(() => getUsage(request, env, now));
         case "deleteAccount":
           return answerApi(() => deleteAccount(request, env, now));
         case "meTrainer":
