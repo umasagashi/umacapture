@@ -217,7 +217,7 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
       // a module update (see CharaDetailRecordStorage._checkRecordVersion).
       // Fire-and-forget: regeneration runs in the background with its own
       // progress indicator on the chara detail page.
-      ref.read(charaDetailRecordStorageLoaderProvider.notifier).checkRecordVersion();
+      ref.read(charaDetailRecordStorageLoaderProvider.notifier).checkRecordVersion(automatic: true);
       CardDialog.dismiss(ref.base);
     } else {
       setState(() => _installing = false);
