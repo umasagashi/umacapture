@@ -346,9 +346,10 @@ it ([what no row accounts for](#references-and-retention)).
 
 - **While it is being deleted** every sync endpoint answers `409 account_deleting`, the
   deletion-only session's requests included.
-- **`remaining`.** A 200 carries `{remaining: {sync_rows, sync_versions, shares}}`: the sync rows left
-  (counted up to `ACCOUNT_DELETE_SYNC_ROWS`), the versions and markers B2 still lists under the prefix
-  (up to one page), and the shared records left. The app repeats the call with the same session until
+- **`remaining`.** A 200 carries `{remaining: {sync_rows, sync_versions, shares, share_images}}`: the
+  sync rows left (counted up to `ACCOUNT_DELETE_SYNC_ROWS`), the versions and markers B2 still lists
+  under the sync prefix (up to one page), the shared records left, and the versions of shared images B2
+  still lists under the account's `s/` prefix (up to one page). The app repeats the call with the same session until
   it answers 204, and reads none of the counts.
 - **The day's share.** The sync rows go a chunk a call within half of `SYNC_DAILY_ROWS`
   (`SYNC_DAILY_DELETE_ROWS`, over every deletion), counted in the day's sync rows written, so a day of

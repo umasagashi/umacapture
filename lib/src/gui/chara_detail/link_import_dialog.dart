@@ -32,6 +32,7 @@ String linkImportRefusalKey(LinkImportRefusal refusal) => switch (refusal) {
   LinkImportRefusal.imagesUnreachable => "$tr_link_import.refused.images_unreachable",
   LinkImportRefusal.busy => "$tr_link_import.refused.busy",
   LinkImportRefusal.unreachable => "$tr_link_import.refused.unreachable",
+  LinkImportRefusal.unreadable => "$tr_link_import.refused.unreadable",
 };
 
 /// Imports the shared record [text] links to: reads it ([fetchSharedRecord]) and, where it is complete, writes it

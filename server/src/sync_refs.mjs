@@ -31,7 +31,9 @@
 // being deleted, leaves the record, and B2 may hold under that name a version no row accounts for. The
 // same two take those too (`writeLeftovers`): once the record is old enough that its request is
 // abandoned, they delete the versions it may have written unless the account holds the name and is
-// not being deleted.
+// not being deleted. The same ledger records the writes of shared images under the account's prefix
+// s/<account id>/ (share_images.mjs): each record carries its space as data (`space`, "a" for sync,
+// "s" for shared images), and what holding a name means in each space is `SPACES`.
 //
 // A request cut off where the name it leaves hidden is referenced leaves the row referenced and
 // hidden (sync_objects_to_show): a replacement after its commit and before it showed what a hide

@@ -390,8 +390,8 @@ void main() {
     expect(find.byType(LinkImportDialog), findsOneWidget, reason: 'a refused record leaves the link to correct');
   });
 
-  testWidgets('refuses, saving nothing, a link of another shape, an old share, the device\'s own share and a share '
-      'the server does not hold', (tester) async {
+  testWidgets('refuses, saving nothing, a link of another shape, an old share, a share in a form this build cannot '
+      'read, the device\'s own share and a share the server does not hold', (tester) async {
     final record = recordFromFixture('source', '2026-01-02T03:04:05+0900');
     final old = _answer('eeeeeeeeee', record);
     (old['record'] as Map<String, Object?>)['trainee'] = {
@@ -399,6 +399,7 @@ void main() {
     };
     server.shares['eeeeeeeeee'] = _Share(old);
     server.shares['ffffffffff'] = _Share(_answer('ffffffffff', record));
+    server.shares['hhhhhhhhhh'] = _Share({..._answer('hhhhhhhhhh', record), 'schema': 2});
     final (:container, :toasts) = await pump(tester);
     await tester.runAsync(
       () => Hive.box(storageBoxNameOf(StorageBoxKey.recordShares)).put(
@@ -421,6 +422,7 @@ void main() {
       ('https:/r/eeeeeeeeee', LinkImportRefusal.notALink),
       ('${Const.sharingOrigin}/r/ILLEGALIDX', LinkImportRefusal.notALink),
       (link('eeeeeeeeee'), LinkImportRefusal.oldFormat),
+      (link('hhhhhhhhhh'), LinkImportRefusal.unreadable),
       (link('ffffffffff'), LinkImportRefusal.ownShare),
       (link('gggggggggg'), LinkImportRefusal.notFound),
     ]) {
@@ -429,6 +431,6 @@ void main() {
     }
     expect(stored(), isEmpty);
     // Nothing is fetched for a link of another shape, nor for the device's own share.
-    expect(server.sent, ['GET /api/shares/eeeeeeeeee', 'GET /api/shares/gggggggggg']);
+    expect(server.sent, ['GET /api/shares/eeeeeeeeee', 'GET /api/shares/hhhhhhhhhh', 'GET /api/shares/gggggggggg']);
   });
 }

@@ -3,11 +3,17 @@
 The web app is served from `https://umacapture.com` by **Cloudflare Workers Static Assets**,
 together with the **Worker** (`server/src/`, configured by `server/wrangler.jsonc`) and its D1
 database. The Worker carries logins (Google, behind Turnstile), record sharing and file sync. It
-answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, an account's list of shared records
-`/u/<id>` and `/u/<id>.json`, and the API under `/api/` (file sync under `/api/sync/`), and answers 404
-to any other path that matches no file. An hourly run of the same Worker tidies file sync's storage
-and goes on with the deletion of every account being deleted (`triggers.crons`). File sync stores its objects in a Backblaze B2 bucket per environment, which the
-Worker alone reaches, with a key held in Worker secrets ([`sync-server.md`](sync-server.md)). A
+answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, the report page of a record
+`/r/<id>/report`, an account's list of shared records `/u/<id>` and `/u/<id>.json`, and the API under
+`/api/` (file sync under `/api/sync/`), and answers 404 to any other path that matches no file. The
+API includes the app's import of a shared record: `GET /api/shares/<id>`, which answers the stored
+form and the state of the share's images, and `GET /api/shares/<id>/images`, the image bundle of a
+share whose sharer chose to share its images. Both answer without a login, for the app alone: their
+shape is not promised to anyone else, who reads `/r/<id>.json`. An hourly run of the same Worker
+carries out operators' takedowns of shares, tidies the storage of file sync and of shared images, and
+goes on with the deletion of every account being deleted (`triggers.crons`). File sync's objects and
+shared images are stored in a Backblaze B2 bucket per environment, which the Worker alone reaches,
+with a key held in Worker secrets ([`sync-server.md`](sync-server.md)). A
 request for a file in `build/web/` is a static-asset request: no Worker script runs and it is not
 counted as a Worker request.
 
@@ -108,12 +114,14 @@ These are outward-facing or account-level operations. Nothing in the repository 
    | `TURNSTILE_SECRET` | The Turnstile widget's secret key (step 7) | Every login begin is refused (`403`) |
    | `GOOGLE_CLIENT_SECRET` | The Google OAuth client's secret (step 8) | Every login fails at the callback |
    | `IDENTITY_HMAC_KEY` | 32 random bytes as 64 lowercase hex digits (step 9) | Every login fails at the callback |
-   | `B2_KEY_ID`, `B2_APPLICATION_KEY` | The application key of the environment's B2 bucket (step 10) | Every sync request that reaches B2 and every account deletion fail (`502`), and so does every hourly run |
+   | `B2_KEY_ID`, `B2_APPLICATION_KEY` | The application key of the environment's B2 bucket (step 10) | Every sync request that reaches B2, every put and fetch of a share's images and every account deletion fail (`502`), and so does every hourly run |
 7. **Turnstile.** Create the widget in the dashboard for the hostname `umacapture.com`, in Managed
    mode. Its sitekey goes into the config (below), its secret key into `TURNSTILE_SECRET`. The
    login start page (`/api/auth/start`) shows the widget, and a login begin
    (`POST /api/auth/begin`) is refused unless siteverify reports this hostname and the action
-   `login`.
+   `login`. The report page of a record (`/r/<id>/report`) shows the same widget, and a report
+   (`POST /api/reports`) is refused unless siteverify reports the action `report` (`REPORT_ACTION` in
+   `server/src/report.mjs`, a constant, not a var).
 8. **Google login.** In Google Cloud, an OAuth client of type Web application; the Worker asks it
    for the scope `openid email`. Its redirect URI is `<AUTH_REDIRECT_ORIGIN>/api/auth/callback/google`:
    `https://umacapture.com/api/auth/callback/google` for production. Its client id goes into
@@ -134,21 +142,34 @@ These are outward-facing or account-level operations. Nothing in the repository 
       `vars.B2_ENDPOINT` and `vars.B2_REGION`.
     - **An application key** restricted to that bucket, with read and write access (which lists,
       reads, writes and deletes files), into `B2_KEY_ID` and `B2_APPLICATION_KEY`.
-    - **The lifecycle rule** `daysFromHidingToDeleting` 6 covering the prefix `a/`, under which the
-      Worker stores every object (`B2_DAYS_FROM_HIDING_TO_DELETING` in `server/src/limits.mjs`). The
-      Worker only hides what is no longer referenced, and counts on this rule to delete it; without
-      the rule nothing it hid is ever deleted ([`sync-server.md`](sync-server.md#the-b2-bucket)).
-    - **Check the rule after setting it.** Read the bucket's lifecycle rules back, in the B2
+    - **Two lifecycle rules**, one per prefix the Worker stores under
+      ([`sync-server.md`](sync-server.md#the-b2-bucket)):
+      - `daysFromHidingToDeleting` 6 covering the prefix `a/`, file sync's objects
+        (`B2_DAYS_FROM_HIDING_TO_DELETING` in `server/src/limits.mjs`). The Worker only hides what is
+        no longer referenced, and counts on this rule to delete it; without the rule nothing it hid is
+        ever deleted.
+      - `daysFromHidingToDeleting` 1 covering the prefix `s/`, the image bundles of shares. B2 hides
+        a version once a later one of the same key is uploaded, and a retried or doubled PUT uploads
+        one; this rule deletes them a day or two later. Every version of a key holds the same bytes,
+        so nothing served changes. Without the rule those versions stay until the share is unshared
+        or its account deleted. Set it before the first Worker that stores images is deployed
+        ("Rolling out shared images, the link import and reports"), so that it covers every version
+        from the first.
+    - **Check the rules after setting them.** Read the bucket's lifecycle rules back, in the B2
       console (the bucket's Lifecycle Settings), or read only through the native API:
       `b2_authorize_account` with the bucket's application key, then `b2_list_buckets` with the
       bucket's name in `bucketName` (a key restricted to one bucket has to name it), which returns
-      the rules as `lifecycleRules`. Expect the rule with
-      `fileNamePrefix` `a/` and `daysFromHidingToDeleting` 6, and no `daysFromUploadingToHiding`
-      covering `a/`: that would hide objects the Worker still references.
+      the rules as `lifecycleRules`. Expect exactly two rules: `fileNamePrefix` `a/` with
+      `daysFromHidingToDeleting` 6, and `fileNamePrefix` `s/` with `daysFromHidingToDeleting` 1, each
+      with no `daysFromUploadingToHiding`: that would hide objects the Worker still references or
+      serves. A rule with `fileNamePrefix` `""` would cover both prefixes with one number, which is
+      right for neither.
     - **Data caps and alerts** on the B2 account (Caps & Alerts), the stop for B2's charges: storage
       $0.50 a day and download $0.20 a day, and the transaction classes that offer a cap $0.10 a day,
       with alerts at 75% and 100%. A cap that is reached makes B2 refuse what it covers, and the
-      Worker answers those requests `502`.
+      Worker answers those requests `502`. The caps are the account's, so file sync and shared images
+      use them up together: a day whose shared images are downloaded up to the download cap makes file
+      sync's image fetches answer `502` too, until the next UTC day.
 11. **Production config.** The top level of `server/wrangler.jsonc` carries what `env.staging`
     does, with production values: `"main": "src/index.mjs"`, `assets.run_worker_first`
     `["/r/*", "/u/*", "/api/*"]`, `"observability": { "enabled": false }`, `triggers.crons`
@@ -168,12 +189,15 @@ These are outward-facing or account-level operations. Nothing in the repository 
     | `GOOGLE_CLIENT_ID` | The OAuth client's id (step 8) |
     | `AUTH_REDIRECT_ORIGIN` | `https://umacapture.com`, the origin of the redirect URI registered with Google |
     | `SYNC_ENABLED` | `"true"` (a first production deployment starts with `"false"`, see "Deploying"). `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` and stops the hourly run's sync kinds, while sharing, logins and account deletion go on, the hourly run's included |
+    | `SHARE_IMAGES_ENABLED` | `"true"`. `"false"` stops shared images coming in and going out: a share that declares images is refused (its result in `POST /api/shares` is `image_sharing_paused`; one without images goes on), a bundle's PUT answers `503 image_sharing_paused`, the bundle's GET answers `404`, and the import endpoint tells a share with images `{"state": "unavailable"}`. Unsharing, account deletion, takedowns and the hourly run's deletion of images go on. Turning it back to `"true"` serves again every bundle still stored |
+    | `REPORT_SENTRY_DSN` | The Sentry DSN reports of shares are sent to: the app's own (`_sentryDsn` in `lib/src/core/sentry_util.dart`), written here a second time because the app and the Worker ship apart. A DSN is a public client value, so it is a var. Empty: the environment takes no reports, and the report page says so. Staging's is empty |
+    | `REPORT_SENTRY_ENVIRONMENT` | `production`: the Sentry environment a report's event carries (staging `staging`) |
     | `B2_ENDPOINT` | `s3.us-west-004.backblazeb2.com` |
     | `B2_REGION` | `us-west-004` |
     | `B2_BUCKET` | `umacapture-sync` |
 
-    `SHARING_ENABLED` and `SYNC_ENABLED` must be `"true"` or `"false"`; any other value is a
-    configuration error. `wrangler deploy` replaces the Worker's vars with the ones in the config,
+    `SHARING_ENABLED`, `SYNC_ENABLED` and `SHARE_IMAGES_ENABLED` must be `"true"` or `"false"`; any
+    other value is a configuration error. `wrangler deploy` replaces the Worker's vars with the ones in the config,
     so a var set in the dashboard does not survive the next deployment.
 12. **Zone rate limiting.** One WAF rate limiting rule on the `umacapture.com` zone: requests whose
     URI path starts with `/r/`, `/u/` or `/api/` but not with `/api/sync/`, and that do not come
@@ -207,6 +231,29 @@ These are outward-facing or account-level operations. Nothing in the repository 
     request and `429` after it. `/api/sync/generation` never answers `429`: every request gets the
     Worker's own answer (`401` without a login, `503` while sync is off). The check blocks only the
     IP it runs from, for 10 seconds at a time.
+13. **Notification of reports.** A report of a share (`/r/<id>/report`) reaches the operator only as
+    a Sentry event in the app's project (`REPORT_SENTRY_DSN`); nothing else tells anyone. Each
+    accepted report is one event of this shape (`sendReport` in `server/src/report.mjs`):
+
+    | Field | Value |
+    |---|---|
+    | `message` | `share report` |
+    | `level` | `warning` |
+    | `logger` | `share-report` |
+    | `environment` | `REPORT_SENTRY_ENVIRONMENT` |
+    | `tags` | `kind`: `share_report`; `reason`: `own_trainer`, `personal_info`, `inappropriate` or `other` (`REPORT_REASONS`) |
+    | `extra` | `share_id`, `text` (the reporter's free text, up to 1,000 characters), `shared_on` |
+    | `fingerprint` | `["share-report", <share id>]`: one issue a share, whose count grows with each later report of it |
+
+    It carries no user, request or IP. In Sentry, create one issue alert rule on the app's project:
+    environment `production`; when a new issue is created, or an issue changes state from resolved
+    to unresolved (a share reported again after its issue was resolved); if the event's tag `kind`
+    equals `share_report`; then notify the operator (email to the member or team who handles
+    reports). The tag filter keeps the app's own errors out of it. Any other rule of the project that
+    fires on every new issue fires on reports too; decide whether to keep that. Staging's DSN is
+    empty, so the rule can only be checked in production: send one report from a production record
+    page (it counts toward that day's `REPORT_DAILY_LIMIT`), and expect an issue `share report` with
+    the record's `share_id` and a notification. Handling a report is under "Handling a report".
 
 ### Entrance list
 
@@ -219,7 +266,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
 | `umacapture-web-staging.umasagashi.workers.dev` | Staging (`umacapture-web-staging`), assets only once sharing is off there | Does not apply | Open, linked from nowhere (see "Staging") |
 | `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
-| B2 buckets `umacapture-sync`, `umacapture-sync-staging` | Nothing public: file sync's objects, reached only by the Worker with the bucket's key | Does not apply | Private |
+| B2 buckets `umacapture-sync`, `umacapture-sync-staging` | File sync's objects (`a/`) and shared images (`s/`), reached only by the Worker with the bucket's key. Nothing under `a/` is public. A bundle under `s/` is served to anyone who knows its share's id, through the Worker's `GET /api/shares/<id>/images` on the entrance above, while the share records it stored and `SHARE_IMAGES_ENABLED` is `"true"` | Does not apply to the bucket; the zone's rule applies to the Worker's `/api/` | Private |
 
 After the first deployment, confirm in the dashboard (Worker › Settings › Domains & Routes) that
 `workers.dev` and preview URLs are shown as disabled and that each Worker has exactly one domain:
@@ -403,6 +450,13 @@ so the change gets the plain-text `404`, which the tab shows as a failure and wh
 shares as they are. No Windows release has sent either. Do not release a Windows build that does:
 its shares would keep the Worker accepting `view` for good, and its changes would always fail.
 
+A Windows build that shares a record's images, sends the trainee's and the parents' icons and the
+parents' rank and record type, or imports from a share link is released only after the production
+Worker that takes and answers them ("Rolling out shared images, the link import and reports"). An
+older Worker refuses every share of such a build as `invalid_payload` (it refuses any key it does not
+know), and answers the link import `404`. Once such a build is released, the production Worker is
+never rolled back past that version (below).
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
@@ -535,6 +589,120 @@ After step 6 two more limits hold:
   (`og/node_modules/.bin/vercel promote <deployment url>`, or `deploy_og.sh --target production`),
   or the origin serves `/site/logo.svg` again (a rollback to the version deployed in step 3 or 4,
   which still serves it and reads no `records.focus`, or a new deployment that restores the file).
+
+### Rolling out shared images, the link import and reports
+
+Once, for the release whose Worker stores and serves the images a sharer chooses to share, answers
+the app's import of a shared record (`GET /api/shares/<id>`), carries out operators' takedowns and
+takes reports of shares, with the migration `0009_share_images.sql`. Take these steps in this order,
+staging first:
+
+1. **The `s/` lifecycle rule** on the target's bucket, and read the rules back (One-time preparation,
+   step 10). Before the Worker stores anything under `s/`, so that the rule covers every version.
+2. **Check that the target's D1 has no `0009` yet.** The file was changed after it was first
+   committed (it gained `share_takedowns` and `daily.reports`), and `migrations apply` applies a
+   migration by its name once, so a D1 that ran an earlier `0009` would never get what was added:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 migrations list umacapture-share --remote -c server/wrangler.jsonc
+   # staging: umacapture-share-staging --env staging
+   ```
+
+   Go on only when it lists `0009_share_images.sql` as not applied. If it does not, that D1 ran a
+   `0009` already: stop, and read which parts it has (the next item's two queries). What it lacks
+   goes into a new migration, committed and applied as any other; never into the D1 by hand.
+3. **Apply `0009`** ("Checks before a production run", then "Applying a migration"). It adds columns
+   and a table and changes none, so the live Worker runs unchanged on it: it names no new column, and
+   its writes to `sync_writes` get the space `'a'`. Then confirm that each of these prints one row:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'share_takedowns'"
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT name FROM pragma_table_info('daily') WHERE name = 'reports'"
+   ```
+
+4. **Deploy** the web app and the Worker together ("Deploying"). On staging, check from a staging
+   Windows build and from a desktop Chromium-based browser and Firefox: share a record with and
+   without its images, and import each from another account; the imported record opens from the
+   table with its preview. A share whose bundle was not sent yet is refused as still being sent, and
+   imports with its images once the sharer shares it again. After unsharing, `GET /api/shares/<id>`
+   and `GET /api/shares/<id>/images` answer `404`. On Android Chrome on a phone (write down the
+   model and the CSS viewport width): paste a share link, import, reload, open the record from the
+   table, zoom and scroll its preview, close it. Staging's report page says it takes no reports
+   (its `REPORT_SENTRY_DSN` is empty). In production, also share eight records with their images at
+   once: the zone's rate limiting rule may answer bundle PUTs `429`, after which the app waits once
+   and sends again; every share has to end with its images. Then check the report rule (One-time
+   preparation, step 13).
+5. **Windows release**, after the production deployment ("Ordering against a Windows release").
+
+Shares made before this release carry neither icons nor the parents' ranks, which the import needs, so
+the app refuses to import them (`oldFormat` in `lib/src/chara_detail/record_link_import.dart`) until
+their sharers unshare them and share them again.
+
+**Do not roll the Worker back past this release** once its web app has been deployed to the target,
+or its Windows build released. Stop instead: `SHARE_IMAGES_ENABLED` `"false"` stops images alone,
+`SHARING_ENABLED` `"false"` new logins and shares, and a rollback to a version without the Worker
+stops the Worker whole ("Stopping record sharing"); none of them leaves anything behind. A Worker from
+before this release, rolled back to:
+
+- refuses as `invalid_payload` every share that a web app tab or a Windows build of this release sends,
+  since they carry keys it does not know (a resend under a client key it already holds answers
+  `existing` before the check, so that one passes);
+- deletes a share's row on unshare and on account deletion without recording the share's bundle in
+  the write ledger, so the bundle stays in B2 with nothing to delete it, and its hourly run may drop
+  the ledger's records of shared images (it reads them as sync's and lists them under `a/`, where
+  they are not), with the same result;
+- ignores `share_takedowns`, and answers the import `404`.
+
+If an older Worker ran anyway, after the Worker of this release is back, find the bundles no share
+accounts for and hand them to the hourly run:
+
+1. List every version under `s/` with `b2_list_file_versions` (`prefix` `s/`), under the same
+   authorization as the lifecycle check (One-time preparation, step 10). Each key is
+   `s/<account id>/<share id>/<bundle name>`.
+2. For each key, the share accounts for it when this prints a row:
+
+   ```sql
+   SELECT id FROM records WHERE id = '<share id>' AND owner_id = '<account id>'
+     AND images_name = '<bundle name>' AND images_stored_at IS NOT NULL
+   ```
+
+3. For each key that no share accounts for, write one record to the write ledger, as a request about
+   to write it would have:
+
+   ```sql
+   INSERT INTO sync_writes (account_id, write_by, names, written_at, space)
+     VALUES ('<account id>', lower(hex(randomblob(16))), json_array('<share id>/<bundle name>'), unixepoch(), 's')
+   ```
+
+   The first hourly run two hours and a quarter later (`share_writes`) deletes every version of that
+   name uploaded before the record's time, with the code an abandoned PUT's record takes, or only
+   clears the record if a share holds the bundle by then. Nothing is deleted in B2 by hand.
+
+### Shared images: declared bytes and what B2 holds
+
+The image limits in `server/src/limits.mjs` (`SHARE_IMAGE_BUDGET`, `SHARE_IMAGE_DAILY_LIMIT`,
+`ACCOUNT_SHARE_IMAGE_DAILY_LIMIT`) count what shares **declare** (`records.images_size`, summed in
+`totals.image_bytes`, `daily.image_bytes` and `accounts.image_quota_bytes`), once per share, from its
+`POST /api/shares` until it is unshared, its images or itself taken down, or its account deleted. They
+do not count what B2 stores under `s/`, which no D1 row can read, and `SHARE_IMAGE_BUDGET` is not a
+bound on it. The two differ in these states, each with what brings them together:
+
+| State | Declared | Stored in B2 | What brings them together |
+|---|---|---|---|
+| Declared, bundle not put yet | +size | 0 | The sharer sharing again (the app sends the bundle), or unsharing |
+| Stored | +size | size | — |
+| B2 stored a PUT and answered 429 or 5xx, and the Worker sent it again | +size | up to 3 × size, versions of one key | The `s/` lifecycle rule, a day or two after |
+| B2 stored the bundle and the D1 statement after it failed, and the app sent it again | +size | 2 × size | The ledger record is cleared once the share holds the name; the lifecycle rule deletes the extra version |
+| Two PUTs of one share at once | +size | 2 × size | As above |
+| Unshared, or taken down, and B2's deletion failed; or a PUT arrived after it | 0 | size | The hourly run's `share_writes`, about three hours and a quarter after when nothing is waiting, later when it is |
+| Account being deleted | falls as its shares go | the rest | Account deletion's `share_images`; a late PUT, `share_writes` |
+
+So what B2 stores exceeds what is declared by at most two or three bundles of a share, for a day or
+two, or for a few hours after a share went. `SELECT image_bytes FROM totals` reads the declared total;
+the bucket's own size in the B2 console, which counts `a/` too, is what Backblaze bills and its caps
+stop.
 
 ### After a deployment with sharing on — the Turnstile check
 
@@ -891,6 +1059,10 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   `/site/logo.svg` no longer served), do not roll a target back to a version whose Worker reads
   `records.focus`, and do not roll the OG function back on its own to a deployment that reads
   `/site/logo.svg`. That section says how to tell them, and what brings the cards back.
+- Once a target has the web app of "Rolling out shared images, the link import and reports", or its
+  Windows build is released, do not roll that target's Worker back to a version from before it. That
+  section says what such a Worker breaks and leaves behind, and how to clean up after one that ran.
+  A version deployed with sharing off is not ruled out by this.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
@@ -913,6 +1085,59 @@ the schema D1 now has. A version deployed with sharing off (`server/wrangler.ass
 no Worker and no D1 binding and reads no schema, so a rollback to it is not ruled out by any
 migration: it is the first means under "Stopping record sharing".
 
+### Handling a report
+
+A report arrives as a Sentry issue `share report` (One-time preparation, step 13), one issue a share.
+
+1. Read the issue: `share_id`, the `reason` tag and the reporter's `text`. Open
+   `https://umacapture.com/r/<share id>`; for a report about images, the share's images are what
+   `GET /api/shares/<share id>` lists and `GET /api/shares/<share id>/images` serves (or import the
+   link into the app).
+2. Decide: nothing; take down the images only; take down the whole share; or, for many at once, a
+   switch (the table below).
+3. To take down, write one order to the target's D1. `scope` is `'images'` to take down the images
+   alone (the share stays, and tells no images from then on, as one shared without them) or
+   `'share'` to unshare it:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc \
+     --command "INSERT INTO share_takedowns (share_id, scope, ordered_at) VALUES ('<share id>', 'share', unixepoch())"
+   ```
+
+   An order is carried out by the next hourly run (`takedowns`, the first of its kinds), with the
+   code a sharer's own unshare runs, as the share's owner: the totals, the account's count and the
+   declared image bytes are given back, and the bundle's versions are deleted, or recorded in the
+   write ledger for `share_writes` when B2 fails. No switch stops it. A second order of the same
+   share and scope is refused by the table's key: one is recorded already.
+4. **Done** once its row has a `done_at`:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT share_id, scope, ordered_at, done_at FROM share_takedowns WHERE done_at IS NULL"
+   ```
+
+   lists the orders not carried out yet. An order also counts as done when nothing of its scope was
+   left (the sharer unshared first). One whose account is being deleted stays not done until the
+   deletion has removed the share. From outside: after `'share'`, `/r/<share id>.json` answers `404`
+   once the record pages' five-minute cache (`max-age=300`) has passed; after `'images'`,
+   `GET /api/shares/<share id>` answers `"images": null` and `GET /api/shares/<share id>/images`
+   answers `404`, neither cached.
+5. Resolve the issue in Sentry. A later report of the same share reopens it.
+
+The row stays as the record of what was taken down and when. A share taken down whole leaves its
+sharer's app to drop its own mark of it at its next list of the account's shares, without saying why,
+and nothing keeps the sharer from sharing the same record again under a new id. Copies already
+imported into someone's app stay there. An order waits up to an hour, more when orders are waiting
+(`SHARE_TAKEDOWNS_PER_RUN` a run): when that is too long, or there are too many reports to judge one
+by one, stop with a switch:
+
+| Situation | Means |
+|---|---|
+| One share | An order above |
+| Many images, or more than can be judged | `SHARE_IMAGES_ENABLED` `"false"` (below): no image is taken or served; shares themselves go on |
+| Many shares | `SHARING_ENABLED` `"false"` (below): new logins and shares stop; existing shares are still read |
+| A flood of reports | Lower `REPORT_DAILY_LIMIT` in `server/src/limits.mjs`, commit, deploy; `0` takes none. Reports are taken while sharing and images are switched off |
+
 ### Stopping record sharing
 
 In this order of preference:
@@ -922,6 +1147,7 @@ In this order of preference:
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
 | `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
 | `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except D1: the name tables are not read. Use it once the version without the Worker is no longer among the last 100 |
+| `SHARE_IMAGES_ENABLED` `"false"`, committed, then `deploy_web.sh` | Shared images alone stop: shares declaring images are refused, bundles are neither stored nor served, and the import endpoint tells such shares' images as unavailable, so an import waits rather than saving a record without them. Shares without images, reads, unshares, takedowns and the hourly run's deletion of images go on. D1 and B2 keep their data; turning it back serves every bundle still stored | As `SHARING_ENABLED` |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |
 | On Vercel | Deny `/r/` with a Firewall rule | The Vercel dashboard. After `OG_IMAGE_MODE` is `"static"` |
 
@@ -967,7 +1193,7 @@ Separate from a stop, and decided on its own: the D1 database, the B2 buckets an
 Turnstile widget, the Google OAuth client, the zone's rate limiting rule and the Vercel Firewall
 rule, the `og` DNS record, the Vercel domain, deployments and environment variables, and the extra
 token permissions. While D1 holds shared records or accounts, it is not deleted; while D1 lists
-synced objects, their bucket is not deleted; while `publish_modules.sh` writes name tables to a
+synced objects or shares whose images are stored, their bucket is not deleted; while `publish_modules.sh` writes name tables to a
 D1, deleting it stops every module publish ("Publishing to data.umacapture.com"). `b2_list_file_versions`, under the same authorization
 as the lifecycle check (One-time preparation, step 10), lists every version a bucket holds, hidden
 ones included. The kept copy of `IDENTITY_HMAC_KEY` goes only with
