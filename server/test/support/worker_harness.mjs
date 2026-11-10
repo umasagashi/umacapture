@@ -682,6 +682,7 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
       AUTH_REDIRECT_ORIGIN: GOOGLE.REDIRECT_ORIGIN,
       IDENTITY_HMAC_KEY: IDENTITY_HMAC_KEY,
       SYNC_ENABLED: "true",
+      SHARE_IMAGES_ENABLED: "true",
       B2_ENDPOINT: B2.ENDPOINT,
       B2_REGION: B2.REGION,
       B2_BUCKET: B2.BUCKET,
@@ -828,6 +829,15 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
         body: JSON.stringify({ shares }),
       }),
     unshare: (token, id) => fetch(`/api/shares/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
+    /** PUT /api/shares/<id>/images with `bytes` as the body (its length as Content-Length) and the session `token`. */
+    putImages: (token, id, bytes) =>
+      fetch(`/api/shares/${id}/images`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.length), Authorization: `Bearer ${token}` },
+        body: bytes,
+      }),
+    /** GET /api/shares/<id>/images, with no session. */
+    getImages: (id) => fetch(`/api/shares/${id}/images`),
     myShares: (token) => fetch("/api/me/shares", { headers: { Authorization: `Bearer ${token}` } }),
 
     /** Makes the next `n` D1 batches wait for each other (needs `testEntry: true`). */
@@ -906,6 +916,37 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
       return db.prepare("SELECT day, share_bytes, share_count FROM daily ORDER BY day").all().then((r) => r.results);
     },
   };
+}
+
+/** Bytes shaped as a JPEG for the server's checks: its start and end markers around `length - 4` bytes of `fill`. */
+export function fakeJpeg(length, fill) {
+  const bytes = new Uint8Array(length).fill(fill);
+  bytes.set([0xff, 0xd8], 0);
+  bytes.set([0xff, 0xd9], length - 2);
+  return bytes;
+}
+
+/**
+ * A share's images: `{images, bytes}`, the declaration a POST /api/shares carries and the bundle its PUT
+ * sends. The parts' bytes differ with `seed`, so two bundles of different seeds have different names.
+ * Without `trainee`, the bundle has the three screenshots alone.
+ */
+export function imageBundle({ seed = 1, trainee = true } = {}) {
+  const box = (x) => ({ top_left: { x, y: 0 }, bottom_right: { x: x + 540, y: 960, anchor: { h: "ScreenStart", v: "ScreenStart" } } });
+  const kinds = [
+    ["skill", fakeJpeg(301, seed), box(0)],
+    ["factor", fakeJpeg(203, seed + 1), box(10)],
+    ["campaign", fakeJpeg(157, seed + 2), box(20)],
+    ...(trainee ? [["trainee", fakeJpeg(41, seed + 3), null]] : []),
+  ];
+  const bytes = new Uint8Array(Buffer.concat(kinds.map(([, b]) => b)));
+  const parts = kinds.map(([kind, b, intersection]) => ({
+    kind,
+    size: b.length,
+    sha256: sha256(b),
+    ...(intersection === null ? {} : { intersection }),
+  }));
+  return { images: { name: sha256(bytes), size: bytes.length, parts }, bytes };
 }
 
 const chara = (n) => ({ character: n, card: n });

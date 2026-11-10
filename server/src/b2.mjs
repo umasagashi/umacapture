@@ -1,7 +1,8 @@
 // The Backblaze B2 bucket through its S3-compatible API, signed with AWS Signature Version 4.
 //
 // Every object of an account lives under a/<account id>/<name>, where name is the SHA-256 of the
-// object's bytes as 64 lowercase hex digits. A PUT signs that name as x-amz-content-sha256 and never
+// object's bytes as 64 lowercase hex digits; the image bundle of each of its shares under
+// s/<account id>/<share id>/<name>, named the same way. A PUT signs that name as x-amz-content-sha256 and never
 // UNSIGNED-PAYLOAD: B2 checks the bytes it receives against the signed hash and refuses a mismatch
 // (403, the same answer as a wrong key) without storing anything, which is what keeps "name = SHA-256
 // of the bytes" true for images the Worker passes on without hashing them. With UNSIGNED-PAYLOAD,
@@ -26,6 +27,32 @@ export const objectKey = (accountId, name) => `a/${accountId}/${name}`;
 
 /** The key prefix every object of account `accountId` shares. */
 export const accountPrefix = (accountId) => `a/${accountId}/`;
+
+/**
+ * The key prefix of space `space` of account `accountId`: "a" the account's synced objects
+ * (`accountPrefix`), "s" the images of its shares (`sharePrefix`). The write ledger (sync_writes)
+ * records the space of each write, and a name there is the key less this prefix.
+ */
+export const spacePrefix = (space, accountId) => {
+  if (space !== "a" && space !== "s") throw new RangeError(`no space ${JSON.stringify(space)}`);
+  return `${space}/${accountId}/`;
+};
+
+/**
+ * The key prefix of the images of every share of account `accountId`. A share's bundle is at
+ * `shareImageKey`, under the share's own prefix (`shareImagePrefix`), so unsharing one share lists and
+ * deletes that share's versions alone, and deleting the account those of every share.
+ */
+export const sharePrefix = (accountId) => spacePrefix("s", accountId);
+
+/** The key prefix of the images of share `shareId` of account `accountId`. */
+export const shareImagePrefix = (accountId, shareId) => `${sharePrefix(accountId)}${shareId}/`;
+
+/** The name of bundle `bundleName` of share `shareId` in the write ledger: its key less `sharePrefix`. */
+export const shareImageName = (shareId, bundleName) => `${shareId}/${bundleName}`;
+
+/** The key of bundle `bundleName` of share `shareId` of account `accountId`. */
+export const shareImageKey = (accountId, shareId, bundleName) => `${sharePrefix(accountId)}${shareImageName(shareId, bundleName)}`;
 
 /** A B2 answer the Worker cannot act on: anything other than what the operation expects. */
 export class StorageFailed extends Error {

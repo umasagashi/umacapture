@@ -34,12 +34,45 @@ async function query(op) {
 const gunzipJson = (payload) =>
   new Response(new Blob([new Uint8Array(payload)]).stream().pipeThrough(new DecompressionStream("gzip"))).json();
 
-/** The posted form and share day of record `id`, or null when no such row exists. */
+/**
+ * The state of the images of a share whose row is `row` (with `images_name` and `images_stored_at`):
+ * "none" (it declares none, which it never does later), "pending" (declared, the bundle not stored
+ * yet) or "stored".
+ */
+export const imageState = (row) => (row.images_name === null ? "none" : row.images_stored_at === null ? "pending" : "stored");
+
+/**
+ * The declaration of a share's images from its row, `{name, size, parts, state}` (`imageState`), or
+ * null for a share that declares none.
+ */
+const declaredImages = (row) =>
+  row.images_name === null
+    ? null
+    : { name: row.images_name, size: row.images_size, parts: JSON.parse(row.images), state: imageState(row) };
+
+/**
+ * The posted form, share day, owner and declared images (`declaredImages`) of record `id`, or null when
+ * no such row exists.
+ */
 export async function readRecord(db, id) {
-  const row = await db.prepare("SELECT schema, payload, shared_day FROM records WHERE id = ?").bind(id).first();
+  const row = await db
+    .prepare("SELECT schema, payload, shared_day, owner_id, images, images_name, images_size, images_stored_at FROM records WHERE id = ?")
+    .bind(id)
+    .first();
   if (row === null) return null;
   if (row.schema !== 1) throw new Error(`record ${id} has posted-form schema ${row.schema}`);
-  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day };
+  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day, owner: row.owner_id, images: declaredImages(row) };
+}
+
+/**
+ * The owner and declared images (`declaredImages`) of share `id`, `{owner, images}`, or null when no such
+ * row exists: what the bundle's endpoints read, without the posted form. Throws Unavailable.
+ */
+export async function readShareImages(db, id) {
+  const row = await query(() =>
+    db.prepare("SELECT owner_id, images, images_name, images_size, images_stored_at FROM records WHERE id = ?1").bind(id).first(),
+  );
+  return row === null ? null : { owner: row.owner_id, images: declaredImages(row) };
 }
 
 /**
@@ -95,59 +128,95 @@ export async function registerTrainer(db, owner, trainerId, cap) {
   return results[1].results.length > 0 ? "registered" : "limit";
 }
 
-/** The public id stored under client key hash `clientKey`, or null. */
-export async function findIdByClientKey(db, clientKey) {
-  const row = await query(() => db.prepare("SELECT id FROM records WHERE client_key = ?").bind(clientKey).first());
-  return row === null ? null : row.id;
+/**
+ * `{id, images}` of the share stored under client key hash `clientKey`, `images` its `imageState`, or
+ * null.
+ */
+export async function findByClientKey(db, clientKey) {
+  const row = await query(() =>
+    db.prepare("SELECT id, images_name, images_stored_at FROM records WHERE client_key = ?").bind(clientKey).first(),
+  );
+  return row === null ? null : { id: row.id, images: imageState(row) };
 }
 
 /** The charge account ?1 has shared on day ?3, read from its row. */
 const ACCOUNT_SHARED_TODAY = "(SELECT CASE WHEN quota_day = ?3 THEN quota_bytes ELSE 0 END FROM accounts WHERE id = ?1)";
 
+/** The image bytes account ?1 has declared on day ?3, read from its row: the same day as ACCOUNT_SHARED_TODAY's. */
+const ACCOUNT_IMAGES_TODAY = "(SELECT CASE WHEN quota_day = ?3 THEN image_quota_bytes ELSE 0 END FROM accounts WHERE id = ?1)";
+
 /**
  * Shares one record for account `owner` (one batch) and judges the outcome.
  *
- * `p`: `{id, owner, clientKey, payload, charge, day, budget, dailyLimit, accountCap, accountDailyLimit}`.
- * Returns `{status: "created"}`, `{status: "existing", id}` (the same client key committed first),
- * `{status: "refused", reason: "gone" | "deleting" | "storage" | "daily" | "account" | "changed"}` or
+ * `p`: `{id, owner, clientKey, payload, charge, day, budget, dailyLimit, accountCap, accountDailyLimit,
+ * images, imageBudget, imageDailyLimit, accountImageDailyLimit}`. `images` is the share's declaration
+ * `{name, size, parts}` (`parts` the JSON stored as it is), or null for a share without images: its
+ * size is counted, once, against the image limits, which a share without images is never judged by.
+ * Returns `{status: "created"}`, `{status: "existing", id, images}` (the same client key committed
+ * first; `images` its `imageState`), `{status: "refused", reason: "gone" | "deleting" | "storage" |
+ * "daily" | "account" | "imageStorage" | "imageDaily" | "imageAccount" | "changed"}` or
  * `{status: "idCollision"}`.
  * Throws Unavailable when D1 fails.
  */
 export async function shareRecord(db, p) {
   const exists = "EXISTS (SELECT 1 FROM records WHERE id = ?2)";
+  const images = p.images ?? { name: null, size: null, parts: null };
   const statements = [
     // A row already holding this id makes the insert run and break the primary key even when a
     // condition fails, so a refused share can never find that row and commit statements 2 to 4.
     db
       .prepare(
-        `INSERT INTO records (id, owner_id, client_key, schema, payload, charge, shared_day)
-         SELECT ?2, ?1, ?4, 1, ?5, ?6, ?3
+        `INSERT INTO records (id, owner_id, client_key, schema, payload, charge, shared_day, images, images_name, images_size)
+         SELECT ?2, ?1, ?4, 1, ?5, ?6, ?3, ?11, ?12, ?13
          WHERE EXISTS (SELECT 1 FROM records WHERE id = ?2)
             OR (EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)
                 AND (SELECT bytes FROM totals WHERE id = 1) + ?6 <= ?7
                 AND COALESCE((SELECT share_bytes FROM daily WHERE day = ?3), 0) + ?6 <= ?8
                 AND (SELECT share_count FROM accounts WHERE id = ?1) < ?9
-                AND ${ACCOUNT_SHARED_TODAY} + ?6 <= ?10)`,
+                AND ${ACCOUNT_SHARED_TODAY} + ?6 <= ?10
+                AND (?13 IS NULL
+                     OR ((SELECT image_bytes FROM totals WHERE id = 1) + ?13 <= ?14
+                         AND COALESCE((SELECT image_bytes FROM daily WHERE day = ?3), 0) + ?13 <= ?15
+                         AND ${ACCOUNT_IMAGES_TODAY} + ?13 <= ?16)))`,
       )
-      .bind(p.owner, p.id, p.day, p.clientKey, p.payload, p.charge, p.budget, p.dailyLimit, p.accountCap, p.accountDailyLimit),
+      .bind(
+        p.owner,
+        p.id,
+        p.day,
+        p.clientKey,
+        p.payload,
+        p.charge,
+        p.budget,
+        p.dailyLimit,
+        p.accountCap,
+        p.accountDailyLimit,
+        images.parts,
+        images.name,
+        images.size,
+        p.imageBudget,
+        p.imageDailyLimit,
+        p.accountImageDailyLimit,
+      ),
     db
       .prepare(
         `UPDATE accounts SET share_count = share_count + 1,
-           quota_bytes = CASE WHEN quota_day = ?3 THEN quota_bytes + ?4 ELSE ?4 END, quota_day = ?3
+           quota_bytes = CASE WHEN quota_day = ?3 THEN quota_bytes + ?4 ELSE ?4 END,
+           image_quota_bytes = CASE WHEN quota_day = ?3 THEN image_quota_bytes + ?5 ELSE ?5 END, quota_day = ?3
          WHERE id = ?1 AND ${exists}`,
       )
-      .bind(p.owner, p.id, p.day, p.charge),
+      .bind(p.owner, p.id, p.day, p.charge, images.size ?? 0),
     db
-      .prepare(`UPDATE totals SET bytes = bytes + ?1, count = count + 1 WHERE id = 1 AND ${exists}`)
-      .bind(p.charge, p.id),
+      .prepare(`UPDATE totals SET bytes = bytes + ?1, count = count + 1, image_bytes = image_bytes + ?3 WHERE id = 1 AND ${exists}`)
+      .bind(p.charge, p.id, images.size ?? 0),
     db
       .prepare(
-        `INSERT INTO daily (day, share_bytes, share_count)
-         SELECT ?1, ?3, 1 WHERE ${exists}
+        `INSERT INTO daily (day, share_bytes, share_count, image_bytes)
+         SELECT ?1, ?3, 1, ?4 WHERE ${exists}
          ON CONFLICT (day) DO UPDATE SET share_bytes = share_bytes + excluded.share_bytes,
-                                         share_count = share_count + 1`,
+                                         share_count = share_count + 1,
+                                         image_bytes = image_bytes + excluded.image_bytes`,
       )
-      .bind(p.day, p.id, p.charge),
+      .bind(p.day, p.id, p.charge, images.size ?? 0),
   ];
 
   let results;
@@ -165,15 +234,15 @@ export async function shareRecord(db, p) {
   // Nothing changed. A request with the same key may have committed after this one looked for it
   // and used the last of a limit, so the condition failed here before the unique constraint could:
   // look for the key again before refusing.
-  const id = await findIdByClientKey(db, p.clientKey);
-  if (id !== null) return { status: "existing", id };
+  const found = await findByClientKey(db, p.clientKey);
+  if (found !== null) return { status: "existing", ...found };
   return { status: "refused", reason: await refusalReason(db, p) };
 }
 
 async function existingOrUnavailable(db, clientKey) {
-  const id = await findIdByClientKey(db, clientKey);
-  if (id === null) throw new Unavailable("the key that broke the constraint is gone");
-  return { status: "existing", id };
+  const found = await findByClientKey(db, clientKey);
+  if (found === null) throw new Unavailable("the key that broke the constraint is gone");
+  return { status: "existing", ...found };
 }
 
 /**
@@ -191,7 +260,10 @@ async function refusalReason(db, p) {
                 EXISTS (SELECT 1 FROM accounts WHERE id = ?1) AS account_exists,
                 (SELECT deleting_since FROM accounts WHERE id = ?1) AS deleting_since,
                 (SELECT share_count FROM accounts WHERE id = ?1) AS account_count,
-                ${ACCOUNT_SHARED_TODAY} AS account_shared`,
+                ${ACCOUNT_SHARED_TODAY} AS account_shared,
+                (SELECT image_bytes FROM totals WHERE id = 1) AS image_bytes,
+                COALESCE((SELECT image_bytes FROM daily WHERE day = ?3), 0) AS images_shared,
+                ${ACCOUNT_IMAGES_TODAY} AS account_images`,
       )
       .bind(p.owner, null, p.day)
       .first(),
@@ -202,6 +274,10 @@ async function refusalReason(db, p) {
   if (row.shared + p.charge > p.dailyLimit) return "daily";
   if (row.account_count >= p.accountCap) return "account";
   if (row.account_shared + p.charge > p.accountDailyLimit) return "account";
+  const size = p.images?.size;
+  if (size != null && row.image_bytes + size > p.imageBudget) return "imageStorage";
+  if (size != null && row.images_shared + size > p.imageDailyLimit) return "imageDaily";
+  if (size != null && row.account_images + size > p.accountImageDailyLimit) return "imageAccount";
   return "changed";
 }
 
@@ -402,29 +478,42 @@ export async function sweepLogins(db, now, limit) {
 }
 
 /**
- * Unshares record `id` if account `owner` holds it, giving its charge back to the totals and its
- * place back to the account's cap in the same transaction, while the account is not being deleted
- * (its deletion removes its records itself, under the opposite condition: `deleteShareChunk`).
- * Returns "unshared", "deleting" (the account is being deleted, or its deletion completed), "forbidden"
- * (another account holds it) or "notFound" (no such row, including one a concurrent unshare removed).
- * Throws Unavailable.
+ * Unshares record `id` if account `owner` holds it, giving its charge and its declared image bytes back
+ * to the totals and its place back to the account's cap in the same transaction, while the account is
+ * not being deleted (its deletion removes its records itself, under the opposite condition:
+ * `deleteShareChunk`). When the share declares images, the same transaction records in the write ledger
+ * (space "s", for request `by` at clock `now`) that its bundle's versions are to go: from then on no row
+ * accounts for them, and the record stays until they are deleted (`removeBundle` in share_images.mjs, or
+ * the hourly run).
+ * Returns `{status, images}`: status "unshared", "deleting" (the account is being deleted, or its
+ * deletion completed), "forbidden" (another account holds it) or "notFound" (no such row, including one
+ * a concurrent unshare removed), and `images` the bundle's name when it unshared a share declaring
+ * images, else null. Throws Unavailable.
  */
-export async function unshareRecord(db, id, owner) {
+export async function unshareRecord(db, id, owner, by, now) {
   const match = "id = ?1 AND owner_id = ?2 AND EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL)";
   const statements = [
     db
       .prepare(
-        `UPDATE totals SET bytes = bytes - (SELECT charge FROM records WHERE ${match}), count = count - 1
+        `UPDATE totals SET bytes = bytes - (SELECT charge FROM records WHERE ${match}), count = count - 1,
+           image_bytes = image_bytes - (SELECT COALESCE(images_size, 0) FROM records WHERE ${match})
          WHERE id = 1 AND EXISTS (SELECT 1 FROM records WHERE ${match})`,
       )
       .bind(id, owner),
     db
       .prepare(`UPDATE accounts SET share_count = share_count - 1 WHERE id = ?2 AND EXISTS (SELECT 1 FROM records WHERE ${match})`)
       .bind(id, owner),
+    db
+      .prepare(
+        `INSERT INTO sync_writes (account_id, write_by, names, written_at, space)
+         SELECT ?2, ?3, json_array(id || '/' || images_name), ?4, 's' FROM records WHERE ${match} AND images_name IS NOT NULL`,
+      )
+      .bind(id, owner, by, now),
+    db.prepare(`SELECT images_name FROM records WHERE ${match}`).bind(id, owner),
     db.prepare(`DELETE FROM records WHERE ${match}`).bind(id, owner),
   ];
   const results = await query(() => db.batch(statements));
-  if (results[2].meta.changes === 1) return "unshared";
+  if (results[4].meta.changes === 1) return { status: "unshared", images: results[3].results[0]?.images_name ?? null };
   const row = await query(() =>
     db
       .prepare(
@@ -434,8 +523,8 @@ export async function unshareRecord(db, id, owner) {
       .bind(id, owner)
       .first(),
   );
-  if (row.writable === 0) return "deleting";
-  return row.found === 0 ? "notFound" : "forbidden";
+  if (row.writable === 0) return { status: "deleting", images: null };
+  return { status: row.found === 0 ? "notFound" : "forbidden", images: null };
 }
 
 /**
@@ -486,7 +575,8 @@ export async function deleteShareChunk(db, accountId, limit) {
       db
         .prepare(
           `UPDATE totals SET bytes = bytes - COALESCE((SELECT sum(charge) FROM records WHERE id IN (${chunk})), 0),
-             count = count - (SELECT count(*) FROM records WHERE id IN (${chunk}))
+             count = count - (SELECT count(*) FROM records WHERE id IN (${chunk})),
+             image_bytes = image_bytes - COALESCE((SELECT sum(images_size) FROM records WHERE id IN (${chunk})), 0)
            WHERE id = 1 AND ${allowed}`,
         )
         .bind(accountId, limit),
@@ -546,20 +636,30 @@ export async function finishAccountDeletion(db, accountId) {
 }
 
 /**
- * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, form}`
- * each. ACCOUNT_SHARE_CAP bounds how many there are. Throws Unavailable.
+ * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, form,
+ * images}` each, `images` its `imageState`. ACCOUNT_SHARE_CAP bounds how many there are. Throws
+ * Unavailable.
  */
 export async function listOwnShares(db, owner) {
   const { results } = await query(() =>
     db
-      .prepare("SELECT id, client_key, schema, payload, shared_day FROM records WHERE owner_id = ?1 ORDER BY shared_day DESC, id")
+      .prepare(
+        `SELECT id, client_key, schema, payload, shared_day, images_name, images_stored_at FROM records
+         WHERE owner_id = ?1 ORDER BY shared_day DESC, id`,
+      )
       .bind(owner)
       .all(),
   );
   return Promise.all(
     results.map(async (row) => {
       if (row.schema !== 1) throw new Error(`record ${row.id} has posted-form schema ${row.schema}`);
-      return { id: row.id, clientKey: row.client_key, sharedDay: row.shared_day, form: await gunzipJson(row.payload) };
+      return {
+        id: row.id,
+        clientKey: row.client_key,
+        sharedDay: row.shared_day,
+        form: await gunzipJson(row.payload),
+        images: imageState(row),
+      };
     }),
   );
 }

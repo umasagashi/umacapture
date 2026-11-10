@@ -12,6 +12,7 @@ import * as limits from "../src/limits.mjs";
 import {
   appendTables,
   FIXTURE_TABLES,
+  imageBundle,
   newClientKey,
   newLoginHash,
   ORIGIN,
@@ -128,7 +129,7 @@ describe("share, list and unshare", () => {
     const [shared] = await results(worker, mine, [share()]);
     assert.equal(shared.status, "created");
     const { id } = shared;
-    assert.deepEqual(shared, { status: "created", id, url: `${ORIGIN}/r/${id}`, json_url: `${ORIGIN}/r/${id}.json` });
+    assert.deepEqual(shared, { status: "created", id, url: `${ORIGIN}/r/${id}`, json_url: `${ORIGIN}/r/${id}.json`, images: "none" });
     assert.equal((await answer(worker.fetch(`/r/${id}.json`))).status, 200);
     const charge = await chargeOf(worker);
     assert.deepEqual(await worker.totals(), { bytes: charge, count: 1 });
@@ -230,6 +231,7 @@ describe("share, list and unshare", () => {
           trainee: { card: { gid: 1004, name: "card <b>&\"'" }, character: { name: "chara 3" }, rank: { name: "rank 2" } },
           evaluation: 12345,
         },
+        images: "none",
       },
     ]);
     assert.match(res.body[0].client_key_hash, /^[0-9a-f]{64}$/);
@@ -750,5 +752,252 @@ describe("name tables loaded into D1 after the Worker started", () => {
     const factor = { gid: 3001 + next, name: `factor ${next}`, color: "red", star: 2 };
     assert.deepEqual((await json.json()).factors.self, [factor]);
     assert.equal((await worker.fetch(`/r/${created.id}`)).status, 200);
+  });
+});
+
+describe("shared images", () => {
+  let worker;
+  before(async () => {
+    worker = await startWorker({ testEntry: true });
+  });
+  after(() => worker.dispose());
+
+  /** A share of the fixture's form declaring the images of `bundle` (from imageBundle). */
+  const withImages = (bundle) => ({ ...share(), images: bundle.images });
+
+  /** The key of share `id`'s bundle `bundle` of account `account` in B2. */
+  const keyOf = (account, id, bundle) => `s/${account}/${id}/${bundle.images.name}`;
+
+  /** The records of the account's writes of shared images that no row accounts for yet. */
+  const imageWritesOf = async (account) =>
+    (await worker.db.prepare("SELECT count(*) AS n FROM sync_writes WHERE account_id = ?1 AND space = 's'").bind(account).first()).n;
+
+  /** `image_bytes` of the totals, of today's daily row, and of account `account`'s day. */
+  async function imageUsage(account) {
+    const day = await today(worker);
+    const totals = await worker.db.prepare("SELECT image_bytes FROM totals WHERE id = 1").first();
+    const daily = await worker.db.prepare("SELECT image_bytes FROM daily WHERE day = ?1").bind(day).first();
+    const own = await worker.db.prepare("SELECT image_quota_bytes FROM accounts WHERE id = ?1 AND quota_day = ?2").bind(account, day).first();
+    return { total: totals.image_bytes, daily: daily?.image_bytes ?? 0, account: own?.image_quota_bytes ?? 0 };
+  }
+
+  /** Moves the Worker's clock on until what a request left in the write ledger is taken, and runs the hourly run. */
+  async function takeWrites() {
+    await worker.advanceClock(limits.SYNC_ABANDONED_AFTER + 2 * limits.RESTORE_MARGIN_SECONDS);
+    assert.equal(await worker.scheduled(), "ok");
+  }
+
+  test("a bundle is stored only by the PUT of the owner of a share declaring images, and only with the declared bytes", async () => {
+    const mine = await worker.signIn("images-owner");
+    const theirs = await worker.signIn("images-other");
+    const owner = await worker.accountOf(mine);
+    const bundle = imageBundle({ seed: 10 });
+    const declared = withImages(bundle);
+    const [shared, plain] = await results(worker, mine, [declared, share()]);
+    assert.deepEqual([shared.status, shared.images, plain.status, plain.images], ["created", "pending", "created", "none"]);
+    const key = keyOf(owner, shared.id, bundle);
+
+    const refusedWith = async (res, status, error, field) => {
+      const got = await answer(res);
+      assert.deepEqual([got.status, got.body], [status, field === undefined ? { error } : { error, field }]);
+    };
+    await refusedWith(worker.putImages(theirs, shared.id, bundle.bytes), 403, "forbidden");
+    await refusedWith(worker.putImages(newClientKey(), shared.id, bundle.bytes), 401, "session_required");
+    await refusedWith(worker.putImages(mine, plain.id, bundle.bytes), 409, "no_images_declared");
+    const tampered = bundle.bytes.slice();
+    tampered[301 + 100] ^= 1; // a byte inside the second part, the factor screenshot
+    await refusedWith(worker.putImages(mine, shared.id, tampered), 400, "invalid_payload", "parts[1]");
+    await refusedWith(worker.putImages(mine, shared.id, bundle.bytes.subarray(1)), 400, "invalid_payload", "content-length");
+    // Another bundle's bytes of the same length: every part differs from the declaration.
+    await refusedWith(worker.putImages(mine, shared.id, imageBundle({ seed: 20 }).bytes), 400, "invalid_payload", "parts[0]");
+    assert.deepEqual(worker.b2.keys("s/"), [], "a refused PUT reached B2");
+    assert.equal((await answer(worker.getImages(shared.id))).status, 404, "a bundle not stored is served");
+
+    const stored = await answer(worker.putImages(mine, shared.id, bundle.bytes));
+    assert.deepEqual([stored.status, stored.body], [200, { status: "stored" }]);
+    assert.deepEqual(worker.b2.versions(key), ["v"]);
+    assert.deepEqual(Buffer.from(worker.b2.visible(key)), Buffer.from(bundle.bytes));
+    assert.equal(await imageWritesOf(owner), 0, "the put's record of its write was left");
+
+    const puts = worker.b2.count("PUT");
+    const again = await answer(worker.putImages(mine, shared.id, bundle.bytes));
+    assert.deepEqual([again.status, again.body], [200, { status: "exists" }]);
+    assert.equal(worker.b2.count("PUT"), puts, "a bundle stored already was put again");
+
+    const served = await worker.getImages(shared.id);
+    assert.equal(served.status, 200);
+    assert.deepEqual(Buffer.from(await served.arrayBuffer()), Buffer.from(bundle.bytes));
+    assert.equal(served.headers.get("content-type"), "application/octet-stream");
+    assert.equal(served.headers.get("content-disposition"), "attachment");
+    assert.equal(served.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(served.headers.get("cache-control"), "no-store");
+
+    // The state of the images follows the bundle in the account's list and on a resend.
+    const listed = (await answer(worker.myShares(mine))).body;
+    assert.deepEqual(
+      listed.map((s) => [s.id, s.images]).sort(),
+      [
+        [shared.id, "stored"],
+        [plain.id, "none"],
+      ].sort(),
+    );
+    const [resent] = await results(worker, mine, [declared]);
+    assert.deepEqual([resent.status, resent.id, resent.images], ["existing", shared.id, "stored"]);
+  });
+
+  test("declared image bytes are counted once a share, not again on a resend or a failed put, and given back on unshare", async () => {
+    const token = await worker.signIn("images-usage");
+    const owner = await worker.accountOf(token);
+    const start = await imageUsage(owner);
+    const bundle = imageBundle({ seed: 30 });
+    const declared = withImages(bundle);
+    const [shared, plain] = await results(worker, token, [declared, share()]);
+    const size = bundle.bytes.length;
+    const counted = { total: start.total + size, daily: start.daily + size, account: start.account + size };
+    assert.deepEqual(await imageUsage(owner), counted);
+    const charges = await worker.db.prepare("SELECT id, charge FROM records WHERE id IN (?1, ?2)").bind(shared.id, plain.id).all();
+    const chargeOfId = (id) => charges.results.find((r) => r.id === id).charge;
+    assert.ok(chargeOfId(shared.id) > chargeOfId(plain.id), "the declaration's bytes are not in the row's charge");
+
+    const [resent] = await results(worker, token, [declared]);
+    assert.equal(resent.status, "existing");
+    assert.equal((await worker.putImages(token, shared.id, bundle.bytes.subarray(1))).status, 400);
+    worker.b2.failPuts(keyOf(owner, shared.id, bundle), [{ status: 403, code: "AccessDenied" }]);
+    assert.deepEqual((await answer(worker.putImages(token, shared.id, bundle.bytes))).body, { error: "storage_refused" });
+    assert.equal((await worker.putImages(token, shared.id, bundle.bytes)).status, 200);
+    assert.deepEqual(await imageUsage(owner), counted, "a resend or a put changed the count");
+
+    assert.equal((await worker.unshare(token, shared.id)).status, 204);
+    assert.deepEqual(await imageUsage(owner), { ...counted, total: start.total }, "the unshare did not give the declared bytes back");
+    assert.deepEqual(worker.b2.keys(`s/${owner}/${shared.id}/`), [], "the unshare left the bundle in B2");
+    assert.equal(await imageWritesOf(owner), 1, "the refused put's record is left to the hourly run");
+  });
+
+  test("past an image limit a share declaring images is refused, and one without images in the same request is not", async () => {
+    const token = await worker.signIn("images-limit");
+    const bundle = imageBundle({ seed: 40 });
+    const { image_bytes: before } = await worker.db.prepare("SELECT image_bytes FROM totals WHERE id = 1").first();
+    // Room for less than the bundle.
+    await worker.db.prepare("UPDATE totals SET image_bytes = ?1").bind(limits.SHARE_IMAGE_BUDGET - bundle.bytes.length + 1).run();
+    try {
+      const list = await results(worker, token, [withImages(bundle), share()]);
+      assert.deepEqual(statuses(list), ["refused image_storage_full", "created"]);
+      assert.equal((await worker.db.prepare("SELECT image_bytes FROM totals WHERE id = 1").first()).image_bytes, limits.SHARE_IMAGE_BUDGET - bundle.bytes.length + 1);
+    } finally {
+      await worker.db.prepare("UPDATE totals SET image_bytes = ?1").bind(before).run();
+    }
+  });
+
+  test("an unshare or a put meeting in any order leaves, once the hourly run took the writes, no version and no record of what was withdrawn, and the account's other share and synced objects stay", async () => {
+    const token = await worker.signIn("images-crossing");
+    const owner = await worker.accountOf(token);
+    const bundles = [50, 60, 70, 80].map((seed) => imageBundle({ seed }));
+    const [late, cut, failed, kept] = await results(worker, token, bundles.map(withImages));
+    const keys = [late, cut, failed, kept].map((s, i) => keyOf(owner, s.id, bundles[i]));
+    for (const [s, i] of [[failed, 2], [kept, 3]]) assert.equal((await worker.putImages(token, s.id, bundles[i].bytes)).status, 200);
+    // A synced object of the same account, which nothing here may reach.
+    const synced = `a/${owner}/${"0".repeat(64)}`;
+    worker.b2.objects.set(synced, [{ versionId: "synced", marker: false, bytes: new Uint8Array([1]), at: await worker.now() }]);
+
+    // 1. A put held at B2 while its share is unshared: it lands after the unshare listed the prefix.
+    const held = worker.b2.hold("PUT", keys[0]);
+    const put = answer(worker.putImages(token, late.id, bundles[0].bytes));
+    await held.entered;
+    assert.equal((await worker.unshare(token, late.id)).status, 204);
+    held.release();
+    assert.deepEqual([(await put).status, (await put).body], [404, { error: "not_found" }]);
+    assert.deepEqual(worker.b2.versions(keys[0]), ["v"], "a version no share accounts for");
+
+    // 2. A put B2 stored whose D1 batch failed; the put sent again stores it, so B2 holds it twice.
+    await worker.cutD1At("SET images_stored_at");
+    assert.equal((await worker.putImages(token, cut.id, bundles[1].bytes)).status, 503);
+    await worker.restoreD1();
+    assert.equal((await worker.putImages(token, cut.id, bundles[1].bytes)).status, 200);
+    assert.deepEqual(worker.b2.versions(keys[1]), ["v", "v"]);
+
+    // 3. An unshare whose deletion B2 fails: the unshare is done, the bundle is left.
+    worker.b2.fail(keys[2]);
+    assert.equal((await worker.unshare(token, failed.id)).status, 204);
+    assert.deepEqual(worker.b2.versions(keys[2]), ["v"]);
+    assert.equal((await answer(worker.getImages(failed.id))).status, 404, "an unshared share's bundle is served");
+    assert.equal(await imageWritesOf(owner), 3, "each crossing leaves its record");
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.versions(keys[0]), [], "the late put's version stayed");
+    assert.deepEqual(worker.b2.versions(keys[2]), [], "the failed unshare's version stayed");
+    // The share that holds its bundle keeps both versions, the same bytes: B2's lifecycle takes the older.
+    assert.deepEqual(worker.b2.versions(keys[1]), ["v", "v"]);
+    assert.equal(await imageWritesOf(owner), 0, "a record stayed");
+    assert.deepEqual(worker.b2.versions(keys[3]), ["v"], "the account's other share lost its bundle");
+    assert.equal((await answer(worker.getImages(kept.id))).status, 200);
+    assert.deepEqual(worker.b2.versions(synced), ["v"], "a synced object was reached");
+
+    // Unsharing the share B2 holds twice deletes both.
+    assert.equal((await worker.unshare(token, cut.id)).status, 204);
+    assert.deepEqual(worker.b2.keys(`s/${owner}/${cut.id}/`), []);
+    assert.equal(await imageWritesOf(owner), 0);
+  });
+
+  test("a put B2 stores but answers 503, refused on the retry after its share was unshared, leaves no version once the hourly run took its record", async () => {
+    const token = await worker.signIn("images-stored-then-refused");
+    const owner = await worker.accountOf(token);
+    const bundle = imageBundle({ seed: 90 });
+    const [shared] = await results(worker, token, [withImages(bundle)]);
+    const key = keyOf(owner, shared.id, bundle);
+    // The unshare completes once the put recorded its write, listing a prefix that holds nothing yet.
+    await worker.writeD1Before("INSERT INTO sync_writes", [`DELETE FROM records WHERE id = '${shared.id}'`]);
+    // The first attempt is stored but answered 503, and the retry is refused.
+    worker.b2.failPuts(key, [
+      { status: 503, code: "ServiceUnavailable", retryAfter: "0" },
+      { status: 403, code: "AccessDenied" },
+    ]);
+    worker.b2.objects.set(key, [{ versionId: "stored-on-503", marker: false, bytes: bundle.bytes, at: await worker.now() }]);
+    assert.deepEqual((await answer(worker.putImages(token, shared.id, bundle.bytes))).body, { error: "storage_refused" });
+    assert.equal(await imageWritesOf(owner), 1, "the refused put dropped the only record of what it may have stored");
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.keys(`s/${owner}/`), [], "the version stored on the 503 stayed");
+    assert.equal(await imageWritesOf(owner), 0);
+  });
+});
+
+describe("image switch", () => {
+  test('SHARE_IMAGES_ENABLED "false" refuses images in and out, and lets unsharing and the hourly run remove them, sync switched off too', async () => {
+    const worker = await startWorker({ testEntry: true, vars: { SHARE_IMAGES_ENABLED: "false", SYNC_ENABLED: "false" } });
+    try {
+      const token = await worker.signIn();
+      const owner = await worker.accountOf(token);
+      const bundle = imageBundle({ seed: 90 });
+      const list = await results(worker, token, [{ ...share(), images: bundle.images }, share()]);
+      assert.deepEqual(statuses(list), ["refused image_sharing_paused", "created"]);
+      assert.equal(await worker.count("records"), 1);
+
+      // A share stored with its bundle before the switch, written directly: this Worker cannot make it.
+      const id = "0123456789";
+      await worker.insertRecord(id, postedForm());
+      await worker.db
+        .prepare("UPDATE records SET owner_id = ?1, images = ?2, images_name = ?3, images_size = ?4, images_stored_at = 1 WHERE id = ?5")
+        .bind(owner, JSON.stringify(bundle.images.parts), bundle.images.name, bundle.images.size, id)
+        .run();
+      const key = `s/${owner}/${id}/${bundle.images.name}`;
+      worker.b2.objects.set(key, [{ versionId: "before", marker: false, bytes: bundle.bytes, at: await worker.now() }]);
+
+      const imported = await answer(worker.fetch(`/api/shares/${id}`));
+      assert.deepEqual([imported.status, imported.body.images], [200, { state: "unavailable" }]);
+      assert.equal((await answer(worker.fetch(`/api/shares/${list[1].id}`))).body.images, null, "a share without images is told apart");
+      assert.equal((await answer(worker.getImages(id))).status, 404);
+      const put = await answer(worker.putImages(token, id, bundle.bytes));
+      assert.deepEqual([put.status, put.body], [503, { error: "image_sharing_paused" }]);
+
+      worker.b2.fail(key);
+      assert.equal((await worker.unshare(token, id)).status, 204);
+      assert.deepEqual(worker.b2.versions(key), ["v"]);
+      await worker.advanceClock(limits.SYNC_ABANDONED_AFTER + 2 * limits.RESTORE_MARGIN_SECONDS);
+      assert.equal(await worker.scheduled(), "ok");
+      assert.deepEqual(worker.b2.versions(key), [], "the hourly run left the bundle while switched off");
+      assert.equal(await worker.count("sync_writes"), 0);
+    } finally {
+      await worker.dispose();
+    }
   });
 });

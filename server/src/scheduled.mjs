@@ -44,7 +44,7 @@ const KINDS = [
     // not a record the user sees.
     key: "writes",
     sync: true,
-    run: (env, bucket, clk) => writeLeftovers(env.DB, bucket, clk.now),
+    run: (env, bucket, clk) => writeLeftovers(env.DB, bucket, "a", clk.now),
   },
   {
     // Continues the deletion of the accounts being deleted, a step at a time. After the kinds of sync
@@ -54,6 +54,17 @@ const KINDS = [
     key: "deletions",
     sync: false,
     run: (env, bucket, clk) => continueAccountDeletions(env.DB, bucket, clk),
+  },
+  {
+    // Deletes what a request wrote under an account's shared images (s/<account id>/) and left no share
+    // to account for: a bundle put after its share was unshared or its account deleted, one put whose
+    // share's row was never told, and one an unshare failed to delete. Not a kind of sync: neither the
+    // sync switch nor the image switch stops it, since what it deletes is what a sharer withdrew. After
+    // the deletions, which take a whole step at a time: what it leaves costs storage, and B2 does not
+    // serve it, since the bundle's GET answers only for a share that records its bundle as stored.
+    key: "share_writes",
+    sync: false,
+    run: (env, bucket, clk) => writeLeftovers(env.DB, bucket, "s", clk.now),
   },
   {
     // Deletes the rows of names gone past the six-day boundary that nothing references, a day after the

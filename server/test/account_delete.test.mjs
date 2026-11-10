@@ -10,7 +10,7 @@ import * as limits from "../src/limits.mjs";
 import { ROUTES } from "../src/routes.mjs";
 import { named, STATEMENT } from "../src/sync_refs.mjs";
 import { answer as answerWithHeaders, bodyOf, idIn, newImage, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
-import { CookieJar, GOOGLE, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
+import { CookieJar, GOOGLE, imageBundle, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
 
 /** Status and parsed body of one response (null for a body that is not JSON). */
 async function answer(resPromise) {
@@ -98,7 +98,7 @@ describe("account deletion", () => {
 
     const first = await deleteMe(token);
     assert.equal(first.status, 200, first.text);
-    assert.deepEqual(first.body, { remaining: { sync_rows: 0, sync_versions: 0, shares: 1 } });
+    assert.deepEqual(first.body, { remaining: { sync_rows: 0, sync_versions: 0, shares: 1, share_images: 0 } });
     assert.equal(await rowsOf("records", "owner_id", owner), 1);
     assert.equal(await rowsOf("sessions", "account_id", owner), 1, "only the deleting session is left");
     assert.equal((await getMe(other)).status, 401);
@@ -397,6 +397,41 @@ describe("account deletion", () => {
     assert.equal(await writesOf(a.id), 0);
   });
 
+  test("removes the bundle of every share under the account's prefix, and one a PUT stores after the deletion answered 204 once the hourly run took its write, another account's kept", async () => {
+    const shareImages = async (token, bundles) => {
+      const shares = bundles.map((b) => ({ client_key: newClientKey(), record: postedForm(), images: b.images }));
+      return (await answer(worker.share(token, shares))).body.results.map((r) => r.id);
+    };
+    const imageWritesOf = async (id) =>
+      (await worker.db.prepare("SELECT count(*) AS n FROM sync_writes WHERE account_id = ?1 AND space = 's'").bind(id).first()).n;
+    const token = await worker.signIn("images-delete");
+    const id = await worker.accountOf(token);
+    const other = await worker.signIn("images-delete-other");
+    const [stored, late, theirs] = [1, 2, 3].map((seed) => imageBundle({ seed }));
+    const [storedId, lateId] = await shareImages(token, [stored, late]);
+    const [theirsId] = await shareImages(other, [theirs]);
+    assert.equal((await worker.putImages(token, storedId, stored.bytes)).status, 200);
+    assert.equal((await worker.putImages(other, theirsId, theirs.bytes)).status, 200);
+    const theirKey = `s/${await worker.accountOf(other)}/${theirsId}/${theirs.images.name}`;
+
+    const lateKey = `s/${id}/${lateId}/${late.images.name}`;
+    const held = worker.b2.hold("PUT", lateKey);
+    const put = answer(worker.putImages(token, lateId, late.bytes));
+    await held.entered;
+    const answers = await deleteUntilDone(token, 5);
+    assert.equal(answers.at(-1).status, 204, answers.map((r) => r.text).join("\n"));
+    held.release();
+    assert.equal((await put).status, 404, "a share of a deleted account was recorded as stored");
+    assert.deepEqual(worker.b2.keys(`s/${id}/`), [lateKey], "the deletion left a bundle, or the late put stored none");
+    assert.equal(await imageWritesOf(id), 1);
+
+    await takeWrites();
+    assert.deepEqual(worker.b2.keys(`s/${id}/`), []);
+    assert.equal(await imageWritesOf(id), 0);
+    assert.deepEqual(worker.b2.versions(theirKey), ["v"], "another account's bundle was reached");
+    assert.equal((await worker.getImages(theirsId)).status, 200);
+  });
+
   test("removes everything an account synced, every version and marker under its B2 prefix and every sync row, while D1 enforces references", async () => {
     assert.deepEqual((await worker.db.prepare("PRAGMA foreign_keys").all()).results, [{ foreign_keys: 1 }]);
     const a = await syncing("sync-deleted");
@@ -455,11 +490,11 @@ describe("account deletion", () => {
     await leaveDeleteRows(4 * 3 + 2);
     const some = await deleteMe(a.token);
     assert.equal(some.status, 200, some.text);
-    assert.deepEqual(some.body, { remaining: { sync_rows: 7, sync_versions: 0, shares: 0 } });
+    assert.deepEqual(some.body, { remaining: { sync_rows: 7, sync_versions: 0, shares: 0, share_images: 0 } });
 
     const paused = await answerWithHeaders(worker.fetch("/api/me", { method: "DELETE", headers: { Authorization: `Bearer ${a.token}` } }));
     assert.equal(paused.status, 429, paused.text);
-    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 7, sync_versions: 0, shares: 0 } });
+    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 7, sync_versions: 0, shares: 0, share_images: 0 } });
     assert.ok(Number(paused.headers.get("retry-after")) > 0);
     assert.equal(await syncRowsOf(a.id), 7);
     const day = await worker.db.prepare("SELECT rows_written, delete_rows FROM sync_daily WHERE day = ?").bind(await today()).first();
@@ -486,7 +521,7 @@ describe("account deletion", () => {
     const before = await readOn();
     const paused = await answerWithHeaders(worker.fetch("/api/me", { method: "DELETE", headers: { Authorization: `Bearer ${a.token}` } }));
     assert.equal(paused.status, 429, paused.text);
-    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 11, sync_versions: 0, shares: 0 } });
+    assert.deepEqual(paused.body, { error: "sync_paused_today", remaining: { sync_rows: 11, sync_versions: 0, shares: 0, share_images: 0 } });
     assert.ok((await readOn()) > before, "what the call read is counted");
     assert.equal(await syncRowsOf(a.id), 11);
 

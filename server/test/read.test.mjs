@@ -2,7 +2,7 @@
 
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { newClientKey, OG_ORIGIN, ORIGIN, postedForm, startWorker } from "./support/worker_harness.mjs";
+import { imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, startWorker } from "./support/worker_harness.mjs";
 
 const ID = "0123456789";
 const HOSTILE_CARD = "card <b>&\"'";
@@ -302,5 +302,51 @@ describe("account list", () => {
       assert.equal(res.status, 404, path);
       await res.arrayBuffer();
     }
+  });
+});
+
+describe("import endpoint", () => {
+  let worker;
+  before(async () => {
+    worker = await startWorker();
+  });
+  after(() => worker.dispose());
+
+  test("tells a share without images, with its bundle pending and with it stored apart, serves the bundle only once stored, and neither once unshared", async () => {
+    const token = await worker.signIn();
+    const bundle = imageBundle({ seed: 7, trainee: false });
+    const res = await worker.share(token, [
+      { client_key: newClientKey(), record: postedForm(), images: bundle.images },
+      { client_key: newClientKey(), record: postedForm() },
+    ]);
+    const [shared, plain] = (await res.json()).results;
+    const imported = async (id) => (await (await worker.fetch(`/api/shares/${id}`)).json()).images;
+    const bundleStatus = async (id) => {
+      const got = await worker.getImages(id);
+      await got.arrayBuffer();
+      return got.status;
+    };
+
+    assert.equal(await imported(plain.id), null);
+    assert.deepEqual(await imported(shared.id), { state: "pending" });
+    assert.equal(await bundleStatus(shared.id), 404);
+
+    assert.equal((await worker.putImages(token, shared.id, bundle.bytes)).status, 200);
+    assert.deepEqual(await imported(shared.id), { state: "stored", ...bundle.images });
+    const served = await worker.getImages(shared.id);
+    assert.deepEqual(Buffer.from(await served.arrayBuffer()), Buffer.from(bundle.bytes));
+
+    // The public JSON and page carry nothing of the images: they are those of the share without them.
+    const publicOf = async (id) => {
+      const { id: _id, url: _url, ...rest } = await (await worker.fetch(`/r/${id}.json`)).json();
+      return rest;
+    };
+    assert.deepEqual(await publicOf(shared.id), await publicOf(plain.id));
+    assert.equal((await (await worker.fetch(`/r/${shared.id}`)).text()).includes(bundle.images.name), false);
+
+    assert.equal((await worker.unshare(token, shared.id)).status, 204);
+    const gone = await worker.fetch(`/api/shares/${shared.id}`);
+    assert.deepEqual([gone.status, await gone.json()], [404, { error: "not_found" }]);
+    assert.equal(await bundleStatus(shared.id), 404);
   });
 });

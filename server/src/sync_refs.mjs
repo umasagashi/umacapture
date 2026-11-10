@@ -55,7 +55,7 @@
 // (`forgetUnstored`), so the rows follow what the account references and what it hid lately.
 
 import { clock } from "./api.mjs";
-import { accountPrefix, DELETE_OBJECTS_MAX, objectKey, StorageFailed } from "./b2.mjs";
+import { accountPrefix, DELETE_OBJECTS_MAX, objectKey, spacePrefix, StorageFailed } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { d1 } from "./sync.mjs";
 import { Unavailable } from "./store.mjs";
@@ -325,12 +325,18 @@ export const HELD = (bound, table = null) => {
 const LIVE = "EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND deleting_since IS NULL)";
 
 /**
- * The statement that records, before request `by` asks B2 to write `names` under the prefix of account
- * `accountId` at clock `at`, that it is about to (sync_writes): one row, whatever the number of names.
- * It references no account, so it is written for an account deleted meanwhile too.
+ * The statement that records, before request `by` asks B2 to write `names` under the prefix of space
+ * `space` (`spacePrefix`) of account `accountId` at clock `at`, that it is about to (sync_writes): one
+ * row, whatever the number of names. It references no account, so it is written for an account deleted
+ * meanwhile too.
  */
-export const writing = (db, accountId, by, names, at) =>
-  db.prepare("INSERT INTO sync_writes (account_id, write_by, names, written_at) VALUES (?1, ?2, ?3, ?4)").bind(accountId, by, distinctJson(names), at);
+export const writingIn = (db, space, accountId, by, names, at) =>
+  db
+    .prepare("INSERT INTO sync_writes (account_id, write_by, names, written_at, space) VALUES (?1, ?2, ?3, ?4, ?5)")
+    .bind(accountId, by, distinctJson(names), at, space);
+
+/** `writingIn` for sync's writes, under the account's prefix (space "a"). */
+export const writing = (db, accountId, by, names, at) => writingIn(db, "a", accountId, by, names, at);
 
 /**
  * The statement that clears the records `writing` made for request `by`, for the statement or batch
@@ -338,7 +344,7 @@ export const writing = (db, accountId, by, names, at) =>
  * is gone: what the request wrote may be under a prefix the deletion has already emptied.
  */
 export const written = (db, accountId, by) =>
-  db.prepare(`DELETE FROM sync_writes WHERE account_id = ?1 AND write_by = ?2 AND ${LIVE}`).bind(accountId, by);
+  db.prepare(`DELETE FROM sync_writes WHERE account_id = ?1 AND write_by = ?2 AND space = 'a' AND ${LIVE}`).bind(accountId, by);
 
 /**
  * `written` for the batch that records what request `by` put (`insertObjects`), after that statement:
@@ -349,7 +355,7 @@ export const written = (db, accountId, by) =>
 export const putWritten = (db, accountId, by) =>
   db
     .prepare(
-      `DELETE FROM sync_writes WHERE account_id = ?1 AND write_by = ?2 AND ${LIVE}
+      `DELETE FROM sync_writes WHERE account_id = ?1 AND write_by = ?2 AND space = 'a' AND ${LIVE}
          AND NOT EXISTS (SELECT 1 FROM json_each(sync_writes.names) j CROSS JOIN sync_objects o ON o.account_id = ?1 AND o.name = j.value
            WHERE o.ref_count = 0 AND o.hidden_at IS NOT NULL)`,
     )
@@ -582,7 +588,7 @@ async function deleteVersions(bucket, targets) {
 export async function markersOf(bucket, accountId, rows, after) {
   const recorded = rows.filter((r) => r.marker !== null).map((r) => ({ key: objectKey(accountId, r.name), versionId: r.marker }));
   const names = rows.filter((r) => r.marker === null).map((r) => r.name).sort();
-  const { targets, listed } = await listVersionsOf(bucket, accountId, names, (e) => e.marker, (n) => after(recorded.length + n));
+  const { targets, listed } = await listVersionsOf(bucket, accountPrefix(accountId), names, (e) => e.marker, (n) => after(recorded.length + n));
   return { targets: [...recorded, ...targets], listed };
 }
 
@@ -799,16 +805,15 @@ async function unshown(db, accountId, at) {
 }
 
 /**
- * The versions B2 lists over `names` of `accountId` (sorted) that `keep(entry, name)` keeps (an entry of
- * `Bucket.listVersions`), read from the account's ListObjectVersions pages rather than a listing per
- * name: each page begins at the first name not yet listed, or goes on inside it when the page before
+ * The versions B2 lists over `names` (sorted) under key prefix `prefix` (an account's space,
+ * `spacePrefix`) that `keep(entry, name)` keeps (an entry of `Bucket.listVersions`), read from the
+ * prefix's ListObjectVersions pages rather than a listing per name: each page begins at the first name not yet listed, or goes on inside it when the page before
  * ended in it, and one page lists every name it passes. So a page lists one name at least, unless that
  * name alone holds more versions than a page. It reads pages while `bucket` keeps room for one more and
  * for `after(n)` B2 requests, n the versions kept, a page's worth more included. Returns `{targets,
  * listed}`: the versions kept as DeleteObjects targets, and the names whose every version it read.
  */
-async function listVersionsOf(bucket, accountId, names, keep, after) {
-  const prefix = accountPrefix(accountId);
+async function listVersionsOf(bucket, prefix, names, keep, after) {
   const wanted = new Set(names);
   const targets = [];
   const listed = new Set();
@@ -897,8 +902,8 @@ export async function tidyLeftoversOf(db, bucket, accountId, at) {
       const names = (await leftovers(db, accountId, at)).get(accountId);
       if (names !== undefined) await hideLeft(db, bucket, accountId, names, at);
     }
-    const writes = (await unwritten(db, accountId, at)).get(accountId);
-    if (writes !== undefined) await writeLeft(db, bucket, accountId, writes, at);
+    const writes = (await unwritten(db, "a", accountId, at)).get(accountId);
+    if (writes !== undefined) await writeLeft(db, bucket, "a", accountId, writes, at);
   } catch (error) {
     if (!(error instanceof Unavailable || error instanceof StorageFailed)) throw error;
   }
@@ -927,25 +932,47 @@ export async function hideLeftovers(db, bucket, at) {
 }
 
 /**
- * The names of account `accountId` (every account when null) whose writes requests left unrecorded and
- * are taken at clock `at` (`unwrittenBy`), as `{name, written_at, held}`: `written_at` the latest
- * record's, `held` whether the account holds the name and is not being deleted. A name a record newer
- * than that also names is left for later: its request may still be writing. At most
- * SYNC_LEFTOVER_WRITES, by account, and by name within an account.
+ * What a record of a write (sync_writes) means in each space (`spacePrefix`), keyed by the space: `held`,
+ * the SQL condition, over the record `w` and the name `j.value` and with `?4` bound to `goneBy` of the
+ * clock, that the account holds the name, so the versions under it stay; and `rehides`, whether a held
+ * name's row has to be hidden again (`rehidden`) once its record is taken.
+ * - "a", sync: the account's sync_objects row of the name is held (`HELD`). A put may have shown it over
+ *   a hide, so a held row hidden and referenced by nothing is hidden again.
+ * - "s", shared images: the name is <share id>/<bundle name> of the account's share that records that
+ *   bundle as stored. Nothing hides a bundle, so nothing is hidden again.
  */
-async function unwritten(db, accountId, at) {
-  const account = accountId === null ? "" : "WHERE w.account_id = ?1";
+const SPACES = Object.freeze({
+  a: {
+    held: `EXISTS (SELECT 1 FROM sync_objects o WHERE o.account_id = w.account_id AND o.name = j.value AND ${HELD("?4", "o")})`,
+    rehides: true,
+  },
+  s: {
+    held: `EXISTS (SELECT 1 FROM records r WHERE r.id = substr(j.value, 1, instr(j.value, '/') - 1) AND r.owner_id = w.account_id
+             AND r.images_name = substr(j.value, instr(j.value, '/') + 1) AND r.images_stored_at IS NOT NULL)`,
+    rehides: false,
+  },
+});
+
+/**
+ * The names of space `space` of account `accountId` (every account when null) whose writes requests
+ * left unrecorded and are taken at clock `at` (`unwrittenBy`), as `{name, written_at, held}`:
+ * `written_at` the latest record's, `held` whether the account holds the name (the space's `held`) and
+ * is not being deleted. A name a record newer than that also names is left for later: its request may
+ * still be writing. At most SYNC_LEFTOVER_WRITES, by account, and by name within an account.
+ */
+async function unwritten(db, space, accountId, at) {
+  const account = accountId === null ? "" : "AND w.account_id = ?1";
   const rows = await d1(() =>
     db
       .prepare(
         `SELECT w.account_id, j.value AS name, max(w.written_at) AS written_at,
            EXISTS (SELECT 1 FROM accounts a WHERE a.id = w.account_id AND a.deleting_since IS NULL)
-             AND EXISTS (SELECT 1 FROM sync_objects o WHERE o.account_id = w.account_id AND o.name = j.value AND ${HELD("?4", "o")}) AS held
-         FROM sync_writes w CROSS JOIN json_each(w.names) j ${account}
+             AND ${SPACES[space].held} AS held
+         FROM sync_writes w CROSS JOIN json_each(w.names) j WHERE w.space = ?5 ${account}
          GROUP BY w.account_id, j.value HAVING max(w.written_at) <= ?2
          ORDER BY w.account_id, j.value LIMIT ?3`,
       )
-      .bind(accountId, unwrittenBy(at), limits.SYNC_LEFTOVER_WRITES, goneBy(at))
+      .bind(accountId, unwrittenBy(at), limits.SYNC_LEFTOVER_WRITES, goneBy(at), space)
       .all(),
   );
   const out = new Map();
@@ -975,35 +1002,39 @@ function rehidden(db, accountId, names, at) {
 }
 
 /**
- * Takes the writes `rows` (from `unwritten`) of `accountId` left unrecorded, as far as `bucket` has the
- * B2 requests left, and returns whether it took on all of them. A name the account holds is accounted
- * for by its row, once the row says what B2 may show (`rehidden`): its records are cleared in the same
- * batch. Of any other name, it deletes the versions its requests may have written (`writtenBy`, by B2's
- * LastModified), listed by the account's pages (`listVersionsOf`), and clears the records of each name
- * whose every version it listed and B2 failed none of. A version written later is a request's still
- * running, which records its own write.
+ * Takes the writes `rows` (from `unwritten`) of space `space` of `accountId` left unrecorded, as far as
+ * `bucket` has the B2 requests left, and returns whether it took on all of them. A name the account
+ * holds is accounted for by its row, once the row says what B2 may show (`rehidden`, in a space that
+ * `rehides`): its records are cleared in the same batch. Of any other name, it deletes the versions its
+ * requests may have written (`writtenBy`, by B2's LastModified), listed by the pages of the account's
+ * prefix in the space (`listVersionsOf`), and clears the records of each name whose every version it
+ * listed and B2 failed none of. A version written later is a request's still running, which records its
+ * own write.
  */
-async function writeLeft(db, bucket, accountId, rows, at) {
+async function writeLeft(db, bucket, space, accountId, rows, at) {
+  const prefix = spacePrefix(space, accountId);
   const held = rows.filter((r) => r.held).map((r) => r.name);
   const unheld = rows.filter((r) => !r.held);
   const bound = new Map(unheld.map((r) => [r.name, writtenBy(r.written_at)]));
   const names = unheld.map((r) => r.name).sort();
-  const { targets, listed } = await listVersionsOf(bucket, accountId, names, (e, name) => e.modified <= bound.get(name), deleteBatches);
+  const { targets, listed } = await listVersionsOf(bucket, prefix, names, (e, name) => e.modified <= bound.get(name), deleteBatches);
   const failed = await deleteVersions(bucket, targets);
-  const done = [...held, ...[...listed].filter((n) => !failed.has(objectKey(accountId, n)))];
+  const done = [...held, ...[...listed].filter((n) => !failed.has(prefix + n))];
   if (done.length > 0) {
     // Takes the names off the rows it read them from, and deletes a row left naming none.
     await d1(() =>
       db.batch([
-        ...rehidden(db, accountId, held, at),
+        ...(SPACES[space].rehides ? rehidden(db, accountId, held, at) : []),
         db
           .prepare(
             `UPDATE sync_writes SET names = (SELECT json_group_array(value) FROM json_each(sync_writes.names)
                WHERE value NOT IN (SELECT value FROM json_each(?3)))
-             WHERE account_id = ?1 AND written_at <= ?2`,
+             WHERE account_id = ?1 AND written_at <= ?2 AND space = ?4`,
           )
-          .bind(accountId, unwrittenBy(at), distinctJson(done)),
-        db.prepare("DELETE FROM sync_writes WHERE account_id = ?1 AND written_at <= ?2 AND names = '[]'").bind(accountId, unwrittenBy(at)),
+          .bind(accountId, unwrittenBy(at), distinctJson(done), space),
+        db
+          .prepare("DELETE FROM sync_writes WHERE account_id = ?1 AND written_at <= ?2 AND space = ?3 AND names = '[]'")
+          .bind(accountId, unwrittenBy(at), space),
       ]),
     );
   }
@@ -1011,13 +1042,13 @@ async function writeLeft(db, bucket, accountId, rows, at) {
 }
 
 /**
- * The hourly run's writes: up to SYNC_LEFTOVER_WRITES names whose writes requests left unrecorded, of
- * every account, existing or not, account by account while `bucket` has the B2 requests left. What it
- * does not reach stays recorded for the next run.
+ * The hourly run's writes of space `space`: up to SYNC_LEFTOVER_WRITES names whose writes requests left
+ * unrecorded, of every account, existing or not, account by account while `bucket` has the B2 requests
+ * left. What it does not reach stays recorded for the next run.
  */
-export async function writeLeftovers(db, bucket, at) {
-  for (const [accountId, rows] of await unwritten(db, null, at)) {
-    if (!(await writeLeft(db, bucket, accountId, rows, at))) break;
+export async function writeLeftovers(db, bucket, space, at) {
+  for (const [accountId, rows] of await unwritten(db, space, null, at)) {
+    if (!(await writeLeft(db, bucket, space, accountId, rows, at))) break;
   }
 }
 
