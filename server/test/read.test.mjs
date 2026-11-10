@@ -422,6 +422,36 @@ describe("share report", () => {
     }
   });
 
+  test("a report of an account's list reaches Sentry naming the list, and counts toward the same day's limit", async () => {
+    const worker = await startWorker();
+    try {
+      const owner = await worker.accountOf(await worker.signIn("100000000000000000031"));
+      worker.siteverify.answer = passingReport;
+
+      const list = await (await worker.fetch(`/u/${owner}`)).text();
+      assert.match(list, new RegExp(`href="${ORIGIN}/u/${owner}/report"`));
+      const form = await worker.fetch(`/u/${owner}/report`);
+      assert.equal(form.status, 200);
+      assert.match(await form.text(), new RegExp(`name="id" value="${owner}"`));
+      const missing = await worker.fetch(`/u/${"0".repeat(16)}/report`);
+      assert.equal(missing.status, 404);
+      await missing.arrayBuffer();
+
+      assert.equal(await outcome(await report(worker, { id: owner, text: "一覧について" })), "200 accepted");
+      const event = JSON.parse(worker.sentry.calls[0].body.split("\n")[2]);
+      assert.deepEqual(event.extra, { list_id: owner, text: "一覧について" });
+      assert.deepEqual(event.tags, { kind: "list_report", reason: "personal_info" });
+      assert.deepEqual(event.fingerprint, ["list-report", owner]);
+      assert.equal((await report(worker, { id: "0".repeat(16) })).status, 404);
+
+      await worker.db.prepare("UPDATE daily SET reports = ? WHERE day = ?").bind(REPORT_DAILY_LIMIT, today()).run();
+      assert.equal(await outcome(await report(worker, { id: owner })), "429 limit");
+      assert.equal(worker.sentry.calls.length, 1);
+    } finally {
+      await worker.dispose();
+    }
+  });
+
   test("reports are accepted while sharing, sync and shared images are paused, and refused unsent where no DSN is set", async () => {
     const paused = await startWorker({ vars: { SHARING_ENABLED: "false", SYNC_ENABLED: "false", SHARE_IMAGES_ENABLED: "false" } });
     const off = await startWorker({ vars: { REPORT_SENTRY_DSN: "" } });

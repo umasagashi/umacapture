@@ -128,10 +128,11 @@ a { color: var(--primary); }
 .site-doc p, .site-doc li { line-height: 1.85; }
 .site-doc a, .site-doc code { overflow-wrap: anywhere; }
 
-/* The report form (/r/<id>/report): a reason per line, the text across the column, then the button. */
+/* The report form (/r/<id>/report, /u/<id>/report): a reason per line, the text across the column, then the button. */
 .report-form { display: grid; gap: .8rem; }
 .report-form fieldset { margin: 0; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: 12px; }
-.report-choice { display: block; line-height: 1.85; }
+/* The radio in its own column, so a reason that wraps continues under its own text, not under the radio. */
+.report-choice { display: flex; gap: .4em; align-items: baseline; line-height: 1.85; }
 .report-form textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: .5rem; }
 .report-form button { justify-self: start; font: inherit; padding: .4rem 1.4rem; border: 0; border-radius: 999px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
 
@@ -147,7 +148,14 @@ a { color: var(--primary); }
   border-top: 1px solid var(--line);
   font-size: .82rem;
   color: var(--muted);
+  /* The links on the left, the report link at the right end; when the row is too narrow the report
+     link wraps to a line of its own and stays at the right end. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .4rem 1rem;
 }
+.site-footer-report { margin-left: auto; }
 
 /* /r/<id>: one shared record. */
 .rec h1 { margin: .1rem 0 .4rem; font-size: 2rem; line-height: 1.25; }

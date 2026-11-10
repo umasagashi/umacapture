@@ -4,7 +4,8 @@ The web app is served from `https://umacapture.com` by **Cloudflare Workers Stat
 together with the **Worker** (`server/src/`, configured by `server/wrangler.jsonc`) and its D1
 database. The Worker carries logins (Google, behind Turnstile), record sharing and file sync. It
 answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, the report page of a record
-`/r/<id>/report`, an account's list of shared records `/u/<id>` and `/u/<id>.json`, and the API under
+`/r/<id>/report`, an account's list of shared records `/u/<id>` and `/u/<id>.json` and the list's report
+page `/u/<id>/report`, and the API under
 `/api/` (file sync under `/api/sync/`), and answers 404 to any other path that matches no file. The
 API includes the app's import of a shared record: `GET /api/shares/<id>`, which answers the stored
 form and the state of the share's images, and `GET /api/shares/<id>/images`, the image bundle of a
@@ -119,7 +120,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
    mode. Its sitekey goes into the config (below), its secret key into `TURNSTILE_SECRET`. The
    login start page (`/api/auth/start`) shows the widget, and a login begin
    (`POST /api/auth/begin`) is refused unless siteverify reports this hostname and the action
-   `login`. The report page of a record (`/r/<id>/report`) shows the same widget, and a report
+   `login`. The report pages of a record (`/r/<id>/report`) and of a list (`/u/<id>/report`) show the same widget, and a report
    (`POST /api/reports`) is refused unless siteverify reports the action `report` (`REPORT_ACTION` in
    `server/src/report.mjs`, a constant, not a var).
 8. **Google login.** In Google Cloud, an OAuth client of type Web application; the Worker asks it
@@ -190,7 +191,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
     | `AUTH_REDIRECT_ORIGIN` | `https://umacapture.com`, the origin of the redirect URI registered with Google |
     | `SYNC_ENABLED` | `"true"` (a first production deployment starts with `"false"`, see "Deploying"). `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` and stops the hourly run's sync kinds, while sharing, logins and account deletion go on, the hourly run's included |
     | `SHARE_IMAGES_ENABLED` | `"true"`. `"false"` stops shared images coming in and going out: a share that declares images is refused (its result in `POST /api/shares` is `image_sharing_paused`; one without images goes on), a bundle's PUT answers `503 image_sharing_paused`, the bundle's GET answers `404`, and the import endpoint tells a share with images `{"state": "unavailable"}`. Unsharing, account deletion, takedowns and the hourly run's deletion of images go on. Turning it back to `"true"` serves again every bundle still stored |
-    | `REPORT_SENTRY_DSN` | The Sentry DSN reports of shares are sent to: the app's own (`_sentryDsn` in `lib/src/core/sentry_util.dart`), written here a second time because the app and the Worker ship apart. A DSN is a public client value, so it is a var. Empty: the environment takes no reports, and the report page says so. Staging's is empty |
+    | `REPORT_SENTRY_DSN` | The Sentry DSN reports of shares and lists are sent to: the app's own (`_sentryDsn` in `lib/src/core/sentry_util.dart`), written here a second time because the app and the Worker ship apart. A DSN is a public client value, so it is a var. Empty: the environment takes no reports, and the report page says so. Staging's is empty |
     | `REPORT_SENTRY_ENVIRONMENT` | `production`: the Sentry environment a report's event carries (staging `staging`) |
     | `B2_ENDPOINT` | `s3.us-west-004.backblazeb2.com` |
     | `B2_REGION` | `us-west-004` |
@@ -231,24 +232,26 @@ These are outward-facing or account-level operations. Nothing in the repository 
     request and `429` after it. `/api/sync/generation` never answers `429`: every request gets the
     Worker's own answer (`401` without a login, `503` while sync is off). The check blocks only the
     IP it runs from, for 10 seconds at a time.
-13. **Notification of reports.** A report of a share (`/r/<id>/report`) reaches the operator only as
-    a Sentry event in the app's project (`REPORT_SENTRY_DSN`); nothing else tells anyone. Each
-    accepted report is one event of this shape (`sendReport` in `server/src/report.mjs`):
+13. **Notification of reports.** A report of a share (`/r/<id>/report`) or of an account's list
+    (`/u/<id>/report`) reaches the operator only as a Sentry event in the app's project
+    (`REPORT_SENTRY_DSN`); nothing else tells anyone. Each accepted report is one event of this shape
+    (`sendReport` and `TARGETS` in `server/src/report.mjs`); where a list's report differs, the
+    value follows the slash:
 
     | Field | Value |
     |---|---|
-    | `message` | `share report` |
+    | `message` | `share report` / `list report` |
     | `level` | `warning` |
     | `logger` | `share-report` |
     | `environment` | `REPORT_SENTRY_ENVIRONMENT` |
-    | `tags` | `kind`: `share_report`; `reason`: `own_trainer`, `personal_info`, `inappropriate` or `other` (`REPORT_REASONS`) |
-    | `extra` | `share_id`, `text` (the reporter's free text, up to 1,000 characters), `shared_on` |
-    | `fingerprint` | `["share-report", <share id>]`: one issue a share, whose count grows with each later report of it |
+    | `tags` | `kind`: `share_report` / `list_report`; `reason`: `own_trainer`, `personal_info`, `inappropriate` or `other` (`REPORT_REASONS`) |
+    | `extra` | `share_id`, `text` (the reporter's free text, up to 1,000 characters), `shared_on` / `list_id` (the account id of `/u/<id>`), `text` |
+    | `fingerprint` | `["share-report", <share id>]` / `["list-report", <account id>]`: one issue a share or a list, whose count grows with each later report of it |
 
     It carries no user, request or IP. In Sentry, create one issue alert rule on the app's project:
     environment `production`; when a new issue is created, or an issue changes state from resolved
-    to unresolved (a share reported again after its issue was resolved); if the event's tag `kind`
-    equals `share_report`; then notify the operator (email to the member or team who handles
+    to unresolved (a share or list reported again after its issue was resolved); if the event's tag `kind`
+    equals `share_report` or `list_report`; then notify the operator (email to the member or team who handles
     reports). The tag filter keeps the app's own errors out of it. Any other rule of the project that
     fires on every new issue fires on reports too; decide whether to keep that. Staging's DSN is
     empty, so the rule can only be checked in production: send one report from a production record
@@ -1090,7 +1093,10 @@ migration: it is the first means under "Stopping record sharing".
 
 ### Handling a report
 
-A report arrives as a Sentry issue `share report` (One-time preparation, step 13), one issue a share.
+A report arrives as a Sentry issue `share report` (One-time preparation, step 13), one issue a share,
+or `list report`, one issue an account's list. A list is reported as a whole, and there is no takedown
+of a list: open `https://umacapture.com/u/<list_id>`, find the shares the report is about, and handle
+each of them by its share id as below.
 
 1. Read the issue: `share_id`, the `reason` tag and the reporter's `text`. Open
    `https://umacapture.com/r/<share id>`; for a report about images, the share's images are what

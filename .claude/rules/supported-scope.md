@@ -92,7 +92,8 @@ destroys data the product does promise to keep.
   stated reason, which is the promised behaviour for it.
 - **A record imported from a link is the importer's copy**: it stays when its sharer unshares it or the
   operator takes it down.
-- **Readers' reports** of a share (`/r/<id>/report`) and **the operator's takedown** of a share or of
+- **Readers' reports** of a share (`/r/<id>/report`) or of an account's whole list (`/u/<id>/report`),
+  and **the operator's takedown** of a share or of
   its images are normal. A report past the day's limit is refused with a stated reason, which is the
   promised behaviour for it.
 

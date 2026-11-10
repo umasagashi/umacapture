@@ -1,6 +1,7 @@
-// Reporting a share to the operator: the report page /r/<id>/report and its form's POST /api/reports.
+// Reporting a share or an account's list of shares to the operator: the report pages /r/<id>/report
+// and /u/<id>/report, and their form's POST /api/reports.
 //
-// The share page /r/<id> stays without a script; it only links here. This page carries Turnstile, as
+// The share page /r/<id> and the list page /u/<id> stay without a script; they only link here. This page carries Turnstile, as
 // the login start page does, and posts a top-level form whose answer is a page. An accepted report is
 // sent to Sentry as one event and nothing of it is kept in D1 but the day's count. The reporter's name,
 // contact, account, IP and browser are neither asked for nor sent: there is no reply to a report.
@@ -11,7 +12,7 @@ import { TURNSTILE_ORIGIN } from "./login_page.mjs";
 import { PAGE_CSP, esc, renderNotFoundPage, siteHeader } from "./page.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { dayToIso } from "./public_record.mjs";
-import { countReport, readSharedDay, Unavailable } from "./store.mjs";
+import { accountExists, countReport, readSharedDay, Unavailable } from "./store.mjs";
 import { verifyTurnstile } from "./turnstile.mjs";
 
 /** The Turnstile action of the report page; siteverify must report it. Not a var: no environment changes it. */
@@ -25,7 +26,46 @@ export const REPORT_REASONS = {
   other: "その他",
 };
 
-const ID = /^[0-9a-hjkmnp-tv-z]{10}$/;
+/**
+ * What a report can be about, told apart by the id its form carries: a share (/r/<id>, 10 characters)
+ * or an account's list of shares (/u/<id>, 16 characters). `read` returns the target's facts the event
+ * carries, or null when there is no such target; `lead` opens the page; `event` is the part of the
+ * Sentry event that names the target. The operator takes shares down one by one, so a list's report
+ * names the list and the operator picks the shares from it.
+ */
+const TARGETS = {
+  share: {
+    id: /^[0-9a-hjkmnp-tv-z]{10}$/,
+    read: async (db, id) => {
+      const sharedDay = await readSharedDay(db, id);
+      return sharedDay === null ? null : { shared_on: dayToIso(sharedDay) };
+    },
+    lead: "この共有について",
+    // One issue a share: Sentry's "new issue" alert fires once for a share, and later reports of it
+    // add to that issue's count.
+    event: (id, facts) => ({
+      kind: "share_report",
+      message: "share report",
+      extra: { share_id: id, ...facts },
+      fingerprint: ["share-report", id],
+    }),
+  },
+  list: {
+    id: /^[0-9a-hjkmnp-tv-z]{16}$/,
+    read: async (db, id) => ((await accountExists(db, id)) ? {} : null),
+    lead: "この共有レコードの一覧について",
+    // One issue a list, for the reason a share has one.
+    event: (id) => ({
+      kind: "list_report",
+      message: "list report",
+      extra: { list_id: id },
+      fingerprint: ["list-report", id],
+    }),
+  },
+};
+
+/** The target an id names, or null. */
+const targetOf = (id) => Object.values(TARGETS).find((target) => target.id.test(id)) ?? null;
 const FORM = "application/x-www-form-urlencoded";
 const FIELDS = ["id", "reason", "text", "token"];
 const KIND = "問題を報告";
@@ -106,29 +146,31 @@ function outcomePage(outcome, headers = {}) {
 }
 
 /**
- * GET /r/<id>/report: the form, for a share that exists. Its Referrer-Policy is same-origin for the
- * reason the login start page's is: under no-referrer the form's POST carries `Origin: null`, which
+ * GET /r/<id>/report and /u/<id>/report: the form, for a share or a list that exists. Its
+ * Referrer-Policy is same-origin for the reason the login start page's is: under no-referrer the form's POST carries `Origin: null`, which
  * the POST refuses.
  */
 export async function reportPage(env, id) {
-  let sharedDay;
+  const target = targetOf(id);
+  if (target === null) return notFound();
+  let facts;
   try {
-    sharedDay = await readSharedDay(env.DB, id);
+    facts = await target.read(env.DB, id);
   } catch (error) {
     if (error instanceof Unavailable) return outcomePage("unavailable");
     throw error;
   }
-  if (sharedDay === null) return notFound();
+  if (facts === null) return notFound();
   if (reportSink(env) === null) return outcomePage("off");
   const reasons = Object.entries(REPORT_REASONS)
     .map(
       ([key, label], i) =>
-        `<label class="report-choice"><input type="radio" name="reason" value="${key}"${i === 0 ? " required" : ""}> ${esc(label)}</label>`,
+        `<label class="report-choice"><input type="radio" name="reason" value="${key}"${i === 0 ? " required" : ""}><span>${esc(label)}</span></label>`,
     )
     .join("\n");
   // Turnstile puts its token into the form itself, under the name data-response-field-name gives, so
   // the page needs no script of its own.
-  const html = page(`<p>この共有について、運営者に知らせます。名前や連絡先は送られず、返信はしません。返信が必要なときは、${CONTACT}</p>
+  const html = page(`<p>${target.lead}、運営者に知らせます。報告は匿名です。返信はありません。返信が必要なときは、${CONTACT}</p>
 <form class="report-form" method="POST" action="/api/reports">
 <input type="hidden" name="id" value="${esc(id)}">
 <fieldset><legend>理由</legend>
@@ -166,7 +208,7 @@ function reportForm(text) {
   for (const key of new Set(params.keys())) if (!FIELDS.includes(key)) return null;
   if (FIELDS.some((key) => params.getAll(key).length !== 1)) return null;
   const form = Object.fromEntries(FIELDS.map((key) => [key, params.get(key)]));
-  if (!ID.test(form.id) || !Object.hasOwn(REPORT_REASONS, form.reason)) return null;
+  if (targetOf(form.id) === null || !Object.hasOwn(REPORT_REASONS, form.reason)) return null;
   if (form.text.length > limits.MAX_REPORT_TEXT || !isTurnstileToken(form.token)) return null;
   return form;
 }
@@ -175,10 +217,11 @@ const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).jo
 
 /**
  * Sends one report to Sentry as one event and returns whether Sentry took it (a 2xx). The event names
- * the share, the reason and the text, and carries no user, request or IP: the Worker sends it, so
+ * the target, the reason and the text, and carries no user, request or IP: the Worker sends it, so
  * nothing of the reporter's connection is in it.
  */
-async function sendReport(sink, env, report, sharedOn) {
+async function sendReport(sink, env, report, target, facts) {
+  const named = target.event(report.id, facts);
   const eventId = hex(crypto.getRandomValues(new Uint8Array(16)));
   const sentAt = new Date().toISOString();
   const event = {
@@ -187,13 +230,11 @@ async function sendReport(sink, env, report, sharedOn) {
     platform: "other",
     level: "warning",
     logger: "share-report",
-    message: { formatted: "share report" },
+    message: { formatted: named.message },
     environment: env.REPORT_SENTRY_ENVIRONMENT,
-    tags: { kind: "share_report", reason: report.reason },
-    extra: { share_id: report.id, text: report.text, shared_on: sharedOn },
-    // One issue a share: Sentry's "new issue" alert fires once for a share, and later reports of it
-    // add to that issue's count.
-    fingerprint: ["share-report", report.id],
+    tags: { kind: named.kind, reason: report.reason },
+    extra: { ...named.extra, text: report.text },
+    fingerprint: named.fingerprint,
   };
   const body = [{ event_id: eventId, sent_at: sentAt, dsn: sink.dsn }, { type: "event" }, event]
     .map((line) => JSON.stringify(line))
@@ -235,10 +276,11 @@ export async function postReport(request, env, now) {
   if (report === null) return outcomePage("invalid");
   if (!(await verifyTurnstile(report.token, env, REPORT_ACTION))) return outcomePage("unverified");
   const at = clock(now);
-  let sharedDay;
+  const target = targetOf(report.id);
+  let facts;
   try {
-    sharedDay = await readSharedDay(env.DB, report.id);
-    if (sharedDay === null) return notFound();
+    facts = await target.read(env.DB, report.id);
+    if (facts === null) return notFound();
     // Counted before sending, and not given back when sending fails: a failing Sentry must not let
     // retries past the day's limit.
     if (!(await countReport(env.DB, at.day, limits.REPORT_DAILY_LIMIT))) return outcomePage("limit");
@@ -246,5 +288,5 @@ export async function postReport(request, env, now) {
     if (error instanceof Unavailable) return outcomePage("unavailable");
     throw error;
   }
-  return outcomePage((await sendReport(sink, env, report, dayToIso(sharedDay))) ? "accepted" : "unsent");
+  return outcomePage((await sendReport(sink, env, report, target, facts)) ? "accepted" : "unsent");
 }

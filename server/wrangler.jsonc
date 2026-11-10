@@ -77,7 +77,7 @@
     // declaring images are refused and bundles are neither stored nor served, while unsharing, account
     // deletion and the hourly run's removal of images go on.
     "SHARE_IMAGES_ENABLED": "true",
-    // Where a report of a share (/r/<id>/report, src/report.mjs) is sent: a Sentry DSN, the same one
+    // Where a report of a share or a list (/r/<id>/report, /u/<id>/report, src/report.mjs) is sent: a Sentry DSN, the same one
     // the app reports to (_sentryDsn in lib/src/core/sentry_util.dart). It is written twice because the
     // app and the Worker ship apart and neither reads the other's configuration. A DSN is a public
     // client value, so it is a var. Empty: the environment takes no reports, and the report page says so.

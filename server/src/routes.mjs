@@ -24,6 +24,7 @@ export const ROUTES = [
   ["PUT", "putShareImages", new RegExp(`^/api/shares/(${ID})/images$`)],
   ["GET", "getShareImages", new RegExp(`^/api/shares/(${ID})/images$`)],
   ["GET", "reportPage", new RegExp(`^/r/(${ID})/report$`)],
+  ["GET", "reportPage", new RegExp(`^/u/(${ACCOUNT_ID})/report$`)],
   ["POST", "report", /^\/api\/reports$/],
   ["GET", "myShares", /^\/api\/me\/shares$/],
   ["GET", "loginPage", /^\/api\/auth\/start$/],

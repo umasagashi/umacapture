@@ -464,8 +464,8 @@ export const MAX_SYNC_HELD_REQUEST = MAX_SYNC_HELD_NAMES * 67 + 256;
 export const MAX_SMALL_BODY = 4 * 1024;
 
 /**
- * Upper bound on the reports of shares (POST /api/reports) accepted in one UTC day, every share
- * together. Each accepted report is one Sentry event, so a flood stops here rather than in the
+ * Upper bound on the reports of shares and of lists (POST /api/reports) accepted in one UTC day, all
+ * of them together. Each accepted report is one Sentry event, so a flood stops here rather than in the
  * project's event quota. 0 accepts none.
  */
 export const REPORT_DAILY_LIMIT = 50;
