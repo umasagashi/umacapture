@@ -29,6 +29,8 @@ enum SettingsEntryKey {
   capturePreview,
   // The account sync is on for (`RecordSync`).
   recordSyncAccount,
+  // Whether the last share this device made also shared the records' images (`shareImagesChoiceProvider`).
+  shareImages,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {

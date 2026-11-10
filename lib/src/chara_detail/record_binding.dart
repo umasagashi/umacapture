@@ -149,26 +149,37 @@ typedef _ImageHashes = ({String? png, String? jpeg, ({int width, int height})? r
 /// the geometry file's bytes.
 typedef _ImageFiles = ({_ImageHashes hashes, bool png, bool jpeg, Uint8List? json});
 
+/// One image's fields of the geometry, from its geometry file [json], whether the directory holds its PNG ([png]) or
+/// only its reduced JPEG, and the dimensions of the reduced JPEG an archive makes of the PNG ([reduced]); the rule
+/// [recordBodyImagesOf] states.
+({Map<String, dynamic>? png, Map<String, dynamic>? jpeg}) _imageGeometryOf(
+  Uint8List? json, {
+  required bool png,
+  required bool jpeg,
+  required ({int width, int height})? reduced,
+}) {
+  if (json == null || !(png || jpeg)) return (png: null, jpeg: null);
+  Object? decoded;
+  try {
+    decoded = jsonDecode(utf8.decode(json));
+  } on FormatException {
+    decoded = null;
+  }
+  final intersection = geometryIntersectionOf(decoded);
+  if (!png) return (png: null, jpeg: intersection);
+  return (
+    png: intersection,
+    jpeg: intersection == null || reduced == null
+        ? null
+        : rescaledIntersection(intersection, newWidth: reduced.width, newHeight: reduced.height),
+  );
+}
+
 RecordGeometry _geometryOf(Map<String, _ImageFiles> files) {
   ({Map<String, dynamic>? png, Map<String, dynamic>? jpeg}) of(String image) {
     final f = files[image];
-    final json = f?.json;
-    if (f == null || json == null || !(f.png || f.jpeg)) return (png: null, jpeg: null);
-    Object? decoded;
-    try {
-      decoded = jsonDecode(utf8.decode(json));
-    } on FormatException {
-      decoded = null;
-    }
-    final intersection = geometryIntersectionOf(decoded);
-    if (!f.png) return (png: null, jpeg: intersection);
-    final reduced = f.hashes.reduced;
-    return (
-      png: intersection,
-      jpeg: intersection == null || reduced == null
-          ? null
-          : rescaledIntersection(intersection, newWidth: reduced.width, newHeight: reduced.height),
-    );
+    if (f == null) return (png: null, jpeg: null);
+    return _imageGeometryOf(f.json, png: f.png, jpeg: f.jpeg, reduced: f.hashes.reduced);
   }
 
   final skill = of('skill');
@@ -229,6 +240,42 @@ Future<Map<String, Uint8List>> readRecordImageFiles(DirectoryPath directory) asy
   await for (final entry in directory.list())
     if (entry is FilePath && isRecordImageFile(entry.name)) entry.name: await entry.readAsBytes(),
 };
+
+/// One image a share carries ([recordShareImagesOf]): its [kind] (an image of [recordBindingImages], or `trainee`), its
+/// reduced JPEG [bytes], and the rect of the game's pane in that JPEG's coordinates ([intersection], none for the
+/// icon).
+typedef RecordShareImage = ({String kind, Uint8List bytes, Map<String, dynamic>? intersection});
+
+/// The images a share of the record directory holding [files] (by name, [readRecordImageFiles]) carries, in the order
+/// a bundle holds them: each image of [recordBindingImages] as its reduced JPEG with that JPEG's geometry, then
+/// `trainee.jpg` where the directory holds one. Null where an image of [recordBindingImages] has no reduced JPEG or no
+/// geometry of it: an importing device cannot show such an image, so the share carries none. Pure.
+///
+/// The reduced JPEG of an image whose PNG is held is the one an archive makes of it ([archiveJpegConversionOf]), with
+/// the geometry an archive writes for it; otherwise it is the JPEG held, with its geometry file
+/// ([recordBodyImagesOf]'s rule). Nothing in [files] is changed.
+List<RecordShareImage>? recordShareImagesOf(Map<String, Uint8List> files) {
+  final images = <RecordShareImage>[];
+  for (final image in recordBindingImages) {
+    final png = files['$image.png'];
+    final held = files['$image.jpg'];
+    final reduced = png == null ? null : archiveJpegConversionOf(png);
+    final bytes = png == null ? held : reduced?.bytes;
+    final geometry = _imageGeometryOf(
+      files['$image.json'],
+      png: png != null,
+      jpeg: held != null,
+      reduced: reduced == null ? null : (width: reduced.result.dstWidth, height: reduced.result.dstHeight),
+    );
+    final intersection = geometry.jpeg;
+    if (bytes == null || intersection == null) return null;
+    images.add((kind: image, bytes: bytes, intersection: intersection));
+  }
+  if (files[traineeIconFileName] case final icon?) {
+    images.add((kind: 'trainee', bytes: icon, intersection: null));
+  }
+  return images;
+}
 
 /// [recordImagesBound], worked out off the UI isolate where the platform has one.
 Future<RecordImagesBound> recordImagesBoundBy(

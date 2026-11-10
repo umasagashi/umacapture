@@ -7,6 +7,7 @@
 // operation the user started.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
@@ -51,9 +52,16 @@ final recordShareDioProvider = Provider<Dio>((ref) => createDiagnosticDio(operat
 /// 32 MiB image over (`syncRequestTimeoutProvider`, 15 minutes); a minute leaves the server's work room beside that.
 final shareRequestTimeoutProvider = Provider<Duration>((_) => const Duration(minutes: 1));
 
+/// How long the request that sends one share's image bundle may take. A bundle is at most 6 MiB (the server's limit on
+/// one bundle); at the rate the deadline above is drawn from (160 KiB in about 4.4 s) that is about 170 s, and four
+/// minutes leave the server's work room beside it.
+final shareImagesRequestTimeoutProvider = Provider<Duration>((_) => const Duration(minutes: 4));
+
 /// Sends one request to the sharing API. A transport failure, and a request still unanswered at [timeout], are
 /// thrown as Dio's [DioException]. The deadline covers the whole request, as the sync requests' does: Dio's own
 /// receive timeout restarts on every chunk, and a request still waiting for its answer receives none.
+///
+/// [data] is sent as JSON, except bytes ([Uint8List]), which are sent as they are, as `application/octet-stream`.
 Future<ShareAnswer> sendShareRequest(
   Dio dio,
   String method,
@@ -68,14 +76,21 @@ Future<ShareAnswer> sendShareRequest(
   try {
     response = await dio.request<String>(
       "${Const.sharingOrigin}$path",
-      data: data == null ? null : jsonEncode(data),
+      data: switch (data) {
+        null => null,
+        final Uint8List bytes => Stream.value(bytes),
+        _ => jsonEncode(data),
+      },
       cancelToken: cancel,
       options: Options(
         method: method,
-        contentType: Headers.jsonContentType,
+        contentType: data is Uint8List ? "application/octet-stream" : Headers.jsonContentType,
         responseType: ResponseType.plain,
         validateStatus: (_) => true,
-        headers: {if (bearer != null) "Authorization": "Bearer $bearer"},
+        headers: {
+          if (bearer != null) "Authorization": "Bearer $bearer",
+          if (data is Uint8List) Headers.contentLengthHeader: data.length,
+        },
       ),
     );
   } finally {
@@ -361,7 +376,10 @@ class RecordShareSession extends Notifier<ShareSession?> {
   ///
   /// Throws [StateError] when there is no session or it is not [under], and Dio's [DioException] when no answer
   /// arrives.
-  Future<ShareAnswer> send(String method, String path, {Object? data, ShareSession? under}) async {
+  ///
+  /// [timeout] replaces the deadline of one sharing request ([shareRequestTimeoutProvider]) for a request that
+  /// carries more than one does.
+  Future<ShareAnswer> send(String method, String path, {Object? data, ShareSession? under, Duration? timeout}) async {
     final session = state;
     if (session == null) {
       throw StateError("no sharing session");
@@ -371,7 +389,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
     }
     final answer = await sendShareRequest(
       ref.read(recordShareDioProvider),
-      timeout: ref.read(shareRequestTimeoutProvider),
+      timeout: timeout ?? ref.read(shareRequestTimeoutProvider),
       method,
       path,
       data: data,

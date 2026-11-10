@@ -186,6 +186,7 @@ String _failureText(ShareOutcome outcome) {
     LoginRequired() => "login_required",
     ShareUnreachable() => "unreachable",
     ShareSkipped() => "busy",
+    ImagesUnsent() => "images_unsent",
     ShareRefused(:final reason) => switch (reason) {
       ShareRefusal.dailyLimit => "daily_limit",
       ShareRefusal.accountLimit => "account_limit",
@@ -194,18 +195,46 @@ String _failureText(ShareOutcome outcome) {
       ShareRefusal.rejected => "rejected",
       ShareRefusal.sharingPaused || ShareRefusal.accountDeleting => "sharing_paused",
       ShareRefusal.temporarilyUnavailable || ShareRefusal.busy => "busy",
+      ShareRefusal.imageLimit => "image_limit",
+      ShareRefusal.imageSharingPaused => "image_sharing_paused",
     },
     Shared() => throw StateError("a share is not a failure"),
   };
   return "$tr_share_record.failure.$key".tr();
 }
 
-/// Whether the outcome leaves the share to be sent again: a login, a retry, or nothing sent yet.
+/// Whether the outcome leaves the share to be sent again: a login, a retry, images still to send, a refusal of the
+/// images that sharing without them answers, or nothing sent yet.
 bool _sendsAgain(ShareOutcome? outcome) => switch (outcome) {
-  null || LoginRequired() || ShareUnreachable() || ShareSkipped() => true,
+  null || LoginRequired() || ShareUnreachable() || ShareSkipped() || ImagesUnsent() => true,
   ShareRefused(reason: ShareRefusal.temporarilyUnavailable || ShareRefusal.busy) => true,
+  ShareRefused(reason: ShareRefusal.imageLimit || ShareRefusal.imageSharingPaused) => true,
   _ => false,
 };
+
+/// N3: the confirmation's "share the images too", which starts with the choice of the last share
+/// ([shareImagesChoiceProvider]).
+class _ShareImagesCheck extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  const _ShareImagesCheck({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    // Its own transparent Material: inside a note card, the card's decoration would hide the tile's ink.
+    return Material(
+      type: MaterialType.transparency,
+      child: CheckboxListTile(
+        value: value,
+        onChanged: onChanged == null ? null : (v) => onChanged?.call(v ?? false),
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+        title: Text("$tr_share_record.share_images".tr()),
+      ),
+    );
+  }
+}
 
 /// P1: confirms a share, then shows its URL or why it did not happen.
 class ShareRecordDialog extends ConsumerStatefulWidget {
@@ -224,6 +253,7 @@ class ShareRecordDialog extends ConsumerStatefulWidget {
 
 class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
   ShareOutcome? _outcome;
+  late bool _withImages = ref.read(shareImagesChoiceProvider);
 
   /// What the last login ended with, told where a failure is; a login that signed in also clears [_outcome].
   String? _loginText;
@@ -259,9 +289,13 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
       _loginText = null;
     });
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    ref.read(shareImagesChoiceProvider.notifier).set(_withImages);
     final ShareOutcome outcome;
     try {
-      outcome = (await ref.read(recordSharesProvider.notifier).shareAll([record]))[record.id] ?? const ShareSkipped();
+      final shares = ref.read(recordSharesProvider.notifier);
+      outcome =
+          (await shares.shareAll([record], source: widget.source, withImages: _withImages))[record.id] ??
+          const ShareSkipped();
     } finally {
       dialogs.setBarrierDismissible(token, barrierDismissible: true);
       if (mounted) {
@@ -302,7 +336,7 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
       LoginRequired() => [
         (label: "$tr_record_share.log_in".tr(), icon: Symbols.login_rounded, onPressed: _login.press),
       ],
-      ShareUnreachable() || ShareSkipped() => [retry],
+      ShareUnreachable() || ShareSkipped() || ImagesUnsent() => [retry],
       ShareRefused(reason: ShareRefusal.temporarilyUnavailable || ShareRefusal.busy) => [retry],
       ShareRefused(reason: ShareRefusal.rejected) when isSentryAvailable() => [
         (
@@ -337,6 +371,10 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
           Text("$tr_share_record.dialog.shared".tr(), style: theme.textTheme.bodyMedium),
           const SizedBox(height: 8),
           SelectableText(outcome.entry.url ?? "", style: theme.textTheme.bodyMedium),
+          if (outcome.imagesLeftOut) ...[
+            const SizedBox(height: 12),
+            NoteCard(description: Text("$tr_share_record.dialog.images_left_out".tr())),
+          ],
         ],
       );
       bottom = _actionRow(_actionsFor(outcome, record));
@@ -345,6 +383,13 @@ class _ShareRecordDialogState extends ConsumerState<ShareRecordDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _ShareDescription("$tr_share_record.dialog.description"),
+          if (_sendsAgain(outcome)) ...[
+            const SizedBox(height: 8),
+            _ShareImagesCheck(
+              value: _withImages,
+              onChanged: _sending ? null : (value) => setState(() => _withImages = value),
+            ),
+          ],
           if (outcome != null) ...[
             const SizedBox(height: 12),
             NoteCard(
@@ -417,6 +462,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
   String? _loginText;
   bool _signedIn = false;
   bool _sending = false;
+  late bool _withImages = ref.read(shareImagesChoiceProvider);
   late final _selection = SelectionConfirmation(widget.selection);
   late final _login = LoginDriver(
     ref,
@@ -482,9 +528,12 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
       _signedIn = false;
     });
     dialogs.setBarrierDismissible(token, barrierDismissible: false);
+    ref.read(shareImagesChoiceProvider.notifier).set(_withImages);
     final Map<String, ShareOutcome> answered;
     try {
-      answered = await ref.read(recordSharesProvider.notifier).shareAll(records);
+      answered = await ref
+          .read(recordSharesProvider.notifier)
+          .shareAll(records, source: widget.source, withImages: _withImages);
     } finally {
       dialogs.setBarrierDismissible(token, barrierDismissible: true);
       if (mounted) {
@@ -517,6 +566,11 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
     final shared = _count((o) => o is Shared);
     final already = _count((o) => o is AlreadyShared);
     final excluded = _count((o) => o is NotShareable);
+    final imagesLeftOut = _count((o) => o is Shared && o.imagesLeftOut);
+    final imagesUnsent = _count((o) => o is ImagesUnsent);
+    final imagesRefused = _count(
+      (o) => o is ShareRefused && (o.reason == ShareRefusal.imageLimit || o.reason == ShareRefusal.imageSharingPaused),
+    );
     final failures = _outcomes.values.where((o) => o is! Shared && o is! AlreadyShared && o is! NotShareable).toList();
     final needsLogin = failures.any((o) => o is LoginRequired) && !_signedIn;
     final session = ref.watch(recordShareSessionProvider);
@@ -531,7 +585,10 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
             line("shared", shared),
             if (already > 0) line("already_shared", already),
             if (excluded > 0) line("not_shareable", excluded),
+            if (imagesLeftOut > 0) line("images_left_out", imagesLeftOut),
             if (failures.isNotEmpty) line("failed", failures.length),
+            if (imagesUnsent > 0) line("images_unsent", imagesUnsent),
+            if (imagesRefused > 0) line("images_refused", imagesRefused),
           ].join("\n"),
           style: style,
         ),
@@ -559,6 +616,11 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
           NoteCard(
             description: Text(_loginText ?? {for (final o in failures) _failureText(o)}.join("\n")),
             children: [
+              if (!needsLogin && _rest.isNotEmpty)
+                _ShareImagesCheck(
+                  value: _withImages,
+                  onChanged: _sending ? null : (value) => setState(() => _withImages = value),
+                ),
               _actionRow([
                 if (needsLogin)
                   (label: "$tr_record_share.log_in".tr(), icon: Symbols.login_rounded, onPressed: _login.press)
@@ -595,6 +657,11 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
               ],
               const SizedBox(height: 12),
               const _ShareDescription("$tr_share_record.bulk.description"),
+              const SizedBox(height: 8),
+              _ShareImagesCheck(
+                value: _withImages,
+                onChanged: _sending ? null : (value) => setState(() => _withImages = value),
+              ),
               // Stated as body text and not only as the confirm's tooltip, as the other bulk confirmations state
               // their refusals: a tooltip needs a hover.
               if (withdrawn) ...[const SizedBox(height: 12), NoteCard(description: Text(selectionEndedMessage()))],
