@@ -620,6 +620,7 @@ staging first:
      --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'share_takedowns'"
    server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
      --command "SELECT name FROM pragma_table_info('daily') WHERE name = 'reports'"
+   # staging: umacapture-share-staging --env staging
    ```
 
 4. **Deploy** the web app and the Worker together ("Deploying"). On staging, check from a staging
@@ -647,8 +648,9 @@ stops the Worker whole ("Stopping record sharing"); none of them leaves anything
 before this release, rolled back to:
 
 - refuses as `invalid_payload` every share that a web app tab or a Windows build of this release sends,
-  since they carry keys it does not know (a resend under a client key it already holds answers
-  `existing` before the check, so that one passes);
+  since they carry keys it does not know (a resend of a share without images, under a client key it
+  already holds, answers `existing` before the check, so that one passes; a share with images is
+  refused before the key is looked up);
 - deletes a share's row on unshare and on account deletion without recording the share's bundle in
   the write ledger, so the bundle stays in B2 with nothing to delete it, and its hourly run may drop
   the ledger's records of shared images (it reads them as sync's and lists them under `a/`, where
@@ -685,7 +687,8 @@ accounts for and hand them to the hourly run:
 The image limits in `server/src/limits.mjs` (`SHARE_IMAGE_BUDGET`, `SHARE_IMAGE_DAILY_LIMIT`,
 `ACCOUNT_SHARE_IMAGE_DAILY_LIMIT`) count what shares **declare** (`records.images_size`, summed in
 `totals.image_bytes`, `daily.image_bytes` and `accounts.image_quota_bytes`), once per share, from its
-`POST /api/shares` until it is unshared, its images or itself taken down, or its account deleted. They
+`POST /api/shares`. The total counts it until the share is unshared, its images or itself taken
+down, or its account deleted; the daily counts keep what was declared on the day. They
 do not count what B2 stores under `s/`, which no D1 row can read, and `SHARE_IMAGE_BUDGET` is not a
 bound on it. The two differ in these states, each with what brings them together:
 
@@ -1102,6 +1105,7 @@ A report arrives as a Sentry issue `share report` (One-time preparation, step 13
    ```bash
    server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc \
      --command "INSERT INTO share_takedowns (share_id, scope, ordered_at) VALUES ('<share id>', 'share', unixepoch())"
+   # staging: umacapture-share-staging --env staging
    ```
 
    An order is carried out by the next hourly run (`takedowns`, the first of its kinds), with the
@@ -1114,6 +1118,7 @@ A report arrives as a Sentry issue `share report` (One-time preparation, step 13
    ```bash
    server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
      --command "SELECT share_id, scope, ordered_at, done_at FROM share_takedowns WHERE done_at IS NULL"
+   # staging: umacapture-share-staging --env staging
    ```
 
    lists the orders not carried out yet. An order also counts as done when nothing of its scope was

@@ -84,7 +84,8 @@ destroys data the product does promise to keep.
   only, as stated there). An import takes one link at a time; importing an account's list (`/u/<id>`)
   is not offered.
 - **A share carries the record's images only when its sharer chooses to share them.** Those images
-  reach anyone who has the link, through the app's import alone; the record page, its card, its JSON
+  reach anyone who has the link, through the import endpoints alone (`GET /api/shares/<id>` and its
+  `/images`, which need no login), whether through the app or not; the record page, its card, its JSON
   and the account's list never carry them.
 - **An import saves nothing until the share's images, when it declares any, have all arrived**; a
   later try of the same link imports them. A share made before shares carried icons is refused with a
