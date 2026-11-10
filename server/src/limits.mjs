@@ -474,6 +474,38 @@ export const REPORT_DAILY_LIMIT = 50;
 export const MAX_REPORT_TEXT = 1_000;
 
 /**
+ * Code points a share's tagline holds at most, counted after NFC (PUT /api/shares/<id>/tagline). Its
+ * UTF-8 bytes, up to four times this, are charged with the share.
+ */
+export const MAX_TAGLINE = 80;
+
+/**
+ * Code points the trainer name of an account's public profile holds at most, counted after NFC
+ * (PUT /api/me/profile): the app's own cap, not the game's.
+ */
+export const MAX_TRAINER_NAME = 20;
+
+/**
+ * Writes of a share's tagline and of the public profile (PUT /api/shares/<id>/tagline and
+ * PUT /api/me/profile, counted together) one account makes in one UTC day. Nothing else bounds how
+ * often the same text is rewritten. A write costs, with its two counters, 4 D1 rows written for a
+ * tagline (its record, the totals, the account, the day) and 3 for a profile (the account twice, the
+ * day). Only a write that stored a value counts: one refused (409 changed and the rest) writes no row,
+ * and an editor that lost a race to another device is not charged for it. A write that only clears
+ * text is neither counted nor refused, so a sharer past the limit can still take text down; each clear
+ * needs a write before it, so clears add at most one to every write.
+ */
+export const ACCOUNT_TEXT_WRITES_PER_DAY = 100;
+
+/**
+ * Those writes over every account in one UTC day: at most 40,000 D1 rows written (all taglines), and
+ * at most 20,000 more for the clears that can follow them (2 rows for a tagline, its record and the
+ * totals; 1 for a profile), 60,000 in all, under the roughly 100,000 rows a day the plan's monthly rows leave each environment beside SYNC_DAILY_ROWS and
+ * sharing.
+ */
+export const TEXT_WRITES_PER_DAY = 10_000;
+
+/**
  * Request body of a report form: the text at its longest percent-encoded (up to 9 bytes a character),
  * a Turnstile token (up to 2,048 characters) and the other fields.
  */

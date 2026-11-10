@@ -15,6 +15,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/chara_detail/share_record_dialog.dart';
+import '/src/gui/chara_detail/sharer_profile_section.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -135,6 +136,7 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
             },
             storesLoaded: recordOf != null,
             onUnshared: _refresh,
+            onTaglineAnswered: _refresh,
           ),
       ],
     };
@@ -168,7 +170,7 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const Divider(),
         if (_asking && _listing != null) const LinearProgressIndicator(),
         ...rows,
       ],
@@ -176,8 +178,8 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
   }
 }
 
-/// One share on one line: the record's name, its evaluation value, the day it was shared, and its actions as icons
-/// whose names are their tooltips.
+/// One share on two lines: the record's name, its evaluation value and the day it was shared above; the share's
+/// tagline and its actions, as icons whose names are their tooltips, below.
 class _AccountShareRow extends ConsumerWidget {
   final AccountShare share;
 
@@ -187,6 +189,9 @@ class _AccountShareRow extends ConsumerWidget {
   final bool storesLoaded;
   final VoidCallback onUnshared;
 
+  /// Runs once the server has answered the share's tagline, so the list is asked for again and shows what it holds.
+  final VoidCallback onTaglineAnswered;
+
   const _AccountShareRow({
     super.key,
     required this.share,
@@ -194,6 +199,7 @@ class _AccountShareRow extends ConsumerWidget {
     required this.record,
     required this.storesLoaded,
     required this.onUnshared,
+    required this.onTaglineAnswered,
   });
 
   /// The record's name, or that it was deleted when the note names a record neither store holds. A share with no
@@ -213,36 +219,59 @@ class _AccountShareRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final evaluation = share.evaluation;
-    return Row(
-      spacing: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: Text(
-            _title(ref) ?? "",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall,
-          ),
-        ),
-        Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
-        Text(share.sharedOn, style: theme.textTheme.bodyMedium),
         Row(
-          mainAxisSize: MainAxisSize.min,
+          spacing: 8,
           children: [
-            IconButton(
-              tooltip: "$tr_record_share.open_shared".tr(),
-              icon: const Icon(Symbols.open_in_new_rounded),
-              onPressed: () => openSharedPage(share.url),
+            Expanded(
+              child: Text(
+                _title(ref) ?? "",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall,
+              ),
             ),
-            IconButton(
-              tooltip: "$tr_record_share.copy_url".tr(),
-              icon: const Icon(Symbols.content_copy_rounded),
-              onPressed: () => copySharedUrl(share.url),
+            Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
+            Text(share.sharedOn, style: theme.textTheme.bodyMedium),
+          ],
+        ),
+        Row(
+          spacing: 8,
+          children: [
+            Expanded(
+              child: Text(
+                share.tagline?.text ?? "",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
             ),
-            IconButton(
-              tooltip: "$tr_record_share_list.unshare".tr(),
-              icon: const Icon(Symbols.public_off_rounded),
-              onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
+            // Compact, so that a phone's width still leaves the tagline beside the four actions some ten characters.
+            Theme(
+              data: theme.copyWith(visualDensity: VisualDensity.compact),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: "$tr_record_share.open_shared".tr(),
+                    icon: const Icon(Symbols.open_in_new_rounded),
+                    onPressed: () => openSharedPage(share.url),
+                  ),
+                  IconButton(
+                    tooltip: "$tr_record_share.copy_url".tr(),
+                    icon: const Icon(Symbols.content_copy_rounded),
+                    onPressed: () => copySharedUrl(share.url),
+                  ),
+                  ?shareTaglineButton(ref.base, share, onAnswered: onTaglineAnswered),
+                  IconButton(
+                    tooltip: "$tr_record_share_list.unshare".tr(),
+                    icon: const Icon(Symbols.public_off_rounded),
+                    onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

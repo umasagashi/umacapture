@@ -51,18 +51,33 @@ const declaredImages = (row) =>
     : { name: row.images_name, size: row.images_size, parts: JSON.parse(row.images), state: imageState(row) };
 
 /**
- * The posted form, share day, owner and declared images (`declaredImages`) of record `id`, or null when
- * no such row exists.
+ * The posted form, share day, owner and declared images (`declaredImages`) of record `id`, with what its
+ * sharer wrote for readers: the share's `tagline` and the owner's `profile` (`profileOf`), each null
+ * when not written. Null when no such row exists.
  */
 export async function readRecord(db, id) {
   const row = await db
-    .prepare("SELECT schema, payload, shared_day, owner_id, images, images_name, images_size, images_stored_at FROM records WHERE id = ?")
+    .prepare(
+      `SELECT r.schema, r.payload, r.shared_day, r.owner_id, r.images, r.images_name, r.images_size, r.images_stored_at,
+              r.tagline, a.trainer_name, a.game_trainer_id
+       FROM records r LEFT JOIN accounts a ON a.id = r.owner_id WHERE r.id = ?`,
+    )
     .bind(id)
     .first();
   if (row === null) return null;
   if (row.schema !== 1) throw new Error(`record ${id} has posted-form schema ${row.schema}`);
-  return { form: await gunzipJson(row.payload), sharedDay: row.shared_day, owner: row.owner_id, images: declaredImages(row) };
+  return {
+    form: await gunzipJson(row.payload),
+    sharedDay: row.shared_day,
+    owner: row.owner_id,
+    images: declaredImages(row),
+    tagline: row.tagline,
+    profile: profileOf(row),
+  };
 }
+
+/** The public profile an account's row holds: `{trainerName, gameTrainerId}`, each null when not written. */
+const profileOf = (row) => ({ trainerName: row.trainer_name ?? null, gameTrainerId: row.game_trainer_id ?? null });
 
 /**
  * The owner and declared images (`declaredImages`) of share `id`, `{owner, images}`, or null when no such
@@ -76,13 +91,13 @@ export async function readShareImages(db, id) {
 }
 
 /**
- * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, trainerIds}`, or null when no such
- * account exists. Throws Unavailable.
+ * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, trainerIds, profile}` (`profileOf`),
+ * or null when no such account exists. Throws Unavailable.
  */
 export async function readAccount(db, id) {
   const [account, trainers] = await query(() =>
     db.batch([
-      db.prepare("SELECT share_count, deleting_since FROM accounts WHERE id = ?1").bind(id),
+      db.prepare("SELECT share_count, deleting_since, trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id),
       db.prepare("SELECT trainer_id FROM account_trainers WHERE account_id = ?1 ORDER BY trainer_id").bind(id),
     ]),
   );
@@ -92,12 +107,181 @@ export async function readAccount(db, id) {
     shareCount: row.share_count,
     deleting: row.deleting_since !== null,
     trainerIds: trainers.results.map((t) => t.trainer_id),
+    profile: profileOf(row),
   };
 }
 
 /** Whether account `id` exists. Throws Unavailable. */
 export async function accountExists(db, id) {
   return (await query(() => db.prepare("SELECT 1 AS found FROM accounts WHERE id = ?1").bind(id).first())) !== null;
+}
+
+/** The public profile (`profileOf`) of account `id`, or null when no such account exists. Throws Unavailable. */
+export async function readProfile(db, id) {
+  const row = await query(() => db.prepare("SELECT trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id).first());
+  return row === null ? null : profileOf(row);
+}
+
+/** The text writes (taglines and profiles) of the account in parameter `account` on the UTC day in parameter `day`. */
+const accountTextWritesToday = (account, day) =>
+  `(SELECT CASE WHEN text_writes_day = ${day} THEN text_writes ELSE 0 END FROM accounts WHERE id = ${account})`;
+
+/** The text writes over every account on the UTC day in parameter `day`. */
+const textWritesToday = (day) => `COALESCE((SELECT text_writes FROM daily WHERE day = ${day}), 0)`;
+
+/**
+ * The two statements that count one text write of account `owner` on UTC day `day`, each made only
+ * when the statement before it changed one row: the account's counter, then the day's.
+ */
+const countTextWrite = (db, owner, day) => [
+  db
+    .prepare(
+      `UPDATE accounts SET text_writes = CASE WHEN text_writes_day = ?2 THEN text_writes + 1 ELSE 1 END, text_writes_day = ?2
+       WHERE id = ?1 AND changes() = 1`,
+    )
+    .bind(owner, day),
+  db
+    .prepare(
+      `INSERT INTO daily (day, text_writes) SELECT ?1, 1 WHERE changes() = 1
+       ON CONFLICT (day) DO UPDATE SET text_writes = text_writes + 1`,
+    )
+    .bind(day),
+];
+
+/**
+ * Which text-write limit of `quota` (`{accountLimit, dailyLimit}`) is used up: "account", "service",
+ * or null. `row` holds `account_writes` and `service_writes`, read with `accountTextWritesToday` and
+ * `textWritesToday`.
+ */
+const textWriteRefusal = (row, quota) =>
+  row.account_writes >= quota.accountLimit ? "account" : row.service_writes >= quota.dailyLimit ? "service" : null;
+
+/**
+ * The SQL condition that the text-write limits leave room for a write of the account in parameter
+ * `account` on the UTC day in parameter `day`, against the limits in parameters `accountLimit` and
+ * `dailyLimit`; always true when parameter `clears` is 1, for a write that only clears (`onlyClears`).
+ */
+const textWriteRoom = (clears, account, day, accountLimit, dailyLimit) =>
+  `(${clears} = 1 OR (${accountTextWritesToday(account, day)} < ${accountLimit} AND ${textWritesToday(day)} < ${dailyLimit}))`;
+
+/**
+ * Whether writing `next` over `previous` (objects with the same fields) only clears: at least one field
+ * goes from a value to null and every other field is left as it is. A write that clears one field and
+ * changes another does not only clear, so no new text is published past the limits. A write that only
+ * clears is neither refused by the text-write limits nor counted against them, so a sharer past them
+ * can still take text down; the text cleared had to be written first, so clears stay bounded by writes.
+ */
+const onlyClears = (next, previous) =>
+  Object.keys(next).every((k) => next[k] === null || next[k] === previous[k]) &&
+  Object.keys(next).some((k) => next[k] === null && previous[k] !== null);
+
+/**
+ * Replaces the public profile of account `owner` with `profile` (`{trainerName, gameTrainerId}`) if it
+ * is still `previous`, both fields compared, the account is not being deleted, and the text-write
+ * limits of `quota` (`{day, accountLimit, dailyLimit}`) leave room; a write made counts against them.
+ * A write that only clears (`onlyClears`) is neither refused by those limits nor counted.
+ * One batch, so a write made from a value another device has changed since changes and counts nothing.
+ * Returns `{status}`: "written", "deleting", "gone" (no such account), `{status: "changed", profile}`
+ * when the profile is not `previous`, `profile` what it is, or `{status: "limit", scope}` ("account"
+ * or "service"). Throws Unavailable.
+ */
+export async function writeProfile(db, owner, profile, previous, quota) {
+  const clears = onlyClears(profile, previous);
+  const results = await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `UPDATE accounts SET trainer_name = ?2, game_trainer_id = ?3
+           WHERE id = ?1 AND deleting_since IS NULL AND trainer_name IS ?4 AND game_trainer_id IS ?5
+             AND ${textWriteRoom("?9", "?1", "?6", "?7", "?8")}`,
+        )
+        .bind(
+          owner,
+          profile.trainerName,
+          profile.gameTrainerId,
+          previous.trainerName,
+          previous.gameTrainerId,
+          quota.day,
+          quota.accountLimit,
+          quota.dailyLimit,
+          clears ? 1 : 0,
+        ),
+      ...(clears ? [] : countTextWrite(db, owner, quota.day)),
+    ]),
+  );
+  if (results[0].meta.changes === 1) return { status: "written" };
+  const row = await query(() =>
+    db
+      .prepare(
+        `SELECT deleting_since, trainer_name, game_trainer_id,
+                ${accountTextWritesToday("?1", "?2")} AS account_writes, ${textWritesToday("?2")} AS service_writes
+         FROM accounts WHERE id = ?1`,
+      )
+      .bind(owner, quota.day)
+      .first(),
+  );
+  if (row === null) return { status: "gone" };
+  if (row.deleting_since !== null) return { status: "deleting" };
+  const current = profileOf(row);
+  const unchanged = current.trainerName === previous.trainerName && current.gameTrainerId === previous.gameTrainerId;
+  const scope = unchanged && !clears ? textWriteRefusal(row, quota) : null;
+  if (scope !== null) return { status: "limit", scope };
+  return { status: "changed", profile: current };
+}
+
+/**
+ * Replaces the tagline of share `id` with `tagline` if account `owner` holds the share, its tagline is
+ * still `previous`, and the account is not being deleted (one batch). The row's charge and the totals
+ * move by `delta`, the UTF-8 bytes of `tagline` less those of `previous`, so an unshare and a deletion
+ * give the tagline's bytes back with the rest of the charge. A tagline that grows is refused past
+ * `budget` (STORAGE_BUDGET); one that shrinks or goes never is. Removing the tagline (`tagline`
+ * null) only clears (`onlyClears`), so the text-write limits neither refuse nor count it. Returns `{status}`: "written",
+ * "deleting" (the account is being deleted, or its deletion completed), "notFound", "forbidden"
+ * (another account holds it), "storage" (the budget refused it), `{status: "limit", scope}` when a
+ * text-write limit refused it (as `writeProfile`, with `day`, `accountLimit` and `dailyLimit` its
+ * `quota`), or `{status: "changed", tagline}` when the tagline is not `previous`, `tagline` what it is.
+ * A write made counts against the text-write limits. Throws Unavailable.
+ */
+export async function writeTagline(db, { id, owner, tagline, previous, delta, budget, day, accountLimit, dailyLimit }) {
+  const clears = onlyClears({ tagline }, { tagline: previous });
+  const match = "id = ?1 AND owner_id = ?2 AND EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL)";
+  const results = await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `UPDATE records SET tagline = ?3, charge = charge + ?5
+           WHERE ${match} AND tagline IS ?4 AND (?5 <= 0 OR (SELECT bytes FROM totals WHERE id = 1) + ?5 <= ?6)
+             AND ${textWriteRoom("?10", "?2", "?7", "?8", "?9")}`,
+        )
+        .bind(id, owner, tagline, previous, delta, budget, day, accountLimit, dailyLimit, clears ? 1 : 0),
+      // changes() counts what the statement before changed: the totals, then the counters, move only
+      // with the row this batch updated (the totals row always exists, so its update changes one).
+      db.prepare("UPDATE totals SET bytes = bytes + ?1 WHERE id = 1 AND changes() = 1").bind(delta),
+      ...(clears ? [] : countTextWrite(db, owner, day)),
+    ]),
+  );
+  if (results[0].meta.changes === 1) return { status: "written" };
+  const row = await query(() =>
+    db
+      .prepare(
+        `SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL) AS writable,
+                (SELECT owner_id FROM records WHERE id = ?1) AS owner_id,
+                (SELECT tagline FROM records WHERE id = ?1) AS tagline,
+                (SELECT bytes FROM totals WHERE id = 1) AS bytes,
+                ${accountTextWritesToday("?2", "?3")} AS account_writes, ${textWritesToday("?3")} AS service_writes`,
+      )
+      .bind(id, owner, day)
+      .first(),
+  );
+  if (row.writable === 0) return { status: "deleting" };
+  if (row.owner_id === null) return { status: "notFound" };
+  if (row.owner_id !== owner) return { status: "forbidden" };
+  if (row.tagline === previous) {
+    const scope = clears ? null : textWriteRefusal(row, { accountLimit, dailyLimit });
+    if (scope !== null) return { status: "limit", scope };
+    if (delta > 0 && row.bytes + delta > budget) return { status: "storage" };
+  }
+  return { status: "changed", tagline: row.tagline };
 }
 
 /**
@@ -568,7 +752,9 @@ export async function withdrawShareImages(db, id, owner, by, now) {
 
 /**
  * Begins deleting account `accountId` from its full session `tokenHash` (one batch): marks the
- * account as being deleted since `now`, removes every other session of it, and turns this one into a
+ * account as being deleted since `now` and clears its public profile (from then on no page shows it,
+ * and no write brings it back, since every write requires the mark's absence), removes every other
+ * session of it, and turns this one into a
  * deletion-only session (scope "delete") expiring at `expiresAt`. Returns "begun", "deleting" (the
  * account was being deleted already) or "gone" (no such account). Throws Unavailable.
  */
@@ -583,7 +769,7 @@ export async function beginAccountDeletion(db, accountId, tokenHash, now, expire
     db.batch([
       db
         .prepare(
-          `UPDATE accounts SET deleting_since = ?3
+          `UPDATE accounts SET deleting_since = ?3, trainer_name = NULL, game_trainer_id = NULL
            WHERE id = ?1 AND deleting_since IS NULL
              AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2 AND account_id = ?1 AND scope = 'full')`,
         )
@@ -676,14 +862,14 @@ export async function finishAccountDeletion(db, accountId) {
 
 /**
  * The records account `owner` shares, newest share day first: `{id, clientKey, sharedDay, form,
- * images}` each, `images` its `imageState`. ACCOUNT_SHARE_CAP bounds how many there are. Throws
- * Unavailable.
+ * images, tagline}` each, `images` its `imageState` and `tagline` null when not written.
+ * ACCOUNT_SHARE_CAP bounds how many there are. Throws Unavailable.
  */
 export async function listOwnShares(db, owner) {
   const { results } = await query(() =>
     db
       .prepare(
-        `SELECT id, client_key, schema, payload, shared_day, images_name, images_stored_at FROM records
+        `SELECT id, client_key, schema, payload, shared_day, images_name, images_stored_at, tagline FROM records
          WHERE owner_id = ?1 ORDER BY shared_day DESC, id`,
       )
       .bind(owner)
@@ -698,6 +884,7 @@ export async function listOwnShares(db, owner) {
         sharedDay: row.shared_day,
         form: await gunzipJson(row.payload),
         images: imageState(row),
+        tagline: row.tagline,
       };
     }),
   );

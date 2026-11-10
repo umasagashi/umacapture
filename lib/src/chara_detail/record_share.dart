@@ -354,6 +354,8 @@ enum UnshareOutcome { unshared, forbidden, loginRequired, unreachable, failed }
 /// tables label it (its own form, not the app's), or null when the listing names none. [evaluation] is the game's
 /// evaluation value the listing carries, or null when it carries none (an inheritance-only record has none).
 /// [imagesPending] is whether the server still waits for the images the share declared ([_imagesPending]).
+/// [tagline] is the share's tagline as the server holds it (its `text` null when none is written), or null when the
+/// listing carries no tagline at all: a Worker older than taglines, which cannot store one.
 typedef AccountShare = ({
   String id,
   String url,
@@ -362,6 +364,7 @@ typedef AccountShare = ({
   String? cardName,
   int? evaluation,
   bool imagesPending,
+  ({String? text})? tagline,
 });
 
 /// What listing the account's shares answered.
@@ -872,6 +875,10 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         cardName: cardName,
         evaluation: evaluation,
         imagesPending: _imagesPending(item),
+        tagline: switch (item) {
+          {"tagline": final String? text} => (text: text),
+          _ => null,
+        },
       ));
     }
     return shares;

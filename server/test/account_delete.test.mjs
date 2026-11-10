@@ -123,8 +123,15 @@ describe("account deletion", () => {
     const token = await worker.signIn();
     const owner = await worker.accountOf(token);
     const [kept] = await shareMany(token, limits.ACCOUNT_DELETE_CHUNK + 1);
+    const profile = { trainer_name: "name", game_trainer_id: "123456789" };
+    const none = { trainer_name: null, game_trainer_id: null };
+    assert.equal((await answer(worker.putProfile(token, { ...profile, previous: none }))).status, 200);
     assert.equal((await deleteMe(token)).status, 200);
     const left = await rowsOf("records", "owner_id", owner);
+    // The profile is gone from the moment the deletion began, while the account's shares are still listed.
+    const list = await answer(worker.fetch(`/u/${owner}.json`));
+    assert.deepEqual([list.status, list.body.sharer], [200, null]);
+    assert.equal(list.body.count, left);
 
     for (const res of [
       await shareOnce(token),
@@ -132,6 +139,8 @@ describe("account deletion", () => {
       await postTrainer(token, TRAINER),
       await getMe(token),
       await answer(worker.myShares(token)),
+      await answer(worker.putProfile(token, { ...profile, previous: none })),
+      await answer(worker.putTagline(token, kept, { tagline: "x", previous: null })),
     ]) {
       assert.equal(res.status, 409, res.text);
       assert.equal(res.body.error, "account_deleting");
@@ -146,10 +155,21 @@ describe("account deletion", () => {
     const [id] = await shareMany(token, 1);
     await worker.db.prepare("UPDATE accounts SET deleting_since = 1 WHERE id = ?").bind(owner).run();
 
-    for (const res of [await answer(worker.unshare(token, id)), await shareOnce(token), await postTrainer(token, TRAINER)]) {
+    for (const res of [
+      await answer(worker.unshare(token, id)),
+      await shareOnce(token),
+      await postTrainer(token, TRAINER),
+      await answer(worker.putProfile(token, { trainer_name: "x", game_trainer_id: null, previous: { trainer_name: null, game_trainer_id: null } })),
+      await answer(worker.putTagline(token, id, { tagline: "x", previous: null })),
+    ]) {
       assert.equal(res.status, 409, res.text);
       assert.equal(res.body.error, "account_deleting");
     }
+    const written = await worker.db
+      .prepare("SELECT a.trainer_name, r.tagline FROM accounts a JOIN records r ON r.owner_id = a.id WHERE a.id = ?")
+      .bind(owner)
+      .first();
+    assert.deepEqual(written, { trainer_name: null, tagline: null }, "a write reached an account being deleted");
     assert.equal(await rowsOf("records", "owner_id", owner), 1);
     assert.equal(await rowsOf("account_trainers", "account_id", owner), 0);
     assert.equal((await worker.account(owner)).share_count, 1);

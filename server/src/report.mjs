@@ -1,7 +1,8 @@
 // Reporting a share or an account's list of shares to the operator: the report pages /r/<id>/report
 // and /u/<id>/report, and their form's POST /api/reports.
 //
-// The share page /r/<id> and the list page /u/<id> stay without a script; they only link here. This page carries Turnstile, as
+// The share page /r/<id> and the list page /u/<id> run no script but the trainer id's copy button, and
+// only link here. This page carries Turnstile, as
 // the login start page does, and posts a top-level form whose answer is a page. An accepted report is
 // sent to Sentry as one event and nothing of it is kept in D1 but the day's count. The reporter's name,
 // contact, account, IP and browser are neither asked for nor sent: there is no reply to a report.
@@ -21,7 +22,7 @@ export const REPORT_ACTION = "report";
 /** The reasons a report gives, in the order the page lists them. The key is what Sentry receives. */
 export const REPORT_REASONS = {
   own_trainer: "自分の育成が、ほかの人に共有されている",
-  personal_info: "画像に名前などの個人の情報が写っている",
+  personal_info: "名前や ID などの個人の情報が載っている",
   inappropriate: "不適切な内容",
   other: "その他",
 };
