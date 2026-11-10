@@ -22,10 +22,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:image/image.dart' as img;
 import 'package:logger/logger.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/const.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/image_converter.dart';
 import 'package:umacapture/src/chara_detail/record_share.dart';
 import 'package:umacapture/src/chara_detail/record_share_session.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
@@ -35,6 +37,8 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/login_receiver.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/storage/record_write_effects.dart';
@@ -47,6 +51,7 @@ import 'package:umacapture/src/gui/chara_detail/record_share_list_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
+import 'package:umacapture/src/preference/settings_state.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
@@ -58,7 +63,7 @@ const _parent2Id = "7e1d2c3b-4a59-4687-b7c8-d9e0f1a2b3c4";
 const _moduleVersion = "2026-09-30T11:00:00+0900";
 
 /// One request the app made, as it reached the transport.
-typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String body});
+typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String body, List<int> bytes});
 
 /// Answers each request with the next of [answers]; a [SocketException] there is a lost connection, and a
 /// future holds the answer back until the test completes it.
@@ -75,7 +80,13 @@ class _FakeServer implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final bytes = requestStream == null ? <int>[] : await requestStream.expand((chunk) => chunk).toList();
-    sent.add((method: options.method, uri: options.uri, headers: options.headers, body: utf8.decode(bytes)));
+    sent.add((
+      method: options.method,
+      uri: options.uri,
+      headers: options.headers,
+      body: utf8.decode(bytes, allowMalformed: true),
+      bytes: bytes,
+    ));
     var answer = answers.removeAt(0);
     if (answer is Future<Object>) {
       answer = await answer;
@@ -252,6 +263,7 @@ void main() {
     LoginListener? listener,
     Duration? requestTimeout,
     ({List<CharaDetailRecord> records, List<ColumnSpec>? columns})? table,
+    PathInfo? pathInfo,
   }) {
     server = _FakeServer(answers);
     opened = [];
@@ -274,6 +286,9 @@ void main() {
           (ref) => createDiagnosticDio(operation: "record_share")..httpClientAdapter = server,
         ),
         if (requestTimeout != null) shareRequestTimeoutProvider.overrideWithValue(requestTimeout),
+        // The wait after a 429 is the site's rate-limit window; a test does not wait it out in real time.
+        shareImagesRetryDelayProvider.overrideWithValue(Duration.zero),
+        if (pathInfo != null) pathInfoProvider.overrideWithValue(pathInfo),
         if (table != null) ...[
           displayedRecordsProvider.overrideWithValue(table.records),
           if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
@@ -316,16 +331,19 @@ void main() {
 
   setUp(() async {
     await Hive.box(storageBoxNameOf(StorageBoxKey.recordShares)).clear();
+    // A share that ticked "share the images too" keeps that choice; every case starts from none made.
+    await StorageBox(StorageBoxKey.settings).delete(SettingsEntryKey.shareImages.name);
     record = CharaDetailRecord.fromRecordJson(_recordBytes());
   });
 
-  test('the body that leaves the device carries no trainer id, capture time or record id', () async {
+  test('the body that leaves the device carries no trainer id, capture time or record id, and carries the icons and '
+      "the family's ranks and record types", () async {
     await storeSession();
     container = containerFor([
       _results([_created("0123456789")]),
     ]);
 
-    final outcome = (await notes().shareAll([record]))[record.id];
+    final outcome = (await notes().shareAll([record], source: RecordSource.active))[record.id];
 
     expect(outcome, isA<Shared>());
     expect(server.sent, hasLength(1));
@@ -335,7 +353,7 @@ void main() {
       expect(bytes, contains(value), reason: 'the input does not hold $value, so its absence proves nothing');
       expect(body, isNot(contains(value)));
     }
-    for (final key in ["trainer_id", "captured_date", "record_id", "format_version", "stage", "icon"]) {
+    for (final key in ["trainer_id", "captured_date", "record_id", "format_version", "stage"]) {
       expect(body, isNot(contains('"$key"')));
     }
     final sentRecord = sharesSent(0).single["record"] as Map<String, dynamic>;
@@ -344,7 +362,267 @@ void main() {
       "character": record.trainee.character,
       "card": record.trainee.card,
       "rank": record.trainee.rank,
+      "icon": record.trainee.icon,
     });
+    final family = sentRecord["family"] as Map<String, dynamic>;
+    for (final (key, parent) in [("parent1", record.family.parent1), ("parent2", record.family.parent2)]) {
+      for (final (member, chara) in [("self", parent.self), ("parent1", parent.parent1), ("parent2", parent.parent2)]) {
+        expect((family[key] as Map)[member], {
+          "character": chara.character,
+          "card": chara.card,
+          "icon": chara.icon,
+          "rank": chara.rank,
+          "record_type": chara.recordType?.toValue(),
+        }, reason: '$key.$member');
+      }
+    }
+    expect(
+      (family["parent2"] as Map)["self"]["record_type"],
+      "InheritanceOnly",
+      reason: 'a record type other than the default proves the value is read and not assumed',
+    );
+    expect(sharesSent(0).single.containsKey("images"), isFalse, reason: 'no images were asked for');
+  });
+
+  late Directory dataDir;
+  late PathInfo dataInfo;
+
+  /// A data directory of its own, under which [seedImages] writes record directories.
+  void useDataDir() {
+    dataDir = Directory.systemTemp.createTempSync('record_share_images_');
+    addTearDown(() => dataDir.deleteSync(recursive: true));
+    final dir = DirectoryPath(dataDir.path);
+    dataInfo = PathInfo(documentDir: dir, supportDir: dir, executableDir: dir, downloadDir: dir);
+  }
+
+  Uint8List solid(int width, int height, int shade, {required bool jpeg}) {
+    final image = img.Image(width: width, height: height)..clear(img.ColorRgb8(shade, 255 - shade, shade ~/ 2));
+    return jpeg ? img.encodeJpg(image) : img.encodePng(image);
+  }
+
+  const anchor = {"h": "ScreenStart", "v": "ScreenStart"};
+
+  /// A geometry file as the native pipeline writes one, with a key beside the rect the declaration must not carry.
+  Uint8List geometryFile(int width, int height) => utf8.encode(
+    jsonEncode({
+      "intersection": {
+        "top_left": {"x": 0, "y": 0, "anchor": anchor},
+        "bottom_right": {"x": width, "y": height, "anchor": anchor},
+        "unrelated": true,
+      },
+    }),
+  );
+
+  /// Writes the active record [id]'s images, coloured by [shade] so no two records' images are alike, and answers its
+  /// files by name: the skill image as a PNG wider than an archive keeps, the factor image as its reduced JPEG only,
+  /// the campaign image as a PNG an archive keeps at its size, each with its geometry, and the icon.
+  Map<String, Uint8List> seedImages(String id, int shade) {
+    final files = {
+      "skill.png": solid(1000, 400, shade, jpeg: false),
+      "skill.json": geometryFile(1000, 400),
+      "factor.jpg": solid(300, 200, shade + 1, jpeg: true),
+      "factor.json": geometryFile(300, 200),
+      "campaign.png": solid(500, 300, shade + 2, jpeg: false),
+      "campaign.json": geometryFile(500, 300),
+      "trainee.jpg": solid(40, 40, shade + 3, jpeg: true),
+      "record.json": utf8.encode(_recordBytes(recordId: id)),
+    };
+    final dir = Directory(recordDirOfId(dataInfo, RecordSource.active, id).path)..createSync(recursive: true);
+    for (final MapEntry(:key, :value) in files.entries) {
+      File('${dir.path}/$key').writeAsBytesSync(value);
+    }
+    return files;
+  }
+
+  /// Every file of the active record [id]'s directory, by name.
+  Map<String, String> filesOf(String id) => {
+    for (final f in Directory(recordDirOfId(dataInfo, RecordSource.active, id).path).listSync().whereType<File>())
+      f.uri.pathSegments.last: sha256.convert(f.readAsBytesSync()).toString(),
+  };
+
+  Map<String, Object?> pendingImages(String id, {String status = "created"}) => {
+    "status": status,
+    ..._located(id),
+    "images": "pending",
+  };
+
+  /// The parts a share of the record holding [files] declares, worked out here by hand: what each part must be.
+  List<({String kind, List<int> bytes, Map<String, Object?>? intersection})> expectedParts(
+    Map<String, Uint8List> files,
+  ) {
+    Map<String, Object?> rect(int width, int height) => {
+      "top_left": {"x": 0, "y": 0, "anchor": anchor},
+      "bottom_right": {"x": width, "y": height, "anchor": anchor},
+    };
+    return [
+      // 1000 px wide, reduced to the archive's 720: the pane's rect scales with it.
+      (kind: "skill", bytes: archiveJpegOf(files["skill.png"] ?? Uint8List(0)) ?? [], intersection: rect(720, 288)),
+      (kind: "factor", bytes: files["factor.jpg"] ?? [], intersection: rect(300, 200)),
+      (
+        kind: "campaign",
+        bytes: archiveJpegOf(files["campaign.png"] ?? Uint8List(0)) ?? [],
+        intersection: rect(500, 300),
+      ),
+      (kind: "trainee", bytes: files["trainee.jpg"] ?? [], intersection: null),
+    ];
+  }
+
+  /// Checks the declaration of share [share] and the bundle request [put] against [expected].
+  void expectBundle(
+    Map<String, dynamic> share,
+    _Sent put,
+    List<({String kind, List<int> bytes, Map<String, Object?>? intersection})> expected,
+  ) {
+    final declared = share["images"] as Map<String, dynamic>;
+    final parts = (declared["parts"] as List).cast<Map<String, dynamic>>();
+    expect(parts.map((p) => p["kind"]), expected.map((e) => e.kind));
+    for (final (i, e) in expected.indexed) {
+      expect(e.bytes, isNotEmpty, reason: '${e.kind}: the expected bytes were made');
+      expect(parts[i]["size"], e.bytes.length, reason: e.kind);
+      expect(parts[i]["sha256"], sha256.convert(e.bytes).toString(), reason: e.kind);
+      expect(parts[i]["intersection"], e.intersection, reason: e.kind);
+    }
+    final bundle = [for (final e in expected) ...e.bytes];
+    expect(put.method, "PUT");
+    expect(put.bytes, bundle, reason: 'the bundle is the parts, one after another, in the declared order');
+    expect(declared["size"], bundle.length);
+    expect(declared["name"], sha256.convert(bundle).toString());
+    expect(put.headers[Headers.contentTypeHeader], "application/octet-stream");
+    expect(put.headers[Headers.contentLengthHeader], bundle.length, reason: 'the server requires Content-Length');
+  }
+
+  group('images', () {
+    setUp(useDataDir);
+
+    test("asked for, each share declares and sends its own record's images, and no file of a record changes", () async {
+      await storeSession();
+      final ids = [_uuid(1), _uuid(2)];
+      final seeded = [seedImages(ids[0], 10), seedImages(ids[1], 120)];
+      final before = [for (final id in ids) filesOf(id)];
+      final records = [for (final id in ids) CharaDetailRecord.fromRecordJson(_recordBytes(recordId: id))];
+      container = containerFor(pathInfo: dataInfo, [
+        _results([pendingImages("0000000010"), pendingImages("0000000020")]),
+        _json(200, {"status": "stored"}),
+        _json(200, {"status": "stored"}),
+      ]);
+
+      final outcomes = await notes().shareAll(records, source: RecordSource.active, withImages: true);
+
+      expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), [
+        "POST /api/shares",
+        "PUT /api/shares/0000000010/images",
+        "PUT /api/shares/0000000020/images",
+      ]);
+      for (final (i, id) in ids.indexed) {
+        expectBundle(sharesSent(0)[i], server.sent[i + 1], expectedParts(seeded[i]));
+        expect(outcomes[id], isA<Shared>().having((o) => o.imagesLeftOut, 'imagesLeftOut', isFalse));
+        expect(notes().entryOf(id)?.state, RecordShareState.shared);
+        expect(filesOf(id), before[i], reason: 'sharing reads the images and writes none');
+      }
+    });
+
+    test('not asked for, nothing is declared or sent; asked for, a record with no complete images is shared without '
+        'them and says so', () async {
+      await storeSession();
+      seedImages(record.id, 10);
+      final partial = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(3)));
+      seedImages(partial.id, 50);
+      File('${recordDirOfId(dataInfo, RecordSource.active, partial.id).path}/campaign.json').deleteSync();
+      container = containerFor(pathInfo: dataInfo, [
+        _results([_created("0123456789")]),
+        _results([
+          {..._created("0123456780"), "images": "none"},
+        ]),
+      ]);
+
+      final plain = (await notes().shareAll([record], source: RecordSource.active))[record.id];
+      final leftOut = (await notes().shareAll([partial], source: RecordSource.active, withImages: true))[partial.id];
+
+      expect(server.sent.map((s) => s.method), ["POST", "POST"], reason: 'no bundle is sent for either');
+      expect(sharesSent(0).single.containsKey("images"), isFalse);
+      expect(plain, isA<Shared>().having((o) => o.imagesLeftOut, 'imagesLeftOut', isFalse));
+      expect(sharesSent(1).single.containsKey("images"), isFalse, reason: 'the campaign image has no geometry');
+      expect(leftOut, isA<Shared>().having((o) => o.imagesLeftOut, 'imagesLeftOut', isTrue));
+    });
+
+    test('a share whose images were not sent stays pending, also against the account list, and sharing it again '
+        'sends the images only and confirms it', () async {
+      await storeSession();
+      final seeded = seedImages(record.id, 10);
+      container = containerFor(pathInfo: dataInfo, [
+        _results([pendingImages("0123456789")]),
+        _lostConnection,
+        _results([pendingImages("0123456789", status: "existing")]),
+        _json(200, {"status": "stored"}),
+      ]);
+
+      final first = (await notes().shareAll([record], source: RecordSource.active, withImages: true))[record.id];
+
+      expect(first, isA<ImagesUnsent>());
+      final pending = notes().entryOf(record.id);
+      expect(pending?.state, RecordShareState.pending);
+      expect(pending?.id, "0123456789");
+
+      server.answers.insert(
+        0,
+        _sharesList([
+          {..._listed("0123456789", pending?.keyHash ?? ""), "images": "pending"},
+        ]),
+      );
+      expect(await notes().refreshFromServer(), isA<SharesListed>());
+      expect(notes().entryOf(record.id)?.state, RecordShareState.pending, reason: 'the server still waits for them');
+
+      // The images were declared by the first attempt; the box is no longer ticked, and they are sent all the same.
+      final again = (await notes().shareAll([record], source: RecordSource.active))[record.id];
+
+      expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), [
+        "POST /api/shares",
+        "PUT /api/shares/0123456789/images",
+        "GET /api/me/shares",
+        "POST /api/shares",
+        "PUT /api/shares/0123456789/images",
+      ]);
+      expect(sharesSent(3).single["client_key"], pending?.clientKey);
+      expectBundle(sharesSent(0).single, server.sent[4], expectedParts(seeded));
+      expect(again, isA<Shared>());
+      expect(notes().entryOf(record.id)?.state, RecordShareState.shared);
+    });
+
+    test(
+      'after a 429 the bundle is sent once more; a second 429 stops, and the shares not yet sent stay pending',
+      () async {
+        await storeSession();
+        final ids = [_uuid(1), _uuid(2), _uuid(3)];
+        for (final (i, id) in ids.indexed) {
+          seedImages(id, 10 + 40 * i);
+        }
+        final records = [for (final id in ids) CharaDetailRecord.fromRecordJson(_recordBytes(recordId: id))];
+        container = containerFor(pathInfo: dataInfo, [
+          _results([pendingImages("0000000010"), pendingImages("0000000020"), pendingImages("0000000030")]),
+          _json(429, {}),
+          _json(200, {"status": "stored"}),
+          _json(429, {}),
+          _json(429, {}),
+        ]);
+
+        final outcomes = await notes().shareAll(records, source: RecordSource.active, withImages: true);
+
+        expect(server.sent.map((s) => s.uri.path), [
+          "/api/shares",
+          "/api/shares/0000000010/images",
+          "/api/shares/0000000010/images",
+          "/api/shares/0000000020/images",
+          "/api/shares/0000000020/images",
+        ]);
+        expect(outcomes[ids[0]], isA<Shared>());
+        expect(outcomes[ids[1]], isA<ImagesUnsent>());
+        expect(outcomes[ids[2]], isA<ImagesUnsent>(), reason: 'not sent after the second 429');
+        expect(
+          [for (final id in ids) notes().entryOf(id)?.state],
+          [RecordShareState.shared, RecordShareState.pending, RecordShareState.pending],
+        );
+      },
+    );
   });
 
   group('from the row menu', () {
@@ -415,6 +693,58 @@ void main() {
       expect(server.sent.single.uri.path, "/api/shares");
       expect(server.sent.single.headers["Authorization"], "Bearer $_token");
       expect(container.read(recordSharesProvider).values.single.url, url);
+    });
+
+    testWidgets('a share left with "share the images too" untouched sends no images; ticked, it sends them, and the '
+        'next confirmation starts ticked', (tester) async {
+      await storeSession();
+      useDataDir();
+      final plain = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1)));
+      final ticked = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(2)));
+      final next = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(3)));
+      final seeded = await tester.runAsync(() async => [seedImages(plain.id, 10), seedImages(ticked.id, 90)]) ?? [];
+      container = containerFor(
+        pathInfo: dataInfo,
+        held: [plain, ticked, next],
+        [
+          _results([_created("0000000010")]),
+          _results([pendingImages("0000000020")]),
+          _json(200, {"status": "stored"}),
+        ],
+      );
+
+      Future<void> openShare(CharaDetailRecord shown) async {
+        await openMenu(tester, shown);
+        await tester.tap(find.text('共有する…'));
+        await tester.pumpAndSettle();
+      }
+
+      bool checked() => tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value ?? false;
+
+      // No choice made yet: the box starts unticked, and the share is left as it is.
+      await openShare(plain);
+      expect(checked(), isFalse);
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: 'the first share');
+      await tester.pumpAndSettle();
+      expect(server.sent.map((s) => s.method), ["POST"], reason: 'no bundle is sent');
+      expect(sharesSent(0).single.containsKey("images"), isFalse, reason: 'no images are declared');
+      CardDialog.dismiss(container.read(containerRefProvider));
+      await tester.pumpAndSettle();
+
+      await openShare(ticked);
+      await tester.tap(find.text('画像も共有する'));
+      await tester.pump();
+      await tester.longPress(find.text('長押しで共有'));
+      await settleUntilElapsing(tester, () => server.sent.length == 3, describe: 'the ticked share and its bundle');
+      await tester.pumpAndSettle();
+      expectBundle(sharesSent(1).single, server.sent[2], expectedParts(seeded[1]));
+      CardDialog.dismiss(container.read(containerRefProvider));
+      await tester.pumpAndSettle();
+
+      // The choice of the share just made is where the next confirmation starts.
+      await openShare(next);
+      expect(checked(), isTrue);
     });
 
     testWidgets("the confirmation's link opens the privacy policy next to the shared pages", (tester) async {
@@ -694,7 +1024,7 @@ void main() {
         _results([_created("0123456789")]),
         _empty(204),
       ]);
-      await tester.runAsync(() => notes().shareAll([record]));
+      await tester.runAsync(() => notes().shareAll([record], source: RecordSource.active));
 
       await openMenu(tester, record);
       await tester.tap(find.text('共有を取り消す…'));
@@ -1404,7 +1734,7 @@ void main() {
         _results([_created("0000000080"), _created("0000000090")]),
       ]);
 
-      final outcomes = await notes().shareAll(records);
+      final outcomes = await notes().shareAll(records, source: RecordSource.active);
 
       expect(
         [
@@ -1460,8 +1790,8 @@ void main() {
     ]);
 
     // As after a login whose trainer registration got no answer: the account does not hold this device's id.
-    expect((await notes().shareAll([record]))[record.id], isA<Shared>());
-    expect((await notes().shareAll([synced]))[synced.id], isA<Shared>());
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<Shared>());
+    expect((await notes().shareAll([synced], source: RecordSource.active))[synced.id], isA<Shared>());
 
     expect(server.sent.map((s) => s.uri.path), ["/api/shares", "/api/me", "/api/shares"]);
   });
@@ -1483,13 +1813,13 @@ void main() {
           _results([_created("0123456780"), if (!keeps) _created("0123456781")]),
         ]);
 
-        expect((await notes().shareAll([other]))[other.id], isA<LoginRequired>());
+        expect((await notes().shareAll([other], source: RecordSource.active))[other.id], isA<LoginRequired>());
         expect(container.read(recordShareSessionProvider), isNull);
         expect(notes().entryOf(record.id), isNotNull, reason: 'a 401 alone keeps the notes');
 
         final attempt = await container.read(recordShareSessionProvider.notifier).beginLogin();
         expect(await attempt.claim(), LoginOutcome.signedIn);
-        final outcomes = await notes().shareAll([record, other]);
+        final outcomes = await notes().shareAll([record, other], source: RecordSource.active);
 
         final sentKeys = sharesSent(3).map((s) => s["client_key"]).toList();
         if (keeps) {
@@ -1532,8 +1862,11 @@ void main() {
         _empty(204),
       ]);
 
-      expect((await notes().shareAll([record, other]))[record.id], isA<ShareUnreachable>());
-      await notes().shareAll([record, other]);
+      expect(
+        (await notes().shareAll([record, other], source: RecordSource.active))[record.id],
+        isA<ShareUnreachable>(),
+      );
+      await notes().shareAll([record, other], source: RecordSource.active);
       final keys = [
         for (final r in [record, other]) notes().entryOf(r.id)?.clientKey ?? "",
       ];
@@ -1565,11 +1898,11 @@ void main() {
       ]),
     ]);
 
-    expect((await notes().shareAll([record]))[record.id], isA<ShareUnreachable>());
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<ShareUnreachable>());
     final pending = container.read(recordSharesProvider).values.single;
     expect(pending.state, RecordShareState.pending);
 
-    final outcome = (await notes().shareAll([record]))[record.id];
+    final outcome = (await notes().shareAll([record], source: RecordSource.active))[record.id];
 
     expect(
       [
@@ -1586,7 +1919,7 @@ void main() {
     await storeSession();
     container = containerFor([Completer<Object>().future], requestTimeout: const Duration(milliseconds: 10));
 
-    expect((await notes().shareAll([record]))[record.id], isA<ShareUnreachable>());
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<ShareUnreachable>());
     expect(container.read(recordSharesProvider).values.single.state, RecordShareState.pending);
   });
 
@@ -1634,7 +1967,7 @@ void main() {
       ];
 
       expect(listed(), isEmpty, reason: 'a pending share is not listed as shared');
-      expect((await notes().shareAll([shared]))[shared.id], isA<Shared>());
+      expect((await notes().shareAll([shared], source: RecordSource.active))[shared.id], isA<Shared>());
       expect(listed(), [shared.id]);
 
       await container.read(recordShareSessionProvider.notifier).logout();
@@ -1912,7 +2245,7 @@ void main() {
         final other = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1), trainerId: otherTrainer));
         container = containerFor([deleting()]);
 
-        final outcome = (await notes().shareAll([other]))[other.id];
+        final outcome = (await notes().shareAll([other], source: RecordSource.active))[other.id];
 
         expect(server.sent.single.uri.path, "/api/me");
         expect(outcome, isA<ShareRefused>().having((o) => o.reason, "reason", ShareRefusal.accountDeleting));
@@ -1924,7 +2257,7 @@ void main() {
         await storeSession();
         container = containerFor([deleting()]);
 
-        final outcome = (await notes().shareAll([record]))[record.id];
+        final outcome = (await notes().shareAll([record], source: RecordSource.active))[record.id];
 
         expect(server.sent.single.uri.path, "/api/shares");
         expect(outcome, isA<ShareRefused>().having((o) => o.reason, "reason", ShareRefusal.accountDeleting));

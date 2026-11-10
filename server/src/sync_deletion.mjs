@@ -98,15 +98,20 @@ export async function countSyncRows(db, accountId) {
 export const deleteVersionsRequests = (pages) => 2 * pages + 1;
 
 /**
- * Deletes the versions and delete markers under the B2 prefix of account `accountId`, by version, at
- * most `pages` pages of ListObjectVersions and one DeleteObjects for each, then one more listing, all
- * through `bucket` (`deleteVersionsRequests(pages)` B2 requests at most). Every page is listed from
- * the start of the prefix: what the page before deleted is no longer there. Returns `{removed,
- * remaining}`: the versions deleted, and those B2 still lists, up to one page (0 once a page came back
- * whole and every version on it was deleted). With `pages` 0 it only counts. Throws StorageFailed.
+ * Deletes the versions and delete markers under the B2 prefix of account `accountId`'s synced objects
+ * (`deleteVersionsUnder`).
  */
-export async function deleteSyncVersions(bucket, accountId, pages) {
-  const prefix = accountPrefix(accountId);
+export const deleteSyncVersions = (bucket, accountId, pages) => deleteVersionsUnder(bucket, accountPrefix(accountId), pages);
+
+/**
+ * Deletes the versions and delete markers under B2 key prefix `prefix`, by version, at most `pages`
+ * pages of ListObjectVersions and one DeleteObjects for each, then one more listing, all through
+ * `bucket` (`deleteVersionsRequests(pages)` B2 requests at most). Every page is listed from the start of
+ * the prefix: what the page before deleted is no longer there. Returns `{removed, remaining}`: the
+ * versions deleted, and those B2 still lists, up to one page (0 once a page came back whole and every
+ * version on it was deleted). With `pages` 0 it only counts. Throws StorageFailed.
+ */
+export async function deleteVersionsUnder(bucket, prefix, pages) {
   let removed = 0;
   for (let page = 0; page < pages; page++) {
     const { entries, next } = await bucket.listVersions(prefix);

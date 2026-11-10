@@ -21,6 +21,13 @@ const MAX_SUPPORT_CARDS = 6;
 const MAX_RACES = 96;
 
 const RECORD_TYPES = ["Standard", "InheritanceOnly"];
+// The record types a parent may carry: the app's RecordType, friends' records included, since a
+// parent is whichever record the sharer bred from.
+const PARENT_RECORD_TYPES = ["Standard", "InheritanceOnly", "FriendStandard", "FriendInheritance"];
+// A face icon is the recognizer's class number, published as is so the importing app can show the
+// same face. The bound only keeps a number sane: the largest class number seen in real records is
+// 876, far below it.
+const MAX_ICON = 65_535;
 const VERSION = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:?\d{2})$/;
 const TRAINED_DATE = /^(\d{4})\/(\d{2})\/(\d{2})$/;
 
@@ -82,12 +89,28 @@ class Checker {
     return value;
   }
 
+  /** Copies `value`'s face icon class number into `out`, when it carries one. */
+  icon(value, out, field) {
+    if (given(value, "icon")) out.icon = int(value.icon, `${field}.icon`, 0, MAX_ICON);
+  }
+
+  /**
+   * A parent's chara. Its icon, rank and record type are optional: shares posted before the app sent
+   * them stay valid, and the app reading a share tells such a share by their absence.
+   */
   chara(value, field) {
-    object(value, field, ["character", "card"]);
-    return {
+    object(value, field, ["character", "card"], ["icon", "rank", "record_type"]);
+    const out = {
       character: this.sid(value.character, `${field}.character`, Keys.character),
       card: this.sid(value.card, `${field}.card`, Keys.card),
     };
+    this.icon(value, out, field);
+    if (given(value, "rank")) out.rank = this.sid(value.rank, `${field}.rank`, Keys.rank);
+    if (given(value, "record_type")) {
+      if (!PARENT_RECORD_TYPES.includes(value.record_type)) throw new InvalidPayload(`${field}.record_type`);
+      out.record_type = value.record_type;
+    }
+    return out;
   }
 
   parent(value, field) {
@@ -206,12 +229,13 @@ export function canonicalPostedForm(value, tables) {
   };
   if (given(value, "relation_bonus")) out.relation_bonus = int(value.relation_bonus, `${F}.relation_bonus`, 0, 999);
 
-  const trainee = object(value.trainee, `${F}.trainee`, ["character", "card", "rank"]);
+  const trainee = object(value.trainee, `${F}.trainee`, ["character", "card", "rank"], ["icon"]);
   out.trainee = {
     character: c.sid(trainee.character, `${F}.trainee.character`, Keys.character),
     card: c.sid(trainee.card, `${F}.trainee.card`, Keys.card),
     rank: c.sid(trainee.rank, `${F}.trainee.rank`, Keys.rank),
   };
+  c.icon(trainee, out.trainee, `${F}.trainee`);
   out.evaluation_value = int(value.evaluation_value, `${F}.evaluation_value`, 0, 9_999_999);
 
   const statusKeys = ["speed", "stamina", "power", "guts", "intelligence"];

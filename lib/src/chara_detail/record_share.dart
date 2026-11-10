@@ -7,17 +7,26 @@
 // share by the hash of its key.
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_share_session.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
 part 'record_share.mapper.dart';
@@ -33,7 +42,15 @@ bool canShare(CharaDetailRecord record, Iterable<String> trainerIds) =>
 /// device decides without asking the account's trainers.
 bool isNeverShareable(CharaDetailRecord record) => record.isFriend;
 
-Map<String, Object?> _chara(Character c) => {"character": c.character, "card": c.card};
+/// A family member: who it is, its face icon's class number, its rank, and its record type where the recognizer read
+/// one, so a device importing the share holds the fields a captured record holds.
+Map<String, Object?> _chara(Character c) => {
+  "character": c.character,
+  "card": c.card,
+  "icon": c.icon,
+  "rank": c.rank,
+  if (c.recordType case final type?) "record_type": type.toValue(),
+};
 
 Map<String, Object?> _parent(Parent p) => {
   "self": _chara(p.self),
@@ -75,7 +92,12 @@ Map<String, Object?> postedForm(CharaDetailRecord record, {required String modul
     "record_type": (m.recordType ?? RecordType.standard).toValue(),
     "strategy": m.strategy,
     if (m.relationBonus != null) "relation_bonus": m.relationBonus,
-    "trainee": {"character": record.trainee.character, "card": record.trainee.card, "rank": record.trainee.rank},
+    "trainee": {
+      "character": record.trainee.character,
+      "card": record.trainee.card,
+      "rank": record.trainee.rank,
+      "icon": record.trainee.icon,
+    },
     "evaluation_value": record.evaluationValue,
     "status": {
       "speed": s.speed,
@@ -167,17 +189,77 @@ class RecordShare with RecordShareMappable {
 
   String get keyHash => secretHash(clientKey);
 
-  /// This note once the server has the share as [id], under the same key.
-  RecordShare confirmedAs({required String id, required String url, required String sharedOn}) => RecordShare(
-    recordId: recordId,
-    accountId: accountId,
-    clientKey: clientKey,
-    state: RecordShareState.shared,
-    id: id,
-    url: url,
-    sharedOn: sharedOn,
-  );
+  /// This note once the server has the share as [id], under the same key, and holds every image it declared.
+  RecordShare confirmedAs({required String id, required String url, required String sharedOn}) =>
+      _at(RecordShareState.shared, id: id, url: url, sharedOn: sharedOn);
+
+  /// This note once the server has the share as [id] but not yet the images it declared: still pending, so sharing the
+  /// record again sends them.
+  RecordShare locatedAs({required String id, required String url, required String sharedOn}) =>
+      _at(RecordShareState.pending, id: id, url: url, sharedOn: sharedOn);
+
+  RecordShare _at(RecordShareState state, {required String id, required String url, required String sharedOn}) =>
+      RecordShare(
+        recordId: recordId,
+        accountId: accountId,
+        clientKey: clientKey,
+        state: state,
+        id: id,
+        url: url,
+        sharedOn: sharedOn,
+      );
 }
+
+/// The images of one share as one unit: [bytes], the parts' bytes one after another, and [declaration], what a share
+/// of `POST /api/shares` declares of them — the bundle's SHA-256 as its name, its size, and each part's kind, size,
+/// SHA-256 and geometry, in the order the bundle holds them.
+typedef ShareImageBundle = ({Uint8List bytes, Map<String, Object?> declaration});
+
+/// The bundle of [images] ([recordShareImagesOf]), or null where an image's geometry is not one a declaration can state
+/// ([_declaredRect]). Pure.
+ShareImageBundle? shareImageBundleOf(List<RecordShareImage> images) {
+  final parts = <Map<String, Object?>>[];
+  final builder = BytesBuilder(copy: false);
+  for (final image in images) {
+    final Map<String, Object?>? rect;
+    if (image.intersection case final intersection?) {
+      rect = _declaredRect(intersection);
+      if (rect == null) return null;
+    } else {
+      rect = null;
+    }
+    builder.add(image.bytes);
+    parts.add({
+      "kind": image.kind,
+      "size": image.bytes.length,
+      "sha256": sha256.convert(image.bytes).toString(),
+      "intersection": ?rect,
+    });
+  }
+  final bytes = builder.takeBytes();
+  return (bytes: bytes, declaration: {"name": sha256.convert(bytes).toString(), "size": bytes.length, "parts": parts});
+}
+
+/// The rect a declaration states of the geometry [intersection]: its two corners with their integer `x` and `y` and
+/// their `anchor` where it has one, picked out by name as the posted form's values are, since the server refuses any
+/// other key. Null where a corner has no integer coordinates.
+Map<String, Object?>? _declaredRect(Map<String, dynamic> intersection) {
+  Map<String, Object?>? corner(Object? point) => switch (point) {
+    {"x": final int x, "y": final int y} => {
+      "x": x,
+      "y": y,
+      if (point["anchor"] case {"h": final String h, "v": final String v}) "anchor": {"h": h, "v": v},
+    },
+    _ => null,
+  };
+  final topLeft = corner(intersection["top_left"]);
+  final bottomRight = corner(intersection["bottom_right"]);
+  return topLeft == null || bottomRight == null ? null : {"top_left": topLeft, "bottom_right": bottomRight};
+}
+
+/// What the server says of a share's images, in a share's result and in the account's list: whether it still waits
+/// for the bundle the share declared. A share that declared none, or whose bundle is stored, waits for nothing.
+bool _imagesPending(Object? item) => item is Map && item["images"] == "pending";
 
 /// Why the server refused a share, past the cases the app answers by itself.
 enum ShareRefusal {
@@ -194,6 +276,14 @@ enum ShareRefusal {
 
   /// A 429 or 5xx that is not the server's own JSON: Cloudflare's rate limit or its daily quota.
   busy,
+
+  /// The share declared images and the server takes no more images, today or at all. The whole share is refused;
+  /// without images it could be shared.
+  imageLimit,
+
+  /// The share declared images and the server has stopped taking images. The whole share is refused; without images it
+  /// could be shared.
+  imageSharingPaused,
 }
 
 sealed class ShareOutcome {
@@ -203,7 +293,19 @@ sealed class ShareOutcome {
 final class Shared extends ShareOutcome {
   final RecordShare entry;
 
-  const Shared(this.entry);
+  /// Images were asked for and the record has none a share can carry ([recordShareImagesOf]), so it was shared
+  /// without them.
+  final bool imagesLeftOut;
+
+  const Shared(this.entry, {this.imagesLeftOut = false});
+}
+
+/// The server holds the share but not the images it declared, which were not sent. The note stays pending with the
+/// share's id, and sharing the record again sends the images only.
+final class ImagesUnsent extends ShareOutcome {
+  final RecordShare entry;
+
+  const ImagesUnsent(this.entry);
 }
 
 /// The record is already shared; it is unshared and shared again to change what it holds.
@@ -249,7 +351,15 @@ enum UnshareOutcome { unshared, forbidden, loginRequired, unreachable, failed }
 
 /// One share of the account, as `GET /api/me/shares` lists it. [cardName] is the trainee's card as the server's name
 /// tables label it (its own form, not the app's), or null when the listing names none.
-typedef AccountShare = ({String id, String url, String sharedOn, String clientKeyHash, String? cardName});
+/// [imagesPending] is whether the server still waits for the images the share declared ([_imagesPending]).
+typedef AccountShare = ({
+  String id,
+  String url,
+  String sharedOn,
+  String clientKeyHash,
+  String? cardName,
+  bool imagesPending,
+});
 
 /// What listing the account's shares answered.
 sealed class ShareListing {
@@ -290,6 +400,8 @@ ShareRefusal? _refusalOf(Object? error) => switch (error) {
   "sharing_paused" => ShareRefusal.sharingPaused,
   "account_deleting" => ShareRefusal.accountDeleting,
   "temporarily_unavailable" => ShareRefusal.temporarilyUnavailable,
+  "image_daily_limit" || "image_storage_full" || "image_account_limit" => ShareRefusal.imageLimit,
+  "image_sharing_paused" => ShareRefusal.imageSharingPaused,
   _ => null,
 };
 
@@ -348,9 +460,18 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
 
   RecordShare? entryOf(String recordId) => state.values.where((e) => e.recordId == recordId).firstOrNull;
 
-  /// Shares [records] under the session, [maxSharesPerRequest] to a request, and answers each record's outcome
-  /// by its id. Each share's note is written from its own result only.
-  Future<Map<String, ShareOutcome>> shareAll(List<CharaDetailRecord> records) async {
+  /// Shares [records], held in [source], under the session, [maxSharesPerRequest] to a request, and answers each
+  /// record's outcome by its id. Each share's note is written from its own result only.
+  ///
+  /// With [withImages], each share declares its record's images ([recordShareImagesOf]) and their bundle is sent once
+  /// the server holds the share; a record with none a share can carry is shared without them. Whatever
+  /// [withImages] says, a share the server holds and still waits for images of (one an earlier attempt declared)
+  /// is sent its bundle, and its note becomes shared only once the bundle is sent.
+  Future<Map<String, ShareOutcome>> shareAll(
+    List<CharaDetailRecord> records, {
+    required RecordSource source,
+    bool withImages = false,
+  }) async {
     final session = ref.read(recordShareSessionProvider);
     if (session == null) {
       return {for (final r in records) r.id: const LoginRequired()};
@@ -361,21 +482,77 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     }
     final (:toSend, :settled) = await sortForSharing(records, under: session);
     final outcomes = {...settled};
+    final images = _ShareImages(ref, source);
     for (var start = 0; start < toSend.length; start += maxSharesPerRequest) {
       final chunk = toSend.sublist(start, min(start + maxSharesPerRequest, toSend.length));
-      final answered = await _shareChunk(chunk, session, moduleVersion);
+      final answered = await _shareChunk(chunk, session, moduleVersion, withImages ? images : null);
+      final unsent = await _sendBundles(answered, session, images);
       outcomes.addAll(answered);
       final stop = answered.values.any(
         (o) => o is LoginRequired || o is ShareUnreachable || o is ShareRefused && o.reason == ShareRefusal.busy,
       );
-      if (stop) {
+      if (stop || unsent.stopped) {
         for (final record in toSend.skip(start + chunk.length)) {
-          outcomes[record.id] = answered.values.first;
+          outcomes[record.id] = stop ? answered.values.first : const ShareSkipped();
         }
         break;
       }
     }
     return outcomes;
+  }
+
+  /// Sends the bundle of each share of [answered] the server holds and waits for images of ([ImagesUnsent]), one at a
+  /// time, and replaces its outcome with [Shared] once the bundle is sent. A 429 is waited out once
+  /// ([shareImagesRetryDelayProvider]); a second stops the sending, and every share not yet sent stays [ImagesUnsent].
+  /// Answers whether it stopped so.
+  Future<({bool stopped})> _sendBundles(
+    Map<String, ShareOutcome> answered,
+    ShareSession session,
+    _ShareImages images,
+  ) async {
+    for (final MapEntry(key: recordId, value: outcome) in answered.entries.toList()) {
+      if (outcome is! ImagesUnsent) {
+        continue;
+      }
+      final bundle = await images.of(recordId);
+      final RecordShare(:id, :url, :sharedOn) = outcome.entry;
+      if (bundle == null || id == null || url == null || sharedOn == null) {
+        continue;
+      }
+      ShareAnswer? answer;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(ref.read(shareImagesRetryDelayProvider));
+        }
+        try {
+          answer = await _session.send(
+            "PUT",
+            "/api/shares/$id/images",
+            data: bundle.bytes,
+            under: session,
+            timeout: ref.read(shareImagesRequestTimeoutProvider),
+          );
+        } on DioException {
+          answer = null;
+        } on StateError {
+          answer = null;
+        }
+        if (answer?.status != 429) {
+          break;
+        }
+      }
+      if (answer?.status == 429) {
+        return (stopped: true);
+      }
+      if (answer case ShareAnswer(:final status) when status >= 200 && status < 300) {
+        final shared = outcome.entry.confirmedAs(id: id, url: url, sharedOn: sharedOn);
+        await _put(shared);
+        answered[recordId] = Shared(shared);
+      } else {
+        logger.w("A share's images were not sent: ${answer?.status ?? 'no answer'}");
+      }
+    }
+    return (stopped: false);
   }
 
   /// Sorts [records] without sending anything: those [shareAll] would send, and the outcome of each it would not —
@@ -447,6 +624,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     List<CharaDetailRecord> chunk,
     ShareSession session,
     String moduleVersion,
+    _ShareImages? images,
   ) async {
     Map<String, ShareOutcome> everyOne(ShareOutcome o) => {for (final r in chunk) r.id: o};
     // A share begun under one account sends nothing once the device holds another: the server would publish the
@@ -469,9 +647,14 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       await _put(note);
       pending.add(note);
     }
+    final declared = [for (final record in chunk) await images?.of(record.id)];
     final shares = [
       for (final (i, note) in pending.indexed)
-        {"client_key": note.clientKey, "record": postedForm(chunk[i], moduleVersion: moduleVersion)},
+        {
+          "client_key": note.clientKey,
+          "record": postedForm(chunk[i], moduleVersion: moduleVersion),
+          if (declared[i] case final bundle?) "images": bundle.declaration,
+        },
     ];
     final ShareAnswer answer;
     try {
@@ -485,7 +668,14 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     if (answer.status == 200 && results is List && results.length == pending.length) {
       final outcomes = <String, ShareOutcome>{};
       for (final (i, note) in pending.indexed) {
-        outcomes[note.recordId] = await _applyResult(note, results[i]);
+        final result = results[i];
+        final outcome = await _applyResult(note, result);
+        // Images were asked for and the share holds none: the record has none a share can carry, or the share was
+        // already made by an earlier attempt that declared none, which a resend does not change.
+        final leftOut = declared[i] == null || result is Map && result["images"] == "none";
+        outcomes[note.recordId] = outcome is Shared && images != null && leftOut
+            ? Shared(outcome.entry, imagesLeftOut: true)
+            : outcome;
       }
       return outcomes;
     }
@@ -496,7 +686,8 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     return everyOne(ShareRefused(reason, retryAfter: _retryAfter(answer.headers)));
   }
 
-  /// Writes one share's result into its own note, and answers its outcome.
+  /// Writes one share's result into its own note, and answers its outcome: [ImagesUnsent] for a share the server
+  /// holds and still waits for images of, whose note stays pending.
   Future<ShareOutcome> _applyResult(RecordShare note, Object? result) async {
     final map = result is Map ? result : const {};
     switch (map["status"]) {
@@ -505,6 +696,11 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         final url = map["url"];
         if (id is! String || url is! String) {
           return const ShareRefused(ShareRefusal.busy);
+        }
+        if (_imagesPending(map)) {
+          final located = note.locatedAs(id: id, url: url, sharedOn: note.sharedOn ?? _today());
+          await _put(located);
+          return ImagesUnsent(located);
         }
         final shared = note.confirmedAs(id: id, url: url, sharedOn: _today());
         await _put(shared);
@@ -541,7 +737,8 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   }
 
   /// Lists the account's shares and matches the notes against them by `client_key_hash`: a pending note the list
-  /// holds becomes shared, and a note of this account the list does not hold is dropped.
+  /// holds becomes shared — or stays pending, with the share's id, while the server waits for its images — and a note
+  /// of this account the list does not hold is dropped.
   Future<ShareListing> refreshFromServer() async {
     final session = ref.read(recordShareSessionProvider);
     if (session == null) {
@@ -574,8 +771,14 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       final share = byHash[key];
       if (share == null) {
         gone.add(key);
-      } else if (note.state != RecordShareState.shared || note.id != share.id) {
-        await _put(note.confirmedAs(id: share.id, url: share.url, sharedOn: share.sharedOn));
+      } else {
+        final (id, url, sharedOn) = (share.id, share.url, share.sharedOn);
+        final matched = share.imagesPending
+            ? note.locatedAs(id: id, url: url, sharedOn: sharedOn)
+            : note.confirmedAs(id: id, url: url, sharedOn: sharedOn);
+        if (note.state != matched.state || note.id != matched.id) {
+          await _put(matched);
+        }
       }
     }
     await _drop(gone);
@@ -605,10 +808,59 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         {"trainee": {"card": {"name": final String name}}} when name.isNotEmpty => name,
         _ => null,
       };
-      shares.add((id: id, url: url, sharedOn: sharedOn, clientKeyHash: hash, cardName: cardName));
+      shares.add((
+        id: id,
+        url: url,
+        sharedOn: sharedOn,
+        clientKeyHash: hash,
+        cardName: cardName,
+        imagesPending: _imagesPending(item),
+      ));
     }
     return shares;
   }
 }
 
 final recordSharesProvider = NotifierProvider<RecordShares, Map<String, RecordShare>>(RecordShares.new);
+
+/// Whether the share confirmations start with "share the images too" checked: the choice of the last share this
+/// device made, off until one is made. Set when a share starts, not when the box is merely toggled.
+final shareImagesChoiceProvider = BooleanNotifierProvider(() {
+  return BooleanNotifier(entryKey: SettingsEntryKey.shareImages.name, defaultValue: false);
+});
+
+/// How long the sending of share images waits after a 429 before sending once more. The site's rate limit counts
+/// `/api/` requests from one address over 10 seconds, so 10 seconds is the wait that lets one window pass.
+final shareImagesRetryDelayProvider = Provider<Duration>((_) => const Duration(seconds: 10));
+
+/// The image bundles of one share's records in [source] ([shareImageBundleOf]), each worked out once from what its
+/// directory holds when first asked for, and kept for the rest of that share; null for a record that has none a share
+/// can carry, or whose directory cannot be read.
+class _ShareImages {
+  final Ref _ref;
+  final RecordSource source;
+  final _bundles = <String, Future<ShareImageBundle?>>{};
+
+  _ShareImages(this._ref, this.source);
+
+  Future<ShareImageBundle?> of(String recordId) => _bundles[recordId] ??= _read(recordId);
+
+  Future<ShareImageBundle?> _read(String recordId) async {
+    final info = _ref.read(pathInfoProvider);
+    final directory = recordDirOfId(info, source, recordId);
+    try {
+      // Read under the record's lock: an archive or a write-back rewrites the images in place.
+      final files = await platformRecordRecoveryGate.runForRecords(
+        info.storageDir,
+        [recordId],
+        () => readRecordImageFiles(directory),
+        declaration: const LongReadDeclaration.none(reason: 'reads one record\'s images, a few megabytes'),
+      );
+      final images = await compute(recordShareImagesOf, files);
+      return images == null ? null : shareImageBundleOf(images);
+    } on Exception catch (e) {
+      logger.w("A record's images could not be read for a share: ${e.runtimeType}");
+      return null;
+    }
+  }
+}

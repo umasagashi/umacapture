@@ -120,6 +120,13 @@ export const ACCOUNT_DELETE_SYNC_READ_ROWS = 15_000;
 /** Pages of ListObjectVersions (and a DeleteObjects for each) one DELETE /api/me takes on at most. */
 export const ACCOUNT_DELETE_B2_PAGES = 4;
 
+/**
+ * Pages of ListObjectVersions (and a DeleteObjects for each) one DELETE /api/me takes on at most under
+ * the account's shared images (s/<account id>/). An account holds ACCOUNT_SHARE_CAP shares at most, a
+ * bundle each, so a page of 1,000 versions usually holds them all; what it does not, the next call takes.
+ */
+export const ACCOUNT_DELETE_SHARE_IMAGE_PAGES = 1;
+
 /** Expired rows removed per sweep and table, so one sweep never costs more than this many deletions. */
 export const SWEEP_LIMIT = 100;
 
@@ -129,6 +136,44 @@ export const MAX_SHARE_BODY = MAX_SHARES_PER_REQUEST * MAX_SHARE_RECORD;
 
 /** Canonical JSON of the posted form, before compression. */
 export const MAX_CANONICAL = 16 * 1024;
+
+// Shared images. A share may declare one bundle of its record's reduced JPEGs (share_images.mjs). Every
+// byte limit below counts what shares declare (`records.images_size`), once per share, from its POST
+// until it is unshared or its account deleted: declared bytes, not the bytes B2 stores. B2 may hold
+// fewer (a bundle not put yet) or more (a version a retried PUT or a late one added, until the bucket's
+// lifecycle or the hourly run removes it), and no D1 row can read what it holds. Provisional, every
+// one: the values await the approval asked before the deployment.
+
+/** One part of a bundle, a reduced JPEG: about four times the largest measured, 460 KB. */
+export const MAX_SHARE_IMAGE_PART = 2 * 1024 ** 2;
+
+/** One bundle: three parts of MAX_SHARE_IMAGE_PART; the trainee's portrait, about 9 KB, is not budgeted for apart. */
+export const MAX_SHARE_IMAGE_BUNDLE = 6 * 1024 ** 2;
+
+/**
+ * Declared bytes of every share's bundle at a time: about 195,000 shares of a typical 1.1 MB bundle.
+ * Declared bytes, not what B2 stores (see above).
+ */
+export const SHARE_IMAGE_BUDGET = 200 * 1024 ** 3;
+
+/**
+ * Declared bytes of the bundles shared in one UTC day, over every account: about 1,950 typical bundles,
+ * four times the shares DAILY_LIMIT admits a day at the average payload. Declared bytes, not what B2 stores.
+ */
+export const SHARE_IMAGE_DAILY_LIMIT = 2 * 1024 ** 3;
+
+/**
+ * Declared bytes of the bundles one account shares in one UTC day: an eighth of SHARE_IMAGE_DAILY_LIMIT,
+ * about 240 typical bundles, so one account cannot use up a day by itself. Declared bytes, not what B2 stores.
+ */
+export const ACCOUNT_SHARE_IMAGE_DAILY_LIMIT = 256 * 1024 ** 2;
+
+/**
+ * Bytes a share's declaration adds to its row past the posted form: the stored parts' JSON, counted as
+ * it is, plus this for the bundle's name (64), its size and the time it was stored. The declaration's
+ * bytes are charged with the form (`records.charge`), against the sharing budgets measured for rows.
+ */
+export const SHARE_IMAGE_ROW_CHARGE = 96;
 
 /**
  * Bodies one sync request puts or fetches at most. Measured on the real platform, ten bodies took a
@@ -325,9 +370,10 @@ export const SYNC_DAILY_DELETE_ROWS = SYNC_DAILY_ROWS / 2;
  * Steps of account deletion, each what one DELETE /api/me takes on, that one hourly run takes on at
  * most over every account being deleted: as many as let the 24 runs of a UTC day write the whole of
  * SYNC_DAILY_DELETE_ROWS a chunk of ACCOUNT_DELETE_SYNC_ROWS a step, ceil(300,000 / (24 * 5,000)) = 3.
- * A step sends at most 2 * ACCOUNT_DELETE_B2_PAGES + 1 = 9 B2 requests, so three take 27 of the run's
- * B2_REQUESTS_PER_INVOCATION at most, and about 50 of the 1,000 D1 queries a Workers Paid invocation
- * may make. Provisional, as ACCOUNT_DELETE_SYNC_ROWS.
+ * A step sends at most 2 * ACCOUNT_DELETE_B2_PAGES + 1 = 9 B2 requests under the sync prefix and
+ * 2 * ACCOUNT_DELETE_SHARE_IMAGE_PAGES + 1 = 3 under the shared images', 12 in all, so three take 36 of
+ * the run's B2_REQUESTS_PER_INVOCATION at most, and about 50 of the 1,000 D1 queries a Workers Paid
+ * invocation may make. Provisional, as ACCOUNT_DELETE_SYNC_ROWS.
  */
 export const ACCOUNT_DELETE_STEPS_PER_RUN = Math.ceil(SYNC_DAILY_DELETE_ROWS / (24 * ACCOUNT_DELETE_SYNC_ROWS));
 

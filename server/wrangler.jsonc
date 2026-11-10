@@ -73,6 +73,10 @@
     "AUTH_REDIRECT_ORIGIN": "https://umacapture.com",
     // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.
     "SYNC_ENABLED": "true",
+    // "false" stops shared images coming in and going out (shareImagesEnabled in src/api.mjs): shares
+    // declaring images are refused and bundles are neither stored nor served, while unsharing, account
+    // deletion and the hourly run's removal of images go on.
+    "SHARE_IMAGES_ENABLED": "true",
     // The B2 bucket synced objects are stored in. Its key, B2_KEY_ID and B2_APPLICATION_KEY, is a
     // pair of Worker secrets (`wrangler secret put`), never vars.
     "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
@@ -134,6 +138,8 @@
         "AUTH_REDIRECT_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
         // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.
         "SYNC_ENABLED": "true",
+        // "false" stops shared images coming in and going out, as at the top level.
+        "SHARE_IMAGES_ENABLED": "true",
         // Staging's own bucket, with its own key in the secrets B2_KEY_ID and B2_APPLICATION_KEY.
         "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
         "B2_REGION": "us-west-004",

@@ -9,7 +9,7 @@
 import { AccountDeleting, clock, fail, json, noContent, SessionRequired, untilTomorrow } from "./api.mjs";
 import { requireSession } from "./auth.mjs";
 import * as limits from "./limits.mjs";
-import { Bucket, StorageFailed } from "./b2.mjs";
+import { Bucket, sharePrefix, StorageFailed } from "./b2.mjs";
 import { accountsBeingDeleted, beginAccountDeletion, countShares, deleteShareChunk, finishAccountDeletion } from "./store.mjs";
 import {
   chargeDeletionReads,
@@ -17,6 +17,7 @@ import {
   deleteSyncRowChunk,
   deleteSyncVersions,
   deleteVersionsRequests,
+  deleteVersionsUnder,
 } from "./sync_deletion.mjs";
 
 /**
@@ -50,10 +51,20 @@ const KINDS = [
       return { removed, remaining: await countShares(db, accountId) };
     },
   },
+  {
+    // The bundles of the account's shares (s/<account id>/), every share's at once. After the shares,
+    // as the sync versions go after the sync rows: while a share is left, this only counts what B2
+    // lists. A bundle put after the last listing has a record in the write ledger, which the hourly run
+    // takes (`share_writes` in scheduled.mjs).
+    key: "share_images",
+    step: ({ bucket, accountId }, left) =>
+      deleteVersionsUnder(bucket, sharePrefix(accountId), left.shares > 0 ? 0 : limits.ACCOUNT_DELETE_SHARE_IMAGE_PAGES),
+  },
 ];
 
-/** B2 requests one step (`stepAccountDeletion`) sends at most. */
-const STEP_B2_REQUESTS = deleteVersionsRequests(limits.ACCOUNT_DELETE_B2_PAGES);
+/** B2 requests one step (`stepAccountDeletion`) sends at most: the sync prefix's and the shared images'. */
+const STEP_B2_REQUESTS =
+  deleteVersionsRequests(limits.ACCOUNT_DELETE_B2_PAGES) + deleteVersionsRequests(limits.ACCOUNT_DELETE_SHARE_IMAGE_PAGES);
 
 /**
  * One step of the deletion of account `accountId`, already marked as being deleted, at clock `at`

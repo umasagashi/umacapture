@@ -43,6 +43,19 @@ export function sharingEnabled(env) {
   throw new Error(`SHARING_ENABLED must be "true" or "false", got ${JSON.stringify(env.SHARING_ENABLED)}`);
 }
 
+/**
+ * `vars.SHARE_IMAGES_ENABLED`: "true" or "false"; anything else is a configuration error. "false" stops
+ * shared images from coming in and going out: a share declaring images is refused image_sharing_paused,
+ * a bundle's PUT is 503 image_sharing_paused, the import endpoint answers `{state: "unavailable"}` for a
+ * share that declares images, and the bundle's GET is 404. Unsharing, account deletion and the hourly
+ * run's removal of images go on.
+ */
+export function shareImagesEnabled(env) {
+  if (env.SHARE_IMAGES_ENABLED === "true") return true;
+  if (env.SHARE_IMAGES_ENABLED === "false") return false;
+  throw new Error(`SHARE_IMAGES_ENABLED must be "true" or "false", got ${JSON.stringify(env.SHARE_IMAGES_ENABLED)}`);
+}
+
 export class TooLarge extends Error {}
 
 /** No valid session: the request carried no bearer token, or one that is unknown or expired. */

@@ -11,7 +11,8 @@ import { matchRoute, pagePathKind } from "./routes.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
-import { deleteShare, getMyShares, postShares } from "./shares.mjs";
+import { getShareImages, putShareImages } from "./share_images.mjs";
+import { deleteShare, getMyShares, getShare, postShares } from "./shares.mjs";
 import { answerSync, getBodies, getGeneration, getHeld, getImage, getSettings, putBodies, putImage, putSettings } from "./sync.mjs";
 import { getPart, getRoot, putPart, replaceRoot } from "./sync_list.mjs";
 import { TableSource, withTables } from "./tables.mjs";
@@ -91,6 +92,12 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => postShares(request, env, tables, newId, now));
         case "unshare":
           return answerApi(() => deleteShare(request, env, route.id, now));
+        case "importShare":
+          return answerApi(() => getShare(env, route.id));
+        case "putShareImages":
+          return answerApi(() => putShareImages(request, env, route.id, now));
+        case "getShareImages":
+          return answerApi(() => getShareImages(env, route.id, now));
         case "myShares":
           return answerApi(() => getMyShares(request, env, tables, now));
         case "loginPage":
