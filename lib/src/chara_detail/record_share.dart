@@ -1,7 +1,8 @@
 // Sharing a record under the logged-in account, unsharing it, and listing the account's shares.
 //
-// Shared by web and Windows. The record leaves the device only as the posted form below; the server
-// names the values, so the app sends sids. Each share carries a client key made here and kept in the
+// Shared by web and Windows. The record leaves the device as the posted form below, and its images only
+// when the sharer chooses to share them, as one bundle of reduced JPEGs ([shareImageBundleOf]) put after
+// the share; the server names the values, so the app sends sids. Each share carries a client key made here and kept in the
 // `recordShares` store before anything is sent, so a share whose reply never arrived is found again:
 // a resend with the same key answers the id the first send created, and the account's list names each
 // share by the hash of its key.

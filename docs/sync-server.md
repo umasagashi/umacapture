@@ -7,6 +7,11 @@ back is [`sync-protocol.md`](sync-protocol.md); this document does not repeat it
 what a client sees. It states facts, not operating procedures: setting up the bucket, the key and the
 secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 
+The same bucket, the same write ledger (`sync_writes`) and the same hourly run also hold and tidy the
+images a sharer chooses to share with a record (`server/src/share_images.mjs`). This document states
+where they meet sync's: the key prefix, the lifecycle rule, the ledger's `space`, the hourly run's
+kinds and account deletion.
+
 ## Configuration
 
 `server/wrangler.jsonc` sets, for production and for `env.staging` separately:
@@ -33,6 +38,10 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
 - **Keys.** An account's object is stored at `a/<account id>/<name>` (`objectKey`), `<name>` the
   SHA-256 of its bytes as 64 lowercase hex digits. Two accounts storing the same bytes hold two
   objects, and every request names keys under its own account's prefix `a/<account id>/` only.
+  The image bundle of a share is stored at `s/<account id>/<share id>/<name>` (`shareImageKey`),
+  `<name>` the SHA-256 of the bundle's bytes, so the account's shared images are under
+  `s/<account id>/` (`sharePrefix`) and one share's under `s/<account id>/<share id>/`. Nothing of
+  sync is under `s/` and nothing of sharing under `a/`.
 - **Signing.** Every request is signed with AWS Signature Version 4. A PUT signs the object's name as
   `x-amz-content-sha256` and never `UNSIGNED-PAYLOAD`, so B2 checks the bytes it receives against
   the name and stores nothing on a mismatch.
@@ -61,10 +70,24 @@ secrets, deploying, and stopping sync are in [`web-deploy.md`](web-deploy.md).
   `DeleteObjects` that names no version); to show it again it deletes that marker by its version id.
   Both go up to 1,000 keys to a `DeleteObjects` (`DELETE_OBJECTS_MAX`). It lists an account's versions
   with `ListObjectVersions` under the account's prefix, a page of up to 1,000 versions per request.
-  Account deletion deletes every version and marker under the prefix by version id.
-- **The lifecycle rule** is set on the bucket by the operator, not by the Worker:
-  `daysFromHidingToDeleting` is 6 (`B2_DAYS_FROM_HIDING_TO_DELETING`). The server counts on it to
-  delete what it hid, and on nothing else deleting or hiding what it stored; it never reads the rule.
+  Account deletion deletes every version and marker under both of its prefixes by version id. Nothing
+  hides a bundle under `s/`: unsharing a share, an operator's takedown of its images, and account
+  deletion delete its versions by version id. B2 itself hides a version once a later version of the
+  same key is uploaded.
+- **The lifecycle rules** are set on the bucket by the operator, not by the Worker, one per prefix:
+  - `a/`: `daysFromHidingToDeleting` 6 (`B2_DAYS_FROM_HIDING_TO_DELETING`). The server counts on it to
+    delete what it hid, and on nothing else deleting or hiding what it stored.
+  - `s/`: `daysFromHidingToDeleting` 1, B2's least. A bundle's key can hold more than one version of
+    the same bytes — a PUT B2 stored and answered 429 or 5xx, and the Worker sent again; two PUTs of
+    one share at once; a PUT that B2 stored before the D1 statement after it failed, sent again. B2
+    hides every version of a key but the latest, and the rule deletes them, about one to two days
+    after the later upload. Every version of one key holds the same bytes, so which one is left changes
+    nothing served. The server does not count on this rule for anything it serves; without it those
+    extra versions stay until the share is unshared or its account deleted. The 6 days of `a/` are not
+    needed here: they leave room for the Worker to show a hidden object again, and the Worker hides
+    nothing under `s/`.
+  - Neither prefix has a `daysFromUploadingToHiding`: it would hide what the Worker still serves.
+  The server never reads the rules.
 - **Requests per invocation.** One request or one hourly run sends at most
   `B2_REQUESTS_PER_INVOCATION` (50) requests to B2; the `Bucket` of the invocation throws on the
   next, as the platform would. Every endpoint counts the requests its hides and shows take before it
@@ -104,7 +127,7 @@ rest of the account. The hourly run continues it (`deletions`, [The hourly run](
 |---|---|---|
 | `sync_accounts` | `account_id` | An account that synced: `generation`, `root_name`, `image_form` (`'none'` until set), `stored_bytes`, `hidden_bytes` (JSON, UTC day to bytes), `record_count`, `last_synced_day`, and its day's counters `daily_day`, `daily_requests`, `daily_rows_read`, `daily_rows_written` |
 | `sync_objects` | `account_id`, `name` | A name the account stored, or that its list names before it is stored: `kind` (`'body'`, `'png'`, `'jpeg'`, `'part'`, `'root'`), `size`, a body's `binding` (its image binding and icon), a part's `slot` and `record_count`, `refs`, `stored_at`, `ref_count`, `pending`, and the hide state `hidden_at`, `hidden_since`, `hide_by`, `marker` |
-| `sync_writes` | `account_id`, `write_by` | A request about to write under an account's prefix in B2: `names` (JSON) and `written_at`. It references no account, so it outlives the account it names |
+| `sync_writes` | `account_id`, `write_by` | A request about to write under an account's prefix in B2: `names` (JSON), `written_at`, and `space` (added by `0009_share_images.sql`): `'a'` for sync's prefix `a/<account id>/`, `'s'` for the shared images' `s/<account id>/`, where a name is `<share id>/<bundle name>`. It references no account, so it outlives the account it names. The table keeps its name although it is the ledger of both |
 | `sync_daily` | `day` | Sync's counters of one UTC day over every account: `requests`, `rows_read`, `rows_written`, and `delete_rows`, the part of `rows_written` account deletions wrote |
 | `sync_totals` | `id` = 1 | `stored_bytes` and `hidden_bytes` over every account |
 
@@ -194,6 +217,7 @@ what was not measured on the real platform.
 | `ACCOUNT_DELETE_SYNC_ROWS` | 5,000 (provisional) |
 | `ACCOUNT_DELETE_SYNC_READ_ROWS` | 15,000 (provisional) |
 | `ACCOUNT_DELETE_B2_PAGES` | 4 |
+| `ACCOUNT_DELETE_SHARE_IMAGE_PAGES` | 1: pages of versions under `s/<account id>/` one step lists and deletes |
 | `ACCOUNT_DELETE_STEPS_PER_RUN` | `ceil(SYNC_DAILY_DELETE_ROWS / (24 * ACCOUNT_DELETE_SYNC_ROWS))` = 3: steps one hourly run takes on (provisional) |
 
 The other constants of `limits.mjs` bound sharing and logins.
@@ -228,28 +252,41 @@ The other constants of `limits.mjs` bound sharing and logins.
 `runScheduled` (`server/src/scheduled.mjs`) runs the kinds of `KINDS` in this order, each sharing the
 run's one `Bucket`, each after the one before has finished or failed:
 
-| Kind | Function | What it does |
-|---|---|---|
-| `shows` | `showLeftovers` | Shows what cut-off requests left referenced and hidden, up to `SYNC_LEFTOVER_SHOWS` |
-| `hides` | `hideLeftovers` | Hides what nothing references and no request is hiding, up to `SYNC_LEFTOVER_HIDES` |
-| `writes` | `writeLeftovers` | Deletes what requests wrote under an account's prefix and no row accounts for, up to `SYNC_LEFTOVER_WRITES` names |
-| `deletions` | `continueAccountDeletions` | Continues the deletion of the accounts being deleted, up to `ACCOUNT_DELETE_STEPS_PER_RUN` steps |
-| `forgets` | `forgetLeftovers` | Deletes gone rows nothing references, up to `SYNC_FORGETS_PER_RUN` |
-| `days` | `forgetDays` | Deletes the `sync_daily` rows before yesterday |
+| Kind | Function | Sync's | What it does |
+|---|---|---|---|
+| `takedowns` | `carryOutTakedowns` (`server/src/takedowns.mjs`) | no | Carries out the operators' takedowns of shares (`share_takedowns`), up to `SHARE_TAKEDOWNS_PER_RUN`, with the code a sharer's own unshare runs ([`web-deploy.md`](web-deploy.md#handling-a-report)) |
+| `shows` | `showLeftovers` | yes | Shows what cut-off requests left referenced and hidden, up to `SYNC_LEFTOVER_SHOWS` |
+| `hides` | `hideLeftovers` | yes | Hides what nothing references and no request is hiding, up to `SYNC_LEFTOVER_HIDES` |
+| `writes` | `writeLeftovers(…, "a", …)` | yes | Deletes what requests wrote under an account's prefix `a/` and no row accounts for, up to `SYNC_LEFTOVER_WRITES` names |
+| `deletions` | `continueAccountDeletions` | no | Continues the deletion of the accounts being deleted, up to `ACCOUNT_DELETE_STEPS_PER_RUN` steps |
+| `share_writes` | `writeLeftovers(…, "s", …)` | no | Deletes what requests wrote under an account's shared images `s/` and no share accounts for — a bundle put after its share was unshared or its account deleted, one an unshare or a takedown failed to delete — up to `SYNC_LEFTOVER_WRITES` names. A name is held while its share records that bundle as stored |
+| `forgets` | `forgetLeftovers` | yes | Deletes gone rows nothing references, up to `SYNC_FORGETS_PER_RUN` |
+| `days` | `forgetDays` | yes | Deletes the `sync_daily` rows before yesterday |
 
 A kind that fails does not stop the ones after it; the run then fails with the first failure. While
-`SYNC_ENABLED` is `"false"` only `deletions` runs: it is not a kind of sync, and account deletion goes
-on while sync is off.
+`SYNC_ENABLED` is `"false"` only the kinds that are not sync's run (`takedowns`, `deletions`,
+`share_writes`): account deletion goes on while sync is off, and the other two remove what must stop
+being served or what a sharer withdrew. `SHARE_IMAGES_ENABLED` stops none of them.
+
+A record of the ledger in space `"s"` is taken, as one in `"a"`, once it is `SYNC_ABANDONED_AFTER` and
+twice `RESTORE_MARGIN_SECONDS` old (2 hours and a quarter), so what an unshare or an account deletion
+failed to delete, or a PUT that arrived after it, goes at the first run after that: about three hours
+and a quarter when nothing is waiting. That is not a bound. One run takes up to
+`SYNC_LEFTOVER_WRITES` names and what is left of its `B2_REQUESTS_PER_INVOCATION`, and leaves the
+rest, and a failing B2 leaves it all, for later runs. The Worker serves none of it meanwhile: the
+bundle's GET answers only for a share that records its bundle as stored.
 
 `deletions` reads the accounts being deleted through the partial index `accounts_deleting`
 (`server/migrations/0004_accounts_deleting.sql`), longest deleted first. A step is what one
-`DELETE /api/me` takes on (`stepAccountDeletion`): a chunk of the sync rows, of the B2 versions and of
-the shares, and the account itself once nothing is left. It takes an account on until the account is
+`DELETE /api/me` takes on (`stepAccountDeletion`): a chunk of the sync rows, of the B2 versions under
+`a/`, of the shares and of the B2 versions under `s/`, and the account itself once nothing is left. It takes an account on until the account is
 gone or a step of it removes nothing — the day's share of sync rows (`SYNC_DAILY_DELETE_ROWS`, or
 `SYNC_DAILY_READ_ROWS`) has no room, and the next run tries again — and stops at
-`ACCOUNT_DELETE_STEPS_PER_RUN` steps in all. It comes after sync's kinds that send B2 requests and
-takes a step only while what they left of the run's `B2_REQUESTS_PER_INVOCATION` holds a whole step
-(`2 * ACCOUNT_DELETE_B2_PAGES + 1` = 9), so it never takes their requests. A step removing a chunk of
+`ACCOUNT_DELETE_STEPS_PER_RUN` steps in all. It comes after `takedowns` and sync's kinds that send B2
+requests and takes a step only while what they left of the run's `B2_REQUESTS_PER_INVOCATION` holds a
+whole step (`2 * ACCOUNT_DELETE_B2_PAGES + 1` = 9 under `a/` and
+`2 * ACCOUNT_DELETE_SHARE_IMAGE_PAGES + 1` = 3 under `s/`, 12 in all), so it never takes their
+requests. A step removing a chunk of
 the sync rows writes within the same day's share as `DELETE /api/me`, so the runs and the app's calls
 of one day write no more than that share between them.
 

@@ -264,10 +264,11 @@ const String absentValueLabel = "-";
 
 /// Sentinel `trainer_id` for records whose owner is unknown.
 ///
-/// A friend's record captured from the player's own game exposes no recoverable
-/// trainer id, so it is stored with this nil UUID rather than the capturing
-/// player's id. Only externally shared/imported friend records carry the
-/// friend's real id. Mirrors `kUnknownTrainerId` in the native recognizer.
+/// Neither a friend's record captured from the player's own game nor one
+/// imported from a share link carries a recoverable trainer id, so both are
+/// stored with this nil UUID rather than the capturing or importing player's
+/// id, which would misattribute the record's ownership. Mirrors
+/// `kUnknownTrainerId` in the native recognizer.
 const String unknownTrainerId = "00000000-0000-0000-0000-000000000000";
 
 /// The record format this build reads and writes, as `metadata.format_version`.

@@ -48,8 +48,11 @@ enum LinkImportRefusal {
   /// The server answered 429 twice, 10 seconds apart.
   busy,
 
-  /// The server could not be reached, or answered something this build cannot read.
+  /// The server could not be reached, or answered with a status other than those above.
   unreachable,
+
+  /// The server answered the share in a form this build cannot read: a newer build may.
+  unreadable,
 }
 
 /// What reading a link gives: the files of the record to import, or why there are none.
@@ -249,7 +252,7 @@ Future<LinkImportFetch> fetchSharedRecord(
       record is! Map<String, Object?> ||
       sharedOn is! String ||
       !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(sharedOn)) {
-    return const LinkImportRefused(LinkImportRefusal.unreachable);
+    return const LinkImportRefused(LinkImportRefusal.unreadable);
   }
   if (!_carriesIcons(record)) return const LinkImportRefused(LinkImportRefusal.oldFormat);
 
@@ -279,12 +282,12 @@ Future<LinkImportFetch> fetchSharedRecord(
       if (files == null) return const LinkImportRefused(LinkImportRefusal.imagesUnreachable);
       imageFiles = files;
     default:
-      return const LinkImportRefused(LinkImportRefusal.unreachable);
+      return const LinkImportRefused(LinkImportRefusal.unreadable);
   }
 
   final recordId = const Uuid().v4();
   final imported = sharedRecordOf(record, recordId: recordId, sharedOn: sharedOn, withImages: imageFiles.isNotEmpty);
-  if (imported == null) return const LinkImportRefused(LinkImportRefusal.unreachable);
+  if (imported == null) return const LinkImportRefused(LinkImportRefusal.unreadable);
   return LinkImportFiles([
     (recordId: recordId, relativeSegments: const ['record.json'], bytes: imported.toRecordJsonBytes()),
     for (final MapEntry(key: name, value: bytes) in imageFiles.entries)
