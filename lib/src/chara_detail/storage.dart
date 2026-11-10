@@ -639,6 +639,20 @@ extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
   }
 }
 
+/// The files in a record's directory that a re-recognition reads: `record.json`, each tab's stitched PNG,
+/// and the geometry sidecar the native `Frame::open` reads beside each PNG (the PNG's name with `.json`).
+/// The set is the same on both platforms: Windows's recognizer opens them in place, and the web channel
+/// copies exactly these into the worker before it recognises.
+const List<String> recognitionInputFileNames = [
+  'record.json',
+  'skill.png',
+  'factor.png',
+  'campaign.png',
+  'skill.json',
+  'factor.json',
+  'campaign.json',
+];
+
 /// Which record set the table currently shows.
 enum RecordSource { active, archive }
 
@@ -1355,7 +1369,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
       });
       _scheduleRetainedCaptureDrain();
     }
-    _checkRecordVersion(records);
+    _checkRecordVersion(records, automatic: true);
     return records;
   }
 
@@ -2269,24 +2283,49 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>>
 
   List<CharaDetailRecord> get records => _records;
 
-  Future<void> checkRecordVersion({bool includeCurrentVersion = false}) {
-    return _checkRecordVersion(_records, includeCurrentVersion: includeCurrentVersion);
+  /// Hands the records the module would recognise differently to a re-recognition batch.
+  ///
+  /// [automatic] says nobody asked for this batch (a store build, a module update). An automatic batch
+  /// leaves out a record whose recognition input ([recognitionInputFileNames]) is not all on this device,
+  /// such as one imported without its images: it cannot be re-recognised, and sending it would fail it again and warn on every build. A
+  /// batch the user asked for sends it anyway, so the failure answers that request.
+  Future<void> checkRecordVersion({bool includeCurrentVersion = false, required bool automatic}) {
+    return _checkRecordVersion(_records, includeCurrentVersion: includeCurrentVersion, automatic: automatic);
   }
 
   // Takes the loaded records explicitly because build() calls this before the
   // notifier's state has been published.
-  Future<void> _checkRecordVersion(List<CharaDetailRecord> records, {bool includeCurrentVersion = false}) async {
+  Future<void> _checkRecordVersion(
+    List<CharaDetailRecord> records, {
+    bool includeCurrentVersion = false,
+    required bool automatic,
+  }) async {
     final moduleVersion = await ref.read(moduleVersionLoader.future);
     if (moduleVersion == null) {
       return Future.value();
     }
-    final obsoletedRecords = records.where((r) {
-      return r.isObsoleted(moduleVersion, includeCurrentVersion) && r.isSupported(moduleVersion);
-    }).toList();
+    final obsoletedRecords = [
+      for (final r in records)
+        if (r.isObsoleted(moduleVersion, includeCurrentVersion) &&
+            r.isSupported(moduleVersion) &&
+            (!automatic || await _hasRecognitionInput(r)))
+          r,
+    ];
     if (obsoletedRecords.isEmpty) {
       return Future.value();
     }
     ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
+  }
+
+  /// Whether every file a re-recognition reads for [record] ([recognitionInputFileNames]) is in its directory.
+  Future<bool> _hasRecognitionInput(CharaDetailRecord record) async {
+    final directory = recordPathOf(record);
+    for (final name in recognitionInputFileNames) {
+      if (!await directory.filePath(name).exists()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Composes the result a desktop re-recognition of [id] left in its directory into its `record.json`

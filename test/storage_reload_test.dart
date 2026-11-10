@@ -10,6 +10,7 @@
 // verified through the shared `loadAsync` loader it delegates to.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/storage_reload_test.dart
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -118,4 +119,64 @@ void main() {
     expect((result as RecordLoaded).record.id, 'web-target');
     expect(result.record.trainee.card, 7);
   });
+
+  // ISS-0027: a record whose recognition input is not all on this device cannot be re-recognised. The automatic
+  // selection a store build runs must leave it out, or every build fails it again and toasts; the manual
+  // whole-store request still sends it, so the failure answers the request the user made.
+  group('the re-recognition a version check selects', () {
+    test('a store build leaves out a record with no stitched images; the manual whole-store check sends it', () async {
+      final root = DirectoryPath(tempRoot.path);
+      final activeDir = pathInfoFor(root).charaDetailActiveDir;
+      // Captured after the module's recognizer version and recognised by an older one: obsoleted and supported.
+      const captured = '2026-06-01T00:00:00+0900';
+      writeRecord(activeDir, makeRecord(id: 'imaged', card: 1, capturedDate: captured));
+      writeRecord(activeDir, makeRecord(id: 'bare', card: 2, capturedDate: captured));
+      // record.json is already there; the stitched PNGs and their geometry sidecars complete the input.
+      for (final name in recognitionInputFileNames.where((name) => name != 'record.json')) {
+        File('${(activeDir / 'imaged').path}/$name').writeAsBytesSync(const [0]);
+      }
+      // The shape a device that holds a record's images as JPEG only keeps (an archived record, one synced
+      // without its originals): the geometry sidecars are there, the PNGs a re-recognition reads are not.
+      for (final image in ['skill', 'factor', 'campaign']) {
+        File('${(activeDir / 'bare').path}/$image.jpg').writeAsBytesSync(const [0]);
+        File('${(activeDir / 'bare').path}/$image.json').writeAsBytesSync(const [0]);
+      }
+      final regeneration = _RecordingRegeneration();
+      final container = ProviderContainer(
+        overrides: [
+          pathInfoLoader.overrideWith((ref) async => pathInfoFor(root)),
+          moduleVersionLoader.overrideWith(
+            (ref) async => ModuleVersion(
+              recognizerVersion: DateTime.utc(2026, 3),
+              minimumVersion: DateTime.utc(2021),
+              recognizerVersionText: '2026-03-01T09:00:00+0900',
+            ),
+          ),
+          charaDetailRecordRegenerationControllerProvider.overrideWith(() => regeneration),
+        ],
+      );
+      addTearDown(container.dispose);
+      final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+
+      final automatic = await regeneration.next();
+      expect(automatic, {'imaged'}, reason: 'the automatic selection sends only a record whose input is here');
+
+      final manual = regeneration.next();
+      await active.checkRecordVersion(includeCurrentVersion: true, automatic: false);
+      expect(await manual, {'imaged', 'bare'}, reason: 'the manual whole-store check still sends every record');
+    });
+  });
+}
+
+/// Records each batch [start] is handed instead of running it.
+class _RecordingRegeneration extends CharaDetailRecordRegenerationController {
+  Completer<Set<String>> _batch = Completer();
+
+  /// The ids of the next batch handed to [start].
+  Future<Set<String>> next() =>
+      _batch.future.timeout(const Duration(seconds: 10)).whenComplete(() => _batch = Completer());
+
+  @override
+  Future<void> start(List<CharaDetailRecord> records) async => _batch.complete({for (final r in records) r.id});
 }

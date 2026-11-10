@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:web/web.dart' as web;
 
+import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/clipboard_image_writer.dart';
 import '/src/core/capture_preview.dart';
@@ -922,20 +923,6 @@ class PlatformChannel {
     _relayNotify(jsonEncode({'type': 'onError', 'message': liveRecordsNotStoredErrorCode}));
   }
 
-  /// Storage-relative input files the recognizer re-runs over an existing record
-  /// (the 7-file input contract): the record json plus each tab's stitched PNG
-  /// and its geometry sidecar json. All must exist or the record is skipped (the
-  /// worker would otherwise block for its full 120 s timeout on a missing input).
-  static const _updateInputFiles = <String>[
-    'record.json',
-    'skill.png',
-    'factor.png',
-    'campaign.png',
-    'skill.json',
-    'factor.json',
-    'campaign.json',
-  ];
-
   /// Regenerates the record [id]: reads its 7 input files from OPFS, re-runs the
   /// recognizer in the worker over them, writes the regenerated record dir back
   /// to OPFS (every returned file, including the `record_<ts>.json` backup, with the
@@ -1018,7 +1005,9 @@ class PlatformChannel {
   Future<List<HarvestedRecordFile>?> _buildRegeneratedPayloadUnlocked(String id, DirectoryPath storageDir) async {
     final recordDir = storageDir / 'chara_detail' / 'active' / id;
     final inputs = <HarvestedRecordFile>[];
-    for (final name in _updateInputFiles) {
+    // Every input ([recognitionInputFileNames]) must exist or the record is skipped: the worker would
+    // otherwise block for its full 120 s timeout on a missing input.
+    for (final name in recognitionInputFileNames) {
       final file = recordDir.filePath(name);
       if (!await file.exists()) {
         logger.e('updateRecord: missing input "$name" for record $id; skipping regeneration');

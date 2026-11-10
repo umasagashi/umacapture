@@ -994,7 +994,7 @@ enum ModuleInstallBlocker {
   ///
   /// The install invalidates `moduleVersionLoader`, which `platformControllerLoader` watches, so the
   /// rebuild takes the worker -- and the import riding it -- with it. It is also a regeneration
-  /// entry point without a regeneration UI: on success it calls `checkRecordVersion()`, which
+  /// entry point without a regeneration UI: on success it calls `checkRecordVersion(automatic: true)`, which
   /// auto-starts a whole-store batch the worker would refuse record by record.
   importing,
 
@@ -1231,7 +1231,7 @@ class RegenerateAllRecordsTile extends ConsumerWidget {
             trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
             onTap: () {
               final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-              storage.checkRecordVersion(includeCurrentVersion: true);
+              storage.checkRecordVersion(includeCurrentVersion: true, automatic: false);
             },
           ),
         );
