@@ -4,6 +4,7 @@
 import { after, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import { maskEmail } from "../src/account_hint.mjs";
 import * as limits from "../src/limits.mjs";
 import {
   CookieJar,
@@ -332,10 +333,13 @@ describe("login callback, claim and sessions", () => {
     return res.headers.get("location");
   }
 
-  /** Begins `login` in `jar` and comes back through Google as `sub`; returns the callback's response. */
-  async function signIn(jar, login, { sub, port } = {}) {
+  /**
+   * Begins `login` in `jar` and comes back through Google as `sub`, the ID token carrying `claims`
+   * besides; returns the callback's response.
+   */
+  async function signIn(jar, login, { sub, port, claims } = {}) {
     const location = await beginIn(jar, login, port === undefined ? {} : { port: String(port) });
-    return worker.visit(worker.authorize(location, { sub }), jar);
+    return worker.visit(worker.authorize(location, { sub, claims }), jar);
   }
 
   const stage = async (login) => (await worker.login(login.h))?.stage;
@@ -496,8 +500,89 @@ describe("login callback, claim and sessions", () => {
     assert.equal(`${location.origin}${location.pathname}`, "http://127.0.0.1:49152/cb");
     assert.equal(location.searchParams.get("h"), login.h);
 
+    // An ID token without an email address carries no hint, and the claim answers none.
+    assert.equal(location.searchParams.has("hint"), false);
+
     assert.equal((await worker.claim({ s: login.s })).status, 403);
-    await claimed(await worker.claim({ s: login.s, code: location.searchParams.get("code") }));
+    const session = await claimed(await worker.claim({ s: login.s, code: location.searchParams.get("code") }));
+    assert.equal(session.account_hint, null);
+  });
+
+  describe("the account hint", () => {
+    const EMAIL = "kenji.hata@gmail.com";
+    const OTHER = "someone.else@example.org";
+    const withEmail = (email) => ({ email, email_verified: true });
+
+    /** Every row of every table of D1 as one string, blobs as latin1, so a stored text shows in either form. */
+    async function everythingInD1() {
+      const tables = (
+        await worker.db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'")
+          .all()
+      ).results.map((row) => row.name);
+      const rows = await Promise.all(tables.map(async (t) => (await worker.db.prepare(`SELECT * FROM "${t}"`).all()).results));
+      return JSON.stringify(rows, (_, v) => (v instanceof ArrayBuffer || ArrayBuffer.isView(v) ? Buffer.from(v).toString("latin1") : v));
+    }
+
+    /** Whether `text` carries no part of either address, whole or masked. */
+    const clean = (text) => ["kenji", "someone", "****", "gmail", "example.org"].every((part) => !text.includes(part));
+
+    test("travels to a web claim sealed in a handover cookie, and is never written to D1", async () => {
+      const jar = new CookieJar();
+      const login = newLogin();
+      const back = await signIn(jar, login, { claims: withEmail(EMAIL) });
+      assert.equal(back.status, 200);
+      assert.deepEqual(setCookieNames(back).sort(), [`uc_begin_${login.h}`, `uc_hint_${login.h}`, `uc_login_${login.h}`]);
+      const cookie = jar.get(`uc_hint_${login.h}`);
+      assert.ok(clean(cookie.value), cookie.value);
+      assert.equal(cookie.attrs.httponly, true);
+      assert.equal(cookie.attrs.path, "/api/auth");
+      assert.equal(cookie.attrs["max-age"], String(limits.LOGIN_TTL_SECONDS));
+      assert.ok(clean(await everythingInD1()));
+
+      const res = await worker.claim({ s: login.s }, jar);
+      assert.deepEqual(setCookieNames(res).sort(), [`uc_hint_${login.h}`, `uc_login_${login.h}`]);
+      assert.equal((await claimed(res)).account_hint, "ke****@gmail.com");
+      assert.equal(jar.get(`uc_hint_${login.h}`), undefined);
+      assert.ok(clean(await everythingInD1()));
+    });
+
+    test("travels to a Windows claim sealed in the loopback redirect, and opens only for its own login", async () => {
+      const jar = new CookieJar();
+      const sign = async (login, email) => {
+        const res = await signIn(jar, login, { port: 49152, claims: withEmail(email) });
+        assert.equal(res.status, 302);
+        assert.deepEqual(setCookieNames(res), [`uc_begin_${login.h}`]);
+        const q = new URL(res.headers.get("location")).searchParams;
+        assert.ok(clean(q.get("hint")), q.get("hint"));
+        return { code: q.get("code"), hint: q.get("hint") };
+      };
+      const [mine, other, old] = [newLogin(), newLogin(), newLogin()];
+      const mineBack = await sign(mine, EMAIL);
+      const otherBack = await sign(other, OTHER);
+      const oldBack = await sign(old, EMAIL);
+      assert.ok(clean(await everythingInD1()));
+
+      // A malformed hint is refused like a malformed code, and leaves the login claimable.
+      const malformed = await worker.claim({ s: mine.s, code: mineBack.code, hint: "not a sealed hint" });
+      assert.equal(malformed.status, 400);
+      assert.deepEqual(await malformed.json(), { error: "invalid_payload", field: "hint" });
+      // Another login's hint does not open: the login stands, without a hint.
+      const crossed = await claimed(await worker.claim({ s: mine.s, code: mineBack.code, hint: otherBack.hint }));
+      assert.equal(crossed.account_hint, null);
+      assert.equal((await claimed(await worker.claim({ s: other.s, ...otherBack }))).account_hint, "so****@example.org");
+      // An app that does not know the hint sends none and gets none.
+      assert.equal((await claimed(await worker.claim({ s: old.s, code: oldBack.code }))).account_hint, null);
+      assert.ok(clean(await everythingInD1()));
+    });
+
+    test("is absent from a web login whose ID token carries no email address", async () => {
+      const jar = new CookieJar();
+      const login = newLogin();
+      const back = await signIn(jar, login);
+      assert.deepEqual(setCookieNames(back).sort(), [`uc_begin_${login.h}`, `uc_login_${login.h}`]);
+      assert.equal((await claimed(await worker.claim({ s: login.s }, jar))).account_hint, null);
+    });
   });
 
   test("refuses with 403 a claim with no proof, a wrong proof or another login's proof", async () => {
@@ -630,5 +715,25 @@ describe("login callback, claim and sessions", () => {
 
     await sessionToken();
     await until(async () => (await worker.count("sessions")) === 1, "the expired session to be swept");
+  });
+});
+
+describe("maskEmail", () => {
+  test("keeps two characters of a long local part, one of a short one, none of a very short one, and the domain whole", () => {
+    const cases = [
+      ["kenji.hata@gmail.com", "ke****@gmail.com"],
+      ["abcde@example.co.jp", "ab****@example.co.jp"],
+      ["abcd@example.co.jp", "a****@example.co.jp"],
+      ["abc@example.co.jp", "a****@example.co.jp"],
+      ["ab@example.co.jp", "****@example.co.jp"],
+      ["a@example.co.jp", "****@example.co.jp"],
+      ["\u{1F40E}\u{1F40E}\u{1F40E}\u{1F40E}\u{1F40E}@example.jp", "\u{1F40E}\u{1F40E}****@example.jp"],
+    ];
+    for (const [email, masked] of cases) assert.equal(maskEmail(email), masked, email);
+  });
+
+  test("answers null for anything that is not an address", () => {
+    const values = [undefined, null, 42, "", "no-at-sign", "@example.jp", "someone@", "some one@example.jp", `${"a".repeat(320)}@x.jp`];
+    for (const value of values) assert.equal(maskEmail(value), null, String(value));
   });
 });

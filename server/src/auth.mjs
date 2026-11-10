@@ -19,6 +19,7 @@ import {
   TooLarge,
   untilTomorrow,
 } from "./api.mjs";
+import { accountHint, isSealedHint, openHint, sealHint } from "./account_hint.mjs";
 import * as limits from "./limits.mjs";
 import { loginDoneResponse, loginFailureResponse, loginPageResponse } from "./login_page.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
@@ -165,9 +166,13 @@ export async function loginBegin(request, env, ctx, now) {
   });
 }
 
-/** The cookie that marks the browser a login began in, and the one that hands a web login's proof to the app. */
+/**
+ * The cookie that marks the browser a login began in, the one that hands a web login's proof to the
+ * app, and the one that carries its sealed account hint beside the proof.
+ */
 const beginCookie = (h) => `uc_begin_${h}`;
 const loginCookie = (h) => `uc_login_${h}`;
+const hintCookie = (h) => `uc_hint_${h}`;
 const removal = (name) => `${name}=; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 
 /** The SHA-256 of the begin cookie of `h` (64 hex digits) that `request` carries, or null without one. */
@@ -205,9 +210,10 @@ function jwtPayload(token) {
 }
 
 /**
- * The subject of the ID token the provider answers `code` with, or null when the exchange is refused
- * or the token is not this login's: wrong issuer, audience or nonce, or expired at `atNow`.
- * Throws Unavailable when the provider cannot be reached.
+ * `{sub, hint}` of the ID token the provider answers `code` with — its subject, and the masked account
+ * hint of its email address (null without one) — or null when the exchange is refused or the token is
+ * not this login's: wrong issuer, audience or nonce, or expired at `atNow`. The full address is not
+ * returned. Throws Unavailable when the provider cannot be reached.
  *
  * The ID token arrives straight from the provider's token endpoint over TLS, authenticated by the
  * client secret, so its signature is not verified; its claims still are.
@@ -243,7 +249,7 @@ async function exchangeCode(env, providerName, login, code, atNow) {
   if (!provider.issuers.includes(claims.iss) || claims.aud !== clientId(env, providerName)) return null;
   if (typeof claims.exp !== "number" || claims.exp <= atNow) return null;
   if (typeof claims.nonce !== "string" || !sameBytes(await sha256(claims.nonce), login.nonce_hash)) return null;
-  return claims.sub;
+  return { sub: claims.sub, hint: accountHint(claims) };
 }
 
 /** HMAC-SHA256 of `provider || 0x00 || sub` under IDENTITY_HMAC_KEY: what `identities` holds instead of the subject. */
@@ -287,51 +293,60 @@ async function completeCallback(request, env, { login, h, stateHash, params, at 
   }
   const code = params.get("code");
   if (code === null || code === "" || code.length > MAX_CODE) return loginFailureResponse(400);
-  const sub = await exchangeCode(env, login.provider, login, code, at.now);
-  if (sub === null) return loginFailureResponse(400);
+  const identity = await exchangeCode(env, login.provider, login, code, at.now);
+  if (identity === null) return loginFailureResponse(400);
 
   const proof = randomSecret();
+  const proofHash = await sha256(proof);
   const outcome = await completeLogin(env.DB, {
     h: login.h,
     stateHash,
     provider: login.provider,
-    subjectHmac: await subjectHmac(env, login.provider, sub),
+    subjectHmac: await subjectHmac(env, login.provider, identity.sub),
     newAccountId: newAccountId(),
-    proofHash: await sha256(proof),
+    proofHash,
     now: at.now,
     day: at.day,
     limit: limits.ACCOUNT_CREATE_LIMIT,
   });
   if (outcome === "limit") return loginFailureResponse(429, { "Retry-After": String(untilTomorrow(at)) });
   if (outcome === "gone") return loginFailureResponse(400);
+  // Sealed to this proof, so it travels wherever the proof does and opens only at its claim.
+  const hint = identity.hint === null ? null : await sealHint(env, proofHash, identity.hint);
 
   // The Windows app is not a browser and cannot read a cookie this page sets, so its proof travels
   // to its loopback listener instead; `h` lets the listener ignore a redirect of another login.
   if (login.port !== null) {
-    const target = `http://127.0.0.1:${login.port}/cb?${new URLSearchParams({ h, code: proof })}`;
+    const query = new URLSearchParams({ h, code: proof, ...(hint === null ? {} : { hint }) });
+    const target = `http://127.0.0.1:${login.port}/cb?${query}`;
     return new Response(null, {
       status: 302,
       headers: { Location: target, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" },
     });
   }
   const done = loginDoneResponse();
-  done.headers.append(
-    "Set-Cookie",
-    `${loginCookie(h)}=${proof}; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=${limits.LOGIN_TTL_SECONDS}`,
-  );
+  done.headers.append("Set-Cookie", handover(loginCookie(h), proof));
+  if (hint !== null) done.headers.append("Set-Cookie", handover(hintCookie(h), hint));
   return done;
 }
 
+/** A cookie that hands `value` from a web login's callback to its claim, for as long as a login lives. */
+const handover = (name, value) =>
+  `${name}=${value}; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=${limits.LOGIN_TTL_SECONDS}`;
+
 /**
- * POST /api/auth/claim `{s, code?}`: the app exchanges its login for a session. `s` is the secret
- * whose hash `h` named the login; the proof is the login's cookie on the web and `code` for the
+ * POST /api/auth/claim `{s, code?, hint?}`: the app exchanges its login for a session. `s` is the
+ * secret whose hash `h` named the login; the proof is the login's cookie on the web and `code` for the
  * Windows app, chosen by whether the login carries a loopback port, never by what the request sends.
+ * The sealed account hint comes the same way: its cookie on the web, `hint` (as the loopback
+ * received it) for the Windows app. The answer's `account_hint` is the opened hint, or null.
  * `now` is the Worker's clock.
  */
 export async function loginClaim(request, env, ctx, now) {
-  const body = envelope(await readJson(request, limits.MAX_SMALL_BODY), ["s"], ["code"]);
+  const body = envelope(await readJson(request, limits.MAX_SMALL_BODY), ["s"], ["code", "hint"]);
   if (!isLoginSecret(body.s)) throw new InvalidPayload("s");
   if (body.code !== undefined && !isLoginSecret(body.code)) throw new InvalidPayload("code");
+  if (body.hint !== undefined && !isSealedHint(body.hint)) throw new InvalidPayload("hint");
   const h = toHex(await sha256(body.s));
   const at = clock(now);
   const login = await findLogin(env.DB, hexBytes(h), at.now);
@@ -354,14 +369,21 @@ export async function loginClaim(request, env, ctx, now) {
   });
   if (session === null) return fail(410, "login_expired");
   ctx.waitUntil(sweepLogins(env.DB, at.now, limits.SWEEP_LIMIT).catch(() => {}));
+  const sealedHint = login.port !== null ? (body.hint ?? null) : readCookie(request, hintCookie(h));
+  const hint = sealedHint === null ? null : await openHint(env, proofHash, sealedHint);
   // A login onto an account being deleted gets a session that can only continue the deletion, and
   // `deleting` tells the app to continue it.
-  return json(
-    200,
-    { token, expires_at: session.expiresAt, account_id: session.accountId, deleting: session.scope === "delete" },
-    // Only this login's handover cookie: another login of the same browser may still be in flight.
-    { "Set-Cookie": removal(loginCookie(h)) },
-  );
+  const answer = json(200, {
+    token,
+    expires_at: session.expiresAt,
+    account_id: session.accountId,
+    deleting: session.scope === "delete",
+    account_hint: hint,
+  });
+  // Only this login's handover cookies: another login of the same browser may still be in flight.
+  answer.headers.append("Set-Cookie", removal(loginCookie(h)));
+  if (login.port === null && sealedHint !== null) answer.headers.append("Set-Cookie", removal(hintCookie(h)));
+  return answer;
 }
 
 
