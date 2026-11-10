@@ -330,6 +330,28 @@ class RecordZipService {
         bytes: fileName == "record.json" ? _upgradedRecordJson(content) : content,
       ));
     }
+    final result = await importFiles(files, storageDir, persistence: persistence, isDuplicate: isDuplicate);
+    return RecordImportResult(
+      recordIds: result.recordIds,
+      skippedEntries: skipped,
+      refusals: result.refusals,
+      acceptedRecords: result.acceptedRecords,
+    );
+  }
+
+  /// Writes the record files [files] into the store under [storageDir], each record as the record its files hold
+  /// ([_importPublication]), and returns which records were written and which were refused: the way into the store
+  /// that every import shares, whatever brought the files — a zip ([import]) or a shared record's link
+  /// (`record_link_import.dart`) —, so the duplicate rule, the images and the archive state are decided once.
+  ///
+  /// [files] are trusted to be record files by name (`relativeSegments` one segment, a record id one directory):
+  /// the caller is the one that validated where they came from. [RecordImportResult.skippedEntries] is zero.
+  static Future<RecordImportResult> importFiles(
+    List<RecordPersistenceFile> files,
+    DirectoryPath storageDir, {
+    WebRecordPersistence? persistence,
+    bool Function(CharaDetailRecord record, Iterable<CharaDetailRecord> stored)? isDuplicate,
+  }) async {
     final grouped = <String, List<RecordPersistenceFile>>{};
     for (final file in files) {
       grouped.putIfAbsent(file.recordId, () => <RecordPersistenceFile>[]).add(file);
@@ -386,7 +408,7 @@ class RecordZipService {
     refusals.addAll(_refusals(result));
     return RecordImportResult(
       recordIds: result.committedIds,
-      skippedEntries: skipped,
+      skippedEntries: 0,
       refusals: refusals,
       acceptedRecords: [for (final id in result.committedIds) ?(written[id] ?? decoded[id])],
     );

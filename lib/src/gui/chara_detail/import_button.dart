@@ -156,6 +156,191 @@ CharaDetailRecordStorage? _loadedRecordStorage(ProviderContainer container) {
   return container.read(charaDetailRecordStorageLoaderProvider.notifier);
 }
 
+/// One step of a record import ([runRecordImport]): writes records into the store under the storage directory it is
+/// handed, asking the import's duplicate rule of each, and answers what it wrote — a zip
+/// ([RecordZipService.import]) or the files of a shared record ([RecordZipService.importFiles]).
+typedef RecordImportStep =
+    Future<RecordImportResult> Function(
+      DirectoryPath storageDir,
+      bool Function(CharaDetailRecord record, Iterable<CharaDetailRecord> stored) isDuplicate,
+    );
+
+/// The records a [runRecordImport] has written and refused so far, across its steps.
+class RecordImportProgress {
+  RecordImportProgress._(this._storageDir, this._latestById);
+
+  final DirectoryPath _storageDir;
+  final Map<String, CharaDetailRecord> _latestById;
+
+  /// Ids of the records written. A set: one record split across several pieces of one export is one record.
+  final importedIds = <String>{};
+
+  /// The records not written, by id, keyed by id for the same reason.
+  final refusals = <String, RecordImportRefusal>{};
+
+  /// Whether a step reached the store at all, so the stores are re-listed even where it wrote nothing new.
+  bool _committed = false;
+
+  /// Runs [step] against the store, weighing each record it carries against the store's records and those the
+  /// steps before it wrote ([duplicateCharaIdIn]); a step that throws has written nothing of its own to record.
+  Future<void> run(RecordImportStep step) async {
+    bool isDuplicate(CharaDetailRecord record, Iterable<CharaDetailRecord> stored) =>
+        duplicateCharaIdIn({..._latestById, for (final committed in stored) committed.id: committed}.values, record) !=
+        null;
+    final result = await step(_storageDir, isDuplicate);
+    _committed = true;
+    importedIds.addAll(result.recordIds);
+    refusals.addAll(result.refusals);
+    for (final record in result.acceptedRecords) {
+      _latestById[record.id] = record;
+    }
+  }
+}
+
+/// Runs a record import: [action] calls [RecordImportProgress.run] for each step it has, under the import's claim
+/// over the record store; then the stores are re-listed, sync is told, [report] tells the outcome of the steps as the
+/// caller words it, every refused record is told by its reason, and the inheritance of the written records is
+/// resolved.
+///
+/// The one way into the store for every import the toolbar starts — a zip and a shared record's link —, so the claim,
+/// the duplicate rule, the resolution and the refusals' sentences cannot differ between them. [operation] names the
+/// import in the log of a claim that refused it. Returns false where the import did not start (another long read
+/// holds the store, or the store could not be found), true otherwise.
+Future<bool> runRecordImport(
+  ProviderContainer container, {
+  required String operation,
+  required Future<void> Function(RecordImportProgress progress) action,
+  required void Function(RecordImportProgress progress) report,
+}) async {
+  // Declared before the first await, from the container the import reports through.
+  final effects = recordImportEffects(container.read(containerRefProvider));
+  // Held rather than re-read below, so the `finally` clearing the spinner reads
+  // as the one counterpart of this line -- a disposed widget must not leave the
+  // (app-scoped) importing flag stuck at true and the button disabled.
+  final notifier = container.read(_importingProvider.notifier);
+  notifier.set(true);
+  try {
+    final pathInfo = await container.read(pathInfoLoader.future);
+    // The capture path's duplicate rule, asked of every record an import carries, so a
+    // chara the user already has does not arrive a second time under a new id.
+    //
+    // Asked of one record per id: the latest version of it that is on disk. The
+    // store's records are read once here -- the store does not change while the
+    // import holds the claim below -- and every record a step commits replaces the
+    // entry for its id, so a record this import replaced is weighed by its new
+    // contents and not by the ones it had before. Only a committed record takes
+    // its id's place; one the store refused leaves the stored version in it. If
+    // the store is not loaded there is nothing to duplicate, and the map starts
+    // empty.
+    final progress = RecordImportProgress._(pathInfo.storageDir, <String, CharaDetailRecord>{
+      for (final record in _loadedRecordStorage(container)?.existingRecords() ?? const <CharaDetailRecord>[])
+        record.id: record,
+    });
+    // **The claim is over the whole import, and it starts here rather than
+    // inside [RecordZipService.import].** The service's own window is one
+    // step's persistence; the import's is longer at both ends -- a zip's
+    // `readAsBytes` reads a multi-megabyte file (or fetches the picked blob on web)
+    // outside every acquisition, and between two zips nothing at all is held.
+    // `pathInfo` was resolved before the loop and is not read again, so a
+    // relocation granted anywhere in that stretch renames the store away while
+    // the remaining zips are still being written into the old one, where the
+    // next startup does not look. The registry is what refuses it: the
+    // relocation asks `storageDeleteBlockedBy` over the roots it would move,
+    // and this claim is the answer.
+    //
+    // Asked and claimed in one turn, here and not only in `build`: the picker and the
+    // link dialog are modal and the user may leave them open for minutes, and no frame
+    // of the toolbar is built while they are up, so the gate the button carried can be
+    // arbitrarily old. A claim that arrived in that stretch -- a zip, an archive, a
+    // relocation -- refuses this import before anything is read.
+    //
+    // `holdWhenFree` and not `claimUntilReleased`, so the release is the
+    // registry's `finally` and not a line here to forget: a step that throws,
+    // and the toolbar being disposed mid-import, end the claim by the same path
+    // (`release` returns early once the container is gone, which is the case the
+    // widget's disposal produces).
+    try {
+      await container
+          .read(longReadRegistryProvider.notifier)
+          .holdWhenFree(
+            kind: LongReadKind.import,
+            paths: recordImportLongReadPaths(pathInfo),
+            contention: LongReadContention.refuse,
+            action: (_) => action(progress),
+          );
+    } on LongReadNotStartedException catch (exception) {
+      // Caught here, inside the generic `catch` below, so a refusal is not
+      // reported as `$tr_import.failure`: nothing has been written -- this is
+      // above every step -- so the one sentence every withheld surface shows is
+      // as true here as it is on the button. It goes on a toast because by this
+      // point the user has asked for the import, and there is nothing left on
+      // screen for a tooltip to hang from. The `finally` below still takes the
+      // spinner down.
+      announceLongReadNotStarted(exception, operation: operation);
+      return false;
+    }
+    // Deliberately not gated on the toolbar still being mounted: the records are on disk and the
+    // app-scoped stores are stale whether or not it survived, so the toast (published to an
+    // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
+    // user navigated away from stays invisible in the table until the app is restarted.
+    // Asked before the rescan below rebuilds the store: a container that never built it has no
+    // record set to resolve against, the same silence the duplicate check above takes.
+    final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
+    final importedIds = progress.importedIds;
+    if (progress._committed) {
+      // Over the container's ref rather than the toolbar's own: the import outlives the widget that started it,
+      // which is the same reason this reads the container before the first await.
+      applyRecordsPublished(container.read(containerRefProvider), pathInfo, writtenIds: importedIds, effects: effects);
+      // The records an import put in are an edit of what sync carries.
+      if (importedIds.isNotEmpty) container.read(syncLocalEditsProvider.notifier).edited();
+    }
+    report(progress);
+    // The per-record half of the outcome, which the step-level messages of [report]
+    // cannot express: a step can be read end to end and still have records the
+    // store refused. Those records are in what the user asked for and are not
+    // in the table afterwards, so each reason says how many and what (if
+    // anything) to do about it.
+    for (final toast in importRefusalToasts(progress.refusals)) {
+      Toaster.show(toast);
+    }
+    if (progress._committed && resolvesAfterImport) {
+      await _resolveImportedInheritance(container, importedIds);
+    }
+    return true;
+  } catch (error, stackTrace) {
+    // Reached when the import could not be attempted at all (e.g. the storage
+    // layout is unavailable), not for a step that failed to import.
+    logger.e("Failed to import records", error, stackTrace);
+    Toaster.show(ToastData.error(description: "$tr_import.failure".tr()));
+    return false;
+  } finally {
+    notifier.set(false);
+  }
+}
+
+/// Whether a record import is running, or another long read holds what one would write into: the toolbar's import
+/// controls are withheld while it is. [importing] is the first of the two, which the spinner and the sentence prefer.
+({bool withheld, bool importing}) recordImportWithheld(WidgetRef ref) {
+  final importing = ref.watch(_importingProvider);
+  // Watched, not read: the claim the controls have to respect is normally taken
+  // long after they were built -- a zip, an archive or a relocation started from
+  // the storage dialog on another tab -- and is released again while the
+  // toolbar is still up. A gate that answered once, at build time, would be
+  // wrong in both directions.
+  final claims = ref.watch(longReadRegistryProvider).values;
+  // The layout and not `pathInfoProvider`, for the reason
+  // `module_update_dialog.dart` states: an import needs to know where the
+  // store is, not that it was successfully prepared, and the second throws
+  // while it has not been.
+  final layout = ref.read(pathLayoutProvider);
+  // Asked through [_importBlockedBy], so the set withheld here is the set the
+  // run claims and the set the run asks about again once the user has chosen.
+  final heldByLongRead = layout != null && _importBlockedBy(layout, claims) != null;
+  // The import's own claim is one of these while it runs, so the two reasons
+  // overlap on purpose.
+  return (withheld: importing || heldByLongRead, importing: importing);
+}
+
 /// Toolbar control that imports records from Stage-4-compatible zips.
 ///
 /// Picks one or more `.zip` files with the platform file picker (bytes-based, so
@@ -175,8 +360,6 @@ class CharaDetailImportButton extends ConsumerWidget {
     // container -- and the app-scoped stores and flag it holds -- lives on. Read before the first
     // await, from a context that is certainly still mounted; nothing below touches `ref` at all.
     final container = ProviderScope.containerOf(context, listen: false);
-    // Declared here, before the picker's await, from the container the import reports through.
-    final effects = recordImportEffects(container.read(containerRefProvider));
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ["zip"],
@@ -205,195 +388,78 @@ class CharaDetailImportButton extends ConsumerWidget {
     // with no toast and no log line, which is the very silence this control exists to avoid. The
     // import runs to completion and reports itself through the container, as it does from any other
     // point past this line.
-    //
-    // Held rather than re-read below, so the `finally` clearing the spinner reads
-    // as the one counterpart of this line -- a disposed widget must not leave the
-    // (app-scoped) importing flag stuck at true and the button disabled.
-    final notifier = container.read(_importingProvider.notifier);
-    notifier.set(true);
-    try {
-      final pathInfo = await container.read(pathInfoLoader.future);
-      // The capture path's duplicate rule, asked of every record a zip carries, so a
-      // chara the user already has does not arrive a second time under a new id.
-      //
-      // Asked of one record per id: the latest version of it that is on disk. The
-      // store's records are read once here -- the store does not change while the
-      // import holds the claim below -- and every record a zip commits replaces the
-      // entry for its id, so a record this selection replaced is weighed by its new
-      // contents and not by the ones it had before. Only a committed record takes
-      // its id's place; one the store refused leaves the stored version in it. If
-      // the store is not loaded there is nothing to duplicate, and the map starts
-      // empty.
-      final latestById = <String, CharaDetailRecord>{
-        for (final record in _loadedRecordStorage(container)?.existingRecords() ?? const <CharaDetailRecord>[])
-          record.id: record,
-      };
-      bool isDuplicate(CharaDetailRecord record, Iterable<CharaDetailRecord> stored) =>
-          duplicateCharaIdIn({...latestById, for (final committed in stored) committed.id: committed}.values, record) !=
-          null;
-      final importedIds = <String>{};
-      // Keyed by record id for the same reason `importedIds` is a set: one record
-      // split across several pieces of one export is one record, and is refused
-      // once even if it is met twice.
-      final refusals = <String, RecordImportRefusal>{};
-      var committed = false;
-      var failures = 0;
-      var tooLargeFailures = 0;
-      // **The claim is over the whole selection, and it starts here rather than
-      // inside [RecordZipService.import].** The service's own window is one
-      // zip's persistence; this loop's is longer at both ends -- `readAsBytes`
-      // below reads a multi-megabyte file (or fetches the picked blob on web)
-      // outside every acquisition, and between two zips nothing at all is held.
-      // `pathInfo` was resolved before the loop and is not read again, so a
-      // relocation granted anywhere in that stretch renames the store away while
-      // the remaining zips are still being written into the old one, where the
-      // next startup does not look. The registry is what refuses it: the
-      // relocation asks `storageDeleteBlockedBy` over the roots it would move,
-      // and this claim is the answer.
-      //
-      // Asked and claimed in one turn, here and not only in `build`: the picker is
-      // a modal dialog the user may leave open for minutes -- this method says so
-      // above, as its reason for not gating on `context.mounted` -- and no frame is
-      // built while it is up, so the gate the button carried can be arbitrarily
-      // old. A claim that arrived in that stretch -- a zip, an archive, a
-      // relocation -- refuses this selection before anything is read.
-      //
-      // `holdWhenFree` and not `claimUntilReleased`, so the release is the
-      // registry's `finally` and not a line here to forget: a zip that throws, a
-      // picker result that turns out empty, and this toolbar being disposed
-      // mid-import all end the claim by the same path (`release` returns early
-      // once the container is gone, which is the case the widget's disposal
-      // produces).
-      try {
-        await container
-            .read(longReadRegistryProvider.notifier)
-            .holdWhenFree(
-              kind: LongReadKind.import,
-              paths: recordImportLongReadPaths(pathInfo),
-              contention: LongReadContention.refuse,
-              action: (_) async {
-                for (final file in result.files) {
-                  try {
-                    final bytes = await file.readAsBytes();
-                    final importResult = await RecordZipService.import(
-                      bytes,
-                      pathInfo.storageDir,
-                      isDuplicate: isDuplicate,
-                    );
-                    committed = true;
-                    // Union, because the same record may appear in more than one of the
-                    // pieces a single export was split into, and it is imported once.
-                    importedIds.addAll(importResult.recordIds);
-                    refusals.addAll(importResult.refusals);
-                    for (final record in importResult.acceptedRecords) {
-                      latestById[record.id] = record;
-                    }
-                  } catch (error, stackTrace) {
-                    // Per zip: one unreadable piece of a split export must not discard the
-                    // pieces that follow it -- the user picked them all in one dialog and
-                    // cannot tell which one the loop stopped on.
-                    logger.e("Failed to import records from ${file.name}", error, stackTrace);
-                    failures += 1;
-                    if (error is RecordZipTooLargeException) {
-                      tooLargeFailures += 1;
-                    }
-                  }
-                }
-              },
+    var failures = 0;
+    var tooLargeFailures = 0;
+    await runRecordImport(
+      container,
+      operation: 'An import of ${result.files.length} zip(s)',
+      action: (progress) async {
+        for (final file in result.files) {
+          try {
+            final bytes = await file.readAsBytes();
+            await progress.run(
+              (storageDir, isDuplicate) => RecordZipService.import(bytes, storageDir, isDuplicate: isDuplicate),
             );
-      } on LongReadNotStartedException catch (exception) {
-        // Caught here, inside the generic `catch` below, so a refusal is not
-        // reported as `$tr_import.failure`: nothing has been read or written --
-        // this is above every `readAsBytes` -- so the one sentence every withheld
-        // surface shows is as true here as it is on the button. It goes on a toast
-        // because by this point the user has pressed the button and chosen files,
-        // and there is nothing left on screen for a tooltip to hang from. The
-        // `finally` below still takes the spinner down.
-        announceLongReadNotStarted(exception, operation: 'An import of ${result.files.length} zip(s)');
-        return;
-      }
-      // Deliberately not gated on the toolbar still being mounted: the records are on disk and the
-      // app-scoped stores are stale whether or not it survived, so the toast (published to an
-      // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
-      // user navigated away from stays invisible in the table until the app is restarted.
-      // Asked before the rescan below rebuilds the store: a container that never built it has no
-      // record set to resolve against, the same silence the duplicate check above takes.
-      final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
-      if (committed) {
-        // Over the container's ref rather than the toolbar's own: the import outlives the widget that started it,
-        // which is the same reason this reads the container before opening the picker.
-        applyRecordsPublished(
-          container.read(containerRefProvider),
-          pathInfo,
-          writtenIds: importedIds,
-          effects: effects,
-        );
-        // The records a zip put in are an edit of what sync carries.
-        if (importedIds.isNotEmpty) container.read(syncLocalEditsProvider.notifier).edited();
-      }
-      if (failures == 0) {
-        if (importedIds.isEmpty && refusals.isEmpty) {
-          Toaster.show(ToastData.warning(description: "$tr_import.empty".tr()));
-        } else if (importedIds.isEmpty) {
-          // Records were found and every one of them was refused, so "no records
-          // to import" would be false and "0 imported" would say nothing about
-          // why. The refusal toasts below carry the whole outcome, with the
-          // reason and the count, so this branch deliberately adds no line of its
-          // own rather than a second, vaguer one.
+          } catch (error, stackTrace) {
+            // Per zip: one unreadable piece of a split export must not discard the
+            // pieces that follow it -- the user picked them all in one dialog and
+            // cannot tell which one the loop stopped on.
+            logger.e("Failed to import records from ${file.name}", error, stackTrace);
+            failures += 1;
+            if (error is RecordZipTooLargeException) {
+              tooLargeFailures += 1;
+            }
+          }
+        }
+      },
+      report: (progress) {
+        final importedIds = progress.importedIds;
+        if (failures == 0) {
+          if (importedIds.isEmpty && progress.refusals.isEmpty) {
+            Toaster.show(ToastData.warning(description: "$tr_import.empty".tr()));
+          } else if (importedIds.isEmpty) {
+            // Records were found and every one of them was refused, so "no records
+            // to import" would be false and "0 imported" would say nothing about
+            // why. The refusal toasts carry the whole outcome, with the reason and
+            // the count, so this branch deliberately adds no line of its own rather
+            // than a second, vaguer one.
+          } else {
+            Toaster.show(
+              ToastData.success(description: "$tr_import.success".tr(namedArgs: {"count": "${importedIds.length}"})),
+            );
+          }
+        } else if (failures == result.files.length) {
+          // Every zip failed. RecordZipTooLargeException is a distinct
+          // FormatException subtype (see record_zip.dart), so the size branch only
+          // matches the size/entry-count limits and not the zip-slip rejection,
+          // which is a plain FormatException.
+          final allTooLarge = tooLargeFailures == failures;
+          if (result.files.length == 1) {
+            // One zip is the only failure shape a single selection has: report it
+            // exactly as this button always has, down to the wording.
+            Toaster.show(ToastData.error(description: "$tr_import.${allTooLarge ? "too_large" : "failure"}".tr()));
+          } else {
+            // Several zips, none of which arrived. The single-selection wording
+            // would not say how many were refused -- and its `too_large` variant
+            // tells the user to split the export into several zips, which is
+            // exactly what they just did and had rejected.
+            final messageKey = allTooLarge ? "all_too_large" : "all_failure";
+            Toaster.show(ToastData.error(description: "$tr_import.$messageKey".tr(namedArgs: {"failed": "$failures"})));
+          }
         } else {
+          // Only reachable with several zips selected. Neither the success nor the
+          // failure message is true here, and saying either would hide the other
+          // half of the selection.
           Toaster.show(
-            ToastData.success(description: "$tr_import.success".tr(namedArgs: {"count": "${importedIds.length}"})),
+            ToastData.warning(
+              description: "$tr_import.partial_failure".tr(
+                namedArgs: {"count": "${importedIds.length}", "failed": "$failures"},
+              ),
+            ),
           );
         }
-      } else if (failures == result.files.length) {
-        // Every zip failed. RecordZipTooLargeException is a distinct
-        // FormatException subtype (see record_zip.dart), so the size branch only
-        // matches the size/entry-count limits and not the zip-slip rejection,
-        // which is a plain FormatException.
-        final allTooLarge = tooLargeFailures == failures;
-        if (result.files.length == 1) {
-          // One zip is the only failure shape a single selection has: report it
-          // exactly as this button always has, down to the wording.
-          Toaster.show(ToastData.error(description: "$tr_import.${allTooLarge ? "too_large" : "failure"}".tr()));
-        } else {
-          // Several zips, none of which arrived. The single-selection wording
-          // would not say how many were refused -- and its `too_large` variant
-          // tells the user to split the export into several zips, which is
-          // exactly what they just did and had rejected.
-          final messageKey = allTooLarge ? "all_too_large" : "all_failure";
-          Toaster.show(ToastData.error(description: "$tr_import.$messageKey".tr(namedArgs: {"failed": "$failures"})));
-        }
-      } else {
-        // Only reachable with several zips selected. Neither the success nor the
-        // failure message is true here, and saying either would hide the other
-        // half of the selection.
-        Toaster.show(
-          ToastData.warning(
-            description: "$tr_import.partial_failure".tr(
-              namedArgs: {"count": "${importedIds.length}", "failed": "$failures"},
-            ),
-          ),
-        );
-      }
-      // The per-record half of the outcome, which the zip-level messages above
-      // cannot express: a zip can be read end to end and still have records the
-      // store refused. Those records are in the file the user picked and are not
-      // in the table afterwards, so each reason says how many and what (if
-      // anything) to do about it.
-      for (final toast in importRefusalToasts(refusals)) {
-        Toaster.show(toast);
-      }
-      if (committed && resolvesAfterImport) {
-        await _resolveImportedInheritance(container, importedIds);
-      }
-    } catch (error, stackTrace) {
-      // Reached when the import could not be attempted at all (e.g. the storage
-      // layout is unavailable), not for a zip that failed to import.
-      logger.e("Failed to import records", error, stackTrace);
-      Toaster.show(ToastData.error(description: "$tr_import.failure".tr()));
-    } finally {
-      notifier.set(false);
-    }
+      },
+    );
   }
 
   @override
@@ -401,25 +467,7 @@ class CharaDetailImportButton extends ConsumerWidget {
     // Match CharaDetailExportButton's metrics exactly so the two controls are
     // visually indistinguishable in the toolbar.
     const buttonSize = 36.0;
-    final importing = ref.watch(_importingProvider);
-    // Watched, not read: the claim this button has to respect is normally taken
-    // long after it was built -- a zip, an archive or a relocation started from
-    // the storage dialog on another tab -- and is released again while this
-    // toolbar is still up. A gate that answered once, at build time, would be
-    // wrong in both directions.
-    final claims = ref.watch(longReadRegistryProvider).values;
-    // The layout and not `pathInfoProvider`, for the reason
-    // `module_update_dialog.dart` states: an import needs to know where the
-    // store is, not that it was successfully prepared, and the second throws
-    // while it has not been.
-    final layout = ref.read(pathLayoutProvider);
-    // Asked through [_importBlockedBy], so the set withheld here is the set the
-    // run claims and the set the run asks about again once the picker returns.
-    final heldByLongRead = layout != null && _importBlockedBy(layout, claims) != null;
-    // The import's own claim is one of these while it runs, so the two reasons
-    // overlap on purpose; the spinner and the sentence below both prefer
-    // [importing], which is the one the user just caused.
-    final withheld = importing || heldByLongRead;
+    final (:withheld, :importing) = recordImportWithheld(ref);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: SizedBox(
