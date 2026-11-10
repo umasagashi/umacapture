@@ -326,6 +326,15 @@ of one day write no more than that share between them.
   every account plus the new would pass `SYNC_BUDGET`; then the database's room as a `"normal"` request.
 - **Records.** A replacement that makes the root list more records than the current one and more than
   `ACCOUNT_SYNC_RECORDS_CAP` is `507 account_limit` `"records"` (`recordsRefusal`).
+- **What the account sees.** `GET /api/me/usage` (`getUsage`, `server/src/account.mjs`) answers
+  `{shares: {count, cap}, sync: {stored_bytes, bytes_cap, records, records_cap}}`: the account's share
+  count against `ACCOUNT_SHARE_CAP`, and the `stored` and `records` of `usage` against
+  `ACCOUNT_SYNC_BYTES_CAP` and `ACCOUNT_SYNC_RECORDS_CAP` — the same numbers the two refusals above
+  compare, so a client reading them sees how near it is to those refusals. Hidden bytes are not in it.
+  It lives with the account outside `/api/sync/`, so it answers while sync is switched off (it only
+  reads what is stored), and like `GET /api/me` it is admitted against no daily limit. A session that
+  is missing, expired or whose account is gone gets `401 session_required`. A Worker older than this
+  route answers it with the plain-text `404` ([Ordering against a Windows release](web-deploy.md#ordering-against-a-windows-release)).
 - **The database's room** (`admitDatabase`) is `DATABASE_BUDGET` less the database's size as D1 reports
   it after the check's statement (`meta.size_after`, every table counted) less what sharing has not
   used of `STORAGE_BUDGET` (the charges in `totals`). A put of bodies or an image is refused

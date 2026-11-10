@@ -16,6 +16,7 @@ export const ROUTES = [
   ["GET", "listJson", new RegExp(`^/u/(${ACCOUNT_ID})\\.json$`)],
   ["GET", "listPage", new RegExp(`^/u/(${ACCOUNT_ID})$`)],
   ["GET", "me", /^\/api\/me$/],
+  ["GET", "meUsage", /^\/api\/me\/usage$/],
   ["DELETE", "deleteAccount", /^\/api\/me$/],
   ["POST", "meTrainer", /^\/api\/me\/trainers$/],
   ["POST", "share", /^\/api\/shares$/],

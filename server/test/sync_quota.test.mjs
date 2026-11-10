@@ -13,7 +13,7 @@ import * as limits from "../src/limits.mjs";
 import { Unavailable } from "../src/store.mjs";
 import { admitDatabase } from "../src/sync_quota.mjs";
 import { named, STATEMENT } from "../src/sync_refs.mjs";
-import { archived, bodyOf, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
+import { answer, archived, bodyOf, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
 import { newClientKey, postedForm, startWorker } from "./support/worker_harness.mjs";
 
 const DAY = 86_400;
@@ -145,6 +145,42 @@ describe("sync daily limits and capacity", () => {
     isDailyLimit(await client.settings(), "account");
     const generation = await client.generation();
     assert.deepEqual([generation.status, generation.body], [200, { generation: 0, root: null }]);
+  });
+
+  test("GET /api/me/usage answers the shares, stored bytes and records the caps are held against, beside the caps, and is charged to no daily limit", async () => {
+    const { id, client, token } = await account("usage");
+    const usage = () => answer(worker.fetch("/api/me/usage", { headers: { Authorization: `Bearer ${token}` } }));
+    const caps = { shares: limits.ACCOUNT_SHARE_CAP, bytes: limits.ACCOUNT_SYNC_BYTES_CAP, records: limits.ACCOUNT_SYNC_RECORDS_CAP };
+    const expected = (shares, stored, records) => ({
+      shares: { count: shares, cap: caps.shares },
+      sync: { stored_bytes: stored, bytes_cap: caps.bytes, records, records_cap: caps.records },
+    });
+    assert.deepEqual((await usage()).body, expected(0, 0, 0));
+
+    await client.setImageForm("png");
+    const image = newImage();
+    const first = newRecord(0, { binding: { skill_png: image.name } });
+    const second = newRecord(1);
+    assert.equal((await client.putBodies([first.body, second.body])).status, 200);
+    const parts = [recordPart(0, [first.row]), recordPart(1, [second.row])];
+    for (const p of parts) assert.equal((await client.putPart(p)).status, 200);
+    assert.equal((await client.replace(0, root({ 0: parts[0].name, 1: parts[1].name }))).status, 200);
+    assert.equal((await client.putImage(image.name, image.bytes)).status, 200);
+    await worker.db.prepare("UPDATE accounts SET share_count = 7 WHERE id = ?").bind(id).run();
+    // Bytes nothing references any more count against another cap, not this one.
+    await addHiddenToday(id, 12_345);
+
+    const row = await accountRow(id);
+    assert.equal(row.record_count, 2);
+    assert.ok(row.stored_bytes > image.bytes.length, `stored ${row.stored_bytes}`);
+    const daily = () => worker.db.prepare("SELECT daily_requests FROM sync_accounts WHERE account_id = ?").bind(id).first("daily_requests");
+    const counted = await daily();
+    const res = await usage();
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body, expected(7, row.stored_bytes, 2));
+    assert.equal(await daily(), counted);
+
+    assert.equal((await answer(worker.fetch("/api/me/usage"))).status, 401);
   });
 
   test("a put of a name the account holds answers exists with every limit used up and the caps full, and reaches no B2", async () => {

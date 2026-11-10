@@ -1,10 +1,12 @@
-// The session's own account: GET /api/me and POST /api/me/trainers.
+// The session's own account: GET /api/me, GET /api/me/usage and POST /api/me/trainers.
 
 import { AccountDeleting, clock, envelope, fail, json, readJson, SessionRequired } from "./api.mjs";
 import { requireSession } from "./auth.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { readAccount, registerTrainer } from "./store.mjs";
+import { d1 } from "./sync.mjs";
+import { usage } from "./sync_quota.mjs";
 
 // The form the app's trainer ids take (a lowercase UUID).
 const TRAINER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -25,6 +27,33 @@ export async function getMe(request, env, now) {
     shares_remaining: Math.max(0, limits.ACCOUNT_SHARE_CAP - account.shareCount),
     trainer_ids: account.trainerIds,
     deleting: account.deleting,
+  });
+}
+
+/**
+ * GET /api/me/usage: what the session's account uses of its per-account caps, each beside its cap:
+ * `{shares: {count, cap}, sync: {stored_bytes, bytes_cap, records, records_cap}}`. `shares` counts the
+ * account's shares against ACCOUNT_SHARE_CAP. `sync.stored_bytes` and `sync.records` are what
+ * `admitGrowth` and `recordsRefusal` hold against ACCOUNT_SYNC_BYTES_CAP and ACCOUNT_SYNC_RECORDS_CAP:
+ * the bytes the current root references, and the records its parts list; both 0 before a first sync.
+ * Bytes waiting for B2's lifecycle (ACCOUNT_SYNC_HIDDEN_BYTES_CAP) are left out. Like GET /api/me it
+ * is admitted against no daily limit, and it answers whether sync is switched on or not: it reports
+ * what is stored, and switching sync off stores nothing new.
+ */
+export async function getUsage(request, env, now) {
+  const at = clock(now).now;
+  const session = await requireSession(request, env, at);
+  const account = await readAccount(env.DB, session.accountId);
+  if (account === null) throw new SessionRequired();
+  const sync = await d1(() => usage(env.DB, session.accountId, at));
+  return json(200, {
+    shares: { count: account.shareCount, cap: limits.ACCOUNT_SHARE_CAP },
+    sync: {
+      stored_bytes: sync.stored,
+      bytes_cap: limits.ACCOUNT_SYNC_BYTES_CAP,
+      records: sync.records,
+      records_cap: limits.ACCOUNT_SYNC_RECORDS_CAP,
+    },
   });
 }
 

@@ -460,6 +460,13 @@ older Worker refuses every share of such a build as `invalid_payload` (it refuse
 know), and answers the link import `404`. Once such a build is released, the production Worker is
 never rolled back past that version (below).
 
+A build that shows the account's usage reads `GET /api/me/usage` (shares, sync's stored bytes and
+synced records, each beside its cap; see `docs/sync-server.md`, "Usage and the database's room"). A
+Worker older than that route answers it with the plain-text `404`, as it answers every path it does
+not know. Such a build is released only after the production Worker that has the route, and the
+production Worker is not rolled back past that version afterwards. A build that meets such a Worker
+anyway shows no usage on that `404`; it is not a failure of the account or of the session.
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
