@@ -192,7 +192,8 @@ function footer(logo) {
 }
 
 /**
- * The card for `record`, which must satisfy isRenderable.
+ * The card for `record`, which must satisfy isRenderable. It fills the whole image: a page margin
+ * around it is space every preview shrinks away.
  * `logo` is web/site/logo.png as an image source (a data URI).
  */
 export function buildCard(record, logo) {
@@ -200,18 +201,15 @@ export function buildCard(record, logo) {
     {
       width: 1200,
       height: 630,
-      padding: "30px 44px 24px",
-      background: COLOR.page,
+      padding: "28px 40px 22px",
+      background: COLOR.card,
       color: COLOR.ink,
       fontFamily: FONT_FAMILY,
     },
-    column(
-      { flexGrow: 1, borderRadius: 28, padding: "24px 30px 18px", background: COLOR.card },
-      header(record),
-      aptitudes(record),
-      factors(record),
-      footer(logo),
-    ),
+    header(record),
+    aptitudes(record),
+    factors(record),
+    footer(logo),
   );
 }
 
