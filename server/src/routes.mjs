@@ -20,6 +20,7 @@ export const ROUTES = [
   ["POST", "meTrainer", /^\/api\/me\/trainers$/],
   ["POST", "share", /^\/api\/shares$/],
   ["DELETE", "unshare", new RegExp(`^/api/shares/(${ID})$`)],
+  ["GET", "importShare", new RegExp(`^/api/shares/(${ID})$`)],
   ["GET", "myShares", /^\/api\/me\/shares$/],
   ["GET", "loginPage", /^\/api\/auth\/start$/],
   ["POST", "loginBegin", /^\/api\/auth\/begin$/],

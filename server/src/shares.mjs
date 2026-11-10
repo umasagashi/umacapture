@@ -19,7 +19,7 @@ import * as limits from "./limits.mjs";
 import { canonicalPostedForm, InvalidPayload, parseVersion, SidOutOfRange } from "./posted_form.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { isClientKey, sha256, toHex } from "./secrets.mjs";
-import { findIdByClientKey, listOwnShares, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
+import { findIdByClientKey, listOwnShares, readRecord, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
 import { TableLookupError, withTables } from "./tables.mjs";
 
 async function gzip(text) {
@@ -222,6 +222,22 @@ export async function deleteShare(request, env, id, now) {
   if (outcome === "unshared") return noContent();
   if (outcome === "deleting") throw new AccountDeleting();
   return outcome === "forbidden" ? fail(403, "forbidden") : fail(404, "not_found");
+}
+
+/**
+ * GET /api/shares/<id>: a shared record as the app imports it, with no session. `record` is the
+ * stored posted form, sids and all, without `module_version`; a share posted before the app sent
+ * icons, parents' ranks and record types is returned as stored, without them, and the app tells it
+ * by their absence. `images` is null: no share declares images yet.
+ *
+ * This endpoint is the app's own. Its shape is not promised to stay stable; outside tools read
+ * /r/<id>.json, which publishes no sids.
+ */
+export async function getShare(env, id) {
+  const stored = await readRecord(env.DB, id);
+  if (stored === null) return fail(404, "not_found");
+  const { module_version: _, ...record } = stored.form;
+  return json(200, { schema: 1, id, shared_on: dayToIso(stored.sharedDay), record, images: null });
 }
 
 /**

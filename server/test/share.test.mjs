@@ -67,7 +67,15 @@ describe("share checks", () => {
 
   test("an unknown key is refused at any depth", async () => {
     await refused({ ...postedForm(), trainer_id: "123456789" }, "invalid_payload", "record.trainer_id");
-    await refused(postedForm({ trainee: { character: 3, card: 3, rank: 2, icon: 0 } }), "invalid_payload", "record.trainee.icon");
+    await refused(postedForm({ trainee: { character: 3, card: 3, rank: 2, name: "x" } }), "invalid_payload", "record.trainee.name");
+  });
+
+  test("icons, parents' ranks and parents' record types out of range are refused", async () => {
+    const parent = (self) => ({ parent1: { ...postedForm().family.parent1, self }, parent2: postedForm().family.parent2 });
+    await refused(postedForm({ trainee: { character: 3, card: 3, rank: 2, icon: 65_536 } }), "invalid_payload", "record.trainee.icon");
+    await refused(postedForm({ family: parent({ character: 1, card: 1, icon: -1 }) }), "invalid_payload", "record.family.parent1.self.icon");
+    await refused(postedForm({ family: parent({ character: 1, card: 1, rank: 99 }) }), "invalid_payload", "record.family.parent1.self.rank");
+    await refused(postedForm({ family: parent({ character: 1, card: 1, record_type: "Friend" }) }), "invalid_payload", "record.family.parent1.self.record_type");
   });
 
   test("a sid past the end of a table is refused, as server_tables_older when the client's modules are newer", async () => {
@@ -146,6 +154,46 @@ describe("share, list and unshare", () => {
     assert.equal((await worker.account(owner)).share_count, 0);
     assert.equal((await answer(worker.unshare(mine, id))).status, 404);
     assert.equal((await answer(worker.unshare(newClientKey(), id))).status, 401);
+  });
+
+  test("/api/shares/<id> returns the stored form with its sids and without module_version, with no session, until unshared", async () => {
+    const token = await worker.signIn("100000000000000000014");
+    const c = (character, card, rank, icon, recordType) => ({ character, card, rank, icon, record_type: recordType });
+    const record = postedForm({
+      trainee: { character: 3, card: 3, rank: 2, icon: 876 },
+      family: {
+        parent1: { self: c(1, 1, 1, 10, "FriendStandard"), parent1: c(0, 0, 0, 0, "Standard"), parent2: c(2, 2, 2, 65_535, "InheritanceOnly"), rental: true },
+        // A parent read without a record type carries none.
+        parent2: { self: { character: 2, card: 2, rank: 0, icon: 7 }, parent1: c(0, 0, 1, 1, "FriendInheritance"), parent2: c(1, 1, 2, 2, "Standard") },
+      },
+    });
+    const [plain, extended] = await results(worker, token, [share(), share(record)]);
+    const { module_version: _, ...expected } = record;
+    const got = await answer(worker.fetch(`/api/shares/${extended.id}`));
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get("cache-control"), "no-store");
+    assert.equal(got.headers.get("access-control-allow-origin"), null);
+    const today = got.body.shared_on;
+    assert.match(today, /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepEqual(got.body, { schema: 1, id: extended.id, shared_on: today, record: expected, images: null });
+
+    // A share posted without the new keys is returned as stored, without them.
+    const { module_version: __, ...old } = postedForm();
+    assert.deepEqual((await answer(worker.fetch(`/api/shares/${plain.id}`))).body.record, old);
+
+    // The new keys publish nothing on the public JSON: it is the same as that of the share without them.
+    const publicOf = async (id) => {
+      const { id: _id, url: _url, ...rest } = (await answer(worker.fetch(`/r/${id}.json`))).body;
+      return rest;
+    };
+    assert.deepEqual(await publicOf(extended.id), await publicOf(plain.id));
+
+    for (const { id } of [extended, plain]) assert.equal((await worker.unshare(token, id)).status, 204);
+    const unshared = await answer(worker.fetch(`/api/shares/${extended.id}`));
+    assert.deepEqual([unshared.status, unshared.body], [404, { error: "not_found" }]);
+    const never = extended.id === "zzzzzzzzzz" || plain.id === "zzzzzzzzzz" ? "yyyyyyyyyy" : "zzzzzzzzzz";
+    const missing = await answer(worker.fetch(`/api/shares/${never}`));
+    assert.deepEqual([missing.status, missing.body], [404, { error: "not_found" }]);
   });
 
   test("a resend with the same client key answers existing with the same id and charges once", async () => {
