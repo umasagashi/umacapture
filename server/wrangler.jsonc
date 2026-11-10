@@ -77,6 +77,13 @@
     // declaring images are refused and bundles are neither stored nor served, while unsharing, account
     // deletion and the hourly run's removal of images go on.
     "SHARE_IMAGES_ENABLED": "true",
+    // Where a report of a share (/r/<id>/report, src/report.mjs) is sent: a Sentry DSN, the same one
+    // the app reports to (_sentryDsn in lib/src/core/sentry_util.dart). It is written twice because the
+    // app and the Worker ship apart and neither reads the other's configuration. A DSN is a public
+    // client value, so it is a var. Empty: the environment takes no reports, and the report page says so.
+    "REPORT_SENTRY_DSN": "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477",
+    // The Sentry environment a report's event carries.
+    "REPORT_SENTRY_ENVIRONMENT": "production",
     // The B2 bucket synced objects are stored in. Its key, B2_KEY_ID and B2_APPLICATION_KEY, is a
     // pair of Worker secrets (`wrangler secret put`), never vars.
     "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
@@ -140,6 +147,9 @@
         "SYNC_ENABLED": "true",
         // "false" stops shared images coming in and going out, as at the top level.
         "SHARE_IMAGES_ENABLED": "true",
+        // Empty: staging takes no reports, so none of its tests reaches the operator's Sentry.
+        "REPORT_SENTRY_DSN": "",
+        "REPORT_SENTRY_ENVIRONMENT": "staging",
         // Staging's own bucket, with its own key in the secrets B2_KEY_ID and B2_APPLICATION_KEY.
         "B2_ENDPOINT": "s3.us-west-004.backblazeb2.com",
         "B2_REGION": "us-west-004",

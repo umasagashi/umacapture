@@ -10,15 +10,25 @@ import { Bucket } from "./b2.mjs";
 import { syncEnabled } from "./sync.mjs";
 import { forgetDays } from "./sync_quota.mjs";
 import { forgetLeftovers, hideLeftovers, showLeftovers, writeLeftovers } from "./sync_refs.mjs";
+import { carryOutTakedowns } from "./takedowns.mjs";
 
 /**
  * What the hourly run takes on, one kind per row: `run` takes on what it can of that kind at the run's
- * clock (`clock`) with what is left of the run's one bucket (its B2 requests are counted across the
+ * clock (`clock`, and `now`, the Worker clock it was read from) with what is left of the run's one bucket (its B2 requests are counted across the
  * kinds), and leaves the rest recorded for the next run. The kinds run in order, each after the one
  * before has finished or failed. `sync` marks the kinds of file sync, which the sync switch stops; only
  * a kind that says `sync: false` runs while sync is switched off.
  */
 const KINDS = [
+  {
+    // Carries out the takedowns operators ordered (share_takedowns), with the code a sharer's own
+    // withdrawal runs. First, since until it runs the share or its images are still served, and it takes
+    // at most SHARE_TAKEDOWNS_PER_RUN of the run's B2 requests. Not a kind of sync, and no switch stops
+    // it: what it removes is what must stop being served.
+    key: "takedowns",
+    sync: false,
+    run: (env, bucket, clk, now) => carryOutTakedowns(env, bucket, now),
+  },
   {
     // Shows what a request cut off left referenced and hidden: after a replacement's commit and before
     // it showed what a hide recorded after its look, or inside a hide that found its name referenced or
@@ -95,7 +105,7 @@ export async function runScheduled(env, now) {
   const failures = [];
   for (const kind of kinds) {
     try {
-      await kind.run(env, bucket, clk);
+      await kind.run(env, bucket, clk, now);
     } catch (error) {
       failures.push(error);
     }

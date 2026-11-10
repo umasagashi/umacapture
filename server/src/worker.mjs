@@ -8,6 +8,7 @@ import { buildPublicList, listSort, renderListPage } from "./list.mjs";
 import { buildPublicRecord } from "./public_record.mjs";
 import { PAGE_CSP, renderNotFoundPage, renderPage } from "./page.mjs";
 import { matchRoute, pagePathKind } from "./routes.mjs";
+import { postReport, reportPage } from "./report.mjs";
 import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
@@ -98,6 +99,10 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => putShareImages(request, env, route.id, now));
         case "getShareImages":
           return answerApi(() => getShareImages(env, route.id, now));
+        case "reportPage":
+          return reportPage(env, route.id);
+        case "report":
+          return postReport(request, env, now);
         case "myShares":
           return answerApi(() => getMyShares(request, env, tables, now));
         case "loginPage":

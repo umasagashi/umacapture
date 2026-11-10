@@ -2,7 +2,9 @@
 
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, startWorker } from "./support/worker_harness.mjs";
+import { REPORT_DAILY_LIMIT } from "../src/limits.mjs";
+import { PAGE_CSP } from "../src/page.mjs";
+import { imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
 
 const ID = "0123456789";
 const HOSTILE_CARD = "card <b>&\"'";
@@ -348,5 +350,93 @@ describe("import endpoint", () => {
     const gone = await worker.fetch(`/api/shares/${shared.id}`);
     assert.deepEqual([gone.status, await gone.json()], [404, { error: "not_found" }]);
     assert.equal(await bundleStatus(shared.id), 404);
+  });
+});
+
+describe("share report", () => {
+  const REPORT_TOKEN = "turnstile-report-token";
+  const passingReport = () => ({ success: true, hostname: TURNSTILE.HOSTNAME, action: "report" });
+  const today = () => Math.floor(Date.now() / 86_400_000);
+  /** POST /api/reports as the report page's form sends it; `fields` and `headers` override. */
+  const report = (worker, fields = {}, headers = {}) =>
+    worker.fetch("/api/reports", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams({ id: ID, reason: "personal_info", text: "", token: REPORT_TOKEN, ...fields }).toString(),
+    });
+  /** The outcome a report's answer page names, after its status. */
+  const outcome = async (res) => `${res.status} ${/data-outcome="([a-z]+)"/.exec(await res.text())?.[1] ?? "none"}`;
+
+  test("a report of a share reaches Sentry as one event naming the share, the reason and the text, and nothing of the reporter, and is accepted only when Sentry takes it", async () => {
+    const worker = await startWorker();
+    try {
+      await worker.insertRecord(ID, postedForm(), 20_725);
+      worker.siteverify.answer = passingReport;
+
+      // The share page stays without a script, keeps its CSP and cache, and links to the report page.
+      const shared = await worker.fetch(`/r/${ID}`);
+      const html = await shared.text();
+      assert.equal(shared.headers.get("content-security-policy"), PAGE_CSP);
+      assert.equal(shared.headers.get("cache-control"), "public, max-age=300");
+      assert.equal(html.includes("<script"), false);
+      assert.match(html, new RegExp(`href="${ORIGIN}/r/${ID}/report"`));
+      const form = await worker.fetch(`/r/${ID}/report`);
+      assert.equal(form.status, 200);
+      assert.match(await form.text(), /data-action="report"[^>]*data-response-field-name="token"/);
+      const missing = await worker.fetch("/r/9999999999/report");
+      assert.equal(missing.status, 404);
+      await missing.arrayBuffer();
+
+      const text = "二枚目の画像に名前が写っています";
+      const accepted = await report(worker, { text }, { Cookie: "uc_session=reporter-cookie", "CF-Connecting-IP": "203.0.113.9" });
+      assert.equal(await outcome(accepted), "200 accepted");
+      assert.equal(worker.sentry.calls.length, 1);
+      const [call] = worker.sentry.calls;
+      assert.equal(call.url, SENTRY.ENDPOINT);
+      for (const sent of [call.body, JSON.stringify(call.headers)]) {
+        for (const value of ["reporter-cookie", "203.0.113.9"]) assert.equal(sent.includes(value), false, value);
+      }
+      const event = JSON.parse(call.body.split("\n")[2]);
+      assert.deepEqual(event.extra, { share_id: ID, text, shared_on: "2026-09-29" });
+      assert.deepEqual(event.tags, { kind: "share_report", reason: "personal_info" });
+      for (const key of ["user", "request"]) assert.equal(key in event, false, key);
+      const daily = await worker.db.prepare("SELECT reports FROM daily WHERE day = ?").bind(today()).first();
+      assert.equal(daily.reports, 1);
+
+      // Sentry failing is told as a failure; a report of no share and one Turnstile did not pass for
+      // this page are not sent.
+      worker.sentry.status = 500;
+      assert.equal(await outcome(await report(worker)), "502 unsent");
+      worker.sentry.status = 200;
+      assert.equal((await report(worker, { id: "9999999999" })).status, 404);
+      worker.siteverify.answer = () => ({ ...passingReport(), action: "login" });
+      assert.equal(await outcome(await report(worker)), "403 unverified");
+      worker.siteverify.answer = passingReport;
+
+      // The day's limit refuses the next report without sending it.
+      await worker.db.prepare("UPDATE daily SET reports = ? WHERE day = ?").bind(REPORT_DAILY_LIMIT, today()).run();
+      assert.equal(await outcome(await report(worker)), "429 limit");
+      assert.equal(worker.sentry.calls.length, 2);
+    } finally {
+      await worker.dispose();
+    }
+  });
+
+  test("reports are accepted while sharing, sync and shared images are paused, and refused unsent where no DSN is set", async () => {
+    const paused = await startWorker({ vars: { SHARING_ENABLED: "false", SYNC_ENABLED: "false", SHARE_IMAGES_ENABLED: "false" } });
+    const off = await startWorker({ vars: { REPORT_SENTRY_DSN: "" } });
+    try {
+      for (const worker of [paused, off]) {
+        await worker.insertRecord(ID, postedForm(), 20_725);
+        worker.siteverify.answer = passingReport;
+      }
+      assert.equal(await outcome(await report(paused)), "200 accepted");
+      assert.equal(paused.sentry.calls.length, 1);
+      assert.equal(await outcome(await off.fetch(`/r/${ID}/report`)), "503 off");
+      assert.equal(await outcome(await report(off)), "503 off");
+      assert.equal(off.sentry.calls.length, 0);
+    } finally {
+      await Promise.all([paused.dispose(), off.dispose()]);
+    }
   });
 });

@@ -17,6 +17,7 @@ import {
   TooLarge,
 } from "./api.mjs";
 import { requireSession } from "./auth.mjs";
+import { Bucket } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { canonicalPostedForm, InvalidPayload, parseVersion, SidOutOfRange } from "./posted_form.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
@@ -247,21 +248,26 @@ export async function postShares(request, env, tables, newId, now) {
 }
 
 /**
- * DELETE /api/shares/<id>: unshares a record the session's account holds, and deletes its bundle when
- * it declared images (`removeBundle`): the share's import endpoint and bundle answer 404 from the
- * unshare's commit, and what B2 fails to delete is left to the hourly run.
+ * Unshares share `id` of account `owner` at clock `now` (`unshareRecord`), and deletes its bundle
+ * through `bucket` when it declared images (`removeBundle`): the share's import endpoint and bundle
+ * answer 404 from the unshare's commit, and what B2 fails to delete is left to the hourly run. Returns
+ * the unshare's status. What a sharer's DELETE and an operator's takedown (takedowns.mjs) both run.
  */
-export async function deleteShare(request, env, id, now) {
+export async function unshare(env, bucket, id, owner, now) {
   const at = clock(now);
-  const session = await requireSession(request, env, at.now);
   const by = crypto.randomUUID();
-  const outcome = await unshareRecord(env.DB, id, session.accountId, by, at.now);
-  if (outcome.status === "unshared") {
-    if (outcome.images !== null) await removeBundle(env, now, session.accountId, id, by);
-    return noContent();
-  }
-  if (outcome.status === "deleting") throw new AccountDeleting();
-  return outcome.status === "forbidden" ? fail(403, "forbidden") : fail(404, "not_found");
+  const outcome = await unshareRecord(env.DB, id, owner, by, at.now);
+  if (outcome.status === "unshared" && outcome.images !== null) await removeBundle(env, bucket, owner, id, by);
+  return outcome.status;
+}
+
+/** DELETE /api/shares/<id>: unshares a record the session's account holds (`unshare`). */
+export async function deleteShare(request, env, id, now) {
+  const session = await requireSession(request, env, clock(now).now);
+  const status = await unshare(env, new Bucket(env, now), id, session.accountId, now);
+  if (status === "unshared") return noContent();
+  if (status === "deleting") throw new AccountDeleting();
+  return status === "forbidden" ? fail(403, "forbidden") : fail(404, "not_found");
 }
 
 /**

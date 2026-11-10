@@ -36,7 +36,7 @@ const gunzipJson = (payload) =>
 
 /**
  * The state of the images of a share whose row is `row` (with `images_name` and `images_stored_at`):
- * "none" (it declares none, which it never does later), "pending" (declared, the bundle not stored
+ * "none" (it declares none, or an operator took its images down: `withdrawShareImages`), "pending" (declared, the bundle not stored
  * yet) or "stored".
  */
 export const imageState = (row) => (row.images_name === null ? "none" : row.images_stored_at === null ? "pending" : "stored");
@@ -478,6 +478,20 @@ export async function sweepLogins(db, now, limit) {
 }
 
 /**
+ * The statement that records in the write ledger (space "s", for request `by` at clock `now`) that the
+ * bundle of share `id` of account `owner` is to go, when the row `match` (bound to ?1 `id`, ?2 `owner`)
+ * selects declares images: from its commit no row accounts for the bundle's versions, and the record
+ * stays until they are deleted (`removeBundle` in share_images.mjs, or the hourly run).
+ */
+const bundleRemoval = (db, match, id, owner, by, now) =>
+  db
+    .prepare(
+      `INSERT INTO sync_writes (account_id, write_by, names, written_at, space)
+       SELECT ?2, ?3, json_array(id || '/' || images_name), ?4, 's' FROM records WHERE ${match} AND images_name IS NOT NULL`,
+    )
+    .bind(id, owner, by, now);
+
+/**
  * Unshares record `id` if account `owner` holds it, giving its charge and its declared image bytes back
  * to the totals and its place back to the account's cap in the same transaction, while the account is
  * not being deleted (its deletion removes its records itself, under the opposite condition:
@@ -503,12 +517,7 @@ export async function unshareRecord(db, id, owner, by, now) {
     db
       .prepare(`UPDATE accounts SET share_count = share_count - 1 WHERE id = ?2 AND EXISTS (SELECT 1 FROM records WHERE ${match})`)
       .bind(id, owner),
-    db
-      .prepare(
-        `INSERT INTO sync_writes (account_id, write_by, names, written_at, space)
-         SELECT ?2, ?3, json_array(id || '/' || images_name), ?4, 's' FROM records WHERE ${match} AND images_name IS NOT NULL`,
-      )
-      .bind(id, owner, by, now),
+    bundleRemoval(db, match, id, owner, by, now),
     db.prepare(`SELECT images_name FROM records WHERE ${match}`).bind(id, owner),
     db.prepare(`DELETE FROM records WHERE ${match}`).bind(id, owner),
   ];
@@ -525,6 +534,36 @@ export async function unshareRecord(db, id, owner, by, now) {
   );
   if (row.writable === 0) return { status: "deleting", images: null };
   return { status: row.found === 0 ? "notFound" : "forbidden", images: null };
+}
+
+/**
+ * Withdraws the images of share `id` if account `owner` holds it and it declares images, while the
+ * account is not being deleted: in one transaction it gives the declared image bytes back to the totals,
+ * records the bundle's removal as an unshare does (`bundleRemoval`), and clears the declaration, so the
+ * share stays and tells no images from then on, as one shared without them. The row's charge stays as
+ * charged, given back whole when the share goes. Returns the bundle's name when it withdrew them, else
+ * null (no such share, another account's, one without images or with them withdrawn already, or an
+ * account being deleted, whose deletion removes the bundle itself). Throws Unavailable.
+ */
+export async function withdrawShareImages(db, id, owner, by, now) {
+  const match =
+    "id = ?1 AND owner_id = ?2 AND images_name IS NOT NULL AND EXISTS (SELECT 1 FROM accounts WHERE id = ?2 AND deleting_since IS NULL)";
+  const results = await query(() =>
+    db.batch([
+      db
+        .prepare(
+          `UPDATE totals SET image_bytes = image_bytes - (SELECT images_size FROM records WHERE ${match})
+           WHERE id = 1 AND EXISTS (SELECT 1 FROM records WHERE ${match})`,
+        )
+        .bind(id, owner),
+      bundleRemoval(db, match, id, owner, by, now),
+      db.prepare(`SELECT images_name FROM records WHERE ${match}`).bind(id, owner),
+      db
+        .prepare(`UPDATE records SET images = NULL, images_name = NULL, images_size = NULL, images_stored_at = NULL WHERE ${match}`)
+        .bind(id, owner),
+    ]),
+  );
+  return results[3].meta.changes === 1 ? results[2].results[0].images_name : null;
 }
 
 /**
@@ -662,4 +701,27 @@ export async function listOwnShares(db, owner) {
       };
     }),
   );
+}
+
+/** The UTC day share `id` was shared on, or null when it does not exist (never shared, or unshared). Throws Unavailable. */
+export async function readSharedDay(db, id) {
+  const row = await query(() => db.prepare("SELECT shared_day FROM records WHERE id = ?").bind(id).first());
+  return row === null ? null : row.shared_day;
+}
+
+/**
+ * Counts one report on UTC day `day` while the day's reports are below `limit`. Returns whether it was
+ * counted; a report that was not is refused. Throws Unavailable.
+ */
+export async function countReport(db, day, limit) {
+  const result = await query(() =>
+    db
+      .prepare(
+        `INSERT INTO daily (day, reports) SELECT ?1, 1 WHERE ?2 > 0
+         ON CONFLICT (day) DO UPDATE SET reports = reports + 1 WHERE reports < ?2`,
+      )
+      .bind(day, limit)
+      .run(),
+  );
+  return result.meta.changes === 1;
 }

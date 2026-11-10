@@ -128,6 +128,13 @@ a { color: var(--primary); }
 .site-doc p, .site-doc li { line-height: 1.85; }
 .site-doc a, .site-doc code { overflow-wrap: anywhere; }
 
+/* The report form (/r/<id>/report): a reason per line, the text across the column, then the button. */
+.report-form { display: grid; gap: .8rem; }
+.report-form fieldset { margin: 0; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: 12px; }
+.report-choice { display: block; line-height: 1.85; }
+.report-form textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: .5rem; }
+.report-form button { justify-self: start; font: inherit; padding: .4rem 1.4rem; border: 0; border-radius: 999px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
+
 /* The column of a page the Worker builds, under the header. */
 .site-main {
   max-width: calc(var(--site-width) + 2 * var(--site-gutter));

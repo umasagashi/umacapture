@@ -888,6 +888,65 @@ describe("shared images", () => {
     }
   });
 
+  test("an operator's takedown, of the images and then of the share, leaves what the sharer's own withdrawal leaves, once, and the account's other share and synced objects stay", async () => {
+    const token = await worker.signIn("images-takedown");
+    const owner = await worker.accountOf(token);
+    const bundles = [100, 110].map((seed) => imageBundle({ seed }));
+    const [target, kept] = await results(worker, token, bundles.map(withImages));
+    for (const [s, i] of [[target, 0], [kept, 1]]) assert.equal((await worker.putImages(token, s.id, bundles[i].bytes)).status, 200);
+    const [targetKey, keptKey] = [target, kept].map((s, i) => keyOf(owner, s.id, bundles[i]));
+    const synced = `a/${owner}/${"1".repeat(64)}`;
+    worker.b2.objects.set(synced, [{ versionId: "synced", marker: false, bytes: new Uint8Array([1]), at: await worker.now() }]);
+    const usage = async () => ({
+      ...(await worker.db.prepare("SELECT bytes, count, image_bytes FROM totals WHERE id = 1").first()),
+      ...(await worker.db.prepare("SELECT share_count FROM accounts WHERE id = ?1").bind(owner).first()),
+    });
+    const { charge } = await worker.db.prepare("SELECT charge FROM records WHERE id = ?1").bind(target.id).first();
+    const order = (id, scope) =>
+      worker.db.prepare("INSERT INTO share_takedowns (share_id, scope, ordered_at) VALUES (?1, ?2, unixepoch())").bind(id, scope).run();
+    const done = async () =>
+      (await worker.db.prepare("SELECT share_id, scope FROM share_takedowns WHERE done_at IS NOT NULL ORDER BY share_id, scope").all()).results;
+    const stays = async () => {
+      assert.deepEqual(worker.b2.versions(keptKey), ["v"], "the account's other share lost its bundle");
+      assert.equal((await answer(worker.getImages(kept.id))).status, 200);
+      assert.deepEqual(worker.b2.versions(synced), ["v"], "a synced object was reached");
+      assert.equal(await imageWritesOf(owner), 0, "a record of the removal stayed");
+    };
+
+    // 1. The images only: the share stays and tells no images, as one shared without them.
+    const before = await usage();
+    await order(target.id, "images");
+    await order("0123456789", "share"); // a share that is not there
+    assert.equal(await worker.scheduled(), "ok");
+    const imported = await answer(worker.fetch(`/api/shares/${target.id}`));
+    assert.deepEqual([imported.status, imported.body.images], [200, null]);
+    assert.equal((await answer(worker.getImages(target.id))).status, 404);
+    assert.deepEqual(worker.b2.versions(targetKey), [], "the bundle stayed in B2");
+    assert.deepEqual(await usage(), { ...before, image_bytes: before.image_bytes - bundles[0].bytes.length });
+    assert.equal((await worker.putImages(token, target.id, bundles[0].bytes)).status, 409, "the withdrawn images were put again");
+    await stays();
+    assert.deepEqual(await done(), [{ share_id: "0123456789", scope: "share" }, { share_id: target.id, scope: "images" }]);
+
+    // 2. The whole share: as its sharer's unshare, and the order run again changes nothing.
+    await order(target.id, "share");
+    for (let run = 0; run < 2; run++) assert.equal(await worker.scheduled(), "ok");
+    assert.equal((await answer(worker.fetch(`/api/shares/${target.id}`))).status, 404);
+    assert.deepEqual(await usage(), { ...before, image_bytes: before.image_bytes - bundles[0].bytes.length, bytes: before.bytes - charge, count: before.count - 1, share_count: before.share_count - 1 });
+    assert.deepEqual((await answer(worker.myShares(token))).body.map((s) => s.id), [kept.id]);
+    await stays();
+    assert.equal((await done()).length, 3);
+
+    // 3. A share of an account being deleted: the withdrawal changes nothing, so the order stays not done
+    // while the share is there, and is done in the run after the deletion removed it.
+    await worker.db.prepare("UPDATE accounts SET deleting_since = unixepoch() WHERE id = ?1").bind(owner).run();
+    await order(kept.id, "share");
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal((await done()).length, 3, "the order was done while its share was still there");
+    assert.equal((await answer(worker.fetch(`/api/shares/${kept.id}`))).status, 404, "the account's deletion left the share");
+    assert.equal(await worker.scheduled(), "ok");
+    assert.deepEqual((await done()).map((d) => d.share_id).includes(kept.id), true);
+  });
+
   test("an unshare or a put meeting in any order leaves, once the hourly run took the writes, no version and no record of what was withdrawn, and the account's other share and synced objects stay", async () => {
     const token = await worker.signIn("images-crossing");
     const owner = await worker.accountOf(token);
@@ -962,7 +1021,7 @@ describe("shared images", () => {
 });
 
 describe("image switch", () => {
-  test('SHARE_IMAGES_ENABLED "false" refuses images in and out, and lets unsharing and the hourly run remove them, sync switched off too', async () => {
+  test('SHARE_IMAGES_ENABLED "false" refuses images in and out, and lets unsharing, a takedown and the hourly run remove them, sync switched off too', async () => {
     const worker = await startWorker({ testEntry: true, vars: { SHARE_IMAGES_ENABLED: "false", SYNC_ENABLED: "false" } });
     try {
       const token = await worker.signIn();
@@ -992,9 +1051,19 @@ describe("image switch", () => {
       worker.b2.fail(key);
       assert.equal((await worker.unshare(token, id)).status, 204);
       assert.deepEqual(worker.b2.versions(key), ["v"]);
+      // An operator's takedown of the images of the share still served, ordered while switched off.
+      await worker.db
+        .prepare("UPDATE records SET owner_id = ?1, images = ?2, images_name = ?3, images_size = ?4, images_stored_at = 1 WHERE id = ?5")
+        .bind(owner, JSON.stringify(bundle.images.parts), bundle.images.name, bundle.images.size, list[1].id)
+        .run();
+      const servedKey = `s/${owner}/${list[1].id}/${bundle.images.name}`;
+      worker.b2.objects.set(servedKey, [{ versionId: "before", marker: false, bytes: bundle.bytes, at: await worker.now() }]);
+      await worker.db.prepare("INSERT INTO share_takedowns (share_id, scope, ordered_at) VALUES (?1, 'images', unixepoch())").bind(list[1].id).run();
       await worker.advanceClock(limits.SYNC_ABANDONED_AFTER + 2 * limits.RESTORE_MARGIN_SECONDS);
       assert.equal(await worker.scheduled(), "ok");
       assert.deepEqual(worker.b2.versions(key), [], "the hourly run left the bundle while switched off");
+      assert.deepEqual(worker.b2.versions(servedKey), [], "the takedown was not carried out while switched off");
+      assert.equal((await answer(worker.fetch(`/api/shares/${list[1].id}`))).body.images, null);
       assert.equal(await worker.count("sync_writes"), 0);
     } finally {
       await worker.dispose();

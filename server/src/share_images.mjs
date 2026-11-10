@@ -22,7 +22,7 @@ import { requireSession } from "./auth.mjs";
 import { Bucket, sha256Hex, shareImageKey, shareImageName, shareImagePrefix, StorageFailed } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
-import { readShareImages, Unavailable } from "./store.mjs";
+import { readShareImages, Unavailable, withdrawShareImages } from "./store.mjs";
 import { d1 } from "./sync.mjs";
 import { writingIn } from "./sync_refs.mjs";
 
@@ -245,15 +245,18 @@ export async function getShareImages(env, id, now) {
   });
 }
 
+/** The B2 requests `removeBundle` sends at most: one listing and one deletion. */
+export const REMOVE_BUNDLE_B2_REQUESTS = 2;
+
 /**
- * After request `by` unshared share `id` of account `owner`, whose batch recorded the removal of its
- * bundle in the write ledger: deletes every version under the share's prefix, by version, and clears the
- * record once B2 listed them all and deleted every one. A failure leaves the record for the hourly run
- * and fails nothing the unshare did. A version a put adds after the listing is that put's to record.
+ * After request `by` unshared share `id` of account `owner`, or withdrew its images, whose batch recorded
+ * the removal of its bundle in the write ledger: deletes every version under the share's prefix, by
+ * version, through `bucket`, and clears the record once B2 listed them all and deleted every one. A
+ * failure leaves the record for the hourly run and fails nothing the batch did. A version a put adds
+ * after the listing is that put's to record.
  */
-export async function removeBundle(env, now, owner, id, by) {
+export async function removeBundle(env, bucket, owner, id, by) {
   try {
-    const bucket = new Bucket(env, now);
     const { entries, next } = await bucket.listVersions(shareImagePrefix(owner, id));
     const errors = entries.length === 0 ? [] : await bucket.deleteObjects(entries.map((e) => ({ key: e.key, versionId: e.versionId })));
     if (errors.length > 0 || next !== null) return;
@@ -263,4 +266,18 @@ export async function removeBundle(env, now, owner, id, by) {
   } catch (error) {
     if (!(error instanceof StorageFailed || error instanceof Unavailable)) throw error;
   }
+}
+
+/**
+ * Withdraws the images of share `id` of account `owner` at clock `now` (`withdrawShareImages`) and
+ * deletes its bundle through `bucket` (`removeBundle`): from the commit the import endpoint answers
+ * `images: null` and the bundle's GET 404, and what B2 fails to delete is left to the hourly run.
+ * Returns whether it withdrew them. Throws Unavailable when D1 fails before the commit.
+ */
+export async function withdrawImages(env, bucket, id, owner, now) {
+  const by = crypto.randomUUID();
+  const name = await withdrawShareImages(env.DB, id, owner, by, clock(now).now);
+  if (name === null) return false;
+  await removeBundle(env, bucket, owner, id, by);
+  return true;
 }

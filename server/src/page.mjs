@@ -36,10 +36,14 @@ export function siteHeader(kind) {
 </div></header>`;
 }
 
-/** The footer of every shared page (/r/<id> and /u/<id>): its own JSON, the notice, the privacy policy, the app. */
-export function pageFooter(url) {
+/**
+ * The footer of every shared page (/r/<id> and /u/<id>): its own JSON, the notice, the privacy policy,
+ * the app. With `report`, the link to that share's report page (/r/<id>/report) comes before the policy.
+ */
+export function pageFooter(url, { report = false } = {}) {
+  const reportLink = report ? `<a href="${esc(url)}/report" rel="nofollow">問題を報告</a> · ` : "";
   return `<footer class="site-footer">
-<a href="${esc(url)}.json">JSON</a> · <a href="/notice/">試験公開について</a> · <a href="/privacy/">プライバシーポリシー</a> · <a href="/">umacapture</a>
+<a href="${esc(url)}.json">JSON</a> · <a href="/notice/">試験公開について</a> · ${reportLink}<a href="/privacy/">プライバシーポリシー</a> · <a href="/">umacapture</a>
 </footer>`;
 }
 
@@ -380,7 +384,7 @@ export function renderPage(record, env) {
 ${siteHeader("共有レコード")}
 <main class="site-main rec">
 ${body(record)}
-${pageFooter(record.url)}
+${pageFooter(record.url, { report: true })}
 </main>
 </body>
 </html>

@@ -33,6 +33,12 @@ export const GOOGLE = Object.freeze({
   CLIENT_SECRET: "test-client-secret",
   SUB: "100000000000000000001",
 });
+/** The Sentry a report is sent to in tests: a host no real request could reach. */
+export const SENTRY = Object.freeze({
+  DSN: "https://test-public-key@sentry.share.test/42",
+  ENDPOINT: "https://sentry.share.test/api/42/envelope/",
+  ENVIRONMENT: "test",
+});
 /** The Worker's identity HMAC key in tests: a fixed 32 bytes as hex, never a real key. */
 export const IDENTITY_HMAC_KEY = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
@@ -646,6 +652,8 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
   // unknown code is refused as Google refuses one); `calls` records each request to the token
   // endpoint with its form body, redirect_uri included.
   const google = { codes: new Map(), calls: [] };
+  // Sentry's envelope endpoint: answers `status`, and records each request with its headers and body.
+  const sentry = { status: 200, calls: [] };
   // The Worker's clock offset (testEntry), so an ID token is fresh on the Worker's clock, and the
   // bucket's lifecycle counts days on it.
   let clockOffset = 0;
@@ -688,13 +696,19 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
       B2_BUCKET: B2.BUCKET,
       B2_KEY_ID: B2.KEY_ID,
       B2_APPLICATION_KEY: B2.APPLICATION_KEY,
+      REPORT_SENTRY_DSN: SENTRY.DSN,
+      REPORT_SENTRY_ENVIRONMENT: SENTRY.ENVIRONMENT,
       ...vars,
     },
-    // Every outbound fetch lands here. siteverify, Google's token endpoint and the B2 bucket are
-    // expected; anything else is a 599 the Worker would see as a failure.
+    // Every outbound fetch lands here. siteverify, Google's token endpoint, the B2 bucket and Sentry's
+    // envelope endpoint are expected; anything else is a 599 the Worker would see as a failure.
     outboundService: async (request) => {
       const url = request.url;
       if (new URL(url).host === B2.ENDPOINT) return b2.handle(request);
+      if (new URL(url).host === new URL(SENTRY.ENDPOINT).host) {
+        sentry.calls.push({ url, headers: Object.fromEntries(request.headers), body: await request.text() });
+        return new MfResponse(JSON.stringify({ id: "0".repeat(32) }), { status: sentry.status, headers: { "Content-Type": "application/json" } });
+      }
       const form = new URLSearchParams(await request.text());
       if (url === GOOGLE.TOKEN_URL) {
         google.calls.push({ url, form });
@@ -728,6 +742,8 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     siteverify,
     /** Google's token endpoint: the nonce its next ID token carries, and the requests it received. */
     google,
+    /** Sentry's envelope endpoint, which reports are sent to: the status it answers and the requests it received. */
+    sentry,
     /** The B2 bucket the Worker stores synced objects in (a FakeB2). */
     b2,
     /** Everything the Worker wrote to its log so far, joined. */

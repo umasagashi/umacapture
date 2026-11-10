@@ -462,3 +462,26 @@ export const MAX_SYNC_HELD_REQUEST = MAX_SYNC_HELD_NAMES * 67 + 256;
 
 /** Request body of the other JSON endpoints (a login's secret and proof). */
 export const MAX_SMALL_BODY = 4 * 1024;
+
+/**
+ * Upper bound on the reports of shares (POST /api/reports) accepted in one UTC day, every share
+ * together. Each accepted report is one Sentry event, so a flood stops here rather than in the
+ * project's event quota. 0 accepts none.
+ */
+export const REPORT_DAILY_LIMIT = 50;
+
+/** Characters a report's free text holds at most. */
+export const MAX_REPORT_TEXT = 1_000;
+
+/**
+ * Request body of a report form: the text at its longest percent-encoded (up to 9 bytes a character),
+ * a Turnstile token (up to 2,048 characters) and the other fields.
+ */
+export const MAX_REPORT_BODY = 16 * 1024;
+
+/**
+ * Upper bound on the operators' takedowns (share_takedowns) one hourly run carries out. Each sends at
+ * most REMOVE_BUNDLE_B2_REQUESTS (2) of the run's B2_REQUESTS_PER_INVOCATION, so five take 10 of 50 and
+ * leave the kinds after them room. Takedowns are written by hand, a few at a time; more wait an hour.
+ */
+export const SHARE_TAKEDOWNS_PER_RUN = 5;
