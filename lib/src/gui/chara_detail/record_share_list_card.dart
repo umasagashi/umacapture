@@ -204,7 +204,7 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const Divider(),
         if (_asking && _listing != null) const LinearProgressIndicator(),
         ...rows,
       ],
@@ -212,8 +212,8 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
   }
 }
 
-/// One share on one line: the record's name, its evaluation value, the day it was shared, and its actions as icons
-/// whose names are their tooltips.
+/// One share on two lines: the record's name, its evaluation value and the day it was shared above; the share's
+/// tagline and its actions, as icons whose names are their tooltips, below.
 class _AccountShareRow extends ConsumerWidget {
   final AccountShare share;
 
@@ -253,74 +253,66 @@ class _AccountShareRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final evaluation = share.evaluation;
-    final name = Text(
-      _title(ref) ?? "",
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleSmall,
-    );
-    final facts = [
-      Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
-      Text(share.sharedOn, style: theme.textTheme.bodyMedium),
-    ];
-    final actions = Row(
-      mainAxisSize: MainAxisSize.min,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          tooltip: "$tr_record_share.open_shared".tr(),
-          icon: const Icon(Symbols.open_in_new_rounded),
-          onPressed: () => openSharedPage(share.url),
+        Row(
+          spacing: 8,
+          children: [
+            Expanded(
+              child: Text(
+                _title(ref) ?? "",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall,
+              ),
+            ),
+            Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
+            Text(share.sharedOn, style: theme.textTheme.bodyMedium),
+          ],
         ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          tooltip: "$tr_record_share.copy_url".tr(),
-          icon: const Icon(Symbols.content_copy_rounded),
-          onPressed: () => copySharedUrl(share.url),
-        ),
-        ?shareTaglineButton(ref.base, share, onAnswered: onTaglineAnswered),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          tooltip: "$tr_record_share_list.unshare".tr(),
-          icon: const Icon(Symbols.public_off_rounded),
-          onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
+        Row(
+          spacing: 8,
+          children: [
+            Expanded(
+              child: Text(
+                share.tagline?.text ?? "",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+            // Compact, so that a phone's width still leaves the tagline beside the four actions some ten characters.
+            Theme(
+              data: theme.copyWith(visualDensity: VisualDensity.compact),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: "$tr_record_share.open_shared".tr(),
+                    icon: const Icon(Symbols.open_in_new_rounded),
+                    onPressed: () => openSharedPage(share.url),
+                  ),
+                  IconButton(
+                    tooltip: "$tr_record_share.copy_url".tr(),
+                    icon: const Icon(Symbols.content_copy_rounded),
+                    onPressed: () => copySharedUrl(share.url),
+                  ),
+                  ?shareTaglineButton(ref.base, share, onAnswered: onTaglineAnswered),
+                  IconButton(
+                    tooltip: "$tr_record_share_list.unshare".tr(),
+                    icon: const Icon(Symbols.public_off_rounded),
+                    onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth >= _oneLineMinWidth) {
-          return Row(
-            spacing: 8,
-            children: [
-              Expanded(child: name),
-              ...facts,
-              actions,
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              spacing: 8,
-              children: [
-                Expanded(child: name),
-                ...facts,
-              ],
-            ),
-            Align(alignment: Alignment.centerRight, child: actions),
-          ],
-        );
-      },
-    );
   }
 }
-
-/// The narrowest row that keeps the name readable beside the evaluation value, the day and the four actions: those
-/// take about 310 px, which leaves the name about 170 px — some twelve characters of a card's name. Narrower, the
-/// actions move to a line of their own below.
-const double _oneLineMinWidth = 480;
 
 Widget _button(String label, IconData icon, VoidCallback onPressed) =>
     OutlinedButton.icon(icon: Icon(icon), label: Text(label), onPressed: onPressed);

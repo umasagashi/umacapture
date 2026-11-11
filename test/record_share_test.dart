@@ -2173,7 +2173,10 @@ void main() {
       await storeSession();
       final note = await storeNote(state: RecordShareState.shared);
       // The second share was made on another device: this one holds no note of it.
-      final elsewhere = _listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName, evaluation: 12345);
+      final elsewhere = {
+        ..._listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName, evaluation: 12345),
+        "tagline": "ほかの端末で書いた公開メモ",
+      };
       container = containerFor([
         _sharesList([_listed("0123456789", note.keyHash), elsewhere]),
         _empty(204),
@@ -2203,6 +2206,7 @@ void main() {
       expect(find.text(_serverCardName), findsOneWidget, reason: 'the share with no note takes the listed name');
       expect(find.text('12,345'), findsOneWidget, reason: "the row carries the evaluation value the server listed");
       expect(find.text('-'), findsOneWidget, reason: 'a share listed with no evaluation value shows none');
+      expect(find.text('ほかの端末で書いた公開メモ'), findsOneWidget, reason: 'the row carries the tagline the server listed');
       await tester.tap(find.byTooltip('共有を取り消す…').first);
       await tester.pumpAndSettle();
       await tester.longPress(find.text('長押しで取り消す'));

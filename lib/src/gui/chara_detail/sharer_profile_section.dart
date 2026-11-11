@@ -154,8 +154,10 @@ class _ProfileLine extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         spacing: 8,
+        // The label and the value share the width evenly, so on a phone's width the label wraps before a twelve-digit
+        // id would.
         children: [
-          Text(field.label, style: style),
+          Expanded(child: Text(field.label, style: style)),
           Expanded(
             child: Text(value, style: style, textAlign: TextAlign.end),
           ),
@@ -553,8 +555,6 @@ Widget? shareTaglineButton(RefBase ref, AccountShare share, {required VoidCallba
     return null;
   }
   return IconButton(
-    // As compact as the row's other actions, so that the row still fits a phone's width.
-    visualDensity: VisualDensity.compact,
     tooltip: "$tr_share_tagline.edit".tr(),
     icon: const Icon(Symbols.edit_note_rounded),
     onPressed: () => ShareTaglineDialog.show(ref, shareId: share.id, tagline: tagline.text, onAnswered: onAnswered),
