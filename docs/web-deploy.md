@@ -758,6 +758,67 @@ goes when the deletion completes. If an account began its deletion under the old
 Worker of this release is back before the deletion completed, clear that account's profile by hand
 ("Clearing a public profile by hand", under "Handling a report").
 
+### Rolling out the reduced-image default
+
+Once, for the release in which a new account syncs reduced JPEGs, with the migration
+`0011_sync_image_form_default.sql`. An account's image form is the `image_form` of its
+`sync_accounts` row, and the migration changes that column's default from `'none'` to `'jpeg'`. An
+account that has a row keeps the form it holds, `'none'` included: the migration remakes the table
+and copies every row as it is. Only an account that makes its row after the migration starts with
+reduced JPEGs, and `GET /api/sync/settings` answers `"jpeg"` for an account with no row yet
+(`NEW_ACCOUNT_IMAGE_FORM` in `server/src/sync.mjs`, which must equal the column default).
+
+The order is `0010_share_notes.sql`, then the Worker of this release, then `0011`. A request makes an
+account's row only after it answered, so the form an account with no row is shown is the Worker's
+answer and the form it then syncs is the column default:
+
+- **This release's Worker before `0011`** answers `"jpeg"` for an account with no row while the row
+  its request makes holds the old default `'none'`. Someone who opens the dialog that turns sync on in
+  that window and turns sync on without choosing sends no images although "縮小した画像" was shown:
+  fewer than shown, and nothing leaves the device unchosen. The Worker reads and writes no column
+  `0011` adds or moves (the table keeps its columns and their order), so it runs on the table before
+  `0011`.
+- **An older Worker after `0011`** answers `"none"` while the row holds `'jpeg'`: someone shown
+  "画像は送らない" sends reduced JPEGs. That pair must never serve, which is why `0011` comes last.
+
+Staging first:
+
+1. **Apply `0010` and deploy** this release ("Deploying"), with `0011` not yet applied.
+   `wrangler d1 migrations apply` applies every migration the database lacks, so where `0010` is not
+   applied yet, apply it from a checkout of a commit that has `0010` and not `0011`, then deploy from
+   this release's commit.
+
+2. **Read the forms** before applying, to compare after:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT image_form, count(*) AS n FROM sync_accounts GROUP BY image_form"
+   # staging: umacapture-share-staging --env staging
+   ```
+
+3. **Apply `0011`** ("Checks before a production run", then "Applying a migration"). It runs with
+   `PRAGMA legacy_alter_table` on, so that the rename does not check the usage triggers of
+   `0003_sync.sql` while the old table is gone; the staging apply is the first run of that pragma on
+   D1 itself (the local D1 of the tests allows it). Then read the forms again and see the same counts,
+   and confirm that this prints `'jpeg'`, `sync_accounts` alone, and the three usage triggers:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT dflt_value AS v FROM pragma_table_info('sync_accounts') WHERE name = 'image_form' UNION ALL SELECT name FROM sqlite_schema WHERE name LIKE 'sync_accounts%' UNION ALL SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'sync_objects_usage_%'"
+   # staging: umacapture-share-staging --env staging
+   ```
+
+4. **Check.** On staging, log in with an account that has no `sync_accounts` row (opening the sync
+   settings makes one, even without turning sync on), open the dialog that turns sync on and see
+   "縮小した画像" chosen; an account that had a row keeps its form.
+
+**Once `0011` is applied to a target, do not roll that target's Worker back to a version from before
+this release** (the rollback rules under "Restoring a version"): the older Worker answers `"none"` for
+an account with no row while the row holds `'jpeg'`, the pair above that must never serve. If such a
+Worker has to run, turn sync off first (`SYNC_ENABLED` `"false"`, "Stopping file sync"), so that no
+settings are answered while it does. To give new accounts `'none'` again, a new migration remakes the
+table the same way; nothing changes it by hand.
+
 ### Shared images: declared bytes and what B2 holds
 
 The image limits in `server/src/limits.mjs` (`SHARE_IMAGE_BUDGET`, `SHARE_IMAGE_DAILY_LIMIT`,
@@ -1142,6 +1203,10 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   Windows build is released, do not roll that target's Worker back to a version from before it. That
   section says what such a Worker breaks and leaves behind, and how to clean up after one that ran.
   A version deployed with sharing off is not ruled out by this.
+- Once a target has `0011_sync_image_form_default.sql`, do not roll its Worker back to a version
+  from before "Rolling out the reduced-image default": that Worker shows "画像は送らない" to an account
+  whose row then syncs reduced JPEGs. That section says what to do if one has to run. A version
+  deployed with sharing off has no Worker and is not ruled out by this.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.

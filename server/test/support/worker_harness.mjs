@@ -515,11 +515,12 @@ function modules(testEntry) {
  * Each file is cut at every ";" after dropping "--" comments, except that a CREATE TRIGGER runs on
  * to the ";" after its END, so a migration must not hold either inside a string literal;
  * 0002_accounts.sql states the same constraint. Lines end at LF or CRLF alike, so a checkout that
- * writes CRLF yields the same statements.
+ * writes CRLF yields the same statements. `select` picks the files by name, so a test can apply the
+ * migrations before one, put rows in, and then apply the rest.
  */
-export function migrationStatements(dir = join(ROOT, "migrations")) {
+export function migrationStatements(dir = join(ROOT, "migrations"), select = () => true) {
   return readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => f.endsWith(".sql") && select(f))
     .sort()
     .flatMap((f) => {
       const pieces = readFileSync(join(dir, f), "utf8")

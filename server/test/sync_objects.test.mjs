@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import * as limits from "../src/limits.mjs";
 import { answer, archived, bodyOf, idIn, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
-import { startWorker } from "./support/worker_harness.mjs";
+import { migrationStatements, startWorker } from "./support/worker_harness.mjs";
 
 /** A fresh body text carrying an image binding (by default to a fresh PNG name), and its name. */
 const newBody = (skillPng = sha256(randomBytes(8))) => bodyOf({ skill_png: skillPng, skill_jpeg: null });
@@ -253,7 +253,7 @@ describe("the sync switch", () => {
 });
 
 describe("sync image form", () => {
-  // The account's image form (PNG, reduced JPEG or none, none until it chooses) decides which new
+  // The account's image form (PNG, reduced JPEG or none, reduced JPEG until it chooses) decides which new
   // images it may put. Under none, the one image taken is the reduced JPEG an archive puts in place of
   // its PNG, and only once the current root says so.
   let worker;
@@ -262,13 +262,14 @@ describe("sync image form", () => {
   });
   after(() => worker.dispose());
 
-  /** A fresh account: `{client, key, replace}`, replace(parts) from the generation it last reached. */
+  /** A fresh account: `{id, client, key, replace}`, replace(parts) from the generation it last reached. */
   async function account(sub) {
     const token = await worker.signIn(sub);
     const id = await worker.accountOf(token);
     const client = syncClient(worker, token);
     let generation = 0;
     return {
+      id,
       client,
       key: (name) => `a/${id}/${name}`,
       async replace(parts) {
@@ -289,9 +290,21 @@ describe("sync image form", () => {
 
   const refused = (res) => assert.deepEqual([res.status, res.body], [409, { error: "images_not_synced" }]);
 
-  test("a new account syncs no images, and a change of the form takes effect from the next request", async () => {
+  test("a new account syncs reduced JPEGs, before its row is made and after", async () => {
+    const a = await account("form-new");
+    const hasRow = async () =>
+      (await worker.db.prepare("SELECT 1 FROM sync_accounts WHERE account_id = ?").bind(a.id).first()) !== null;
+    assert.equal(await hasRow(), false);
+    assert.deepEqual((await a.client.settings()).body, { image_form: "jpeg" }, "the answer for an account with no row");
+    assert.equal(await hasRow(), true, "the request's charge made the row, with the column's default");
+    assert.deepEqual((await a.client.settings()).body, { image_form: "jpeg" }, "the form the row was made with");
+    const jpeg = newImage();
+    assert.equal((await a.client.putImage(jpeg.name, jpeg.bytes, "image/jpeg")).body.status, "stored");
+  });
+
+  test("a change of the form takes effect from the next request", async () => {
     const a = await account("form-switch");
-    assert.deepEqual((await a.client.settings()).body, { image_form: "none" });
+    assert.equal((await a.client.setImageForm("none")).status, 200);
     const [png, jpeg] = [newImage(), newImage()];
     refused(await a.client.putImage(png.name, png.bytes));
     refused(await a.client.putImage(jpeg.name, jpeg.bytes, "image/jpeg"));
@@ -315,6 +328,7 @@ describe("sync image form", () => {
 
   test("under none, a record's icon is refused though the root references it", async () => {
     const a = await account("form-icon");
+    assert.equal((await a.client.setImageForm("none")).status, 200);
     const icon = newImage();
     await a.replace({ 0: await putPart(a.client, 0, [newRecord(0, { icon: icon.name })]) });
     refused(await a.client.putImage(icon.name, icon.bytes, "image/jpeg"));
@@ -379,5 +393,75 @@ describe("sync image form", () => {
     refused(await a.client.putImage(absentJpeg.name, absentJpeg.bytes, "image/jpeg"));
     refused(await a.client.putImage(absent.name, absent.bytes));
     for (const image of [normalJpeg, absentJpeg, absent]) assert.deepEqual(worker.b2.versions(a.key(image.name)), []);
+  });
+});
+
+describe("the reduced-JPEG default across its migration", () => {
+  // 0011_sync_image_form_default.sql makes sync_accounts anew with the default 'jpeg'. An account that
+  // has a row before it keeps the form the row holds, the old default 'none' included: it cannot be
+  // told apart from a 'none' chosen.
+  const MIGRATION = "0011_sync_image_form_default.sql";
+  let worker;
+  before(async () => {
+    worker = await startWorker({ migrate: false });
+    await worker.db.batch(migrationStatements(undefined, (f) => f < MIGRATION).map((s) => worker.db.prepare(s)));
+  });
+  after(() => worker.dispose());
+
+  test("an account with a row keeps its form and its generation, and only a new account takes reduced JPEGs", async () => {
+    const defaulted = syncClient(worker, await worker.signIn("before-default"));
+    assert.equal((await defaulted.settings()).status, 200, "its charge makes the row, with the old default");
+    assert.deepEqual((await defaulted.settings()).body, { image_form: "none" });
+
+    const chose = syncClient(worker, await worker.signIn("before-png"));
+    assert.equal((await chose.setImageForm("png")).status, 200);
+    const record = newRecord(0);
+    assert.equal((await chose.putBodies([record.body])).status, 200);
+    const p = recordPart(0, [record.row]);
+    assert.equal((await chose.putPart(p)).status, 200);
+    assert.equal((await chose.replace(0, root({ 0: p.name }))).status, 200);
+
+    // Every column of this row holds a value no other column holds, so a copy that moves a value to
+    // another column changes the row.
+    const distinct = await worker.accountOf(await worker.signIn("before-every-column"));
+    await worker.db
+      .prepare(
+        `INSERT INTO sync_accounts (account_id, generation, root_name, image_form, stored_bytes, hidden_bytes, record_count,
+           last_synced_day, daily_day, daily_requests, daily_rows_read, daily_rows_written)
+         VALUES (?1, 17, 'root-17', 'png', 1000, '{"20000":5}', 29, 20001, 20002, 3, 41, 53)`,
+      )
+      .bind(distinct)
+      .run();
+    const table = async () => (await worker.db.prepare("SELECT * FROM sync_accounts ORDER BY account_id").all()).results;
+    const before = await table();
+
+    await worker.db.batch(migrationStatements(undefined, (f) => f >= MIGRATION).map((s) => worker.db.prepare(s)));
+    assert.deepEqual(await table(), before, "every row keeps every column, the nullable ones included");
+
+    // The usage triggers of 0003_sync.sql add to and take off the migrated table.
+    const usage = async () =>
+      await worker.db.prepare("SELECT stored_bytes, hidden_bytes FROM sync_accounts WHERE account_id = ?1").bind(distinct).first();
+    const object = (name, refCount) =>
+      worker.db
+        .prepare(
+          `INSERT INTO sync_objects (account_id, name, kind, size, stored_at, ref_count) VALUES (?1, ?2, 'png', 7, ?3, ?4)`,
+        )
+        .bind(distinct, name, 20003 * 86400, refCount)
+        .run();
+    await object("a".repeat(64), 1);
+    await object("b".repeat(64), 0);
+    assert.deepEqual(await usage(), { stored_bytes: 1007, hidden_bytes: '{"20000":5,"20003":7}' });
+    await worker.db.prepare("DELETE FROM sync_objects WHERE account_id = ?1").bind(distinct).run();
+    assert.deepEqual(await usage(), { stored_bytes: 1000, hidden_bytes: '{"20000":5,"20003":0}' });
+
+    assert.deepEqual((await defaulted.settings()).body, { image_form: "none" });
+    assert.deepEqual((await chose.settings()).body, { image_form: "png" });
+    assert.deepEqual((await chose.generation()).body, { generation: 1, root: root({ 0: p.name }).name });
+    const image = newImage();
+    assert.equal((await chose.putImage(image.name, image.bytes)).body.status, "stored", "the usage triggers reach the new table");
+
+    const fresh = syncClient(worker, await worker.signIn("after"));
+    assert.deepEqual((await fresh.settings()).body, { image_form: "jpeg" }, "the answer for an account with no row");
+    assert.deepEqual((await fresh.settings()).body, { image_form: "jpeg" }, "the row made after the migration");
   });
 });

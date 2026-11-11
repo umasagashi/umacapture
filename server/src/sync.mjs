@@ -270,13 +270,21 @@ export async function getBodies(request, env, now) {
   return json(200, { bodies: names.map((name, i) => ({ name, body: texts[i] })) });
 }
 
-/** The image forms an account may choose: which images it syncs. A new account syncs none. */
+/** The image forms an account may choose: which images it syncs. */
 const IMAGE_FORMS = ["png", "jpeg", "none"];
 
-/** The image form of account `accountId`: "none" until it chose one. */
+/**
+ * The image form of an account that has no sync_accounts row yet: the default of the row's image_form
+ * column (migrations/0011_sync_image_form_default.sql), which is what every row is made with unless a
+ * PUT /api/sync/settings makes it. The two must agree, or a new account's first answer would differ
+ * from the form its row then holds.
+ */
+const NEW_ACCOUNT_IMAGE_FORM = "jpeg";
+
+/** The image form of account `accountId`: NEW_ACCOUNT_IMAGE_FORM until its row holds one. */
 async function imageForm(db, accountId) {
   const row = await d1(() => db.prepare("SELECT image_form FROM sync_accounts WHERE account_id = ?1").bind(accountId).first());
-  return row?.image_form ?? "none";
+  return row?.image_form ?? NEW_ACCOUNT_IMAGE_FORM;
 }
 
 /**
