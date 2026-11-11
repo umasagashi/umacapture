@@ -1575,13 +1575,13 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      testWidgets('the profile is saved from its card over the value the server answered, and the card shows what '
+      testWidgets('a profile field is saved from its row over the value the server answered, and the card shows what '
           'the server stored', (tester) async {
         await storeSession();
         container = containerFor(
           [
             _sharesList([]),
-            _json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": "123456789"}),
+            _json(200, {"trainer_name": "たづな", "game_trainer_id": "123456789"}),
           ],
           me: [
             _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": null})),
@@ -1597,9 +1597,10 @@ void main() {
         expect(find.text('たづな'), findsOneWidget);
         expect(find.text('未設定'), findsOneWidget, reason: 'no in-game id is written yet');
 
-        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.tap(find.byTooltip('ゲーム内のトレーナー ID を編集'));
         await tester.pumpAndSettle();
         expect(find.text('共有のページと一覧に表示されます。ほかの人の名前や ID は書かないでください。'), findsOneWidget);
+        expect(find.widgetWithText(TextField, 'トレーナー名'), findsNothing, reason: 'the dialog edits its field only');
         final save = find.widgetWithText(FilledButton, '保存');
         expect(
           tester.widget<FilledButton>(save).onPressed,
@@ -1612,7 +1613,6 @@ void main() {
         expect(find.text('9 桁か 12 桁の数字で入力してください。'), findsOneWidget);
         expect(tester.widget<FilledButton>(save).onPressed, isNull, reason: 'eight digits are no id');
 
-        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), ' ハルウララ推し ');
         await tester.enterText(find.widgetWithText(TextField, 'ゲーム内のトレーナー ID'), '123 456 789');
         await tester.pump();
         await tester.tap(save);
@@ -1620,14 +1620,52 @@ void main() {
 
         expect("${server.sent[1].method} ${server.sent[1].uri.path}", "PUT /api/me/profile");
         expect(sentJson(1), {
-          "trainer_name": "ハルウララ推し",
+          "trainer_name": "たづな",
           "game_trainer_id": "123456789",
           "previous": {"trainer_name": "たづな", "game_trainer_id": null},
         });
-        expect(find.text('公開プロフィールの編集'), findsNothing, reason: 'a stored profile closes the dialog');
+        expect(find.text('ゲーム内のトレーナー ID の編集'), findsNothing, reason: 'a stored profile closes the dialog');
+        expect(find.text('たづな'), findsOneWidget);
+        expect(find.text('123 456 789'), findsOneWidget);
+      });
+
+      testWidgets('editing the name alone sends the in-game id as it was, and compares both against the profile the '
+          'edit started from', (tester) async {
+        await storeSession();
+        container = containerFor(
+          [
+            _sharesList([]),
+            _json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": "123456789"}),
+          ],
+          me: [
+            _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": "123456789"})),
+          ],
+        );
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () => find.text('たづな').evaluate().isNotEmpty,
+          describe: "the public profile to show the server's answer",
+        );
+
+        await tester.tap(find.byTooltip('トレーナー名を編集'));
+        await tester.pumpAndSettle();
+        expect(find.text('トレーナー名の編集'), findsOneWidget);
+        expect(find.widgetWithText(TextField, 'ゲーム内のトレーナー ID'), findsNothing);
+        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), ' ハルウララ推し ');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleSent(tester, 2, 'the profile to be written');
+
+        expect("${server.sent[1].method} ${server.sent[1].uri.path}", "PUT /api/me/profile");
+        expect(sentJson(1), {
+          "trainer_name": "ハルウララ推し",
+          "game_trainer_id": "123456789",
+          "previous": {"trainer_name": "たづな", "game_trainer_id": "123456789"},
+        });
+        expect(find.text('トレーナー名の編集'), findsNothing, reason: 'a stored profile closes the dialog');
         expect(find.text('ハルウララ推し'), findsOneWidget);
         expect(find.text('123 456 789'), findsOneWidget);
-        expect(find.text('たづな'), findsNothing);
       });
 
       testWidgets('nothing closes the profile dialog while its save is out, so the card shows what the save stored', (
@@ -1647,7 +1685,7 @@ void main() {
           () => find.text('たづな').evaluate().isNotEmpty,
           describe: "the public profile to show the server's answer",
         );
-        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.tap(find.byTooltip('トレーナー名を編集'));
         await tester.pumpAndSettle();
         await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), 'ハルウララ推し');
         await tester.pump();
@@ -1659,12 +1697,12 @@ void main() {
         await tester.tap(find.byTooltip('保存せずに閉じる').first, warnIfMissed: false);
         await tester.tapAt(const Offset(4, 4));
         await tester.pump();
-        expect(find.text('公開プロフィールの編集'), findsOneWidget, reason: 'the dialog waits for the answer');
+        expect(find.text('トレーナー名の編集'), findsOneWidget, reason: 'the dialog waits for the answer');
 
         stored.complete(_json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": null}));
         await settleUntilElapsing(
           tester,
-          () => find.text('公開プロフィールの編集').evaluate().isEmpty,
+          () => find.text('トレーナー名の編集').evaluate().isEmpty,
           describe: 'the stored profile to close the dialog',
         );
         await tester.pumpAndSettle();
@@ -1694,9 +1732,66 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('たづな'), findsOneWidget, reason: 'a failed read says nothing about the profile');
-        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.tap(find.byTooltip('トレーナー名を編集'));
         await tester.pumpAndSettle();
-        expect(find.text('公開プロフィールの編集'), findsOneWidget);
+        expect(find.text('トレーナー名の編集'), findsOneWidget);
+      });
+
+      testWidgets('a profile changed elsewhere is saved again over what the server holds, the other field included', (
+        tester,
+      ) async {
+        await storeSession();
+        container = containerFor(
+          [
+            _sharesList([]),
+            _json(409, {
+              "error": "changed",
+              "profile": {"trainer_name": "たづな", "game_trainer_id": "123456789"},
+            }),
+            _json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": "123456789"}),
+          ],
+          me: [
+            _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": null})),
+          ],
+        );
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () => find.text('たづな').evaluate().isNotEmpty,
+          describe: "the public profile to show the server's answer",
+        );
+        await tester.tap(find.byTooltip('トレーナー名を編集'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), 'ハルウララ推し');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleUntilElapsing(
+          tester,
+          () => find.text('ほかの端末で変更されていたため、保存しませんでした。').evaluate().isNotEmpty,
+          describe: 'the save to be refused as changed',
+        );
+        expect(sentJson(1)["previous"], {"trainer_name": "たづな", "game_trainer_id": null});
+
+        await tester.tap(find.text('今の内容を読み込む'));
+        await tester.pump();
+        expect(field(tester, 'トレーナー名').controller?.text, 'たづな');
+        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), 'ハルウララ推し');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleUntilElapsing(
+          tester,
+          () => find.text('トレーナー名の編集').evaluate().isEmpty,
+          describe: 'the second save to be stored and close the dialog',
+        );
+        await tester.pumpAndSettle();
+
+        expect(sentJson(2), {
+          "trainer_name": "ハルウララ推し",
+          "game_trainer_id": "123456789",
+          "previous": {"trainer_name": "たづな", "game_trainer_id": "123456789"},
+        });
+        expect(find.text('ハルウララ推し'), findsOneWidget);
+        expect(find.text('123 456 789'), findsOneWidget);
       });
 
       Future<void> openTagline(WidgetTester tester, List<Object> answers) async {
@@ -1708,11 +1803,11 @@ void main() {
           ...answers,
         ]);
         await mountAccount(tester);
-        await tester.tap(find.byTooltip('宣伝文句を編集'));
+        await tester.tap(find.byTooltip('公開メモを編集'));
         await tester.pumpAndSettle();
         expect(find.text('この共有のページと一覧に表示されます。'), findsOneWidget);
-        expect(field(tester, '宣伝文句').controller?.text, '古い文', reason: "the edit starts from the list's tagline");
-        await tester.enterText(find.widgetWithText(TextField, '宣伝文句'), '新しい文');
+        expect(field(tester, '公開メモ').controller?.text, '古い文', reason: "the edit starts from the list's tagline");
+        await tester.enterText(find.widgetWithText(TextField, '公開メモ'), '新しい文');
         await tester.pump();
         await tester.tap(find.widgetWithText(FilledButton, '保存'));
         await settleSent(tester, 2, 'the tagline to be written');
@@ -1734,13 +1829,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('ほかの端末で変更されていたため、保存しませんでした。'), findsOneWidget);
-        expect(field(tester, '宣伝文句').controller?.text, '新しい文', reason: 'the input is kept');
-        expect(find.text('宣伝文句の編集'), findsOneWidget, reason: 'the dialog stays open');
+        expect(field(tester, '公開メモ').controller?.text, '新しい文', reason: 'the input is kept');
+        expect(find.text('公開メモの編集'), findsOneWidget, reason: 'the dialog stays open');
         expect(server.sent.where((s) => s.method == "PUT"), hasLength(1), reason: 'nothing is sent over the change');
 
         await tester.tap(find.text('今の内容を読み込む'));
         await tester.pump();
-        expect(field(tester, '宣伝文句').controller?.text, '別の端末の文');
+        expect(field(tester, '公開メモ').controller?.text, '別の端末の文');
       });
 
       testWidgets("a tagline refused for the account's day says so and keeps the input; so does a server with no "
@@ -1751,12 +1846,12 @@ void main() {
         ]);
 
         expect(find.text('今日の書き換えの上限に達しました。日本時間 9:00 以降にお試しください。'), findsOneWidget);
-        expect(field(tester, '宣伝文句').controller?.text, '新しい文');
+        expect(field(tester, '公開メモ').controller?.text, '新しい文');
 
         await tester.tap(find.widgetWithText(FilledButton, '保存'));
         await settleSent(tester, 3, 'the tagline to be written again');
         expect(find.text('サーバーがまだこの機能に対応していません。しばらくしてからお試しください。'), findsOneWidget);
-        expect(field(tester, '宣伝文句').controller?.text, '新しい文');
+        expect(field(tester, '公開メモ').controller?.text, '新しい文');
       });
     });
 

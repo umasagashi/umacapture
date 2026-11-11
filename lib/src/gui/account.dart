@@ -30,9 +30,9 @@ class AccountPage extends StatelessWidget {
       children: [
         const AccountIntroCard(),
         const AccountCard(),
+        const SharerProfileCard(),
         AccountUsageCard(inView: inView),
         const AccountSyncCard(),
-        const SharerProfileCard(),
         RecordShareListCard(inView: inView),
         const AccountDeletionCard(),
       ],

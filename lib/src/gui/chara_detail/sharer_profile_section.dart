@@ -1,5 +1,5 @@
 // U18: the texts a sharer publishes beside the shares — the account's public profile, in a card of the account tab
-// with its edit dialog, and the edit dialog of one share's tagline, opened from the share's row.
+// with an edit dialog per field, and the edit dialog of one share's tagline, opened from the share's row.
 //
 // Every edit follows one contract: it starts from the value the server last answered, saves only what differs from
 // it, sends that value as `previous` so a value changed elsewhere is never overwritten, and keeps the input on any
@@ -102,36 +102,50 @@ class _SharerProfileState extends ConsumerState<_SharerProfile> with AutomaticKe
         // refused as changed and shows it, so the card still offers the edit.
         (profile, unset) = ((trainerName: null, gameTrainerId: null), "$tr_sharer_profile.unknown".tr());
     }
-    final theme = Theme.of(context);
+    void edit(SharerProfileField field) =>
+        SharerProfileDialog.show(ref.base, field: field, profile: profile, onSaved: _saved);
     return ListCard(
       title: "$tr_sharer_profile.title".tr(),
-      trailing: IconButton(
-        tooltip: "$tr_sharer_profile.edit".tr(),
-        icon: Icon(Symbols.edit_rounded, color: theme.colorScheme.onTertiary),
-        onPressed: () => SharerProfileDialog.show(ref.base, profile: profile, onSaved: _saved),
-      ),
       padding: const EdgeInsets.all(16),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _ProfileLine(label: "$tr_sharer_profile.trainer_name".tr(), value: profile.trainerName ?? unset),
         _ProfileLine(
-          label: "$tr_sharer_profile.game_trainer_id".tr(),
+          field: SharerProfileField.trainerName,
+          value: profile.trainerName ?? unset,
+          onEdit: () => edit(SharerProfileField.trainerName),
+        ),
+        _ProfileLine(
+          field: SharerProfileField.gameTrainerId,
           value: switch (profile.gameTrainerId) {
             final id? => formatGameTrainerId(id),
             null => unset,
           },
+          onEdit: () => edit(SharerProfileField.gameTrainerId),
         ),
       ],
     );
   }
 }
 
-/// One field of the profile: what it is on the left, its value on the right.
-class _ProfileLine extends StatelessWidget {
-  final String label;
-  final String value;
+/// The fields of the public profile, each edited in a dialog of its own.
+enum SharerProfileField {
+  trainerName("trainer_name"),
+  gameTrainerId("game_trainer_id");
 
-  const _ProfileLine({required this.label, required this.value});
+  final String key;
+
+  const SharerProfileField(this.key);
+
+  String get label => "$tr_sharer_profile.$key".tr();
+}
+
+/// One field of the profile: what it is on the left, its value and its edit button on the right.
+class _ProfileLine extends StatelessWidget {
+  final SharerProfileField field;
+  final String value;
+  final VoidCallback onEdit;
+
+  const _ProfileLine({required this.field, required this.value, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
@@ -141,9 +155,15 @@ class _ProfileLine extends StatelessWidget {
       child: Row(
         spacing: 8,
         children: [
-          Text(label, style: style),
+          Text(field.label, style: style),
           Expanded(
             child: Text(value, style: style, textAlign: TextAlign.end),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: "$tr_sharer_profile.edit.${field.key}".tr(),
+            icon: const Icon(Symbols.edit_rounded),
+            onPressed: onEdit,
           ),
         ],
       ),
@@ -168,15 +188,23 @@ String sharerTextRefusalText(SharerTextRefusal reason) =>
         }}"
         .tr();
 
-/// Edits the account's public profile, starting from [profile] — the value the card last had from the server.
+/// Edits one [field] of the account's public profile, starting from [profile] — the value the card last had from the
+/// server. The server writes both fields together, so a save sends the other field as the server last answered it,
+/// and compares both against that answer.
 class SharerProfileDialog extends ConsumerStatefulWidget {
+  final SharerProfileField field;
   final SharerProfile profile;
   final ValueChanged<SharerProfile> onSaved;
 
-  const SharerProfileDialog({super.key, required this.profile, required this.onSaved});
+  const SharerProfileDialog({super.key, required this.field, required this.profile, required this.onSaved});
 
-  static void show(RefBase ref, {required SharerProfile profile, required ValueChanged<SharerProfile> onSaved}) {
-    CardDialog.show(ref, (_) => SharerProfileDialog(profile: profile, onSaved: onSaved));
+  static void show(
+    RefBase ref, {
+    required SharerProfileField field,
+    required SharerProfile profile,
+    required ValueChanged<SharerProfile> onSaved,
+  }) {
+    CardDialog.show(ref, (_) => SharerProfileDialog(field: field, profile: profile, onSaved: onSaved));
   }
 
   @override
@@ -185,13 +213,7 @@ class SharerProfileDialog extends ConsumerStatefulWidget {
 
 class _SharerProfileDialogState extends ConsumerState<SharerProfileDialog> {
   late SharerProfile _previous = widget.profile;
-  late final _name = TextEditingController(text: widget.profile.trainerName ?? "");
-  late final _id = TextEditingController(
-    text: switch (widget.profile.gameTrainerId) {
-      final id? => formatGameTrainerId(id),
-      null => "",
-    },
-  );
+  late final _text = TextEditingController(text: _shown(widget.profile));
 
   /// The value the server held when a save found it changed; the input is left as it was.
   SharerProfile? _changed;
@@ -200,13 +222,30 @@ class _SharerProfileDialogState extends ConsumerState<SharerProfileDialog> {
 
   @override
   void dispose() {
-    _name.dispose();
-    _id.dispose();
+    _text.dispose();
     super.dispose();
   }
 
-  SharerProfile get _input =>
-      (trainerName: canonicalSharerText(_name.text), gameTrainerId: canonicalGameTrainerId(_id.text));
+  /// The edited field of [profile], as its text field shows it.
+  String _shown(SharerProfile profile) => switch (widget.field) {
+    SharerProfileField.trainerName => profile.trainerName ?? "",
+    SharerProfileField.gameTrainerId => switch (profile.gameTrainerId) {
+      final id? => formatGameTrainerId(id),
+      null => "",
+    },
+  };
+
+  /// The input of the edited field, beside the other field as the server last answered it.
+  SharerProfile get _input => switch (widget.field) {
+    SharerProfileField.trainerName => (
+      trainerName: canonicalSharerText(_text.text),
+      gameTrainerId: _previous.gameTrainerId,
+    ),
+    SharerProfileField.gameTrainerId => (
+      trainerName: _previous.trainerName,
+      gameTrainerId: canonicalGameTrainerId(_text.text),
+    ),
+  };
 
   bool get _idValid => switch (_input.gameTrainerId) {
     final id? => isGameTrainerId(id),
@@ -251,11 +290,7 @@ class _SharerProfileDialogState extends ConsumerState<SharerProfileDialog> {
 
   void _loadCurrent(SharerProfile current) {
     setState(() {
-      _name.text = current.trainerName ?? "";
-      _id.text = switch (current.gameTrainerId) {
-        final id? => formatGameTrainerId(id),
-        null => "",
-      };
+      _text.text = _shown(current);
       _changed = null;
     });
   }
@@ -265,7 +300,7 @@ class _SharerProfileDialogState extends ConsumerState<SharerProfileDialog> {
     final theme = Theme.of(context);
     final changed = _changed;
     return _SharerTextDialogFrame(
-      title: "$tr_sharer_profile.dialog.title".tr(),
+      title: "$tr_sharer_profile.dialog.title.${widget.field.key}".tr(),
       description: "$tr_sharer_profile.dialog.description".tr(),
       sending: _sending,
       savable: _savable,
@@ -289,23 +324,25 @@ class _SharerProfileDialogState extends ConsumerState<SharerProfileDialog> {
         _ => null,
       },
       fields: [
-        TextField(
-          controller: _name,
-          maxLength: trainerNameMaxLength,
-          enabled: !_sending,
-          decoration: InputDecoration(labelText: "$tr_sharer_profile.trainer_name".tr()),
-          onChanged: (_) => setState(() {}),
-        ),
-        TextField(
-          controller: _id,
-          enabled: !_sending,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: "$tr_sharer_profile.game_trainer_id".tr(),
-            errorText: _idValid ? null : "$tr_sharer_profile.dialog.id_invalid".tr(),
+        switch (widget.field) {
+          SharerProfileField.trainerName => TextField(
+            controller: _text,
+            maxLength: trainerNameMaxLength,
+            enabled: !_sending,
+            decoration: InputDecoration(labelText: widget.field.label),
+            onChanged: (_) => setState(() {}),
           ),
-          onChanged: (_) => setState(() {}),
-        ),
+          SharerProfileField.gameTrainerId => TextField(
+            controller: _text,
+            enabled: !_sending,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: widget.field.label,
+              errorText: _idValid ? null : "$tr_sharer_profile.dialog.id_invalid".tr(),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        },
       ],
     );
   }

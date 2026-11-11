@@ -2231,23 +2231,29 @@
                 "check_again": "もう一度確かめる",
                 "empty": "共有したレコードはありません。",
                 "tagline": {
-                    "edit": "宣伝文句を編集",
+                    "edit": "公開メモを編集",
                     "dialog": {
-                        "title": "宣伝文句の編集",
+                        "title": "公開メモの編集",
                         "description": "この共有のページと一覧に表示されます。",
-                        "label": "宣伝文句"
+                        "label": "公開メモ"
                     }
                 }
             },
             "profile": {
                 "title": "公開プロフィール",
-                "edit": "公開プロフィールを編集",
+                "edit": {
+                    "trainer_name": "トレーナー名を編集",
+                    "game_trainer_id": "ゲーム内のトレーナー ID を編集"
+                },
                 "trainer_name": "トレーナー名",
                 "game_trainer_id": "ゲーム内のトレーナー ID",
                 "unset": "未設定",
                 "unknown": "読み込めませんでした",
                 "dialog": {
-                    "title": "公開プロフィールの編集",
+                    "title": {
+                        "trainer_name": "トレーナー名の編集",
+                        "game_trainer_id": "ゲーム内のトレーナー ID の編集"
+                    },
                     "description": "共有のページと一覧に表示されます。ほかの人の名前や ID は書かないでください。",
                     "id_invalid": "9 桁か 12 桁の数字で入力してください。"
                 }
