@@ -493,9 +493,11 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
 
     final label = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, sourceLabel]);
     final slider = _VolumeSlider(volume: setting.volume, onChangeEnd: notifier.setVolume);
-    // One row when the controls leave the name column [_minLabelWidth]; otherwise the volume and the
-    // buttons move to a second row, so the name is never squeezed into one character per line. In
-    // either arrangement the path ellipsizes from the front, so the file name stays visible.
+    // The controls sit in two groups: the file (the name and path, then the picker) and the volume
+    // (the slider, then the test button, which plays at that volume). Reset clears both, so it ends
+    // the tile. One row when the controls leave the name column [_minLabelWidth]; otherwise the
+    // volume group moves to a row of its own and reset stays beside the file, so neither row is
+    // squeezed. In either arrangement the path ellipsizes from the front, so the file name stays visible.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: LayoutBuilder(
@@ -504,10 +506,10 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
             return Row(
               children: [
                 Expanded(child: label),
+                pickButton,
                 volumeIcon,
                 SizedBox(width: _sliderWidth, child: slider),
                 testButton,
-                pickButton,
                 resetButton,
               ],
             );
@@ -515,14 +517,18 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              label,
+              Row(
+                children: [
+                  Expanded(child: label),
+                  pickButton,
+                  resetButton,
+                ],
+              ),
               Row(
                 children: [
                   volumeIcon,
                   Expanded(child: slider),
                   testButton,
-                  pickButton,
-                  resetButton,
                 ],
               ),
             ],
