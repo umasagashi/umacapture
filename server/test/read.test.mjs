@@ -3,7 +3,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { REPORT_DAILY_LIMIT } from "../src/limits.mjs";
-import { PAGE_CSP } from "../src/page.mjs";
+import { sharedPageCspOnce } from "../src/page.mjs";
 import { imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
 
 const ID = "0123456789";
@@ -375,10 +375,10 @@ describe("share report", () => {
       await worker.insertRecord(ID, postedForm(), 20_725);
       worker.siteverify.answer = passingReport;
 
-      // The share page stays without a script, keeps its CSP and cache, and links to the report page.
+      // The share page of a sharer with no trainer id carries no script, keeps its CSP and cache, and links to the report page.
       const shared = await worker.fetch(`/r/${ID}`);
       const html = await shared.text();
-      assert.equal(shared.headers.get("content-security-policy"), PAGE_CSP);
+      assert.equal(shared.headers.get("content-security-policy"), await sharedPageCspOnce());
       assert.equal(shared.headers.get("cache-control"), "public, max-age=300");
       assert.equal(html.includes("<script"), false);
       assert.match(html, new RegExp(`href="${ORIGIN}/r/${ID}/report"`));

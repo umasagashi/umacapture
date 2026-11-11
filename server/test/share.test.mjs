@@ -7,6 +7,7 @@
 // whether production does is checked on the staging D1, not here.
 
 import { after, before, beforeEach, describe, test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
 import {
@@ -692,6 +693,25 @@ describe("the session's account", () => {
     assert.deepEqual((await publicJson(`/u/${owner}.json`)).sharer, profile);
     assert.ok((await page(`/u/${owner}`)).includes("ID 123 456 789"));
 
+    // Both pages carry the id's copy button with the bare digits, and the CSP lets the page's one
+    // script, the one that shows the button and copies, run by its hash.
+    for (const path of [`/r/${first.id}`, `/u/${owner}`]) {
+      const res = await worker.fetch(path);
+      const html = await res.text();
+      assert.ok(html.includes('data-copy="123456789"'), `${path}: no copy button with the bare digits`);
+      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+      assert.equal(scripts.length, 1, `${path}: not exactly one script`);
+      const hash = createHash("sha256").update(scripts[0]).digest("base64");
+      const csp = res.headers.get("Content-Security-Policy");
+      assert.ok(csp.includes(`script-src 'sha256-${hash}'`), `${path}: the CSP does not let the page's script run: ${csp}`);
+      assert.equal(csp.includes("unsafe-inline"), false);
+      // A refused copy tells the viewer and does not offer the refused button again.
+      assert.ok(
+        /catch \{\s*b\.textContent = "コピーできませんでした";\s*b\.disabled = true;/.test(scripts[0]),
+        `${path}: a refused copy is not shown`,
+      );
+    }
+
     // Written from a profile changed since: nothing is written, and the answer carries what it is.
     const stale = await putProfile(token, { trainer_name: "other", game_trainer_id: null, previous: NONE });
     assert.deepEqual([stale.status, stale.body], [409, { error: "changed", profile }]);
@@ -699,8 +719,19 @@ describe("the session's account", () => {
     const twelve = await putProfile(token, { trainer_name: null, game_trainer_id: "1234-5678-9012", previous: profile });
     assert.deepEqual(twelve.body, { trainer_name: null, game_trainer_id: "123456789012" });
     assert.ok((await page(`/r/${first.id}`)).includes("ID 123 456 789 012"));
+    assert.ok((await page(`/r/${first.id}`)).includes('data-copy="123456789012"'));
 
-    const removed = await putProfile(token, { trainer_name: null, game_trainer_id: "  ", previous: twelve.body });
+    // A name with no id: no copy button.
+    const named = await putProfile(token, { trainer_name: "name", game_trainer_id: null, previous: twelve.body });
+    assert.deepEqual(named.body, { trainer_name: "name", game_trainer_id: null });
+    for (const path of [`/r/${first.id}`, `/u/${owner}`]) {
+      const html = await page(path);
+      assert.ok(html.includes("name"), path);
+      assert.equal(html.includes("data-copy="), false, `${path}: a copy button with no id`);
+      assert.equal(html.includes("<script"), false, `${path}: a script with no button`);
+    }
+
+    const removed = await putProfile(token, { trainer_name: null, game_trainer_id: "  ", previous: named.body });
     assert.deepEqual([removed.status, removed.body], [200, NONE]);
     assert.equal((await publicJson(`/r/${first.id}.json`)).sharer, null);
     assert.equal((await publicJson(`/u/${owner}.json`)).sharer, null);

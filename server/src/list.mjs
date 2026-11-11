@@ -2,7 +2,7 @@
 // /r/<id>. It names the account by its id and by the public profile its sharer wrote, if any: never by
 // the provider's name or e-mail address, nor its creation day.
 
-import { RECORD_TYPE_LABELS, esc, num, pageFooter, sharerLine, siteHeader, splitCard, taglineText } from "./page.mjs";
+import { RECORD_TYPE_LABELS, copyScriptElement, esc, num, pageFooter, sharerLine, siteHeader, splitCard, taglineText } from "./page.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { listOwnShares, readProfile } from "./store.mjs";
 import { withTables } from "./tables.mjs";
@@ -133,6 +133,7 @@ ${siteHeader("共有レコード一覧")}
 ${sharerLine(list.sharer, "list-sharer")}${body}
 ${pageFooter(list.url)}
 </main>
+${copyScriptElement(list.sharer)}
 </body>
 </html>
 `;

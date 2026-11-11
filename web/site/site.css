@@ -287,6 +287,10 @@ a { color: var(--primary); }
    as long as the field allows, so it breaks anywhere rather than widen a phone-width page. */
 .rec-sharer, .rec-tagline, .list-sharer, .list-tagline { overflow-wrap: anywhere; }
 .list-tagline { display: block; }
+/* The trainer id's copy button: sent hidden, shown by the page's script. Small enough to stay on the
+   sharer's line; on a phone it wraps under the id rather than widen the page. */
+.sharer-copy { margin-left: .3rem; padding: .05rem .6rem; font: inherit; font-size: .78rem; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.sharer-copy[hidden] { display: none; }
 /* The kind filter: the checked radio button hides the other kind. Without :has() every card stays shown. */
 .list:has(#list-k-std:checked) .list-item[data-type="inheritance_only"],
 .list:has(#list-k-inh:checked) .list-item[data-type="standard"] { display: none; }

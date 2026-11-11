@@ -6,7 +6,7 @@ import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
 import { buildPublicList, listSort, renderListPage } from "./list.mjs";
 import { buildPublicRecord } from "./public_record.mjs";
-import { PAGE_CSP, renderNotFoundPage, renderPage } from "./page.mjs";
+import { PAGE_CSP, renderNotFoundPage, renderPage, sharedPageCspOnce } from "./page.mjs";
 import { matchRoute, pagePathKind } from "./routes.mjs";
 import { postReport, reportPage } from "./report.mjs";
 import { runScheduled } from "./scheduled.mjs";
@@ -59,11 +59,11 @@ const publicJson = (body, cache) =>
     },
   });
 
-const publicPage = (html, cache) =>
+const publicPage = async (html, cache) =>
   new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": PAGE_CSP,
+      "Content-Security-Policy": await sharedPageCspOnce(),
       "Cache-Control": cache,
       "X-Robots-Tag": "noindex",
     },

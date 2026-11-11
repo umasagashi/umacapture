@@ -1,7 +1,8 @@
-// The public page /r/<id>: HTML built as a string from public JSON v1. It carries no script and
-// loads nothing from another origin; the CSP sent with it says the same. Its look comes from the
-// shared stylesheet (web/site/site.css); the viewer's switches (colour, each slot's factors or their
-// totals, the folded sections) are radio buttons and <details>, driven by that stylesheet alone.
+// The public page /r/<id>: HTML built as a string from public JSON v1. It loads nothing from another
+// origin, and its one script is the inline COPY_SCRIPT, the only script its CSP (sharedPageCspOnce) lets run. Its
+// look comes from the shared stylesheet (web/site/site.css); the viewer's switches (colour, each
+// slot's factors or their totals, the folded sections) are radio buttons and <details>, driven by that
+// stylesheet alone.
 //
 // Every interpolated value goes through `esc`, table names included: the tables come from the
 // module set, not from this repository, and are not trusted to be markup-free. The sharer's own text
@@ -16,12 +17,59 @@ export function esc(value) {
 }
 
 /**
- * The CSP of every page the Worker builds without a script: /r/<id>, /u/<id> and the login
- * refusals. No script at all; styles, fonts and images from this origin only, which is where the
- * shared look of the public pages lives (web/site/site.css, its fonts and the logo, served from
- * static assets). No inline style either: a page carries no <style> and no style attribute.
+ * The CSP of every page the Worker builds without a script: the 404 of a public page's path, the
+ * login refusals and the report pages. No script at all; styles, fonts and images from this origin
+ * only, which is where the shared look of the public pages lives (web/site/site.css, its fonts and
+ * the logo, served from static assets). No inline style either: a page carries no <style> and no
+ * style attribute.
  */
 export const PAGE_CSP = "default-src 'none'; img-src 'self'; style-src 'self'; font-src 'self'";
+
+/**
+ * The one script of a shared page (/r/<id>, /u/<id>): it shows each trainer id's copy button, which
+ * the page sends hidden, and copies the button's digits to the clipboard. Without script, or without
+ * the clipboard API, the buttons stay hidden and the page reads the same. A refused write (the site's
+ * clipboard permission denied) leaves the button disabled and saying so, since a retry would be
+ * refused the same way. Firefox and Safari cannot be asked about the permission beforehand, so the
+ * refusal is learned from the write itself on every browser.
+ */
+export const COPY_SCRIPT = `for (const b of document.querySelectorAll("button[data-copy]")) {
+  if (!navigator.clipboard) break;
+  const label = b.textContent;
+  b.hidden = false;
+  b.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(b.dataset.copy);
+    } catch {
+      b.textContent = "コピーできませんでした";
+      b.disabled = true;
+      return;
+    }
+    b.textContent = "コピーしました";
+    setTimeout(() => (b.textContent = label), 2000);
+  });
+}`;
+
+let sharedPageCsp = null;
+
+/**
+ * The CSP of a shared page (/r/<id>, /u/<id>): PAGE_CSP, plus COPY_SCRIPT by its
+ * hash and no other script. A hash, not a per-response nonce, because the page is cached, and a
+ * cached nonce is the same for every viewer.
+ */
+export function sharedPageCspOnce() {
+  sharedPageCsp ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(COPY_SCRIPT)).then((hash) => {
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
+    return `${PAGE_CSP}; script-src 'sha256-${b64}'`;
+  });
+  return sharedPageCsp;
+}
+
+/**
+ * The inline script element of a shared page whose sharer line is `sharer`: COPY_SCRIPT, exactly the
+ * text the CSP hashes, when that line carries a copy button, and "" when it carries none.
+ */
+export const copyScriptElement = (sharer) => (sharer?.game_trainer_id == null ? "" : `<script>${COPY_SCRIPT}</script>`);
 
 /**
  * The site header of a page the Worker builds: the mark and name linking to the app, the name of
@@ -190,13 +238,18 @@ function stats(record) {
 /**
  * The line naming the sharer of a page from public JSON's `sharer` (`publicSharer` in user_text.mjs),
  * with `cls` its class, or "" when the sharer wrote no profile. The trainer id is shown grouped by
- * three, as the game shows it. The name is self-declared and is shown as written, never as verified.
+ * three, as the game shows it, followed by a button that copies its bare digits, which is what the
+ * game takes when pasted; COPY_SCRIPT shows the button. The name is self-declared and is shown as
+ * written, never as verified.
  */
 export function sharerLine(sharer, cls) {
   if (sharer === null) return "";
-  const id = sharer.game_trainer_id === null ? null : `ID ${esc(groupedGameTrainerId(sharer.game_trainer_id))}`;
+  const digits = sharer.game_trainer_id;
+  const id = digits === null ? null : `ID ${esc(groupedGameTrainerId(digits))}`;
   const named = sharer.trainer_name === null ? id : id === null ? esc(sharer.trainer_name) : `${esc(sharer.trainer_name)}（${id}）`;
-  return `<p class="${cls}"><span class="rec-k">トレーナー</span> ${named}</p>`;
+  const copy =
+    digits === null ? "" : ` <button type="button" class="sharer-copy" data-copy="${esc(digits)}" hidden>ID をコピー</button>`;
+  return `<p class="${cls}"><span class="rec-k">トレーナー</span> ${named}${copy}</p>`;
 }
 
 /** The share's tagline as a paragraph of class `cls`, or "" when none is written. Never a link. */
@@ -405,6 +458,7 @@ ${siteHeader("共有レコード")}
 ${body(record)}
 ${pageFooter(record.url)}
 </main>
+${copyScriptElement(record.sharer)}
 </body>
 </html>
 `;
