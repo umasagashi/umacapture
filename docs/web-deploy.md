@@ -469,6 +469,14 @@ not know. Such a build is released only after the production Worker that has the
 production Worker is not rolled back past that version afterwards. A build that meets such a Worker
 anyway shows no usage on that `404`; it is not a failure of the account or of the session.
 
+A build that edits a share's tagline (`PUT /api/shares/<id>/tagline`) or the account's public profile
+(`PUT /api/me/profile`), and reads them from `GET /api/me/shares` (`tagline`) and `GET /api/me`
+(`profile`), is released only after the production Worker that has them ("Rolling out taglines and
+the public profile"). The share itself is not affected: `POST /api/shares` is unchanged, so an older
+Worker takes such a build's shares as before. It answers the two writes with the plain-text `404`, as
+it answers every path it does not know, and its `GET /api/me` and `GET /api/me/shares` carry neither
+key; a build that meets such a Worker shows the editing as not available rather than as a failure.
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
@@ -693,6 +701,62 @@ accounts for and hand them to the hourly run:
    The first hourly run two hours and a quarter later (`share_writes`) deletes every version of that
    name uploaded before the record's time, with the code an abandoned PUT's record takes, or only
    clears the record if a share holds the bundle by then. Nothing is deleted in B2 by hand.
+
+### Rolling out taglines and the public profile
+
+Once, for the release whose Worker takes a share's tagline and the account's public profile (the
+trainer name and the game's trainer id), with the migration `0010_share_notes.sql`. The sharer writes
+them after sharing, from the app:
+
+- `PUT /api/shares/<id>/tagline` `{tagline, previous}` and `PUT /api/me/profile`
+  `{trainer_name, game_trainer_id, previous: {trainer_name, game_trainer_id}}` replace the value only
+  while it is still `previous`, and otherwise answer `409 changed` with the current value, writing
+  nothing. A tagline holds up to 80 code points, a trainer name up to 20, on one line; the game's
+  trainer id is 9 or 12 digits, stored without the separators it may be written with. While
+  `SHARING_ENABLED` is `"false"` they take only a write that removes a value or leaves it as it is.
+  The full contract is on `putTagline` (`server/src/shares.mjs`) and `putProfile`
+  (`server/src/account.mjs`).
+- The profile is shown on the account's list (`/u/<id>`) and on every page of its shares (`/r/<id>`),
+  a tagline on its share's page and on its row of the list, and both in those pages' JSON (`sharer`,
+  `tagline`). Neither is on the OG card, in a page's description (`og:description`), or in the import
+  (`GET /api/shares/<id>`). A change is seen once the pages' caches have passed: five minutes for a
+  share's page and its JSON, one minute for a list.
+- A tagline's bytes are part of its share's charge against `STORAGE_BUDGET`; the profile is charged
+  against nothing. Beginning an account's deletion clears its profile.
+- The two writes count together against two daily limits in `server/src/limits.mjs`:
+  `ACCOUNT_TEXT_WRITES_PER_DAY` (100 a UTC day for one account) and `TEXT_WRITES_PER_DAY` (10,000 a
+  UTC day over every account), held in `accounts.text_writes` / `text_writes_day` and
+  `daily.text_writes`. Only a write that stored a value counts; one refused for any reason, `409
+  changed` included, counts nothing. A write that only clears — the tagline to null, or a profile
+  field to null with the other field left as it is — is neither counted nor refused by the limits, so
+  a sharer past them can still take text down; a write that clears one field and changes the other is
+  counted like any write. Past either limit a write is `429 daily_limit` with `scope`
+  (`"account"` or `"service"`) and a `Retry-After` to the next UTC day, the shape sync's daily limits
+  answer with. Lowering either takes a commit and a deployment, like the other limits there.
+
+Staging first:
+
+1. **Apply `0010`** ("Checks before a production run", then "Applying a migration"). It adds columns
+   and changes none, so the live Worker runs unchanged on it. Then confirm that this prints six rows:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT name FROM pragma_table_info('records') WHERE name = 'tagline' UNION ALL SELECT name FROM pragma_table_info('accounts') WHERE name IN ('trainer_name', 'game_trainer_id', 'text_writes_day', 'text_writes') UNION ALL SELECT name FROM pragma_table_info('daily') WHERE name = 'text_writes'"
+   # staging: umacapture-share-staging --env staging
+   ```
+
+2. **Deploy** the web app and the Worker together ("Deploying"). On staging, write a profile and a
+   tagline, and read them on the share's page, on the list and in both JSON; edit the same value from
+   two devices and see the second refused as changed; remove both; delete a test account and see its
+   list lose the profile at once.
+3. **Windows release**, after the production deployment ("Ordering against a Windows release").
+
+**Rolling the Worker back past this release** leaves the columns and what they hold in D1, and the
+older Worker shows none of it: the pages and their JSON lose the profile and the taglines, and the two
+writes answer `404`. It also does not clear the profile when an account's deletion begins; the row
+goes when the deletion completes. If an account began its deletion under the older Worker and the
+Worker of this release is back before the deletion completed, clear that account's profile by hand
+("Clearing a public profile by hand", under "Handling a report").
 
 ### Shared images: declared bytes and what B2 holds
 
@@ -1111,8 +1175,10 @@ each of them by its share id as below.
    `https://umacapture.com/r/<share id>`; for a report about images, the share's images are what
    `GET /api/shares/<share id>` lists and `GET /api/shares/<share id>/images` serves (or import the
    link into the app).
-2. Decide: nothing; take down the images only; take down the whole share; or, for many at once, a
-   switch (the table below).
+2. Decide: nothing; take down the images only; take down the whole share; clear the sharer's public
+   profile (below); or, for many at once, a switch (the table below). A share's tagline has no
+   takedown of its own: a tagline that must go goes with its share (`'share'`), and the sharer may
+   share the record again without it.
 3. To take down, write one order to the target's D1. `scope` is `'images'` to take down the images
    alone (the share stays, and tells no images from then on, as one shared without them) or
    `'share'` to unshare it:
@@ -1158,6 +1224,25 @@ by one, stop with a switch:
 | Many shares | `SHARING_ENABLED` `"false"` (below): new logins and shares stop; existing shares are still read |
 | A flood of reports | Lower `REPORT_DAILY_LIMIT` in `server/src/limits.mjs`, commit, deploy; `0` takes none. Reports are taken while sharing and images are switched off |
 
+#### Clearing a public profile by hand
+
+The account's public profile (trainer name and the game's trainer id) is shown on its list and on
+every page of its shares, and is not a share, so no takedown order reaches it. When a report is about
+the profile (`reason` `personal_info` or `inappropriate` on a share or a list), clear it in the
+target's D1 by hand. `<account id>` is the list's id, or for a share the `owner_id` of
+`SELECT owner_id FROM records WHERE id = '<share id>'`:
+
+```bash
+server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc \
+  --command "UPDATE accounts SET trainer_name = NULL, game_trainer_id = NULL WHERE id = '<account id>'"
+# staging: umacapture-share-staging --env staging
+```
+
+It is cleared at once (the profile is charged against nothing, so nothing is given back), and is gone
+from the pages once their caches have passed: a list within a minute, a share's page and its JSON
+within five. Nothing keeps the sharer from writing a profile again; nothing records that it was
+cleared but this command and the Sentry issue. Resolve the issue as in step 5.
+
 ### Stopping record sharing
 
 In this order of preference:
@@ -1165,7 +1250,7 @@ In this order of preference:
 | Means | Effect | Depends on |
 |---|---|---|
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`); reading, unsharing and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`), and so does writing new text into a tagline or the public profile; reading, unsharing, removing a tagline or the profile, and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
 | `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except D1: the name tables are not read. Use it once the version without the Worker is no longer among the last 100 |
 | `SHARE_IMAGES_ENABLED` `"false"`, committed, then `deploy_web.sh` | Shared images alone stop: shares declaring images are refused, bundles are neither stored nor served, and the import endpoint tells such shares' images as unavailable, so an import waits rather than saving a record without them. Shares without images, reads, unshares, takedowns and the hourly run's deletion of images go on. D1 and B2 keep their data; turning it back serves every bundle still stored | As `SHARING_ENABLED` |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |

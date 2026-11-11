@@ -237,10 +237,11 @@ describe("account list", () => {
     assert.equal(res.headers.get("cache-control"), "public, max-age=60");
     assert.equal(res.headers.get("x-robots-tag"), "noindex");
     const json = await res.json();
-    assert.deepEqual(Object.keys(json).sort(), ["count", "id", "records", "schema", "url"]);
+    assert.deepEqual(Object.keys(json).sort(), ["count", "id", "records", "schema", "sharer", "url"]);
+    // A sharer who wrote no public profile is named by nothing but the id.
     assert.deepEqual(
-      { schema: json.schema, id: json.id, url: json.url, count: json.count },
-      { schema: 1, id: owner, url: `${ORIGIN}/u/${owner}`, count: 3 },
+      { schema: json.schema, id: json.id, url: json.url, sharer: json.sharer, count: json.count },
+      { schema: 1, id: owner, url: `${ORIGIN}/u/${owner}`, sharer: null, count: 3 },
     );
     assert.deepEqual(
       json.records.map((r) => [r.id, r.shared_on]),
@@ -252,12 +253,13 @@ describe("account list", () => {
     );
     assert.equal(json.records.some((r) => r.id === theirs), false, "another account's share is listed");
     for (const record of json.records) {
-      assert.deepEqual(Object.keys(record).sort(), ["evaluation", "id", "record_type", "shared_on", "trainee", "url"]);
+      assert.deepEqual(Object.keys(record).sort(), ["evaluation", "id", "record_type", "shared_on", "tagline", "trainee", "url"]);
     }
     assert.deepEqual(json.records[0], {
       id: "a000000000",
       url: `${ORIGIN}/r/a000000000`,
       shared_on: day(0),
+      tagline: null,
       record_type: "standard",
       trainee: { card: { gid: 1004, name: HOSTILE_CARD }, character: { name: "chara 3" }, rank: { name: "rank 2" } },
       evaluation: 12345,
@@ -298,7 +300,7 @@ describe("account list", () => {
     const owner = await worker.accountOf(await worker.signIn("100000000000000000023"));
     const empty = await worker.fetch(`/u/${owner}.json`);
     assert.equal(empty.status, 200);
-    assert.deepEqual(await empty.json(), { schema: 1, id: owner, url: `${ORIGIN}/u/${owner}`, count: 0, records: [] });
+    assert.deepEqual(await empty.json(), { schema: 1, id: owner, url: `${ORIGIN}/u/${owner}`, sharer: null, count: 0, records: [] });
     for (const path of [`/u/${"0".repeat(16)}`, `/u/${"0".repeat(16)}.json`]) {
       const res = await worker.fetch(path);
       assert.equal(res.status, 404, path);

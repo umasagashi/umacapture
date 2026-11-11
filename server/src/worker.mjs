@@ -1,6 +1,6 @@
 // Request handling for the record-sharing Worker.
 
-import { getMe, getUsage, postTrainer } from "./account.mjs";
+import { getMe, getUsage, postTrainer, putProfile } from "./account.mjs";
 import { deleteAccount } from "./account_deletion.mjs";
 import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
@@ -13,15 +13,17 @@ import { runScheduled } from "./scheduled.mjs";
 import { readRecord } from "./store.mjs";
 import { newPublicId } from "./secrets.mjs";
 import { getShareImages, putShareImages } from "./share_images.mjs";
-import { deleteShare, getMyShares, getShare, postShares } from "./shares.mjs";
+import { deleteShare, getMyShares, getShare, postShares, putTagline } from "./shares.mjs";
 import { answerSync, getBodies, getGeneration, getHeld, getImage, getSettings, putBodies, putImage, putSettings } from "./sync.mjs";
 import { getPart, getRoot, putPart, replaceRoot } from "./sync_list.mjs";
 import { TableSource, withTables } from "./tables.mjs";
 
-// A shared record's content never changes after sharing, but its sharer can unshare it; five minutes
-// bounds how long caches keep serving it after that.
+// A shared record's content never changes after sharing, but its sharer can unshare it, and rewrite
+// the share's tagline and the account's public profile shown with it; five minutes bounds how long
+// caches keep serving it after either.
 const CACHE = "public, max-age=300";
-// A list changes with every share and unshare: an unshared record stays listed for at most a minute.
+// A list changes with every share and unshare, tagline and profile: an unshared record stays listed,
+// and a rewritten text stays as it was, for at most a minute.
 const LIST_CACHE = "public, max-age=60";
 
 const notFound = () =>
@@ -70,7 +72,7 @@ const publicPage = (html, cache) =>
 async function publicRecord(env, tables, id) {
   const stored = await readRecord(env.DB, id);
   if (stored === null) return null;
-  const meta = { id, sharedDay: stored.sharedDay, origin: env.PUBLIC_ORIGIN };
+  const meta = { id, sharedDay: stored.sharedDay, origin: env.PUBLIC_ORIGIN, tagline: stored.tagline, profile: stored.profile };
   return withTables(tables, env.DB, (t) => buildPublicRecord(stored.form, meta, t));
 }
 
@@ -99,6 +101,8 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => putShareImages(request, env, route.id, now));
         case "getShareImages":
           return answerApi(() => getShareImages(env, route.id, now));
+        case "putTagline":
+          return answerApi(() => putTagline(request, env, route.id, now));
         case "reportPage":
           return reportPage(env, route.id);
         case "report":
@@ -123,6 +127,8 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => deleteAccount(request, env, now));
         case "meTrainer":
           return answerApi(() => postTrainer(request, env, now));
+        case "meProfile":
+          return answerApi(() => putProfile(request, env, now));
         case "syncGeneration":
           return answerSync(env, now, (env) => answerApi(() => getGeneration(request, env, now)));
         case "syncGetSettings":

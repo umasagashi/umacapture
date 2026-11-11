@@ -1,29 +1,42 @@
 // An account's public list: /u/<id> (HTML) and /u/<id>.json, answered without a session like
-// /r/<id>. It names the account only by its id: no name, no provider, no creation day.
+// /r/<id>. It names the account by its id and by the public profile its sharer wrote, if any: never by
+// the provider's name or e-mail address, nor its creation day.
 
-import { RECORD_TYPE_LABELS, esc, num, pageFooter, siteHeader, splitCard } from "./page.mjs";
+import { RECORD_TYPE_LABELS, esc, num, pageFooter, sharerLine, siteHeader, splitCard, taglineText } from "./page.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
-import { accountExists, listOwnShares } from "./store.mjs";
+import { listOwnShares, readProfile } from "./store.mjs";
 import { withTables } from "./tables.mjs";
+import { publicSharer } from "./user_text.mjs";
 
 const SCHEMA = 1;
 
 /**
- * Public list JSON v1 of account `id`, `{schema, id, url, count, records}` with the records newest
- * share day first, or null when no such account exists. An account sharing nothing has an empty list.
+ * Public list JSON v1 of account `id`, `{schema, id, url, sharer, count, records}` with the records
+ * newest share day first, or null when no such account exists. An account sharing nothing has an empty
+ * list. `sharer` is the account's public profile (`publicSharer`), and each record's `tagline` the
+ * share's, each null when not written.
  */
 export async function buildPublicList(env, tables, id) {
-  if (!(await accountExists(env.DB, id))) return null;
+  const profile = await readProfile(env.DB, id);
+  if (profile === null) return null;
   const shares = await listOwnShares(env.DB, id);
   const records = await withTables(tables, env.DB, (t) =>
     shares.map((share) => ({
       id: share.id,
       url: `${env.PUBLIC_ORIGIN}/r/${share.id}`,
       shared_on: dayToIso(share.sharedDay),
+      tagline: share.tagline,
       ...recordSummary(share.form, t),
     })),
   );
-  return { schema: SCHEMA, id, url: `${env.PUBLIC_ORIGIN}/u/${id}`, count: shares.length, records };
+  return {
+    schema: SCHEMA,
+    id,
+    url: `${env.PUBLIC_ORIGIN}/u/${id}`,
+    sharer: publicSharer(profile.trainerName, profile.gameTrainerId),
+    count: shares.length,
+    records,
+  };
 }
 
 const TITLE = "共有レコード一覧 | umacapture";
@@ -59,7 +72,7 @@ function card(record) {
   const evaluation = record.evaluation === null ? "" : `<span class="rec-eval">${num(record.evaluation)}</span>`;
   return `<li class="list-item" data-type="${esc(record.record_type)}"><a href="${esc(record.url)}">
 ${costume === null ? "" : `<span class="rec-costume">${esc(costume)}</span>`}<strong>${esc(name)}</strong>
-<span class="list-row">${rank}${evaluation}<span class="rec-tag">${RECORD_TYPE_LABELS[record.record_type]}</span><span class="list-day">${esc(record.shared_on)}</span></span>
+${taglineText(record.tagline, "list-tagline", "span")}<span class="list-row">${rank}${evaluation}<span class="rec-tag">${RECORD_TYPE_LABELS[record.record_type]}</span><span class="list-day">${esc(record.shared_on)}</span></span>
 </a></li>`;
 }
 
@@ -116,8 +129,8 @@ export function renderListPage(list, env, sort) {
 ${siteHeader("共有レコード一覧")}
 <main class="site-main rec list">
 <h1>共有レコード <span class="rec-n">${list.count}件</span></h1>
-<p class="list-lead">同じ人が共有したレコードの一覧です。名前やアカウントの情報は表示しません。</p>
-${body}
+<p class="list-lead">同じ人が共有したレコードの一覧です。</p>
+${sharerLine(list.sharer, "list-sharer")}${body}
 ${pageFooter(list.url)}
 </main>
 </body>

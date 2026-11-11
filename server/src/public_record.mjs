@@ -1,10 +1,13 @@
 // Public JSON v1: what /r/<id>.json serves. Built from the stored posted form (sids and numbers
-// only) by resolving every sid through the server's own tables, so every string a reader sees comes
-// from those tables and never from the client. sids themselves are not published.
+// only) by resolving every sid through the server's own tables, so every string of the record a reader
+// sees comes from those tables and never from the client. sids themselves are not published. The
+// strings that come from the sharer are the share's `tagline` and the account's `sharer` profile, kept
+// beside the posted form and checked by user_text.mjs.
 //
 // Changes to v1 only ever add keys. A breaking change gets a new path and v1 stays.
 
 import { Keys } from "./tables.mjs";
+import { publicSharer } from "./user_text.mjs";
 
 const SCHEMA = 1;
 const DAY_MS = 86_400_000;
@@ -123,8 +126,12 @@ function race(tables, r) {
 }
 
 /**
+ * `tagline` is the share's tagline and `sharer` the account's public profile (`publicSharer`), each
+ * null when not written.
+ *
  * @param {object} form the stored posted form v1
- * @param {{id: string, sharedDay: number, origin: string}} meta
+ * @param {{id: string, sharedDay: number, origin: string, tagline: string | null,
+ *   profile: {trainerName: string | null, gameTrainerId: string | null}}} meta
  * @param {import("./tables.mjs").Tables} tables
  */
 export function buildPublicRecord(form, meta, tables) {
@@ -138,6 +145,8 @@ export function buildPublicRecord(form, meta, tables) {
     id: meta.id,
     url: `${meta.origin}/r/${meta.id}`,
     shared_on: dayToIso(meta.sharedDay),
+    tagline: meta.tagline,
+    sharer: publicSharer(meta.profile.trainerName, meta.profile.gameTrainerId),
     region: form.region,
     recognizer_version: form.recognizer_version,
     tables_version: tables.version,

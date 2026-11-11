@@ -4,7 +4,10 @@
 // totals, the folded sections) are radio buttons and <details>, driven by that stylesheet alone.
 //
 // Every interpolated value goes through `esc`, table names included: the tables come from the
-// module set, not from this repository, and are not trusted to be markup-free.
+// module set, not from this repository, and are not trusted to be markup-free. The sharer's own text
+// (the tagline and the public profile) goes through it too, and is never made a link.
+
+import { groupedGameTrainerId } from "./user_text.mjs";
 
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -184,6 +187,21 @@ function stats(record) {
   return `<div class="rec-stats">${cells.join("")}</div>`;
 }
 
+/**
+ * The line naming the sharer of a page from public JSON's `sharer` (`publicSharer` in user_text.mjs),
+ * with `cls` its class, or "" when the sharer wrote no profile. The trainer id is shown grouped by
+ * three, as the game shows it. The name is self-declared and is shown as written, never as verified.
+ */
+export function sharerLine(sharer, cls) {
+  if (sharer === null) return "";
+  const id = sharer.game_trainer_id === null ? null : `ID ${esc(groupedGameTrainerId(sharer.game_trainer_id))}`;
+  const named = sharer.trainer_name === null ? id : id === null ? esc(sharer.trainer_name) : `${esc(sharer.trainer_name)}（${id}）`;
+  return `<p class="${cls}"><span class="rec-k">トレーナー</span> ${named}</p>`;
+}
+
+/** The share's tagline as a paragraph of class `cls`, or "" when none is written. Never a link. */
+export const taglineText = (tagline, cls, tag = "p") => (tagline === null ? "" : `<${tag} class="${cls}">${esc(tagline)}</${tag}>`);
+
 function hero(record) {
   const { costume, name } = splitCard(record.trainee.card.name);
   const rank = record.trainee.rank ? `<span class="rec-rank">${esc(record.trainee.rank.name)}</span>` : "";
@@ -192,6 +210,7 @@ function hero(record) {
   return `<section class="rec-hero">
 ${costume === null ? "" : `<p class="rec-costume">${esc(costume)}</p>`}<h1>${esc(name)}</h1>
 <div class="rec-badges">${rank}${evaluation}<span class="rec-tag">${RECORD_TYPE_LABELS[record.record_type]}</span></div>
+${sharerLine(record.sharer, "rec-sharer")}${taglineText(record.tagline, "rec-tagline")}
 </section>`;
 }
 

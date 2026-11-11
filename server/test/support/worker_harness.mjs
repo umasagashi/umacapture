@@ -855,6 +855,20 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
     /** GET /api/shares/<id>/images, with no session. */
     getImages: (id) => fetch(`/api/shares/${id}/images`),
     myShares: (token) => fetch("/api/me/shares", { headers: { Authorization: `Bearer ${token}` } }),
+    /** PUT /api/shares/<id>/tagline `body` with the session `token`. */
+    putTagline: (token, id, body) =>
+      fetch(`/api/shares/${id}/tagline`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }),
+    /** PUT /api/me/profile `body` with the session `token`. */
+    putProfile: (token, body) =>
+      fetch("/api/me/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }),
 
     /** Makes the next `n` D1 batches wait for each other (needs `testEntry: true`). */
     async armGate(n) {

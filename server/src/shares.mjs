@@ -1,4 +1,5 @@
-// Sharing records under an account: POST /api/shares, DELETE /api/shares/<id>, and GET /api/me/shares.
+// Sharing records under an account: POST /api/shares, DELETE /api/shares/<id>, PUT /api/shares/<id>/tagline
+// and GET /api/me/shares.
 // The session says whose records they are. A share's client key, made by the app, is what makes a
 // resend find the record the first send created; the server keeps only its SHA-256. A share may
 // declare its record's images, which share_images.mjs takes from there.
@@ -23,8 +24,9 @@ import { canonicalPostedForm, InvalidPayload, parseVersion, SidOutOfRange } from
 import { dayToIso, recordSummary } from "./public_record.mjs";
 import { isClientKey, sha256, toHex } from "./secrets.mjs";
 import { declaration, importedImages, removeBundle } from "./share_images.mjs";
-import { findByClientKey, listOwnShares, readRecord, shareRecord, unshareRecord, Unavailable } from "./store.mjs";
+import { findByClientKey, listOwnShares, readRecord, shareRecord, unshareRecord, Unavailable, writeTagline } from "./store.mjs";
 import { TableLookupError, withTables } from "./tables.mjs";
+import { canonicalText, textWriteQuota, textWriteRefused } from "./user_text.mjs";
 
 async function gzip(text) {
   const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -287,10 +289,64 @@ export async function getShare(env, id) {
   return json(200, { schema: 1, id, shared_on: dayToIso(stored.sharedDay), record, images: importedImages(env, stored.images) });
 }
 
+/** Bytes `text` takes in UTF-8; 0 for null. */
+const utf8Bytes = (text) => (text === null ? 0 : new TextEncoder().encode(text).byteLength);
+
+/**
+ * PUT /api/shares/<id>/tagline `{tagline, previous}`: replaces the tagline of a share the session's
+ * account holds, which its page and the account's list show (never the OG card, the page's description
+ * or the import). `tagline` is a string or null (null, or nothing left once trimmed, removes it), checked
+ * by `canonicalText` up to MAX_TAGLINE code points; `previous` is the tagline the editor started from,
+ * as this endpoint or GET /api/me/shares answered it. The write is made only while the share's tagline
+ * is still `previous`, so a value changed elsewhere since is never overwritten.
+ *
+ * Answers 200 `{tagline}` with the canonical form stored; 409 changed `{tagline}` with what it is now,
+ * having written nothing; 400 invalid_payload `{field}`; 403 forbidden (another account's share); 404
+ * not_found; 409 account_deleting; 409 storage_full when a growing tagline does not fit STORAGE_BUDGET;
+ * 429 daily_limit `{scope}` past the day's text writes, counted with PUT /api/me/profile (`putProfile`).
+ * While SHARING_ENABLED is "false" it takes only a write that publishes nothing new: one removing the
+ * tagline, or leaving it as it is. Any other is 503 sharing_paused.
+ */
+export async function putTagline(request, env, id, now) {
+  const at = clock(now);
+  const session = await requireSession(request, env, at.now);
+  const body = envelope(await readJson(request, limits.MAX_SMALL_BODY), ["tagline", "previous"]);
+  const tagline = canonicalText(body.tagline, "tagline", limits.MAX_TAGLINE);
+  const { previous } = body;
+  if (previous !== null && typeof previous !== "string") throw new InvalidPayload("previous");
+  if (!sharingEnabled(env) && tagline !== null && tagline !== previous) return fail(503, "sharing_paused");
+  const outcome = await writeTagline(env.DB, {
+    id,
+    owner: session.accountId,
+    tagline,
+    previous,
+    delta: utf8Bytes(tagline) - utf8Bytes(previous),
+    budget: limits.STORAGE_BUDGET,
+    ...textWriteQuota(at),
+  });
+  switch (outcome.status) {
+    case "written":
+      return json(200, { tagline });
+    case "changed":
+      return fail(409, "changed", { tagline: outcome.tagline });
+    case "deleting":
+      throw new AccountDeleting();
+    case "forbidden":
+      return fail(403, "forbidden");
+    case "storage":
+      return fail(409, "storage_full");
+    case "limit":
+      return textWriteRefused(outcome.scope, at);
+    default:
+      return fail(404, "not_found");
+  }
+}
+
 /**
  * GET /api/me/shares: the session's account's records, newest share day first, each with
  * `client_key_hash`, the stored SHA-256 of its client key as 64 lowercase hex digits, which the app
- * matches against the key it kept, and `images`, the share's images as POST /api/shares answers them.
+ * matches against the key it kept, `images`, the share's images as POST /api/shares answers them, and
+ * `tagline`, the share's tagline (PUT /api/shares/<id>/tagline), null when not written.
  * The client key itself is never stored, so it cannot be returned.
  */
 export async function getMyShares(request, env, tables, now) {
@@ -304,6 +360,7 @@ export async function getMyShares(request, env, tables, now) {
       client_key_hash: toHex(share.clientKey),
       summary: recordSummary(share.form, t),
       images: share.images,
+      tagline: share.tagline,
     })),
   );
   return json(200, mine);

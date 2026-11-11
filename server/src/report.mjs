@@ -21,7 +21,7 @@ export const REPORT_ACTION = "report";
 /** The reasons a report gives, in the order the page lists them. The key is what Sentry receives. */
 export const REPORT_REASONS = {
   own_trainer: "自分の育成が、ほかの人に共有されている",
-  personal_info: "画像に名前などの個人の情報が写っている",
+  personal_info: "名前や ID などの個人の情報が載っている",
   inappropriate: "不適切な内容",
   other: "その他",
 };

@@ -283,6 +283,10 @@ a { color: var(--primary); }
 .list-item .rec-rank { font-size: 1rem; border-radius: 8px; padding: 0 .4rem; }
 .list-item .rec-eval { font-size: 1rem; }
 .list-day { margin-left: auto; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+/* The sharer's own text (trainer name, game id, tagline): one unbroken run of letters or digits may be
+   as long as the field allows, so it breaks anywhere rather than widen a phone-width page. */
+.rec-sharer, .rec-tagline, .list-sharer, .list-tagline { overflow-wrap: anywhere; }
+.list-tagline { display: block; }
 /* The kind filter: the checked radio button hides the other kind. Without :has() every card stays shown. */
 .list:has(#list-k-std:checked) .list-item[data-type="inheritance_only"],
 .list:has(#list-k-inh:checked) .list-item[data-type="standard"] { display: none; }

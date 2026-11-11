@@ -232,6 +232,7 @@ describe("share, list and unshare", () => {
           evaluation: 12345,
         },
         images: "none",
+        tagline: null,
       },
     ]);
     assert.match(res.body[0].client_key_hash, /^[0-9a-f]{64}$/);
@@ -495,18 +496,20 @@ describe("concurrent writes", () => {
 });
 
 describe("sharing switch", () => {
-  test('SHARING_ENABLED "false" refuses the login begin and shares, and lets reading, unsharing and logging out through', async () => {
+  test('SHARING_ENABLED "false" refuses the login begin, shares and new public text, and lets reading, removing or keeping text, unsharing and logging out through', async () => {
     const worker = await startWorker({ vars: { SHARING_ENABLED: "false" } });
     try {
       // A session and a record from before the switch, stored directly: this Worker cannot make them.
       const token = newClientKey() + newClientKey().slice(0, 21);
       const owner = "0123456789abcdef";
       await worker.db.batch([
-        worker.db.prepare("INSERT INTO accounts (id, created_day, share_count) VALUES (?, 0, 1)").bind(owner),
+        worker.db
+          .prepare("INSERT INTO accounts (id, created_day, share_count, trainer_name, game_trainer_id) VALUES (?, 0, 1, 'name', '123456789')")
+          .bind(owner),
         worker.db.prepare("INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)").bind(secretHash(token), owner, 2 ** 40),
       ]);
       await worker.insertRecord("0123456789", postedForm());
-      await worker.db.prepare("UPDATE records SET owner_id = ?").bind(owner).run();
+      await worker.db.prepare("UPDATE records SET owner_id = ?, tagline = 'old'").bind(owner).run();
 
       const begin = await worker.begin({ h: newLoginHash() });
       assert.equal(begin.status, 503);
@@ -518,6 +521,28 @@ describe("sharing switch", () => {
       assert.equal(shared.status, 503);
       assert.equal(shared.body.error, "sharing_paused");
       assert.equal(await worker.count("records"), 1);
+
+      // A tagline or a profile publishing new text is refused; removing either, or leaving it, goes through.
+      const stored = async () => [
+        (await worker.db.prepare("SELECT tagline FROM records").first()).tagline,
+        await worker.db.prepare("SELECT trainer_name, game_trainer_id FROM accounts WHERE id = ?").bind(owner).first(),
+      ];
+      const profile = { trainer_name: "name", game_trainer_id: "123456789" };
+
+      for (const res of [
+        await answer(worker.putTagline(token, "0123456789", { tagline: "new", previous: "old" })),
+        await answer(worker.putProfile(token, { trainer_name: "new", game_trainer_id: null, previous: profile })),
+      ]) {
+        assert.deepEqual([res.status, res.body], [503, { error: "sharing_paused" }]);
+      }
+      assert.deepEqual(await stored(), ["old", profile]);
+
+      assert.equal((await answer(worker.putTagline(token, "0123456789", { tagline: "old", previous: "old" }))).status, 200);
+      assert.equal((await answer(worker.putTagline(token, "0123456789", { tagline: null, previous: "old" }))).status, 200);
+      const kept = await answer(worker.putProfile(token, { trainer_name: null, game_trainer_id: "123 456 789", previous: profile }));
+      assert.deepEqual([kept.status, kept.body], [200, { trainer_name: null, game_trainer_id: "123456789" }]);
+      assert.deepEqual(await stored(), [null, { trainer_name: null, game_trainer_id: "123456789" }]);
+      assert.equal((await answer(worker.fetch("/r/0123456789.json"))).body.tagline, null);
 
       assert.equal((await answer(worker.fetch("/r/0123456789.json"))).status, 200);
       assert.equal((await answer(worker.myShares(token))).status, 200);
@@ -565,6 +590,7 @@ describe("the session's account", () => {
       shares_remaining: limits.ACCOUNT_SHARE_CAP,
       trainer_ids: [],
       deleting: false,
+      profile: { trainer_name: null, game_trainer_id: null },
     });
     const [a, b] = await results(worker, token, [share(), share()]);
     assert.deepEqual(
@@ -609,6 +635,224 @@ describe("the session's account", () => {
     const other = await worker.signIn("100000000000000000033");
     assert.equal((await trainer(other, { trainer_id: uuid(1) })).status, 200);
     assert.equal((await trainer(newClientKey(), { trainer_id: uuid(99) })).status, 401);
+  });
+
+  const NONE = { trainer_name: null, game_trainer_id: null };
+  const cp = (...points) => String.fromCodePoint(...points);
+  const putProfile = (token, body) => answer(worker.putProfile(token, body));
+  const putTagline = (token, id, body) => answer(worker.putTagline(token, id, body));
+  const page = async (path) => (await answer(worker.fetch(path))).text;
+  const publicJson = async (path) => (await answer(worker.fetch(path))).body;
+  const ogDescription = (html) => /<meta property="og:description" content="([^"]*)">/.exec(html)?.[1] ?? null;
+  const bytes = (text) => new TextEncoder().encode(text).byteLength;
+  const chargeOfShare = async (id) => (await worker.db.prepare("SELECT charge FROM records WHERE id = ?").bind(id).first()).charge;
+
+  test("a profile is stored in its canonical form, shown on every page of the account's shares and on its list, and a malformed one is refused", async () => {
+    const token = await worker.signIn("100000000000000000041");
+    const owner = await worker.accountOf(token);
+    const [first, second] = await results(worker, token, [share(), share()]);
+    assert.deepEqual((await me(token)).body.profile, NONE);
+
+    const refused = [
+      [{ trainer_name: 1, game_trainer_id: null, previous: NONE }, "trainer_name"],
+      [{ trainer_name: `a${cp(0x202e)}b`, game_trainer_id: null, previous: NONE }, "trainer_name"],
+      [{ trainer_name: `a${cp(10)}b`, game_trainer_id: null, previous: NONE }, "trainer_name"],
+      [{ trainer_name: cp(0xd800), game_trainer_id: null, previous: NONE }, "trainer_name"],
+      [{ trainer_name: "x".repeat(21), game_trainer_id: null, previous: NONE }, "trainer_name"],
+      [{ trainer_name: null, game_trainer_id: "12345678", previous: NONE }, "game_trainer_id"],
+      [{ trainer_name: null, game_trainer_id: "1234567890", previous: NONE }, "game_trainer_id"],
+      [{ trainer_name: null, game_trainer_id: "12345678a", previous: NONE }, "game_trainer_id"],
+      [{ trainer_name: null, game_trainer_id: null }, "previous"],
+      [{ trainer_name: null, game_trainer_id: null, previous: { trainer_name: null } }, "previous.game_trainer_id"],
+    ];
+    for (const [body, field] of refused) {
+      const res = await putProfile(token, body);
+      assert.deepEqual([res.status, res.body], [400, { error: "invalid_payload", field }], JSON.stringify(body));
+    }
+    assert.deepEqual((await me(token)).body.profile, NONE, "a refused profile was stored");
+
+    // NFC and trimmed; the emoji's zero-width joiner passes; the id loses its separators.
+    const name = `<s>&"'${cp(0x65)}${cp(0x301)}${cp(0x1f469, 0x200d, 0x1f4bb)}`;
+    const canonical = `<s>&"'${cp(0xe9)}${cp(0x1f469, 0x200d, 0x1f4bb)}`;
+    const written = await putProfile(token, { trainer_name: ` ${name}${cp(10)}`, game_trainer_id: "123 456 789", previous: NONE });
+    assert.deepEqual([written.status, written.body], [200, { trainer_name: canonical, game_trainer_id: "123456789" }]);
+    const profile = { trainer_name: canonical, game_trainer_id: "123456789" };
+    assert.deepEqual((await me(token)).body.profile, profile);
+
+    // Every page of the account's shares and its list show it; the description, the card and the import do not.
+    for (const { id } of [first, second]) {
+      assert.deepEqual((await publicJson(`/r/${id}.json`)).sharer, profile);
+      const html = await page(`/r/${id}`);
+      assert.ok(html.includes("&lt;s&gt;&amp;&quot;&#39;"), "the name is not escaped on the page");
+      assert.equal(html.includes("<s>"), false, "the name reached the page as markup");
+      assert.ok(html.includes("ID 123 456 789"), "the id is not grouped by three");
+      assert.equal(ogDescription(html).includes("&lt;s&gt;"), false, "the description carries the profile");
+      assert.deepEqual(Object.keys((await answer(worker.fetch(`/api/shares/${id}`))).body).sort(), ["id", "images", "record", "schema", "shared_on"]);
+    }
+    assert.deepEqual((await publicJson(`/u/${owner}.json`)).sharer, profile);
+    assert.ok((await page(`/u/${owner}`)).includes("ID 123 456 789"));
+
+    // Written from a profile changed since: nothing is written, and the answer carries what it is.
+    const stale = await putProfile(token, { trainer_name: "other", game_trainer_id: null, previous: NONE });
+    assert.deepEqual([stale.status, stale.body], [409, { error: "changed", profile }]);
+
+    const twelve = await putProfile(token, { trainer_name: null, game_trainer_id: "1234-5678-9012", previous: profile });
+    assert.deepEqual(twelve.body, { trainer_name: null, game_trainer_id: "123456789012" });
+    assert.ok((await page(`/r/${first.id}`)).includes("ID 123 456 789 012"));
+
+    const removed = await putProfile(token, { trainer_name: null, game_trainer_id: "  ", previous: twelve.body });
+    assert.deepEqual([removed.status, removed.body], [200, NONE]);
+    assert.equal((await publicJson(`/r/${first.id}.json`)).sharer, null);
+    assert.equal((await publicJson(`/u/${owner}.json`)).sharer, null);
+    assert.equal((await page(`/r/${first.id}`)).includes("rec-sharer"), false);
+    assert.equal((await putProfile(newClientKey(), { ...NONE, previous: NONE })).status, 401);
+  });
+
+  test("a tagline is written by its share's owner only, from the value it replaces, shown on the share's page and its row of the list, and charged with the share", async () => {
+    const token = await worker.signIn("100000000000000000042");
+    const other = await worker.signIn("100000000000000000043");
+    const owner = await worker.accountOf(token);
+    const [mine, plain] = await results(worker, token, [share(), share()]);
+    const start = { charge: await chargeOfShare(mine.id), totals: (await worker.totals()).bytes };
+
+    const theirs = await putTagline(other, mine.id, { tagline: "x", previous: null });
+    assert.deepEqual([theirs.status, theirs.body], [403, { error: "forbidden" }]);
+    const missing = await putTagline(token, mine.id === "zzzzzzzzzz" ? "yyyyyyyyyy" : "zzzzzzzzzz", { tagline: "x", previous: null });
+    assert.deepEqual([missing.status, missing.body], [404, { error: "not_found" }]);
+    for (const [body, field] of [
+      [{ tagline: `a${cp(10)}b`, previous: null }, "tagline"],
+      [{ tagline: "x".repeat(81), previous: null }, "tagline"],
+      [{ tagline: `a${cp(0xe000)}`, previous: null }, "tagline"],
+      [{ tagline: "x", previous: 1 }, "previous"],
+      [{ tagline: "x" }, "previous"],
+    ]) {
+      const res = await putTagline(token, mine.id, body);
+      assert.deepEqual([res.status, res.body], [400, { error: "invalid_payload", field }], JSON.stringify(body));
+    }
+
+    const text = `${cp(0x1f600).repeat(70)}<b>&"x`;
+    const written = await putTagline(token, mine.id, { tagline: `${text}${cp(10)}`, previous: null });
+    assert.deepEqual([written.status, written.body], [200, { tagline: text }]);
+    assert.equal(await chargeOfShare(mine.id), start.charge + bytes(text));
+    assert.equal((await worker.totals()).bytes, start.totals + bytes(text));
+
+    const listed = (await answer(worker.myShares(token))).body;
+    assert.deepEqual(listed.map((s) => [s.id, s.tagline]).sort(), [[mine.id, text], [plain.id, null]].sort());
+    assert.equal((await publicJson(`/r/${mine.id}.json`)).tagline, text);
+    assert.equal((await publicJson(`/r/${plain.id}.json`)).tagline, null);
+    const list = await publicJson(`/u/${owner}.json`);
+    assert.deepEqual(list.records.map((r) => [r.id, r.tagline]).sort(), [[mine.id, text], [plain.id, null]].sort());
+    for (const html of [await page(`/r/${mine.id}`), await page(`/u/${owner}`)]) {
+      assert.ok(html.includes("&lt;b&gt;&amp;&quot;x"), "the tagline is not escaped");
+      assert.equal(html.includes("<b>"), false, "the tagline reached the page as markup");
+    }
+    assert.equal(ogDescription(await page(`/r/${mine.id}`)).includes("&lt;b&gt;"), false, "the description carries the tagline");
+    assert.equal("tagline" in (await answer(worker.fetch(`/api/shares/${mine.id}`))).body, false, "the import carries the tagline");
+
+    // Written from a tagline changed since: nothing is written.
+    const stale = await putTagline(token, mine.id, { tagline: "y", previous: null });
+    assert.deepEqual([stale.status, stale.body], [409, { error: "changed", tagline: text }]);
+    assert.equal(await chargeOfShare(mine.id), start.charge + bytes(text));
+
+    // A tagline that would grow past the budget is refused; one that shrinks is not.
+    const { bytes: held } = await worker.totals();
+    await worker.db.prepare("UPDATE totals SET bytes = ? WHERE id = 1").bind(limits.STORAGE_BUDGET).run();
+    const full = await putTagline(token, plain.id, { tagline: "z", previous: null });
+    assert.deepEqual([full.status, full.body], [409, { error: "storage_full" }]);
+    assert.equal((await putTagline(token, mine.id, { tagline: null, previous: text })).status, 200);
+    assert.equal((await worker.totals()).bytes, limits.STORAGE_BUDGET - bytes(text));
+    await worker.db.prepare("UPDATE totals SET bytes = ? WHERE id = 1").bind(held - bytes(text)).run();
+    assert.equal(await chargeOfShare(mine.id), start.charge);
+    assert.equal((await publicJson(`/r/${mine.id}.json`)).tagline, null);
+    assert.equal((await page(`/r/${mine.id}`)).includes("rec-tagline"), false);
+
+    // An unshare gives the tagline's bytes back with the rest of the charge.
+    assert.equal((await putTagline(token, plain.id, { tagline: "abc", previous: null })).status, 200);
+    const before = (await worker.totals()).bytes;
+    const charge = await chargeOfShare(plain.id);
+    assert.equal((await worker.unshare(token, plain.id)).status, 204);
+    assert.equal((await worker.totals()).bytes, before - charge);
+    assert.equal((await putTagline(newClientKey(), mine.id, { tagline: null, previous: null })).status, 401);
+  });
+});
+
+describe("daily text writes", () => {
+  let worker;
+  before(async () => {
+    worker = await startWorker({ testEntry: true });
+  });
+  after(() => worker.dispose());
+
+  const NONE = { trainer_name: null, game_trainer_id: null };
+  const me = (token) => answer(worker.fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } }));
+  const putProfile = (token, body) => answer(worker.putProfile(token, body));
+  const putTagline = (token, id, body) => answer(worker.putTagline(token, id, body));
+  const publicJson = async (path) => (await answer(worker.fetch(path))).body;
+
+  test("taglines and profiles count together against the account's and the service's daily text writes, a refused write counting nothing", async () => {
+    const token = await worker.signIn("100000000000000000044");
+    const owner = await worker.accountOf(token);
+    const [mine] = await results(worker, token, [share()]);
+    const day = await today(worker);
+    const counts = async () => ({
+      account: (await worker.db.prepare("SELECT text_writes FROM accounts WHERE id = ? AND text_writes_day = ?").bind(owner, day).first())?.text_writes ?? 0,
+      service: (await worker.db.prepare("SELECT text_writes FROM daily WHERE day = ?").bind(day).first())?.text_writes ?? 0,
+    });
+    const refusedFor = (res, scope) => {
+      assert.deepEqual([res.status, res.body], [429, { error: "daily_limit", scope }]);
+      assert.ok(Number(res.headers.get("retry-after")) > 0);
+    };
+
+    const start = await counts();
+    assert.equal((await putTagline(token, mine.id, { tagline: "a", previous: null })).status, 200);
+    assert.equal((await putProfile(token, { trainer_name: "n", game_trainer_id: null, previous: NONE })).status, 200);
+    assert.deepEqual(await counts(), { account: start.account + 2, service: start.service + 2 });
+    // Written from a value changed since: refused, and counted against neither limit.
+    assert.equal((await putTagline(token, mine.id, { tagline: "b", previous: null })).status, 409);
+    assert.equal((await putProfile(token, { ...NONE, previous: NONE })).status, 409);
+    assert.deepEqual(await counts(), { account: start.account + 2, service: start.service + 2 });
+
+    // The account's last write of the day goes through; the next of either kind is refused, writing nothing.
+    const profile = { trainer_name: "n", game_trainer_id: null };
+    await worker.db
+      .prepare("UPDATE accounts SET text_writes = ? WHERE id = ?")
+      .bind(limits.ACCOUNT_TEXT_WRITES_PER_DAY - 1, owner)
+      .run();
+    assert.equal((await putTagline(token, mine.id, { tagline: "c", previous: "a" })).status, 200);
+    refusedFor(await putTagline(token, mine.id, { tagline: "d", previous: "c" }), "account");
+    refusedFor(await putProfile(token, { trainer_name: "m", game_trainer_id: null, previous: profile }), "account");
+    assert.equal((await publicJson(`/r/${mine.id}.json`)).tagline, "c");
+    assert.deepEqual((await me(token)).body.profile, profile);
+    // A write from a stale value is still told what the value is, not the limit.
+    const stale = await putTagline(token, mine.id, { tagline: "d", previous: "a" });
+    assert.deepEqual([stale.status, stale.body], [409, { error: "changed", tagline: "c" }]);
+    assert.equal((await counts()).account, limits.ACCOUNT_TEXT_WRITES_PER_DAY);
+
+    // Past the limit, a write that clears one profile field and changes the other is refused like any write.
+    const named = { trainer_name: "n", game_trainer_id: "123456789" };
+    await worker.db.prepare("UPDATE accounts SET game_trainer_id = '123456789' WHERE id = ?").bind(owner).run();
+    refusedFor(await putProfile(token, { trainer_name: null, game_trainer_id: "987654321", previous: named }), "account");
+    assert.deepEqual((await me(token)).body.profile, named);
+    // Past the limit, text can still be taken down, and taking it down counts nothing.
+    const atLimit = await counts();
+    assert.equal((await putProfile(token, { trainer_name: null, game_trainer_id: "123456789", previous: named })).status, 200);
+    assert.equal((await putProfile(token, { ...NONE, previous: { trainer_name: null, game_trainer_id: "123456789" } })).status, 200);
+    assert.deepEqual((await me(token)).body.profile, NONE);
+    assert.equal((await putTagline(token, mine.id, { tagline: null, previous: "c" })).status, 200);
+    assert.equal((await publicJson(`/r/${mine.id}.json`)).tagline, null);
+    assert.deepEqual(await counts(), atLimit);
+    // Clearing what is already clear is a write, refused past the limit.
+    refusedFor(await putProfile(token, { ...NONE, previous: NONE }), "account");
+
+    // Every account together: another account is refused once the day's writes are used up.
+    const other = await worker.signIn("100000000000000000045");
+    await worker.db.prepare("UPDATE daily SET text_writes = ? WHERE day = ?").bind(limits.TEXT_WRITES_PER_DAY, day).run();
+    refusedFor(await putProfile(other, { trainer_name: "o", game_trainer_id: null, previous: NONE }), "service");
+
+    // The next UTC day starts both counts again.
+    await worker.advanceClock(86_400);
+    assert.equal((await putTagline(token, mine.id, { tagline: "d", previous: null })).status, 200);
+    assert.equal((await putProfile(other, { trainer_name: "o", game_trainer_id: null, previous: NONE })).status, 200);
   });
 });
 
