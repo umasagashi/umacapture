@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '/const.dart';
 import '/src/app/route.dart';
 import '/src/gui/chara_detail/account_sync_section.dart';
+import '/src/gui/chara_detail/account_usage_card.dart';
 import '/src/gui/chara_detail/record_share_list_card.dart';
 import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/common.dart';
@@ -27,6 +28,7 @@ class AccountPage extends StatelessWidget {
       children: [
         const AccountIntroCard(),
         const AccountCard(),
+        AccountUsageCard(inView: inView),
         const AccountSyncCard(),
         RecordShareListCard(inView: inView),
         const AccountDeletionCard(),

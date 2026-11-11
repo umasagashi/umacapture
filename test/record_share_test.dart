@@ -67,11 +67,17 @@ typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String b
 
 /// Answers each request with the next of [answers]; a [SocketException] there is a lost connection, and a
 /// future holds the answer back until the test completes it.
+///
+/// The account's usage (`GET /api/me/usage`), which the account tab asks for beside its other requests, is answered
+/// apart from them: with the next of [usage], or once that is empty with the bare 404 of a Worker older than the
+/// route. Those requests go to [usageSent], not [sent].
 class _FakeServer implements HttpClientAdapter {
   final List<Object> answers;
+  final List<Object> usage;
   final sent = <_Sent>[];
+  final usageSent = <Uri>[];
 
-  _FakeServer(this.answers);
+  _FakeServer(this.answers, {this.usage = const []});
 
   @override
   Future<ResponseBody> fetch(
@@ -80,6 +86,12 @@ class _FakeServer implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final bytes = requestStream == null ? <int>[] : await requestStream.expand((chunk) => chunk).toList();
+    if (options.uri.path == "/api/me/usage") {
+      usageSent.add(options.uri);
+      return usageSent.length <= usage.length
+          ? usage[usageSent.length - 1] as ResponseBody
+          : ResponseBody.fromString("Not Found", 404);
+    }
     sent.add((
       method: options.method,
       uri: options.uri,
@@ -265,8 +277,9 @@ void main() {
     Duration? requestTimeout,
     ({List<CharaDetailRecord> records, List<ColumnSpec>? columns})? table,
     PathInfo? pathInfo,
+    List<Object> usage = const [],
   }) {
-    server = _FakeServer(answers);
+    server = _FakeServer(answers, usage: usage);
     opened = [];
     final c = ProviderContainer(
       overrides: [
@@ -1441,6 +1454,85 @@ void main() {
         expect(accountListUrl(_accountId), "${Const.sharingOrigin}/u/$_accountId");
       },
     );
+
+    testWidgets("logged in, the account's usage is shown below the account against the server's caps", (tester) async {
+      await storeSession();
+      container = containerFor(
+        [_sharesList([])],
+        usage: [
+          _json(200, {
+            "shares": {"count": 7, "cap": 300},
+            "sync": {"stored_bytes": 123456, "bytes_cap": 2147483648, "records": 2, "records_cap": 5000},
+          }),
+        ],
+      );
+      await mountAccount(tester);
+      await settleUntilElapsing(
+        tester,
+        () => find.text('使用量').evaluate().isNotEmpty,
+        describe: "the usage's card to show the server's answer",
+      );
+
+      expect(server.usageSent.single.path, "/api/me/usage");
+      expect(find.text('7 / 300 件'), findsOneWidget);
+      expect(find.text('120.6 KB / 2.0 GB'), findsOneWidget);
+      expect(find.text('2 / 5,000 件'), findsOneWidget);
+      // The card sits right below the account's own.
+      final below = tester.getTopLeft(find.text('使用量')).dy;
+      expect(below, greaterThan(tester.getTopLeft(find.text('ログアウト')).dy));
+      expect(below, lessThan(tester.getTopLeft(find.text('共有したレコード')).dy));
+    });
+
+    testWidgets("an unshare from the account's list asks for the usage again with the list, so the two agree", (
+      tester,
+    ) async {
+      await storeSession();
+      final share = _listed("0123456789", secretHash(newClientKey()), cardName: _serverCardName);
+      Map<String, Object?> usageOf(int shares) => {
+        "shares": {"count": shares, "cap": 300},
+        "sync": {"stored_bytes": 0, "bytes_cap": 2147483648, "records": 0, "records_cap": 5000},
+      };
+      container = containerFor(
+        [
+          _sharesList([share]),
+          _empty(204),
+          _sharesList([]),
+        ],
+        usage: [_json(200, usageOf(1)), _json(200, usageOf(0))],
+      );
+      await mountAccount(tester);
+      await settleUntilElapsing(
+        tester,
+        () => find.text('1 / 300 件').evaluate().isNotEmpty,
+        describe: 'the usage to count the one share',
+      );
+
+      await tester.tap(find.byTooltip('共有を取り消す…'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('長押しで取り消す'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('0 / 300 件').evaluate().isNotEmpty,
+        describe: 'the usage to count no share once the list has none',
+      );
+
+      expect(server.usageSent, hasLength(2), reason: 'once as the tab was shown, once with the list after the unshare');
+      expect(find.text(_serverCardName), findsNothing);
+    });
+
+    testWidgets('a server with no usage route (404) shows no usage, and tells nothing about it', (tester) async {
+      await storeSession();
+      container = containerFor([_sharesList([])]);
+      await mountAccount(tester);
+      await settleUntilElapsing(tester, () => server.usageSent.isNotEmpty, describe: 'the usage to be asked for');
+      await pumpRealTimeWindow(tester, rounds: 5);
+      await tester.pumpAndSettle();
+
+      expect(find.text('使用量'), findsNothing);
+      expect(find.textContaining('/ 300'), findsNothing);
+      expect(find.text('ログアウト'), findsOneWidget, reason: 'the 404 is not taken as a lost login');
+      expect(container.read(recordShareSessionProvider), isNotNull);
+    });
 
     testWidgets('S4b (C1 ii): logging out from the account drops the session and the share notes', (tester) async {
       await storeSession();

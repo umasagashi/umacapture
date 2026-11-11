@@ -2104,6 +2104,14 @@
             "logout_failed": "サーバーに接続できなかったため、ログアウトできませんでした。もう一度お試しください。",
             "delete": "アカウントを削除…",
             "resume_deletion": "削除を再開",
+            "usage": {
+                "title": "使用量",
+                "shares": "共有しているレコード",
+                "sync_bytes": "同期の保存量",
+                "sync_records": "同期しているレコード",
+                "count_of": "{count} / {cap} 件",
+                "bytes_of": "{used} / {cap}"
+            },
             "sync": {
                 "title": "端末間の同期",
                 "running": "同期しています…",

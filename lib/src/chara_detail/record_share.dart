@@ -785,6 +785,14 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     if (session == null) {
       return const SharesLoginRequired();
     }
+    try {
+      return await _listUnder(session);
+    } finally {
+      ref.read(shareListingsProvider.notifier)._count();
+    }
+  }
+
+  Future<ShareListing> _listUnder(ShareSession session) async {
     final askedAt = _sends.now();
     final ShareAnswer answer;
     try {
@@ -871,6 +879,18 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
 }
 
 final recordSharesProvider = NotifierProvider<RecordShares, Map<String, RecordShare>>(RecordShares.new);
+
+/// How many times [RecordShares.refreshFromServer] has had the server's answer — or its failure — to the account's
+/// list: each time the account tab is shown, after an unshare, and on the reload button. Each is a moment the account's
+/// holdings are read anew, so the account's usage is asked for with every one, and agrees with the list beside it.
+class ShareListings extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void _count() => state++;
+}
+
+final shareListingsProvider = NotifierProvider<ShareListings, int>(ShareListings.new);
 
 /// Whether the share confirmations start with "share the images too" checked: the choice of the last share this
 /// device made, off until one is made. Set when a share starts, not when the box is merely toggled.

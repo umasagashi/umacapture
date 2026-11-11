@@ -139,6 +139,32 @@ enum LoginOutcome {
   cancelled,
 }
 
+/// One amount the account holds, beside the server's cap on it.
+typedef UsageAmount = ({int count, int cap});
+
+/// What an account holds against each of its caps, as the server counts them: its shares, and the bytes and records
+/// its sync stores. The caps are the server's, so the app holds none of its own.
+typedef AccountUsage = ({UsageAmount shares, UsageAmount syncBytes, UsageAmount syncRecords});
+
+AccountUsage? _usageOf(Map<String, Object?>? body) {
+  UsageAmount? amount(Object? group, String count, String cap) {
+    if (group is! Map) {
+      return null;
+    }
+    final (n, c) = (group[count], group[cap]);
+    return n is int && c is int && n >= 0 && c > 0 ? (count: n, cap: c) : null;
+  }
+
+  final sync = body?["sync"];
+  final shares = amount(body?["shares"], "count", "cap");
+  final bytes = amount(sync, "stored_bytes", "bytes_cap");
+  final records = amount(sync, "records", "records_cap");
+  if (shares == null || bytes == null || records == null) {
+    return null;
+  }
+  return (shares: shares, syncBytes: bytes, syncRecords: records);
+}
+
 enum AccountDeletionOutcome {
   /// The server deleted the account; the session and the share notes are gone from the device.
   deleted,
@@ -430,6 +456,30 @@ class RecordShareSession extends Notifier<ShareSession?> {
     await _keep(
       ShareSession(token: current.token, expiresAt: current.expiresAt, accountId: current.accountId, deleting: true),
     );
+  }
+
+  /// What the account holds against its caps, as `GET /api/me/usage` answers under [under]; null when there is
+  /// nothing to show. A Worker older than the route answers a bare 404, and the usage is then simply not shown — it is
+  /// not a failure of the account. Any other failure is not shown either: the figures are for reading only, and the
+  /// actions they bear on tell their own refusals.
+  Future<AccountUsage?> usage(ShareSession under) async {
+    final ShareAnswer answer;
+    try {
+      answer = await send("GET", "/api/me/usage", under: under);
+    } on DioException {
+      return null;
+    } on StateError {
+      return null;
+    }
+    if (answer.status == 404) {
+      logger.i("The sharing server has no usage route");
+      return null;
+    }
+    final usage = answer.status == 200 ? _usageOf(answer.body) : null;
+    if (usage == null) {
+      logger.w("The sharing server's usage could not be read: ${answer.status}");
+    }
+    return usage;
   }
 
   /// Deletes the account: repeats `DELETE /api/me` until the server answers 204, then drops the session and the
