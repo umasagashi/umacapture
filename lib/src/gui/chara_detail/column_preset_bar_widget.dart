@@ -249,7 +249,7 @@ class _RecordSourceDropdown extends ConsumerWidget {
             }
             // Switch source and clear the selection together so checked ids do
             // not leak across sources.
-            setRecordSource(ref, next);
+            setRecordSource(ref.base, next);
           },
           items: [
             DropdownMenuItem(value: RecordSource.active, child: Text("$tr_archive_bar.source.active".tr())),

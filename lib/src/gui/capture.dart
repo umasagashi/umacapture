@@ -1668,8 +1668,18 @@ class CaptureEventView extends ConsumerWidget {
     );
   }
 
+  /// Opens the record table on [recordId], in the record set that holds it now: a duplicate can be of an archived
+  /// record, and a merge can have moved the record since the event was recorded. A record neither set holds any more
+  /// opens the table with nothing to focus.
   void _openInTable(BuildContext context, WidgetRef ref, String recordId) {
-    ref.read(charaDetailFocusRecordProvider.notifier).set(recordId);
+    final held = heldRecordIn(
+      active: ref.read(charaDetailRecordStorageLoaderProvider).value ?? const [],
+      archived: ref.read(charaDetailArchiveStorageLoaderProvider).value ?? const [],
+      id: recordId,
+    );
+    if (held != null) {
+      requestRecordFocus(ref.base, RecordFocusRequest(recordId, held.source));
+    }
     AutoTabsRouter.of(context).navigate(const CharaDetailRoute());
   }
 }

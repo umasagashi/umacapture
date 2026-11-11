@@ -203,4 +203,40 @@ void main() {
     expect(container.read(charaArchiveControllerProvider).isEmpty, isTrue);
     expect(toasts, isEmpty);
   });
+
+  test('a shared name pressed during the batch focuses its record in the archive once it has moved there', () async {
+    // The active store keeps listing a record until the batch ends, so a name pressed meanwhile asks for it in the
+    // active set. The table is not built while the batch runs, and the one built after it shows the active rows that
+    // are left: a request still naming the active set would be spent there on a row that is gone.
+    final root = DirectoryPath(tempRoot.path);
+    final activeDir = pathInfoFor(root).charaDetailActiveDir;
+    writeRecord(activeDir / 'shared-a', makeRecord(id: 'shared-a', card: 1));
+    writeRecord(activeDir / 'other-u', makeRecord(id: 'other-u', card: 2));
+    final container = makeContainer(root);
+    addTearDown(container.dispose);
+    final ref = container.read(containerRefProvider);
+    HeldRecord? pressed;
+    final gate = RecordRecoveryGate(
+      mutationLock: RecordMutationLock((name, mode, action) {
+        // The press, as the shared-record card makes it: the record as the stores publish it, in the set that holds it.
+        final held = heldRecordIn(
+          active: container.read(charaDetailRecordStorageLoaderProvider).requireValue,
+          archived: container.read(charaDetailArchiveStorageLoaderProvider).requireValue,
+          id: 'shared-a',
+        );
+        pressed = held;
+        if (held != null) {
+          requestRecordFocus(ref, RecordFocusRequest('shared-a', held.source));
+        }
+        return action();
+      }),
+    );
+    final controller = await controllerFor(container, gate);
+
+    await controller.archive(['shared-a'], ArchiveImageOption.none, effects: archiveEffects(container));
+
+    expect(pressed?.source, RecordSource.active, reason: 'the press came while the batch still listed it as active');
+    expect(container.read(charaDetailFocusRecordProvider), const RecordFocusRequest('shared-a', RecordSource.archive));
+    expect(container.read(recordSourceProvider), RecordSource.active, reason: 'the archive is not a request to show');
+  });
 }

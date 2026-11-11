@@ -469,7 +469,7 @@ class SelectionConfirmation {
       return false;
     }
     _selection = null;
-    exitSelection(ref);
+    exitSelection(ref.base);
     return true;
   }
 }

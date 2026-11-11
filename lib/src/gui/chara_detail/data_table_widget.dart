@@ -271,11 +271,22 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     return true;
   }
 
-  /// Consumes a pending focus request (set when the capture screen navigates here on a duplicate),
-  /// resetting it to null once handled so it fires once and does not re-focus on later rebuilds.
+  /// Consumes a pending focus request, resetting it to null once handled so it fires once and does not re-focus on
+  /// later rebuilds.
+  ///
+  /// The request names the record set its record lives in; [requestRecordFocus] switched the table to it when it was
+  /// made, and the user may have switched away since, or an operation moved the record ([relocateRecordFocus]). It is
+  /// acted on only against a grid whose rows are of that set, so it cannot be spent on another set's rows: until they
+  /// are on the grid it stays pending, and [_reconcile] asks again when they are.
   void _consumeFocusRequest() {
-    final id = ref.read(charaDetailFocusRecordProvider);
-    if (id != null && _focusRecord(id)) {
+    final request = ref.read(charaDetailFocusRecordProvider);
+    if (request == null) {
+      return;
+    }
+    if (_appliedGrid?.source != request.source) {
+      return;
+    }
+    if (_focusRecord(request.recordId)) {
       ref.read(charaDetailFocusRecordProvider.notifier).set(null);
     }
   }
@@ -852,6 +863,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // repaint so rowWrapper's O(1) lookup matches what the renderer draws.
     _indexPinnedRows();
     stateManager.notifyListeners();
+    // A focus request that waited for this set's rows is served now that they are on the grid.
+    _consumeFocusRequest();
   }
 
   @override
@@ -1599,7 +1612,7 @@ class TopControlsLayer extends ConsumerWidget {
                           OutlinedButton.icon(
                             icon: const Icon(Symbols.cancel_rounded, size: 20),
                             label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
-                            onPressed: () => exitSelection(ref),
+                            onPressed: () => exitSelection(ref.base),
                           ),
                         ],
                       ),

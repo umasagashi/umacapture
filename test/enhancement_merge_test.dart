@@ -2229,7 +2229,9 @@ void main() {
       final container = await loadedContainer();
       container.read(selectedRecordIdsProvider.notifier).set({'retired'});
       container.read(pinnedRecordIdsProvider.notifier).set({'retired', 'someone else'});
-      container.read(charaDetailFocusRecordProvider.notifier).set('retired');
+      container
+          .read(charaDetailFocusRecordProvider.notifier)
+          .set(const RecordFocusRequest('retired', RecordSource.active));
       // Read first: the event notifier subscribes to the capture state when it
       // is built, so a container that never touched it would answer null here
       // for a reason that has nothing to do with the merge.
@@ -2242,7 +2244,7 @@ void main() {
       expect(result.needsReload, isFalse, reason: 'memory was republished, so nothing has to be read back');
       expect(container.read(selectedRecordIdsProvider), {'older'});
       expect(container.read(pinnedRecordIdsProvider), {'someone else', 'older'});
-      expect(container.read(charaDetailFocusRecordProvider), 'older');
+      expect(container.read(charaDetailFocusRecordProvider), const RecordFocusRequest('older', RecordSource.active));
       expect(container.read(charaDetailCaptureStateProvider).duplicateRecordId, 'older');
       expect((container.read(captureEventProvider) as CharaCaptureEvent?)?.recordId, 'older');
 
@@ -2254,6 +2256,49 @@ void main() {
         isNot(contains('retired')),
         reason: 'the card map was rebuilt from the published list',
       );
+    });
+
+    test('a pending focus request for the older record follows it into the store the survivor lives in', () async {
+      // The older id survives the merge but moves to the enhanced record's store: the request keeps its id and has
+      // to change its set, or the table would look for the record in a set that no longer holds it.
+      writeRecord(info.charaDetailActiveDir, preRecord('older'));
+      writeRecord(info.charaDetailArchiveDir, postRecord('retired'));
+      final container = await loadedContainer();
+      addTearDown(container.dispose);
+      container
+          .read(charaDetailFocusRecordProvider.notifier)
+          .set(const RecordFocusRequest('older', RecordSource.active));
+
+      final result = await mergeOne(container);
+
+      expect(result.outcome, EnhancementMergeOutcome.merged);
+      expect(container.read(charaDetailFocusRecordProvider), const RecordFocusRequest('older', RecordSource.archive));
+      expect(container.read(recordSourceProvider), RecordSource.active, reason: 'a merge is not a request to show');
+    });
+
+    test('a merge re-points a pending focus request and leaves the set the user switched to, and its selection, '
+        'alone', () async {
+      // The user pressed a name, switched the table to the archive by hand while the request was still pending, and
+      // began checking archived rows to export. Re-pointing the request at the survivor is not the user asking to see
+      // it, so the table keeps its set and the checked rows.
+      seedPair();
+      writeRecord(info.charaDetailArchiveDir, makeRecord(id: 'kept', card: 99));
+      final container = await loadedContainer();
+      addTearDown(container.dispose);
+      final ref = container.read(containerRefProvider);
+      requestRecordFocus(ref, const RecordFocusRequest('retired', RecordSource.active));
+      setRecordSource(ref, RecordSource.archive);
+      container.read(selectionModeProvider.notifier).set(SelectionPurpose.export);
+      final selection = container.read(selectionModeProvider);
+      container.read(selectedRecordIdsProvider.notifier).set({'kept'});
+
+      final result = await mergeOne(container);
+
+      expect(result.outcome, EnhancementMergeOutcome.merged);
+      expect(container.read(charaDetailFocusRecordProvider), const RecordFocusRequest('older', RecordSource.active));
+      expect(container.read(recordSourceProvider), RecordSource.archive);
+      expect(container.read(selectionModeProvider), same(selection));
+      expect(container.read(selectedRecordIdsProvider), {'kept'});
     });
 
     test('the survivor gains the links the merge made reachable, without a manual resolution', () async {

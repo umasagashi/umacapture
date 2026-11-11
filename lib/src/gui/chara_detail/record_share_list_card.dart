@@ -1,11 +1,12 @@
 // P3: the shares of the logged-in account, listed by the server in a card of the account tab, so that they stay
 // reachable after the records they came from are gone.
-import 'package:collection/collection.dart';
+import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/src/app/route.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_share.dart';
 import '/src/chara_detail/record_share_session.dart';
@@ -130,9 +131,9 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
     final active = ref.watch(charaDetailRecordStorageLoaderProvider).value;
     final archived = ref.watch(charaDetailArchiveStorageLoaderProvider).value;
     // Null while either store is still loading: the record may yet turn up, so it is not called deleted.
-    CharaDetailRecord? Function(String)? recordOf;
+    HeldRecord? Function(String)? recordOf;
     if (active != null && archived != null) {
-      recordOf = (id) => active.firstWhereOrNull((e) => e.id == id) ?? archived.firstWhereOrNull((e) => e.id == id);
+      recordOf = (id) => heldRecordIn(active: active, archived: archived, id: id);
     }
     final listUrl = accountListUrl(widget.accountId);
     final List<Widget> rows = switch (_listing) {
@@ -219,7 +220,7 @@ class _AccountShareRow extends ConsumerWidget {
 
   /// Whether the device holds a note of the share, which names the record it was shared from.
   final bool noted;
-  final CharaDetailRecord? record;
+  final HeldRecord? record;
   final bool storesLoaded;
   final VoidCallback onUnshared;
 
@@ -239,7 +240,7 @@ class _AccountShareRow extends ConsumerWidget {
   /// The record's name, or that it was deleted when the note names a record neither store holds. A share with no
   /// note, as one shared from another device, names no record here, so it takes the name the server listed it with.
   String? _title(WidgetRef ref) {
-    final record = this.record;
+    final record = this.record?.record;
     if (record != null) {
       return ref.watch(charaCardNameProvider(record.trainee.card)) ?? record.trainee.card.toString();
     }
@@ -247,6 +248,47 @@ class _AccountShareRow extends ConsumerWidget {
       return share.cardName;
     }
     return storesLoaded ? "$tr_record_share_list.deleted_record".tr() : null;
+  }
+
+  /// The title, drawn as the app's text links are when the device holds the record: pressing it opens the record
+  /// table on that record. A share the device cannot tie to a record keeps the plain title, which presses nothing.
+  Widget _name(BuildContext context, WidgetRef ref, ThemeData theme) {
+    final record = this.record;
+    final title = Text(
+      _title(ref) ?? "",
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: switch (record) {
+        null => theme.textTheme.titleSmall,
+        _ => theme.textTheme.titleSmall?.copyWith(
+          color: theme.colorScheme.primary,
+          decoration: TextDecoration.underline,
+          decorationColor: theme.colorScheme.primary,
+        ),
+      },
+    );
+    if (record == null) {
+      return title;
+    }
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: MergeSemantics(
+        child: Semantics(
+          link: true,
+          child: InkWell(
+            onTap: () => _openInTable(context, ref, record),
+            borderRadius: BorderRadius.circular(4),
+            mouseCursor: SystemMouseCursors.click,
+            child: title,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openInTable(BuildContext context, WidgetRef ref, HeldRecord held) {
+    requestRecordFocus(ref.base, RecordFocusRequest(held.record.id, held.source));
+    AutoTabsRouter.of(context).navigate(const CharaDetailRoute());
   }
 
   @override
@@ -259,14 +301,7 @@ class _AccountShareRow extends ConsumerWidget {
         Row(
           spacing: 8,
           children: [
-            Expanded(
-              child: Text(
-                _title(ref) ?? "",
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
-              ),
-            ),
+            Expanded(child: _name(context, ref, theme)),
             Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
             Text(share.sharedOn, style: theme.textTheme.bodyMedium),
           ],

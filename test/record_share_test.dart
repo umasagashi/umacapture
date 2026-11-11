@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_context_menu/flutter_context_menu.dart';
@@ -56,6 +57,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/hive.dart';
 import 'support/localization.dart';
+import 'support/record_table_tabs_router.dart';
 import 'support/settling.dart';
 
 const _parent1Id = "3f0c6b2e-1d4a-4c55-9e0f-6a7b8c9d0e1f";
@@ -272,6 +274,15 @@ class _EmptyArchive extends CharaDetailArchiveStorage {
   Future<List<CharaDetailRecord>> build() async => [];
 }
 
+class _Archived extends CharaDetailArchiveStorage {
+  final List<CharaDetailRecord> archivedRecords;
+
+  _Archived(this.archivedRecords);
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => archivedRecords;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializeMappers);
@@ -298,6 +309,7 @@ void main() {
     PathInfo? pathInfo,
     List<Object> usage = const [],
     List<Object> me = const [],
+    List<CharaDetailRecord> archived = const [],
   }) {
     server = _FakeServer(answers, usage: usage, me: meApart ? me : null);
     opened = [];
@@ -327,10 +339,10 @@ void main() {
           displayedRecordsProvider.overrideWithValue(table.records),
           if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
         ],
-        if (held ?? [?shown] case final records when records.isNotEmpty) ...[
+        if (held ?? [?shown] case final records when records.isNotEmpty || archived.isNotEmpty) ...[
           charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(records)),
           // The shares' card looks the noted records up in both stores; these records are all in the active one.
-          if (!emptied) charaDetailArchiveStorageLoaderProvider.overrideWith(_EmptyArchive.new),
+          if (!emptied) charaDetailArchiveStorageLoaderProvider.overrideWith(() => _Archived(archived)),
         ],
         if (emptied) ...[
           charaDetailRecordStorageLoaderProvider.overrideWith(_Emptied.new),
@@ -2166,6 +2178,100 @@ void main() {
       );
 
       expect(toasts, isEmpty);
+    });
+
+    testWidgets("pressing the name of a share the device holds opens the record table on that record, in the record "
+        "set it lives in; a share the device cannot tie to a record has no name to press", (tester) async {
+      await storeSession();
+      final active = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
+      final archived = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1)));
+      final activeNote = await storeNote(recordId: active.id, state: RecordShareState.shared);
+      final archivedNote = await storeNote(recordId: archived.id, state: RecordShareState.shared);
+      container = containerFor(
+        [
+          _sharesList([
+            _listed("0123456789", activeNote.keyHash),
+            _listed("1111111111", archivedNote.keyHash),
+            // Made on another device: this one holds no note of it.
+            _listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName),
+          ]),
+        ],
+        held: [active],
+        archived: [archived],
+      );
+      final router = RecordTableTabsRouter(const DialogLayer(child: Scaffold(body: RecordShareListCard(inView: true))));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router.config()),
+        ),
+      );
+      // A name drawn as a link: an ink with the text as its own child, which the card's buttons are not.
+      Finder links() => find.byWidgetPredicate((w) => w is InkWell && w.child is Text);
+      await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => links().evaluate().length == 2, describe: 'the names of the two noted shares');
+      expect(
+        find.ancestor(of: find.text(_serverCardName), matching: links()),
+        findsNothing,
+        reason: 'the share made elsewhere names no record here',
+      );
+
+      await tester.tap(links().at(0));
+      await tester.pumpAndSettle();
+      expect(find.text('レコードの表'), findsOneWidget, reason: 'the name opens the record table');
+      expect(container.read(charaDetailFocusRecordProvider), RecordFocusRequest(active.id, RecordSource.active));
+
+      container.read(charaDetailFocusRecordProvider.notifier).set(null);
+      await router.navigate(const PageRouteInfo('Home'));
+      await tester.pumpAndSettle();
+      await tester.tap(links().at(1));
+      await tester.pumpAndSettle();
+      expect(find.text('レコードの表'), findsOneWidget);
+      expect(
+        container.read(charaDetailFocusRecordProvider),
+        RecordFocusRequest(archived.id, RecordSource.archive),
+        reason: 'the request names the archive, so the table shows it whichever set it showed before',
+      );
+    });
+
+    testWidgets("pressing the name of an archived share shows the archive while the active set holds no record, so "
+        "the table that serves the request is built", (tester) async {
+      // The table is not built over a set with no record, so a switch left to it could not happen from here.
+      await storeSession();
+      final archived = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(1)));
+      final note = await storeNote(recordId: archived.id, state: RecordShareState.shared);
+      container = containerFor(
+        [
+          _sharesList([_listed("1111111111", note.keyHash)]),
+        ],
+        held: [],
+        archived: [archived],
+      );
+      final router = RecordTableTabsRouter(const DialogLayer(child: Scaffold(body: RecordShareListCard(inView: true))));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router.config()),
+        ),
+      );
+      Finder links() => find.byWidgetPredicate((w) => w is InkWell && w.child is Text);
+      await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => links().evaluate().isNotEmpty, describe: 'the name of the noted share');
+      expect(container.read(displayedRecordsProvider), isEmpty, reason: 'precondition: the table shows the empty set');
+
+      await tester.tap(links());
+      await tester.pumpAndSettle();
+
+      expect(find.text(RecordTableTabsRouter.recordTableText), findsOneWidget);
+      expect(container.read(charaDetailFocusRecordProvider), RecordFocusRequest(archived.id, RecordSource.archive));
+      expect(container.read(recordSourceProvider), RecordSource.archive);
+      expect(
+        container.read(displayedRecordsProvider).map((e) => e.id),
+        [archived.id],
+        reason: 'the table is built over the set the request names, which holds the record',
+      );
     });
 
     testWidgets("a share whose record was deleted is listed from the account's list and can be unshared; one with no "
