@@ -15,6 +15,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/chara_detail/share_record_dialog.dart';
+import '/src/gui/chara_detail/sharer_profile_section.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -169,6 +170,7 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
             },
             storesLoaded: recordOf != null,
             onUnshared: _refresh,
+            onTaglineAnswered: _refresh,
           ),
       ],
     };
@@ -221,6 +223,9 @@ class _AccountShareRow extends ConsumerWidget {
   final bool storesLoaded;
   final VoidCallback onUnshared;
 
+  /// Runs once the server has answered the share's tagline, so the list is asked for again and shows what it holds.
+  final VoidCallback onTaglineAnswered;
+
   const _AccountShareRow({
     super.key,
     required this.share,
@@ -228,6 +233,7 @@ class _AccountShareRow extends ConsumerWidget {
     required this.record,
     required this.storesLoaded,
     required this.onUnshared,
+    required this.onTaglineAnswered,
   });
 
   /// The record's name, or that it was deleted when the note names a record neither store holds. A share with no
@@ -247,43 +253,74 @@ class _AccountShareRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final evaluation = share.evaluation;
-    return Row(
-      spacing: 8,
+    final name = Text(
+      _title(ref) ?? "",
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.titleSmall,
+    );
+    final facts = [
+      Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
+      Text(share.sharedOn, style: theme.textTheme.bodyMedium),
+    ];
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: Text(
-            _title(ref) ?? "",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall,
-          ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: "$tr_record_share.open_shared".tr(),
+          icon: const Icon(Symbols.open_in_new_rounded),
+          onPressed: () => openSharedPage(share.url),
         ),
-        Text(evaluation?.toNumberString() ?? absentValueLabel, style: theme.textTheme.bodyMedium),
-        Text(share.sharedOn, style: theme.textTheme.bodyMedium),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: "$tr_record_share.open_shared".tr(),
-              icon: const Icon(Symbols.open_in_new_rounded),
-              onPressed: () => openSharedPage(share.url),
-            ),
-            IconButton(
-              tooltip: "$tr_record_share.copy_url".tr(),
-              icon: const Icon(Symbols.content_copy_rounded),
-              onPressed: () => copySharedUrl(share.url),
-            ),
-            IconButton(
-              tooltip: "$tr_record_share_list.unshare".tr(),
-              icon: const Icon(Symbols.public_off_rounded),
-              onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
-            ),
-          ],
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: "$tr_record_share.copy_url".tr(),
+          icon: const Icon(Symbols.content_copy_rounded),
+          onPressed: () => copySharedUrl(share.url),
+        ),
+        ?shareTaglineButton(ref.base, share, onAnswered: onTaglineAnswered),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: "$tr_record_share_list.unshare".tr(),
+          icon: const Icon(Symbols.public_off_rounded),
+          onPressed: () => UnshareRecordDialog.show(ref.base, shareId: share.id, onUnshared: onUnshared),
         ),
       ],
     );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= _oneLineMinWidth) {
+          return Row(
+            spacing: 8,
+            children: [
+              Expanded(child: name),
+              ...facts,
+              actions,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              spacing: 8,
+              children: [
+                Expanded(child: name),
+                ...facts,
+              ],
+            ),
+            Align(alignment: Alignment.centerRight, child: actions),
+          ],
+        );
+      },
+    );
   }
 }
+
+/// The narrowest row that keeps the name readable beside the evaluation value, the day and the four actions: those
+/// take about 310 px, which leaves the name about 170 px — some twelve characters of a card's name. Narrower, the
+/// actions move to a line of their own below.
+const double _oneLineMinWidth = 480;
 
 Widget _button(String label, IconData icon, VoidCallback onPressed) =>
     OutlinedButton.icon(icon: Icon(icon), label: Text(label), onPressed: onPressed);

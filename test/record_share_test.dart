@@ -71,13 +71,19 @@ typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String b
 /// The account's usage (`GET /api/me/usage`), which the account tab asks for beside its other requests, is answered
 /// apart from them: with the next of [usage], or once that is empty with the bare 404 of a Worker older than the
 /// route. Those requests go to [usageSent], not [sent].
+///
+/// With [me] given, `GET /api/me` — which the account tab's public profile asks for with each listing of the shares —
+/// is answered apart the same way: with the next of [me], or once that is empty with a 200 that carries no profile.
+/// Those requests go to [meSent].
 class _FakeServer implements HttpClientAdapter {
   final List<Object> answers;
   final List<Object> usage;
+  final List<Object>? me;
   final sent = <_Sent>[];
   final usageSent = <Uri>[];
+  final meSent = <Uri>[];
 
-  _FakeServer(this.answers, {this.usage = const []});
+  _FakeServer(this.answers, {this.usage = const [], this.me});
 
   @override
   Future<ResponseBody> fetch(
@@ -91,6 +97,10 @@ class _FakeServer implements HttpClientAdapter {
       return usageSent.length <= usage.length
           ? usage[usageSent.length - 1] as ResponseBody
           : ResponseBody.fromString("Not Found", 404);
+    }
+    if (me case final me? when options.method == "GET" && options.uri.path == "/api/me") {
+      meSent.add(options.uri);
+      return meSent.length <= me.length ? me[meSent.length - 1] as ResponseBody : _json(200, _me([]));
     }
     sent.add((
       method: options.method,
@@ -272,6 +282,10 @@ void main() {
   late ProviderContainer container;
   late List<Uri> opened;
 
+  /// Whether `GET /api/me` is answered apart from the other requests ([_FakeServer.me]): on the account tab, where
+  /// the public profile asks for it beside the shares' list.
+  var meApart = false;
+
   ProviderContainer containerFor(
     List<Object> answers, {
     String? trainerId,
@@ -283,8 +297,9 @@ void main() {
     ({List<CharaDetailRecord> records, List<ColumnSpec>? columns})? table,
     PathInfo? pathInfo,
     List<Object> usage = const [],
+    List<Object> me = const [],
   }) {
-    server = _FakeServer(answers, usage: usage);
+    server = _FakeServer(answers, usage: usage, me: meApart ? me : null);
     opened = [];
     final c = ProviderContainer(
       overrides: [
@@ -1216,6 +1231,9 @@ void main() {
     testWidgets('S4d (C1): a share begun under one account sends nothing more once another account has logged in', (
       tester,
     ) async {
+      // The account tab is mounted below, and its public profile asks for `GET /api/me` beside the lists.
+      meApart = true;
+      addTearDown(() => meApart = false);
       await storeSession();
       final records = ownRecords(9);
       final heldAnswer = Completer<Object>();
@@ -1395,6 +1413,8 @@ void main() {
 
   group('from the account tab', () {
     setUpAll(loadAppTranslations);
+    setUp(() => meApart = true);
+    tearDown(() => meApart = false);
 
     // S4b: the account tab (N3), mounted as the app routes to it. The view is tall enough for every card at once,
     // because the tab lists its cards lazily and one below the fold would not be found.
@@ -1539,6 +1559,205 @@ void main() {
       expect(find.textContaining('/ 300'), findsNothing);
       expect(find.text('ログアウト'), findsOneWidget, reason: 'the 404 is not taken as a lost login');
       expect(container.read(recordShareSessionProvider), isNotNull);
+    });
+
+    group('the texts a sharer publishes', () {
+      Map<String, Object?> meWith(Map<String, Object?> profile) => {..._me([]), "profile": profile};
+
+      Map<String, Object?> sentJson(int i) => jsonDecode(server.sent[i].body) as Map<String, dynamic>;
+
+      TextField field(WidgetTester tester, String label) =>
+          tester.widget<TextField>(find.widgetWithText(TextField, label));
+
+      Future<void> settleSent(WidgetTester tester, int count, String describe) async {
+        await settleUntilElapsing(tester, () => server.sent.length >= count, describe: describe);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('the profile is saved from its card over the value the server answered, and the card shows what '
+          'the server stored', (tester) async {
+        await storeSession();
+        container = containerFor(
+          [
+            _sharesList([]),
+            _json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": "123456789"}),
+          ],
+          me: [
+            _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": null})),
+          ],
+        );
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () => find.text('公開プロフィール').evaluate().isNotEmpty,
+          describe: "the public profile to show the server's answer",
+        );
+        expect(server.meSent.single.path, "/api/me");
+        expect(find.text('たづな'), findsOneWidget);
+        expect(find.text('未設定'), findsOneWidget, reason: 'no in-game id is written yet');
+
+        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.pumpAndSettle();
+        expect(find.text('共有のページと一覧に表示されます。ほかの人の名前や ID は書かないでください。'), findsOneWidget);
+        final save = find.widgetWithText(FilledButton, '保存');
+        expect(
+          tester.widget<FilledButton>(save).onPressed,
+          isNull,
+          reason: 'nothing differs from what the server holds',
+        );
+
+        await tester.enterText(find.widgetWithText(TextField, 'ゲーム内のトレーナー ID'), '12345678');
+        await tester.pump();
+        expect(find.text('9 桁か 12 桁の数字で入力してください。'), findsOneWidget);
+        expect(tester.widget<FilledButton>(save).onPressed, isNull, reason: 'eight digits are no id');
+
+        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), ' ハルウララ推し ');
+        await tester.enterText(find.widgetWithText(TextField, 'ゲーム内のトレーナー ID'), '123 456 789');
+        await tester.pump();
+        await tester.tap(save);
+        await settleSent(tester, 2, 'the profile to be written');
+
+        expect("${server.sent[1].method} ${server.sent[1].uri.path}", "PUT /api/me/profile");
+        expect(sentJson(1), {
+          "trainer_name": "ハルウララ推し",
+          "game_trainer_id": "123456789",
+          "previous": {"trainer_name": "たづな", "game_trainer_id": null},
+        });
+        expect(find.text('公開プロフィールの編集'), findsNothing, reason: 'a stored profile closes the dialog');
+        expect(find.text('ハルウララ推し'), findsOneWidget);
+        expect(find.text('123 456 789'), findsOneWidget);
+        expect(find.text('たづな'), findsNothing);
+      });
+
+      testWidgets('nothing closes the profile dialog while its save is out, so the card shows what the save stored', (
+        tester,
+      ) async {
+        final stored = Completer<Object>();
+        await storeSession();
+        container = containerFor(
+          [_sharesList([]), stored.future],
+          me: [
+            _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": null})),
+          ],
+        );
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () => find.text('たづな').evaluate().isNotEmpty,
+          describe: "the public profile to show the server's answer",
+        );
+        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextField, 'トレーナー名'), 'ハルウララ推し');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleUntilElapsing(tester, () => server.sent.length == 2, describe: 'the profile to be written');
+
+        // The three exits: the cancel button, the × and the barrier.
+        await tester.tap(find.widgetWithText(OutlinedButton, 'キャンセル'), warnIfMissed: false);
+        await tester.tap(find.byTooltip('保存せずに閉じる').first, warnIfMissed: false);
+        await tester.tapAt(const Offset(4, 4));
+        await tester.pump();
+        expect(find.text('公開プロフィールの編集'), findsOneWidget, reason: 'the dialog waits for the answer');
+
+        stored.complete(_json(200, {"trainer_name": "ハルウララ推し", "game_trainer_id": null}));
+        await settleUntilElapsing(
+          tester,
+          () => find.text('公開プロフィールの編集').evaluate().isEmpty,
+          describe: 'the stored profile to close the dialog',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('ハルウララ推し'), findsOneWidget, reason: 'the card shows what the save stored');
+        expect(find.text('たづな'), findsNothing);
+      });
+
+      testWidgets('a profile read that fails keeps the profile already read, and its edit', (tester) async {
+        await storeSession();
+        container = containerFor(
+          [_sharesList([]), _sharesList([])],
+          me: [
+            _json(200, meWith({"trainer_name": "たづな", "game_trainer_id": null})),
+            _json(503, {"error": "unavailable"}),
+          ],
+        );
+        await mountAccount(tester);
+        await settleUntilElapsing(
+          tester,
+          () => find.text('たづな').evaluate().isNotEmpty,
+          describe: "the public profile to show the server's answer",
+        );
+
+        await tester.tap(find.byTooltip('もう一度確かめる'));
+        await settleUntilElapsing(tester, () => server.meSent.length == 2, describe: 'the profile to be asked again');
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+
+        expect(find.text('たづな'), findsOneWidget, reason: 'a failed read says nothing about the profile');
+        await tester.tap(find.byTooltip('公開プロフィールを編集'));
+        await tester.pumpAndSettle();
+        expect(find.text('公開プロフィールの編集'), findsOneWidget);
+      });
+
+      Future<void> openTagline(WidgetTester tester, List<Object> answers) async {
+        await storeSession();
+        container = containerFor([
+          _sharesList([
+            {..._listed("0123456789", secretHash(newClientKey()), cardName: _serverCardName), "tagline": "古い文"},
+          ]),
+          ...answers,
+        ]);
+        await mountAccount(tester);
+        await tester.tap(find.byTooltip('宣伝文句を編集'));
+        await tester.pumpAndSettle();
+        expect(find.text('この共有のページと一覧に表示されます。'), findsOneWidget);
+        expect(field(tester, '宣伝文句').controller?.text, '古い文', reason: "the edit starts from the list's tagline");
+        await tester.enterText(find.widgetWithText(TextField, '宣伝文句'), '新しい文');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleSent(tester, 2, 'the tagline to be written');
+        expect("${server.sent[1].method} ${server.sent[1].uri.path}", "PUT /api/shares/0123456789/tagline");
+        expect(sentJson(1), {"tagline": "新しい文", "previous": "古い文"});
+      }
+
+      testWidgets('a tagline changed elsewhere is not overwritten: the dialog keeps the input and asks to load what '
+          'the server holds', (tester) async {
+        await openTagline(tester, [
+          _json(409, {"error": "changed", "tagline": "別の端末の文"}),
+          // The list is asked for again, so the row's next edit starts from what the server holds.
+          _sharesList([
+            {..._listed("0123456789", secretHash(newClientKey()), cardName: _serverCardName), "tagline": "別の端末の文"},
+          ]),
+        ]);
+        await settleUntilElapsing(tester, () => server.sent.length == 3, describe: 'the list to be asked for again');
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+
+        expect(find.text('ほかの端末で変更されていたため、保存しませんでした。'), findsOneWidget);
+        expect(field(tester, '宣伝文句').controller?.text, '新しい文', reason: 'the input is kept');
+        expect(find.text('宣伝文句の編集'), findsOneWidget, reason: 'the dialog stays open');
+        expect(server.sent.where((s) => s.method == "PUT"), hasLength(1), reason: 'nothing is sent over the change');
+
+        await tester.tap(find.text('今の内容を読み込む'));
+        await tester.pump();
+        expect(field(tester, '宣伝文句').controller?.text, '別の端末の文');
+      });
+
+      testWidgets("a tagline refused for the account's day says so and keeps the input; so does a server with no "
+          'tagline route', (tester) async {
+        await openTagline(tester, [
+          _json(429, {"error": "daily_limit", "scope": "account"}),
+          ResponseBody.fromString("Not Found\n", 404),
+        ]);
+
+        expect(find.text('今日の書き換えの上限に達しました。日本時間 9:00 以降にお試しください。'), findsOneWidget);
+        expect(field(tester, '宣伝文句').controller?.text, '新しい文');
+
+        await tester.tap(find.widgetWithText(FilledButton, '保存'));
+        await settleSent(tester, 3, 'the tagline to be written again');
+        expect(find.text('サーバーがまだこの機能に対応していません。しばらくしてからお試しください。'), findsOneWidget);
+        expect(field(tester, '宣伝文句').controller?.text, '新しい文');
+      });
     });
 
     testWidgets("logged in, a session the server drops leaves the account shown as the login's hint named it", (

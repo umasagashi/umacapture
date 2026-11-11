@@ -8,9 +8,11 @@ import '/src/gui/chara_detail/account_sync_section.dart';
 import '/src/gui/chara_detail/account_usage_card.dart';
 import '/src/gui/chara_detail/record_share_list_card.dart';
 import '/src/gui/chara_detail/share_account_section.dart';
+import '/src/gui/chara_detail/sharer_profile_section.dart';
 import '/src/gui/common.dart';
 
-/// The account tab: the device's login to the sharing server, then what the account carries — sync and the shares —
+/// The account tab: the device's login to the sharing server, then what the account carries — sync, the public profile
+/// shown beside the shares, and the shares —
 /// and, last, deleting the account. Each card decides from the session whether it has anything to show, so a card
 /// that would be empty is not drawn at all.
 @RoutePage()
@@ -30,6 +32,7 @@ class AccountPage extends StatelessWidget {
         const AccountCard(),
         AccountUsageCard(inView: inView),
         const AccountSyncCard(),
+        const SharerProfileCard(),
         RecordShareListCard(inView: inView),
         const AccountDeletionCard(),
       ],
