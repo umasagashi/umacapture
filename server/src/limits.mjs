@@ -437,7 +437,7 @@ export const SYNC_REPLACE_RESERVE = Object.freeze({
 });
 
 /**
- * Bytes the objects one account's current root references may take: about 550 records with PNGs or
+ * Bytes the objects one account's current root references may take: about 500 records with PNGs or
  * 2,000 with reduced JPEGs. What it no longer references does not count (ACCOUNT_SYNC_HIDDEN_BYTES_CAP).
  */
 export const ACCOUNT_SYNC_BYTES_CAP = 2 * 1024 ** 3;

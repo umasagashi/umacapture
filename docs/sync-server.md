@@ -121,11 +121,12 @@ rest of the account. The hourly run continues it (`deletions`, [The hourly run](
 
 ## Schema
 
-`server/migrations/0003_sync.sql`:
+`server/migrations/0003_sync.sql`, with the default of `sync_accounts.image_form` from
+`server/migrations/0011_sync_image_form_default.sql`:
 
 | Table | Key | What a row is |
 |---|---|---|
-| `sync_accounts` | `account_id` | An account that synced: `generation`, `root_name`, `image_form` (`'none'` until set), `stored_bytes`, `hidden_bytes` (JSON, UTC day to bytes), `record_count`, `last_synced_day`, and its day's counters `daily_day`, `daily_requests`, `daily_rows_read`, `daily_rows_written` |
+| `sync_accounts` | `account_id` | An account that synced: `generation`, `root_name`, `image_form` (`'jpeg'` until set), `stored_bytes`, `hidden_bytes` (JSON, UTC day to bytes), `record_count`, `last_synced_day`, and its day's counters `daily_day`, `daily_requests`, `daily_rows_read`, `daily_rows_written` |
 | `sync_objects` | `account_id`, `name` | A name the account stored, or that its list names before it is stored: `kind` (`'body'`, `'png'`, `'jpeg'`, `'part'`, `'root'`), `size`, a body's `binding` (its image binding and icon), a part's `slot` and `record_count`, `refs`, `stored_at`, `ref_count`, `pending`, and the hide state `hidden_at`, `hidden_since`, `hide_by`, `marker` |
 | `sync_writes` | `account_id`, `write_by` | A request about to write under an account's prefix in B2: `names` (JSON), `written_at`, and `space` (added by `0009_share_images.sql`): `'a'` for sync's prefix `a/<account id>/`, `'s'` for the shared images' `s/<account id>/`, where a name is `<share id>/<bundle name>`. It references no account, so it outlives the account it names. The table keeps its name although it is the ledger of both |
 | `sync_daily` | `day` | Sync's counters of one UTC day over every account: `requests`, `rows_read`, `rows_written`, and `delete_rows`, the part of `rows_written` account deletions wrote |

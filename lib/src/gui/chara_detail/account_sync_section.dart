@@ -1,12 +1,15 @@
-// N8: the account tab's sync card — the switch, the account's image form, the state of the rounds
-// and why they stop, the counts the last rounds told, and syncing now — N9: the sync icon of the table's toolbar,
-// whose hover tells the line N8 leads with — and N11: the dialog that turns sync on.
+// N8: the account tab's sync card — while sync is on, the state of the rounds, why they stop and the counts the last
+// rounds told, with syncing now at its right end; then the switch and the account's image form, as the settings page
+// shows its settings — N9: the sync icon of the table's toolbar, whose hover tells the line N8 leads with — and N11:
+// the dialog that turns sync on.
 //
 // What either decides to tell is the lib's: the switch and the last round ([recordSyncProvider]), how far the round
-// running has got with a long step ([syncProgressProvider]), why the rounds stop ([syncHaltProvider]), whether the device holds a server to sync with ([syncServerProvider]), the account's image form
-// ([syncImageFormProvider]) and what setting it tells ([syncImageFormSendsWhatWasHeld]), and before sync is on what a
-// round would move and the memos that would hold it back ([RecordSync.beforeOn]).
+// running has got with a long step ([syncProgressProvider]), why the rounds stop ([syncHaltProvider]), whether the
+// device holds a server to sync with ([syncServerProvider]), the account's image form ([syncImageFormProvider]) and
+// what setting it tells ([syncImageFormSendsWhatWasHeld]), and before sync is on what a round would move, the memos
+// that would hold it back ([RecordSync.beforeOn]) and how long it would take ([syncRoundEstimate]).
 import 'dart:async';
+import 'dart:math';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -73,6 +76,10 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
         ),
   );
 
+  /// Turning sync on goes through the dialog that tells what it moves (N11); turning it off is at once.
+  void _setOn(bool turnOn) =>
+      turnOn ? SyncTurnOnDialog.show(ref.base) : unawaited(ref.read(recordSyncProvider.notifier).setOn(false));
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -92,69 +99,64 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
     final told = state.told;
     final halt = ref.watch(syncHaltProvider);
     final counts = state.countsFor(session.accountId);
-    final subtitle = on ? _roundsLine(state, progress) : "$tr_account_sync.off".tr();
     Widget line(String key, int count) =>
         Text("$tr_account_sync.$key".tr(namedArgs: {"count": "$count"}), style: theme.textTheme.bodyMedium);
-    // The card's title names sync, so the state of the rounds leads the card, beside the switch.
-    return _card([
-      ListTile(
-        title: Text(subtitle),
-        trailing: server == null
-            ? null
-            : Switch(
-                value: on,
-                onChanged: (turnOn) => turnOn
-                    ? SyncTurnOnDialog.show(ref.base)
-                    : unawaited(ref.read(recordSyncProvider.notifier).setOn(false)),
-              ),
-      ),
-      if (on)
-        _padded(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            spacing: 8,
-            children: [
-              // The share of the long step the line above tells, under it while the step runs.
-              if (progress != null) LinearProgressIndicator(value: progress.fraction),
-              if (halt != null) NoteCard(description: Text(_haltLine(halt, state), style: theme.textTheme.bodyMedium)),
-              if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
-                if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
-                if (told.waitingForTheDay > 0) line("waiting_for_the_day", told.waitingForTheDay),
-                if (told.waitingForBinding > 0) line("waiting_for_binding", told.waitingForBinding),
-                if (told.imagesUndone case final undone?) line("images_undone", undone.records),
-                if (told.withheld > 0) line("withheld", told.withheld),
-              ],
-              if (counts != null)
-                Text(
-                  "$tr_account_sync.counts".tr(
-                    namedArgs: {
-                      "restored": "${counts.restored}",
-                      "split_off": "${counts.splitOff}",
-                      "added": "${counts.added}",
-                    },
-                  ),
-                  style: theme.textTheme.bodyMedium,
-                ),
-              if (server != null) ...[
-                _AccountImageForm(
-                  enabled: !_settingForm,
-                  onChanged: (from, to) => _setForm(server, from, to),
-                  note: _formNote,
-                ),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  children: [
-                    OutlinedButton.icon(
-                      icon: const Icon(Symbols.sync_rounded),
-                      label: Text("$tr_account_sync.sync_now".tr()),
-                      onPressed: state.running ? null : _syncNow,
-                    ),
-                  ],
-                ),
-              ],
-            ],
+    // What the state of the rounds tells beyond its line: the share of the long step the line tells, why the rounds
+    // stop, and what the last rounds told.
+    final details = [
+      if (progress != null) LinearProgressIndicator(value: progress.fraction),
+      if (halt != null) NoteCard(description: Text(_haltLine(halt, state), style: theme.textTheme.bodyMedium)),
+      if (told != null && halt != SyncHalt.longMemos && halt != SyncHalt.deleting) ...[
+        if (told.waitingForRoom > 0) line("waiting_for_room", told.waitingForRoom),
+        if (told.waitingForTheDay > 0) line("waiting_for_the_day", told.waitingForTheDay),
+        if (told.waitingForBinding > 0) line("waiting_for_binding", told.waitingForBinding),
+        if (told.imagesUndone case final undone?) line("images_undone", undone.records),
+        if (told.withheld > 0) line("withheld", told.withheld),
+      ],
+      if (counts != null)
+        Text(
+          "$tr_account_sync.counts".tr(
+            namedArgs: {
+              "restored": "${counts.restored}",
+              "split_off": "${counts.splitOff}",
+              "added": "${counts.added}",
+            },
           ),
+          style: theme.textTheme.bodyMedium,
         ),
+    ];
+    // While sync is on, the state of the rounds leads the card, with syncing now at its right end; the settings follow,
+    // as the settings page shows its own.
+    return _card([
+      if (on) ...[
+        ListTile(
+          title: Text(_roundsLine(state, progress)),
+          trailing: server == null
+              ? null
+              : OutlinedButton.icon(
+                  icon: const Icon(Symbols.sync_rounded),
+                  label: Text("$tr_account_sync.sync_now".tr()),
+                  onPressed: state.running ? null : _syncNow,
+                ),
+        ),
+        if (details.isNotEmpty)
+          _padded(Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: details)),
+        if (server != null) const Divider(height: 1),
+      ],
+      if (server != null) ...[
+        FormTile(
+          divider: false,
+          title: Text("$tr_account_sync.enable".tr()),
+          trailing: Switch(value: on, onChanged: _setOn),
+          onTap: () => _setOn(!on),
+        ),
+        if (on)
+          _AccountImageForm(
+            enabled: !_settingForm,
+            onChanged: (from, to) => _setForm(server, from, to),
+            note: _formNote,
+          ),
+      ],
     ]);
   }
 
@@ -256,14 +258,18 @@ class _AccountImageForm extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _ImageFormChoice(value: read, onChanged: enabled && read != null ? (to) => onChanged(read, to) : null),
-        if (form.hasError) Text("$tr_account_sync.image_form.unread".tr(), style: theme.textTheme.bodyMedium),
-        if (note != null) Text(note, style: theme.textTheme.bodyMedium),
+        if (form.hasError) _padded(Text("$tr_account_sync.image_form.unread".tr(), style: theme.textTheme.bodyMedium)),
+        if (note != null) _padded(Text(note, style: theme.textTheme.bodyMedium)),
       ],
     );
   }
 }
 
-/// The three image forms (S-09), [value] chosen; none is where it is not known. Null [onChanged] disables them.
+/// The three image forms (S-09) as a dropdown the way the settings page shows a choice (`DropdownButtonWidget`, which
+/// reads and writes a setting of the device's own and so cannot hold a form the server holds and a set that can fail):
+/// [value] chosen, none where it is not known. Each option's tooltip tells what it sends and how many records the
+/// account syncs with it, and the dropdown's that the form is the account's, every device's. Null [onChanged] disables
+/// it.
 class _ImageFormChoice extends StatelessWidget {
   final String? value;
   final ValueChanged<String>? onChanged;
@@ -272,31 +278,25 @@ class _ImageFormChoice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final form = "$tr_account_sync.image_form";
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text("$form.title".tr(), style: theme.textTheme.titleSmall),
-        RadioGroup<String>(
-          groupValue: value,
-          onChanged: (to) {
-            if (to != null && to != value) onChanged?.call(to);
+    final value = this.value;
+    return FormTile(
+      divider: false,
+      title: Text("$form.title".tr()),
+      trailing: Disabled(
+        disabled: onChanged == null,
+        child: ChoiceDropdown<String>(
+          values: syncImageForms,
+          selected: value,
+          label: (option) => "$form.option.$option.label".tr(),
+          itemTooltip: (option) => "$form.option.$option.tooltip".tr(),
+          tooltip: "$form.tooltip".tr(),
+          enabled: onChanged != null,
+          onSelected: (to) {
+            if (to != value) onChanged?.call(to);
           },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final option in syncImageForms)
-                RadioListTile<String>(
-                  value: option,
-                  enabled: onChanged != null,
-                  title: Text("$form.option.$option.label".tr()),
-                  subtitle: option == 'none' ? Text("$form.option.none.description".tr()) : null,
-                ),
-            ],
-          ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -320,8 +320,11 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
 
   /// What a round would move; null where it could not be read — the dialog says so, and still turns sync on: the
   /// counts tell before, and turning on without them loses nothing the first round would not tell.
-  ({int toSend, int toReceive})? _counts;
+  SyncCountsBeforeOn? _counts;
   int? _longMemos;
+
+  /// The records the device holds without a binding, which the first round works out before it sends them.
+  var _unbound = 0;
 
   /// The form the user chose here; null until they choose one.
   String? _chosen;
@@ -341,6 +344,7 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
         _loading = false;
         _counts = before?.counts;
         _longMemos = before?.longMemos;
+        _unbound = before?.unbound ?? 0;
       });
     }
   }
@@ -382,6 +386,18 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
     final counts = _counts;
     final longMemos = _longMemos;
     final busy = _loading || form.isLoading || _turning;
+    final chosen = _chosen ?? read;
+    // C: how long the first round takes, in the form chosen here, where the counts were read and something moves.
+    final estimate = switch ((counts, chosen)) {
+      ((:final toSend, :final toReceive, :final imagesToSend)?, final form?) => syncRoundEstimate(
+        toSend: toSend,
+        toReceive: toReceive,
+        imagesToSend: imagesToSend,
+        unbound: _unbound,
+        form: form,
+      ),
+      _ => null,
+    };
     Text body(String text) => Text(text, style: theme.textTheme.bodyMedium);
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -396,10 +412,10 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
           ),
         if (longMemos != null && longMemos > 0)
           NoteCard(description: body("$dialog.long_memos".tr(namedArgs: {"count": "$longMemos"}))),
+        if (estimate != null) body(_estimateLine(estimate)),
         body("$dialog.first_round".tr()),
         body("$dialog.no_image_archive".tr()),
-        body("$dialog.binding".tr()),
-        _ImageFormChoice(value: _chosen ?? read, onChanged: busy ? null : (to) => setState(() => _chosen = to)),
+        _ImageFormChoice(value: chosen, onChanged: busy ? null : (to) => setState(() => _chosen = to)),
         if (form.hasError) body("$tr_account_sync.image_form.unread".tr()),
         if ((read, _chosen) case (final from?, final to?) when syncImageFormSendsWhatWasHeld(from, to))
           body("$tr_account_sync.image_form.sends_held".tr()),
@@ -434,4 +450,27 @@ class _SyncTurnOnDialogState extends ConsumerState<SyncTurnOnDialog> {
       ),
     );
   }
+}
+
+/// The guide to the first round ([SyncRoundEstimate]) as the dialog tells it: the range of its time, and the days it
+/// spreads over where they are more than one.
+String _estimateLine(SyncRoundEstimate estimate) {
+  final dialog = "$tr_account_sync.turn_on";
+  final (shortest, longest) = (_roughTime(estimate.shortest), _roughTime(estimate.longest));
+  final time = shortest == longest
+      ? shortest
+      : "$dialog.estimate.range".tr(namedArgs: {"from": shortest, "to": longest});
+  return [
+    "$dialog.estimate.time".tr(namedArgs: {"time": time}),
+    if (estimate.days > 1) "$dialog.estimate.days".tr(namedArgs: {"days": "${estimate.days}"}),
+  ].join();
+}
+
+/// [time] to the figure a guide carries: whole minutes under ten, tens of minutes under an hour, then whole hours.
+String _roughTime(Duration time) {
+  final minutes = (time.inSeconds / 60).ceil();
+  final shown = minutes < 10 ? max(1, minutes) : (minutes / 10).round() * 10;
+  return shown < 60
+      ? "$tr_account_sync.turn_on.estimate.minutes".tr(namedArgs: {"count": "$shown"})
+      : "$tr_account_sync.turn_on.estimate.hours".tr(namedArgs: {"count": "${(minutes / 60).round()}"});
 }

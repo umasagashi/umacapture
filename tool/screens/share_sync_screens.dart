@@ -340,7 +340,8 @@ class _Sync extends RecordSync {
   _Sync(this.initial, {this.countsUnread = false, this.longMemoCount = 0});
 
   final RecordSyncState initial;
-  final ({int toSend, int toReceive}) counts = (toSend: 12, toReceive: 30);
+  // Every record to send still has its images to send, and none lacks a binding: a device whose records are all bound.
+  final SyncCountsBeforeOn counts = (toSend: 12, toReceive: 30, imagesToSend: 12);
   final bool countsUnread;
   final int longMemoCount;
 
@@ -352,7 +353,7 @@ class _Sync extends RecordSync {
   /// Unread counts are null, as [RecordSync.beforeOn] gives them when the server's list could not be read.
   @override
   Future<SyncBeforeOn?> beforeOn([SyncServer? server]) async =>
-      (longMemos: longMemoCount, counts: countsUnread ? null : counts);
+      (longMemos: longMemoCount, unbound: 0, counts: countsUnread ? null : counts);
 
   @override
   Future<void> setOn(bool on) async {}

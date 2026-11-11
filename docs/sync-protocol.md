@@ -49,7 +49,7 @@ An account's sync settings are the server's, shared by every device of the accou
 - `PUT /api/sync/settings` `{image_form}` → `200 {image_form}`. `400 invalid_payload`, `field`
   `image_form`, for any other value.
 
-`image_form` is `"png"`, `"jpeg"` (reduced JPEG) or `"none"`, and `"none"` until the account sets
+`image_form` is `"png"`, `"jpeg"` (reduced JPEG) or `"none"`, and `"jpeg"` until the account sets
 one. It decides which new images a put may store (see [Images](#images)); every request after the
 `PUT` answers reads the new form. There is no endpoint that resends images after a change: a device
 puts what the form lets it put from then on.

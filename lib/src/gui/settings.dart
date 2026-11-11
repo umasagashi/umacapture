@@ -113,43 +113,16 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(provider);
     final values = ref.read(provider.notifier).values;
-    final theme = Theme.of(context);
     return ListTile(
       title: Text(title),
       subtitle: Text(description),
-      trailing: PopupMenuButton<T>(
-        // disable tool tip
-        tooltip: '',
-        initialValue: current,
-        itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
-          for (final item in values)
-            PopupMenuItem<T>(
-              value: item,
-              child: tooltip == null
-                  ? Text(name(item))
-                  : Tooltip(
-                      message: tooltip!(item),
-                      child: SizedBox(width: double.infinity, child: Text(name(item))),
-                    ),
-            ),
-        ],
+      trailing: ChoiceDropdown<T>(
+        values: values,
+        selected: current,
+        label: name,
+        itemTooltip: tooltip,
+        style: style,
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
-        // Mirrors the choice dropdown in chara_detail/common.dart: no Container
-        // `alignment` (which would expand to fill the ListTile and trip the
-        // "trailing widget consumes the entire tile width" assertion). The label is
-        // centred via the Text, and the minWidth lets the box grow with longer labels
-        // instead of wrapping them.
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 100),
-            child: Text(name(current), textAlign: TextAlign.center, style: style),
-          ),
-        ),
       ),
       onTap: () => ref.read(provider.notifier).next(),
     );

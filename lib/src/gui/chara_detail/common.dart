@@ -643,44 +643,17 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
     // logic mode while a single item is selected); show it greyed with the
     // selected option's disabled tooltip, matching the former chip behaviour.
     final allDisabled = values.isNotEmpty && values.every(disabledSet.contains);
-    // A single-select dropdown mirroring the settings DropdownButtonWidget: the
-    // current label sits in a bottom-bordered box that opens a popup menu.
-    final button = PopupMenuButton<T>(
-      tooltip: "",
+    final button = ChoiceDropdown<T>(
+      values: values,
+      selected: selected,
+      label: _label,
+      itemTooltip: tooltip ? _tooltip : null,
+      disabled: disabledSet,
+      // A disabled option explains why it cannot be chosen instead of what it does.
+      disabledTooltip: _disabledTooltip,
       enabled: !allDisabled,
-      initialValue: selected,
-      itemBuilder: (context) => [
-        for (final value in values)
-          PopupMenuItem<T>(
-            value: value,
-            enabled: !disabledSet.contains(value),
-            child: SizedBox(
-              width: double.infinity,
-              // A disabled option explains why it cannot be chosen instead of what it does.
-              child: disabledSet.contains(value)
-                  ? Tooltip(message: _disabledTooltip(value), child: Text(_label(value)))
-                  : tooltip
-                  ? Tooltip(message: _tooltip(value), child: Text(_label(value)))
-                  : Text(_label(value)),
-            ),
-          ),
-      ],
-      onSelected: (value) => onSelected(value),
-      // No `alignment` here: a Container with an alignment expands to fill the
-      // parent's bounded constraints, which would make the ListTile trailing
-      // consume the whole tile width. Centring is done via the Text instead, and
-      // the minWidth lives on the Text so the box still grows with longer labels.
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 100),
-          child: Text(_label(selected), textAlign: TextAlign.center, style: theme.textTheme.titleSmall),
-        ),
-      ),
+      style: theme.textTheme.titleSmall,
+      onSelected: onSelected,
     );
     return FormTile(
       title: title,
