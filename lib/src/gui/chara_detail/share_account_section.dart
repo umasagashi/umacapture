@@ -2,8 +2,8 @@
 // out) and, set apart below the rest of the tab, deleting the account (and continuing a
 // deletion cut short).
 //
-// Nothing here reaches the server while it is built: what it shows comes from the stored session alone, and only a
-// button the user pressed sends a request.
+// Nothing here reaches the server while it is built: what it shows comes from the stored session and account hint
+// alone, and only a button the user pressed sends a request.
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -69,9 +69,13 @@ class _AccountCardState extends ConsumerState<AccountCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final session = ref.watch(recordShareSessionProvider);
+    final hint = session == null ? ref.watch(recordShareAccountHintProvider) : null;
     final (String stateText, List<Widget> actions) = switch (session) {
       null => (
-        "$tr_share_account.logged_out".tr(),
+        [
+          "$tr_share_account.logged_out".tr(),
+          if (hint != null) "$tr_share_account.last_account".tr(namedArgs: {"account": hint}),
+        ].join("\n"),
         [_button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press)],
       ),
       ShareSession(deleting: true) => ("$tr_share_account.deleting".tr(), const <Widget>[]),

@@ -2,8 +2,8 @@
 //
 // Shared by web and Windows; the two log in differently only in [RecordShareSession.beginLogin] and in how a
 // [LoginAttempt] completes by itself. The
-// session lives in the `recordShares` store beside the device's share notes, so both go together when the
-// store is deleted. Nothing here runs at start-up: the store is read, and the server is reached only from an
+// session and the account hint live in the `recordShares` store beside the device's share notes, so all go together
+// when the store is deleted. Nothing here runs at start-up: the store is read, and the server is reached only from an
 // operation the user started.
 import 'dart:async';
 import 'dart:convert';
@@ -25,8 +25,14 @@ import '/src/preference/storage_box.dart';
 
 part 'record_share_session.mapper.dart';
 
-/// The key the session is kept under in the `recordShares` store; every other key there is a share note.
+/// The key the session is kept under in the `recordShares` store.
 const shareSessionKey = "session";
+
+/// The key the account hint is kept under in the `recordShares` store ([RecordShareAccountHint]).
+const shareAccountHintKey = "account_hint";
+
+/// The keys of the `recordShares` store that hold the login's own data; every other key there is a share note.
+const shareLoginKeys = {shareSessionKey, shareAccountHintKey};
 
 /// What `POST /api/auth/claim` answered, kept as the server named it.
 ///
@@ -232,9 +238,9 @@ class LoginAttempt {
   }
 
   Future<LoginOutcome> _completeOnCallback(LoginListener listener) async {
-    final String code;
+    final LoginCallback callback;
     try {
-      code = await listener.code;
+      callback = await listener.callback;
     } on LoginListenClosed catch (e) {
       _finished = true;
       // The listener outlives the server's login, so a listener that timed out waited past an expired login.
@@ -243,7 +249,7 @@ class LoginAttempt {
     if (_finished) {
       return LoginOutcome.cancelled;
     }
-    return _claim(code: code);
+    return _claim(callback: callback);
   }
 
   /// Claims the login with the cookie the login page left in this browser. Called from the dialog's login button;
@@ -256,11 +262,11 @@ class LoginAttempt {
     return _claim();
   }
 
-  Future<LoginOutcome> _claim({String? code}) {
+  Future<LoginOutcome> _claim({LoginCallback? callback}) {
     if (_finished) {
       return Future.value(LoginOutcome.cancelled);
     }
-    return _claiming ??= _owner._claim(_secret, code: code).then((outcome) {
+    return _claiming ??= _owner._claim(_secret, callback: callback).then((outcome) {
       _claiming = null;
       if (outcome != LoginOutcome.incomplete && outcome != LoginOutcome.unreachable) {
         _finished = true;
@@ -330,7 +336,9 @@ class RecordShareSession extends Notifier<ShareSession?> {
     return LoginAttempt._(this, secret, listener);
   }
 
-  Future<LoginOutcome> _claim(String secret, {String? code}) async {
+  /// Claims the login with [secret]: with the callback's proof and account hint where a listener received them
+  /// (Windows), with the login's cookie otherwise (web).
+  Future<LoginOutcome> _claim(String secret, {LoginCallback? callback}) async {
     final ShareAnswer answer;
     try {
       answer = await sendShareRequest(
@@ -338,7 +346,8 @@ class RecordShareSession extends Notifier<ShareSession?> {
         timeout: ref.read(shareRequestTimeoutProvider),
         "POST",
         "/api/auth/claim",
-        data: {"s": secret, "code": ?code},
+        // The hint is sent only when the callback carried one: a server that predates it refuses the field.
+        data: {"s": secret, "code": ?callback?.code, "hint": ?callback?.hint},
       );
     } on DioException {
       return LoginOutcome.unreachable;
@@ -350,6 +359,9 @@ class RecordShareSession extends Notifier<ShareSession?> {
         if (session == null) {
           return LoginOutcome.unreachable;
         }
+        // Every claim replaces the hint, so one left from another account never names this login's.
+        final hint = answer.body?["account_hint"];
+        await ref.read(recordShareAccountHintProvider.notifier)._keep(hint is String && hint.isNotEmpty ? hint : null);
         await _keep(session);
         await ref.read(recordSharesProvider.notifier).keepOnlyAccount(session.accountId);
         logger.i("Logged in to the sharing server. deleting=${session.deleting}");
@@ -561,10 +573,12 @@ class RecordShareSession extends Notifier<ShareSession?> {
     return true;
   }
 
-  /// Drops the session and every share note: the notes index this account's shares, and another account logging
-  /// in next must not see them as its own. The user ended the session, or the account; the server did not drop it.
+  /// Drops the session, the account hint and every share note: the notes index this account's shares, and another
+  /// account logging in next must not see them as its own. The user ended the session, or the account; the server
+  /// did not drop it, so nothing is left to tell which account it was.
   Future<void> _forgetAll() async {
     ref.read(recordShareSessionDroppedProvider.notifier)._set(false);
+    await ref.read(recordShareAccountHintProvider.notifier)._keep(null);
     state = null;
     for (final (:key, value: _) in _box.entries().toList()) {
       await _box.delete(key);
@@ -589,3 +603,27 @@ class RecordShareSessionDropped extends Notifier<bool> {
 final recordShareSessionDroppedProvider = NotifierProvider<RecordShareSessionDropped, bool>(
   RecordShareSessionDropped.new,
 );
+
+/// The account the device last logged in with, as the server masked its address (`ke****@gmail.com`), or null.
+///
+/// Kept on the device only, beside the session and apart from it: a session the server drops leaves the hint, so the
+/// screen can tell a user whose session ended which account it was. Every claim replaces it, and a logout or the
+/// account's deletion removes it. Only [RecordShareSession] writes it. It is shown, never logged: every log line
+/// becomes a crash report's breadcrumb.
+class RecordShareAccountHint extends Notifier<String?> {
+  StorageBox get _box => StorageBox(StorageBoxKey.recordShares);
+
+  @override
+  String? build() => _box.pull<String>(shareAccountHintKey);
+
+  Future<void> _keep(String? hint) async {
+    state = hint;
+    if (hint == null) {
+      await _box.delete(shareAccountHintKey);
+    } else {
+      await _box.push(shareAccountHintKey, hint);
+    }
+  }
+}
+
+final recordShareAccountHintProvider = NotifierProvider<RecordShareAccountHint, String?>(RecordShareAccountHint.new);

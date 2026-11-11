@@ -16,17 +16,22 @@ export 'login_receiver_io.dart' if (dart.library.js_interop) 'login_receiver_web
 /// accepted: the listener ignores every callback but its own login's.
 const loginListenSeconds = 600;
 
+/// What a login's callback hands the app: the proof ([code]), and the sealed account hint ([hint]) when the
+/// callback carried one. The hint is opaque and goes back to the claim exactly as received; null means the claim
+/// must not send one, since a server that predates the hint refuses the field.
+typedef LoginCallback = ({String code, String? hint});
+
 /// A listener waiting for one login's callback.
 abstract interface class LoginListener {
   /// The loopback port, known before the start page is opened, so it can be named there.
   int get port;
 
-  /// The proof from the login's callback.
+  /// The login's callback.
   ///
   /// Fails with [LoginListenClosed] when the listener closes without one.
-  Future<String> get code;
+  Future<LoginCallback> get callback;
 
-  /// Stops waiting and releases the port. [code] fails with [LoginListenClosed] unless it is done.
+  /// Stops waiting and releases the port. [callback] fails with [LoginListenClosed] unless it is done.
   Future<void> close();
 }
 
