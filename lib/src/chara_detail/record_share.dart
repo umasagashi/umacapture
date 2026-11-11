@@ -351,7 +351,8 @@ final class ShareUnreachable extends ShareOutcome {
 enum UnshareOutcome { unshared, forbidden, loginRequired, unreachable, failed }
 
 /// One share of the account, as `GET /api/me/shares` lists it. [cardName] is the trainee's card as the server's name
-/// tables label it (its own form, not the app's), or null when the listing names none.
+/// tables label it (its own form, not the app's), or null when the listing names none. [evaluation] is the game's
+/// evaluation value the listing carries, or null when it carries none (an inheritance-only record has none).
 /// [imagesPending] is whether the server still waits for the images the share declared ([_imagesPending]).
 typedef AccountShare = ({
   String id,
@@ -359,6 +360,7 @@ typedef AccountShare = ({
   String sharedOn,
   String clientKeyHash,
   String? cardName,
+  int? evaluation,
   bool imagesPending,
 });
 
@@ -418,6 +420,10 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   StorageBox get _box => StorageBox(StorageBoxKey.recordShares);
 
   RecordShareSession get _session => ref.read(recordShareSessionProvider.notifier);
+
+  /// The requests this device sent that can make the server hold a note's share or change what it holds, by the
+  /// note's key hash; [refreshFromServer] reads from them which notes a list may decide.
+  final _sends = _Sends();
 
   @override
   Map<String, RecordShare> build() {
@@ -520,40 +526,53 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       if (bundle == null || id == null || url == null || sharedOn == null) {
         continue;
       }
-      ShareAnswer? answer;
-      for (var attempt = 0; attempt < 2; attempt++) {
-        if (attempt > 0) {
-          await Future<void>.delayed(ref.read(shareImagesRetryDelayProvider));
+      final keys = [outcome.entry.keyHash];
+      _sends.begin(keys);
+      try {
+        final answer = await _sendBundle(id, bundle, session);
+        if (answer?.status == 429) {
+          return (stopped: true);
         }
-        try {
-          answer = await _session.send(
-            "PUT",
-            "/api/shares/$id/images",
-            data: bundle.bytes,
-            under: session,
-            timeout: ref.read(shareImagesRequestTimeoutProvider),
-          );
-        } on DioException {
-          answer = null;
-        } on StateError {
-          answer = null;
+        if (answer case ShareAnswer(:final status) when status >= 200 && status < 300) {
+          final shared = outcome.entry.confirmedAs(id: id, url: url, sharedOn: sharedOn);
+          await _put(shared);
+          answered[recordId] = Shared(shared);
+        } else {
+          logger.w("A share's images were not sent: ${answer?.status ?? 'no answer'}");
         }
-        if (answer?.status != 429) {
-          break;
-        }
-      }
-      if (answer?.status == 429) {
-        return (stopped: true);
-      }
-      if (answer case ShareAnswer(:final status) when status >= 200 && status < 300) {
-        final shared = outcome.entry.confirmedAs(id: id, url: url, sharedOn: sharedOn);
-        await _put(shared);
-        answered[recordId] = Shared(shared);
-      } else {
-        logger.w("A share's images were not sent: ${answer?.status ?? 'no answer'}");
+      } finally {
+        _sends.end(keys);
       }
     }
     return (stopped: false);
+  }
+
+  /// Sends [bundle] as the images of the share [id], once more after a 429, and answers the last answer, or null where
+  /// none arrived.
+  Future<ShareAnswer?> _sendBundle(String id, ShareImageBundle bundle, ShareSession session) async {
+    ShareAnswer? answer;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(ref.read(shareImagesRetryDelayProvider));
+      }
+      try {
+        answer = await _session.send(
+          "PUT",
+          "/api/shares/$id/images",
+          data: bundle.bytes,
+          under: session,
+          timeout: ref.read(shareImagesRequestTimeoutProvider),
+        );
+      } on DioException {
+        answer = null;
+      } on StateError {
+        answer = null;
+      }
+      if (answer?.status != 429) {
+        break;
+      }
+    }
+    return answer;
   }
 
   /// Sorts [records] without sending anything: those [shareAll] would send, and the outcome of each it would not —
@@ -633,21 +652,38 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     if (!_session.holds(session)) {
       return everyOne(const LoginRequired());
     }
-    final pending = <RecordShare>[];
-    for (final record in chunk) {
-      final earlier = entryOf(record.id);
-      final note =
-          earlier ??
-          RecordShare(
-            recordId: record.id,
-            accountId: session.accountId,
-            clientKey: newClientKey(),
-            state: RecordShareState.pending,
-          );
-      // Kept before sending, so the key survives whatever happens to the reply.
-      await _put(note);
-      pending.add(note);
+    final pending = [
+      for (final record in chunk)
+        entryOf(record.id) ??
+            RecordShare(
+              recordId: record.id,
+              accountId: session.accountId,
+              clientKey: newClientKey(),
+              state: RecordShareState.pending,
+            ),
+    ];
+    final keys = [for (final note in pending) note.keyHash];
+    // Begun before a new note is written, so no list can decide a note this share has written and not yet sent.
+    _sends.begin(keys);
+    try {
+      for (final note in pending) {
+        // Kept before sending, so the key survives whatever happens to the reply.
+        await _put(note);
+      }
+      return await _sendChunk(chunk, session, moduleVersion, images, pending);
+    } finally {
+      _sends.end(keys);
     }
+  }
+
+  Future<Map<String, ShareOutcome>> _sendChunk(
+    List<CharaDetailRecord> chunk,
+    ShareSession session,
+    String moduleVersion,
+    _ShareImages? images,
+    List<RecordShare> pending,
+  ) async {
+    Map<String, ShareOutcome> everyOne(ShareOutcome o) => {for (final r in chunk) r.id: o};
     final declared = [for (final record in chunk) await images?.of(record.id)];
     final shares = [
       for (final (i, note) in pending.indexed)
@@ -740,11 +776,16 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   /// Lists the account's shares and matches the notes against them by `client_key_hash`: a pending note the list
   /// holds becomes shared — or stays pending, with the share's id, while the server waits for its images — and a note
   /// of this account the list does not hold is dropped.
+  ///
+  /// The list is the server's state at some moment between asking for it and its answer, so it decides only a note no
+  /// send of which ([_sends]) was unanswered when the list was asked for or has begun since: the server may hold any
+  /// other — or hold it otherwise — whatever the list says, and that note is left as it is.
   Future<ShareListing> refreshFromServer() async {
     final session = ref.read(recordShareSessionProvider);
     if (session == null) {
       return const SharesLoginRequired();
     }
+    final askedAt = _sends.now();
     final ShareAnswer answer;
     try {
       answer = await _session.send("GET", "/api/me/shares", under: session);
@@ -764,25 +805,27 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
       return const SharesUnreachable();
     }
     final byHash = {for (final s in listed) s.clientKeyHash: s};
-    final gone = <String>[];
-    for (final MapEntry(:key, value: note) in state.entries.toList()) {
-      if (note.accountId != session.accountId) {
+    bool decides(String key, RecordShare note) =>
+        note.accountId == session.accountId && _sends.quietSince(key, askedAt);
+    // Each note is read from the notes as they are, right before it is written: a write awaits the store, and a note
+    // may be dropped or a send of it begun in between.
+    for (final key in state.keys.toList()) {
+      final (note, share) = (state[key], byHash[key]);
+      if (note == null || share == null || !decides(key, note)) {
         continue;
       }
-      final share = byHash[key];
-      if (share == null) {
-        gone.add(key);
-      } else {
-        final (id, url, sharedOn) = (share.id, share.url, share.sharedOn);
-        final matched = share.imagesPending
-            ? note.locatedAs(id: id, url: url, sharedOn: sharedOn)
-            : note.confirmedAs(id: id, url: url, sharedOn: sharedOn);
-        if (note.state != matched.state || note.id != matched.id) {
-          await _put(matched);
-        }
+      final (id, url, sharedOn) = (share.id, share.url, share.sharedOn);
+      final matched = share.imagesPending
+          ? note.locatedAs(id: id, url: url, sharedOn: sharedOn)
+          : note.confirmedAs(id: id, url: url, sharedOn: sharedOn);
+      if (note.state != matched.state || note.id != matched.id) {
+        await _put(matched);
       }
     }
-    await _drop(gone);
+    await _drop([
+      for (final MapEntry(:key, value: note) in state.entries)
+        if (!byHash.containsKey(key) && decides(key, note)) key,
+    ]);
     return SharesListed(listed);
   }
 
@@ -809,12 +852,17 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
         {"trainee": {"card": {"name": final String name}}} when name.isNotEmpty => name,
         _ => null,
       };
+      final evaluation = switch (summary) {
+        {"evaluation": final int value} => value,
+        _ => null,
+      };
       shares.add((
         id: id,
         url: url,
         sharedOn: sharedOn,
         clientKeyHash: hash,
         cardName: cardName,
+        evaluation: evaluation,
         imagesPending: _imagesPending(item),
       ));
     }
@@ -864,4 +912,34 @@ class _ShareImages {
       return null;
     }
   }
+}
+
+/// The requests of this device that can make the server hold a share or change what it holds — `POST /api/shares` and
+/// the `PUT` of a share's images — by the share's key hash: how many have not answered, and at which [now] one last
+/// began or ended. Held in memory only: once the app has exited, none of its requests is unanswered.
+class _Sends {
+  final _open = <String, int>{};
+  final _lastAt = <String, int>{};
+  var _clock = 0;
+
+  /// A point after every begin and end so far, and before every one to come.
+  int now() => ++_clock;
+
+  void begin(Iterable<String> keys) {
+    for (final key in keys) {
+      _open[key] = (_open[key] ?? 0) + 1;
+      _lastAt[key] = now();
+    }
+  }
+
+  void end(Iterable<String> keys) {
+    for (final key in keys) {
+      _open[key] = (_open[key] ?? 1) - 1;
+      _lastAt[key] = now();
+    }
+  }
+
+  /// Whether no send of [key] was unanswered at [since] (a [now]) and none has begun since: then a list asked for at
+  /// [since] shows how the server holds that share, or that it holds none, as this device left it.
+  bool quietSince(String key, int since) => (_open[key] ?? 0) == 0 && (_lastAt[key] ?? 0) < since;
 }

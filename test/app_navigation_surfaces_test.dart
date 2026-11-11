@@ -25,6 +25,9 @@
 // logged in and asserts the deletion is there beside the rest of the account.
 // What each card does is `record_share_test.dart`'s and `record_sync_test.dart`'s,
 // which mount the same page.
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +44,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 
 /// The shipped display name for the feature, as a literal: `.tr()` renders an
 /// unresolved key as the key, so a comparison against `.tr()` would pass with the
@@ -123,7 +127,22 @@ void main() {
       tester.view.physicalSize = const Size(1200, 1600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      await _pump(tester, const DialogLayer(child: AccountPage()));
+      // The shares' card asks for the account's list as the page shows it; the server lists none.
+      final container = ProviderContainer(
+        overrides: [recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = _NoShares())],
+      );
+      await pumpWithContainer(
+        tester,
+        container,
+        const MaterialApp(
+          home: Scaffold(body: DialogLayer(child: AccountPage())),
+        ),
+      );
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有したレコードはありません。').evaluate().isNotEmpty,
+        describe: "the shares' card to list the account's shares",
+      );
 
       for (final text in ['Google アカウントでログインしています。', 'ログアウト', '端末間の同期', '共有したレコード', 'アカウントを削除…']) {
         expect(find.text(text), findsOneWidget, reason: text);
@@ -133,3 +152,22 @@ void main() {
 }
 
 void _ignore(int index) {}
+
+/// A sharing server whose account has shared nothing.
+class _NoShares implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody.fromString(
+    "[]",
+    200,
+    headers: {
+      Headers.contentTypeHeader: ["application/json"],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}

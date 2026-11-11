@@ -3,8 +3,9 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '/const.dart';
+import '/src/app/route.dart';
 import '/src/gui/chara_detail/account_sync_section.dart';
-import '/src/gui/chara_detail/record_share_list_dialog.dart';
+import '/src/gui/chara_detail/record_share_list_card.dart';
 import '/src/gui/chara_detail/share_account_section.dart';
 import '/src/gui/common.dart';
 
@@ -17,9 +18,19 @@ class AccountPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const ListTilePageRootWidget(
+    // The tabs keep an inactive tab built, so whether this one is shown is read off the tabs router. Outside one (the
+    // page mounted alone) the page is all there is, and shown.
+    final tabs = TabsRouterScope.of(context, watch: true)?.controller;
+    final inView = tabs == null || tabs.current.name == AccountRoute.name;
+    return ListTilePageRootWidget(
       maxContentWidth: settingsPageMaxContentWidth,
-      children: [AccountIntroCard(), AccountCard(), AccountSyncCard(), RecordShareListCard(), AccountDeletionCard()],
+      children: [
+        const AccountIntroCard(),
+        const AccountCard(),
+        const AccountSyncCard(),
+        RecordShareListCard(inView: inView),
+        const AccountDeletionCard(),
+      ],
     );
   }
 }

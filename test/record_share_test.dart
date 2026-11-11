@@ -47,7 +47,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
-import 'package:umacapture/src/gui/chara_detail/record_share_list_dialog.dart';
+import 'package:umacapture/src/gui/chara_detail/record_share_list_card.dart';
 import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
@@ -133,12 +133,13 @@ ResponseBody _sharesList(List<Map<String, Object?>> shares) => ResponseBody.from
   },
 );
 
-Map<String, Object?> _listed(String id, String clientKeyHash, {String? cardName}) => {
+Map<String, Object?> _listed(String id, String clientKeyHash, {String? cardName, int? evaluation}) => {
   "id": id,
   "url": "${Const.sharingOrigin}/r/$id",
   "shared_on": "2026-10-20",
   "client_key_hash": clientKeyHash,
   "summary": <String, Object?>{
+    "evaluation": ?evaluation,
     if (cardName != null)
       "trainee": {
         "card": {"gid": 100101, "name": cardName},
@@ -293,8 +294,11 @@ void main() {
           displayedRecordsProvider.overrideWithValue(table.records),
           if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
         ],
-        if (held ?? [?shown] case final records when records.isNotEmpty)
+        if (held ?? [?shown] case final records when records.isNotEmpty) ...[
           charaDetailRecordStorageLoaderProvider.overrideWith(() => _Shown(records)),
+          // The shares' card looks the noted records up in both stores; these records are all in the active one.
+          if (!emptied) charaDetailArchiveStorageLoaderProvider.overrideWith(_EmptyArchive.new),
+        ],
         if (emptied) ...[
           charaDetailRecordStorageLoaderProvider.overrideWith(_Emptied.new),
           charaDetailArchiveStorageLoaderProvider.overrideWith(_EmptyArchive.new),
@@ -1201,12 +1205,19 @@ void main() {
       container = containerFor([
         _lostConnection,
         heldAnswer.future,
+        // The shares' card asks for each account's list as the account tab shows it.
+        _sharesList([]),
         _empty(204),
         _json(200, {..._claimed(), 'account_id': 'acct-0002', 'token': tokenB}),
         _json(200, {'trainer_id': record.metadata.trainerId}),
+        _sharesList([]),
         // Answers the last record only if it is wrongly sent under the second account.
         _results([_created('id-8')]),
       ], held: records);
+      List<String> sentBesidesListing() => [
+        for (final s in server.sent)
+          if (s.uri.path != "/api/me/shares") "${s.method} ${s.uri.path}",
+      ];
       await openBulk(tester, [for (final r in records) r.id]);
       await tester.longPress(find.text('長押しで共有'));
       await settleUntil(tester, () => find.text('残りを再試行').evaluate().isNotEmpty, describe: 'the partial result');
@@ -1222,12 +1233,18 @@ void main() {
           child: const MaterialApp(home: DialogLayer(child: AccountPage())),
         ),
       );
+      await settleUntilElapsing(tester, () => server.sent.length == 3, describe: "the first account's list");
       await tester.tap(find.text('ログアウト'));
       await settleUntilElapsing(tester, () => find.text('Google でログイン').evaluate().isNotEmpty, describe: 'logout');
       await tester.tap(find.text('Google でログイン'));
       await settleUntil(tester, () => opened.isNotEmpty, describe: "the second account's login page");
       await tester.tap(find.text('Google でログイン'));
-      await settleUntilElapsing(tester, () => server.sent.length == 5, describe: "the second account's login");
+      await settleUntilElapsing(tester, () => sentBesidesListing().length == 5, describe: "the second account's login");
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有したレコードはありません。').evaluate().isNotEmpty,
+        describe: "the second account's list",
+      );
       expect(container.read(recordShareSessionProvider)?.accountId, 'acct-0002');
 
       heldAnswer.complete(_results([for (var i = 0; i < 8; i++) _created('id-$i')]));
@@ -1240,7 +1257,7 @@ void main() {
       await pumpRealTimeWindow(tester, rounds: 20);
 
       expect(server.sent[1].headers['Authorization'], 'Bearer $_token');
-      expect(server.sent, hasLength(5), reason: 'the last record is not sent under the second account');
+      expect(sentBesidesListing(), hasLength(5), reason: 'the last record is not sent under the second account');
       expect(notes().entryOf(records.last.id), isNull, reason: 'no note names the first account for it');
     });
 
@@ -1363,17 +1380,30 @@ void main() {
 
     // S4b: the account tab (N3), mounted as the app routes to it. The view is tall enough for every card at once,
     // because the tab lists its cards lazily and one below the fold would not be found.
-    Future<void> mountAccount(WidgetTester tester) {
+    Future<void> mountAccount(WidgetTester tester) async {
       tester.view.physicalSize = const Size(1200, 1600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      return tester.pumpWidget(
+      await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
           child: const MaterialApp(home: DialogLayer(child: AccountPage())),
         ),
       );
+      if (container.read(recordShareSessionProvider) case ShareSession(deleting: false)) {
+        await settleUntilElapsing(
+          tester,
+          () => find.text('共有したレコードを確かめています…').evaluate().isEmpty,
+          describe: "the shares' card to list the account's shares",
+        );
+      }
     }
+
+    /// The requests other than the shares' card asking for the account's list as it comes into view.
+    Iterable<String> sentBesidesListing() => [
+      for (final s in server.sent)
+        if (s.uri.path != "/api/me/shares") "${s.method} ${s.uri.path}",
+    ];
 
     const loggedInActions = ['共有の一覧ページを開く', 'ログアウト', 'アカウントを削除…', '共有したレコード'];
 
@@ -1384,11 +1414,13 @@ void main() {
         container = containerFor([
           _json(200, _claimed()),
           _json(200, {"trainer_id": record.metadata.trainerId}),
+          // The shares' card asks for the account's list as it appears with the login.
+          _sharesList([]),
         ], listener: listener);
         await mountAccount(tester);
         await tester.pumpAndSettle();
 
-        expect(find.text('ログインしていません。ログインすると、レコードを共有できます。'), findsOneWidget);
+        expect(find.text('ログインしていません。'), findsOneWidget);
         for (final action in loggedInActions) {
           expect(find.text(action), findsNothing, reason: action);
         }
@@ -1412,8 +1444,11 @@ void main() {
 
     testWidgets('S4b (C1 ii): logging out from the account drops the session and the share notes', (tester) async {
       await storeSession();
-      await storeNote(state: RecordShareState.shared);
-      container = containerFor([_empty(204)]);
+      final note = await storeNote(state: RecordShareState.shared);
+      container = containerFor([
+        _sharesList([_listed("0123456789", note.keyHash)]),
+        _empty(204),
+      ]);
       await mountAccount(tester);
       await tester.pumpAndSettle();
 
@@ -1423,7 +1458,7 @@ void main() {
         () => find.text('Google でログイン').evaluate().isNotEmpty,
         describe: 'the account to show logged out',
       );
-      expect(server.sent.single.uri.path, "/api/auth/logout");
+      expect(sentBesidesListing().single, endsWith(" /api/auth/logout"));
       expect(container.read(recordShareSessionProvider), isNull);
       expect(container.read(recordSharesProvider), isEmpty);
       expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
@@ -1434,7 +1469,7 @@ void main() {
     ) async {
       await storeSession();
       final shared = CharaDetailRecord.fromRecordJson(_recordBytes(recordId: _uuid(0)));
-      await storeNote(recordId: shared.id, state: RecordShareState.shared);
+      final note = await storeNote(recordId: shared.id, state: RecordShareState.shared);
       final onlyShared = ShareStateColumnSpec(
         id: "only_shared",
         title: "only_shared",
@@ -1442,7 +1477,13 @@ void main() {
           rejects: {ShareColumnState.pending, ShareColumnState.none, ShareColumnState.notShareable},
         ),
       );
-      container = containerFor([_empty(204)], table: (records: [shared], columns: [onlyShared]));
+      container = containerFor(
+        [
+          _sharesList([_listed("0123456789", note.keyHash)]),
+          _empty(204),
+        ],
+        table: (records: [shared], columns: [onlyShared]),
+      );
       List<String> listed() => [
         for (final row in container.read(currentGridProvider).rows) row.getUserData<CharaDetailRecord>()!.id,
       ];
@@ -1482,6 +1523,7 @@ void main() {
         [
           _sharesList([_listed("0123456789", note.keyHash)]),
           _empty(204),
+          _sharesList([]),
         ],
         held: [shared],
         table: (records: [shared], columns: [onlyShared]),
@@ -1496,17 +1538,17 @@ void main() {
         UncontrolledProviderScope(
           container: container,
           child: const MaterialApp(
-            home: DialogLayer(child: Scaffold(body: RecordShareListCard())),
+            home: DialogLayer(child: Scaffold(body: RecordShareListCard(inView: true))),
           ),
         ),
       );
 
-      await tester.tap(find.text('ログインしたアカウントで共有したレコードの確認と、共有を取り消すことができます。'));
+      // The card asks as it is built; one more fake step reads the answer.
       await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(
         tester,
-        () => find.text('共有を取り消す…').evaluate().isNotEmpty,
+        () => find.byTooltip('共有を取り消す…').evaluate().isNotEmpty,
         describe: 'the row of the shared record',
       );
       expect(
@@ -1515,7 +1557,7 @@ void main() {
         reason: 'a list that confirms the notes as they are leaves the selection alone',
       );
 
-      await tester.tap(find.text('共有を取り消す…'));
+      await tester.tap(find.byTooltip('共有を取り消す…'));
       await tester.pumpAndSettle();
       await tester.longPress(find.text('長押しで取り消す'));
       await settleUntil(
@@ -1523,8 +1565,13 @@ void main() {
         () => container.read(recordSharesProvider).isEmpty,
         describe: 'the unshare to drop the note',
       );
+      await settleUntil(
+        tester,
+        () => find.text('共有したレコードはありません。').evaluate().isNotEmpty,
+        describe: 'the list asked for again after the unshare',
+      );
 
-      expect(server.sent.last.method, "DELETE");
+      expect(server.sent[1].method, "DELETE");
       expect(container.read(selectionModeProvider), isNull, reason: 'nothing is left to confirm');
       expect(container.read(selectedRecordIdsProvider), isEmpty);
       expect(listed(), isEmpty, reason: 'the share column follows the note again, and filters the row out');
@@ -1534,6 +1581,7 @@ void main() {
         'continued, with nothing else offered meanwhile', (tester) async {
       await storeSession();
       container = containerFor([
+        _sharesList([]),
         _json(200, {
           "remaining": {"shares": 3, "sync": 2},
         }),
@@ -1551,7 +1599,7 @@ void main() {
       await tester.tap(find.text('長押しで削除'));
       await tester.pump(const Duration(seconds: 1));
       await pumpRealTimeWindow(tester, rounds: 20);
-      expect(server.sent, isEmpty, reason: 'a plain tap deletes nothing');
+      expect(sentBesidesListing(), isEmpty, reason: 'a plain tap deletes nothing');
 
       await tester.longPress(find.text('長押しで削除'));
       await settleUntil(
@@ -1576,7 +1624,7 @@ void main() {
         () => find.text('Google でログイン').evaluate().isNotEmpty,
         describe: 'the account to be deleted',
       );
-      expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), List.filled(4, "DELETE /api/me"));
+      expect(sentBesidesListing(), List.filled(4, "DELETE /api/me"));
       expect(container.read(recordShareSessionProvider), isNull);
       expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
     });
@@ -1585,8 +1633,9 @@ void main() {
       tester,
     ) async {
       await storeSession();
-      await storeNote();
+      final note = await storeNote();
       container = containerFor([
+        _sharesList([_listed("0123456789", note.keyHash)]),
         _json(200, {
           "remaining": {"shares": 0, "sync": 1},
         }),
@@ -1618,8 +1667,9 @@ void main() {
       tester,
     ) async {
       await storeSession();
-      await storeNote();
+      final note = await storeNote();
       container = containerFor([
+        _sharesList([_listed("0123456789", note.keyHash)]),
         _json(200, {
           "remaining": {"shares": 0, "sync": 1},
         }),
@@ -1650,8 +1700,9 @@ void main() {
       tester,
     ) async {
       await storeSession();
-      await storeNote();
+      final note = await storeNote();
       container = containerFor([
+        _sharesList([_listed("0123456789", note.keyHash)]),
         _json(401, {"error": "session_required"}),
       ]);
       final toasts = <String?>[];
@@ -1675,25 +1726,24 @@ void main() {
         'note is not called deleted', (tester) async {
       await storeSession();
       final note = await storeNote(state: RecordShareState.shared);
+      // The second share was made on another device: this one holds no note of it.
+      final elsewhere = _listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName, evaluation: 12345);
       container = containerFor([
-        // The second share was made on another device: this one holds no note of it.
-        _sharesList([
-          _listed("0123456789", note.keyHash),
-          _listed("9876543210", secretHash(newClientKey()), cardName: _serverCardName),
-        ]),
+        _sharesList([_listed("0123456789", note.keyHash), elsewhere]),
         _empty(204),
+        // Asked again after the unshare, the server lists what is left.
+        _sharesList([elsewhere]),
       ], emptied: true);
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
           child: const MaterialApp(
-            home: DialogLayer(child: Scaffold(body: RecordShareListCard())),
+            home: DialogLayer(child: Scaffold(body: RecordShareListCard(inView: true))),
           ),
         ),
       );
 
-      await tester.tap(find.text('ログインしたアカウントで共有したレコードの確認と、共有を取り消すことができます。'));
-      // The dialog asks as it opens; one more fake step reads the answer.
+      // The card asks as it is built; one more fake step reads the answer.
       await settleUntilElapsing(tester, () => server.sent.isNotEmpty, describe: "the account's list to be asked for");
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(
@@ -1702,22 +1752,95 @@ void main() {
         describe: 'the row of the deleted record',
       );
       expect(server.sent.single.uri.path, "/api/me/shares");
-      expect(find.text('共有日 2026-10-20'), findsNWidgets(2));
+      expect(find.text('2026-10-20'), findsNWidgets(2));
       expect(find.text('端末から削除したレコード'), findsOneWidget, reason: 'only the noted share was made here');
       expect(find.text(_serverCardName), findsOneWidget, reason: 'the share with no note takes the listed name');
-      await tester.tap(find.text('共有を取り消す…').first);
+      expect(find.text('12,345'), findsOneWidget, reason: "the row carries the evaluation value the server listed");
+      expect(find.text('-'), findsOneWidget, reason: 'a share listed with no evaluation value shows none');
+      await tester.tap(find.byTooltip('共有を取り消す…').first);
       await tester.pumpAndSettle();
       await tester.longPress(find.text('長押しで取り消す'));
       await settleUntil(
         tester,
-        () => find.text('共有日 2026-10-20').evaluate().length == 1,
+        () => find.text('2026-10-20').evaluate().length == 1,
         describe: 'the unshared row to leave the list',
       );
 
       expect(find.text('端末から削除したレコード'), findsNothing);
-      expect(server.sent.last.method, "DELETE");
-      expect(server.sent.last.uri.path, "/api/shares/0123456789");
+      expect(find.text(_serverCardName), findsOneWidget);
+      expect(server.sent.map((s) => "${s.method} ${s.uri.path}"), [
+        "GET /api/me/shares",
+        "DELETE /api/shares/0123456789",
+        "GET /api/me/shares",
+      ], reason: 'the list is asked for again once the share is gone');
       expect(container.read(recordSharesProvider), isEmpty);
+    });
+
+    testWidgets("the account's list is asked for each time its tab comes back into view, and on the reload button", (
+      tester,
+    ) async {
+      await storeSession();
+      final first = _listed("0123456789", secretHash(newClientKey()), cardName: _serverCardName);
+      final second = _listed("9876543210", secretHash(newClientKey()), cardName: "[別の衣装]別のウマ娘");
+      container = containerFor([
+        _sharesList([first]),
+        _sharesList([first, second]),
+        _sharesList([second]),
+      ]);
+      // The account page tells the card whether its tab is the one shown; the inactive tab stays built.
+      final inView = ValueNotifier(true);
+      addTearDown(inView.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: DialogLayer(
+              child: Scaffold(
+                body: ValueListenableBuilder(
+                  valueListenable: inView,
+                  builder: (_, shown, _) => RecordShareListCard(inView: shown),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      Future<void> settleAsked(int count, String describe) async {
+        await settleUntilElapsing(tester, () => server.sent.length == count, describe: "the list's request $count");
+        await tester.pump(const Duration(seconds: 1));
+        await settleUntil(
+          tester,
+          () =>
+              find.text('共有したレコードを確かめています…').evaluate().isEmpty &&
+              find.byType(LinearProgressIndicator).evaluate().isEmpty,
+          describe: describe,
+        );
+      }
+
+      await settleAsked(1, 'the first answer');
+      expect(find.text(_serverCardName), findsOneWidget);
+
+      inView.value = false;
+      await tester.pumpAndSettle();
+      await pumpRealTimeWindow(tester, rounds: 5);
+      expect(server.sent, hasLength(1), reason: 'a tab out of view asks nothing');
+
+      inView.value = true;
+      await settleAsked(2, 'the answer as the tab comes back');
+      await settleUntil(
+        tester,
+        () => find.text('[別の衣装]別のウマ娘').evaluate().isNotEmpty,
+        describe: 'the share made meanwhile to be listed',
+      );
+
+      await tester.tap(find.byTooltip('もう一度確かめる'));
+      await settleAsked(3, 'the answer to the reload');
+      await settleUntil(
+        tester,
+        () => find.text(_serverCardName).evaluate().isEmpty,
+        describe: 'the share unshared elsewhere to leave the list',
+      );
+      expect(server.sent.map((s) => s.uri.path), everyElement("/api/me/shares"));
     });
   });
 
@@ -1777,6 +1900,112 @@ void main() {
     expect(notesNow[kept.keyHash]?.state, RecordShareState.shared);
     expect(notesNow[kept.keyHash]?.id, "0123456789");
     expect(StorageBox(StorageBoxKey.recordShares).pull<String>(lost.keyHash), isNull);
+  });
+
+  test("a list asked for before a share finished keeps that share's note", () async {
+    await storeSession();
+    final listing = Completer<Object>();
+    container = containerFor([
+      listing.future,
+      _results([_created("0123456789")]),
+    ]);
+
+    final refreshed = notes().refreshFromServer();
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<Shared>());
+    final made = notes().entryOf(record.id);
+    listing.complete(_sharesList([]));
+    expect(await refreshed, isA<SharesListed>());
+
+    expect(notes().entryOf(record.id), made);
+    expect(notes().entryOf(record.id)?.state, RecordShareState.shared);
+    expect(StorageBox(StorageBoxKey.recordShares).pull<String>(made?.keyHash ?? ""), made?.toJson());
+  });
+
+  test("a list that arrives while a share is being sent keeps its note; once the send fails, a list decides", () async {
+    await storeSession();
+    final posted = Completer<Object>();
+    container = containerFor([posted.future, _sharesList([]), _sharesList([])]);
+
+    final sharing = notes().shareAll([record], source: RecordSource.active);
+    await waitUntil(() => server.sent.isNotEmpty, describe: 'the share to be sent');
+    final note = notes().entryOf(record.id);
+    // The server may already hold the share; the list it answered before that is no evidence against it.
+    expect(await notes().refreshFromServer(), isA<SharesListed>());
+    expect(notes().entryOf(record.id), note);
+    expect(StorageBox(StorageBoxKey.recordShares).pull<String>(note?.keyHash ?? ""), note?.toJson());
+
+    posted.complete(_lostConnection);
+    expect((await sharing)[record.id], isA<ShareUnreachable>());
+    expect(notes().entryOf(record.id), note);
+    expect(await notes().refreshFromServer(), isA<SharesListed>());
+    expect(notes().entryOf(record.id), isNull);
+  });
+
+  test("a list asked for while a share was being sent keeps its note when it arrives after the send failed", () async {
+    await storeSession();
+    final posted = Completer<Object>();
+    final listing = Completer<Object>();
+    container = containerFor([posted.future, listing.future]);
+
+    final sharing = notes().shareAll([record], source: RecordSource.active);
+    await waitUntil(() => server.sent.isNotEmpty, describe: 'the share to be sent');
+    final note = notes().entryOf(record.id);
+    final refreshed = notes().refreshFromServer();
+    await waitUntil(() => server.sent.length == 2, describe: 'the list to be asked for');
+    // The server answered the list, then took the share, whose reply was lost.
+    posted.complete(_lostConnection);
+    expect((await sharing)[record.id], isA<ShareUnreachable>());
+    listing.complete(_sharesList([]));
+    expect(await refreshed, isA<SharesListed>());
+
+    expect(notes().entryOf(record.id), note);
+    expect(StorageBox(StorageBoxKey.recordShares).pull<String>(note?.keyHash ?? ""), note?.toJson());
+    server.answers.add(_sharesList([_listed("0123456789", note?.keyHash ?? "")]));
+    expect(await notes().refreshFromServer(), isA<SharesListed>());
+    expect(notes().entryOf(record.id)?.clientKey, note?.clientKey);
+    expect(notes().entryOf(record.id)?.state, RecordShareState.shared);
+  });
+
+  test("a list asked for before a pending note was sent again keeps the share that send confirmed", () async {
+    await storeSession();
+    final earlier = await storeNote();
+    final listing = Completer<Object>();
+    container = containerFor([
+      listing.future,
+      _results([
+        {"status": "existing", ..._located("0123456789")},
+      ]),
+    ]);
+
+    final refreshed = notes().refreshFromServer();
+    await waitUntil(() => server.sent.isNotEmpty, describe: 'the list to be asked for');
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<Shared>());
+    expect(sharesSent(1).single["client_key"], earlier.clientKey);
+    final made = notes().entryOf(record.id);
+    listing.complete(_sharesList([]));
+    expect(await refreshed, isA<SharesListed>());
+
+    expect(made?.state, RecordShareState.shared);
+    expect(notes().entryOf(record.id), made);
+    expect(StorageBox(StorageBoxKey.recordShares).pull<String>(earlier.keyHash), made?.toJson());
+  });
+
+  test("a note whose share the server refused is dropped by a list asked for after the refusal", () async {
+    await storeSession();
+    container = containerFor([
+      _results([
+        {"status": "refused", "error": "account_limit"},
+      ]),
+      _sharesList([]),
+    ]);
+
+    expect((await notes().shareAll([record], source: RecordSource.active))[record.id], isA<ShareRefused>());
+    final note = notes().entryOf(record.id);
+    expect(note?.state, RecordShareState.pending);
+    expect(await notes().refreshFromServer(), isA<SharesListed>());
+
+    expect(notes().entryOf(record.id), isNull);
+    expect(StorageBox(StorageBoxKey.recordShares).pull<String>(note?.keyHash ?? ""), isNull);
   });
 
   test("a record of this device's trainer is shared without asking the account; another trainer's asks it", () async {

@@ -700,18 +700,13 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
 class UnshareRecordDialog extends ConsumerStatefulWidget {
   final String shareId;
 
-  /// Runs once the share is gone, for the dialog it was opened from.
+  /// Runs once the share is gone, for the list of shares it was opened from.
   final VoidCallback? onUnshared;
 
   const UnshareRecordDialog({super.key, required this.shareId, this.onUnshared});
 
-  /// [over] keeps the dialog it was opened from (the list of shares) beneath it.
-  static void show(RefBase ref, {required String shareId, bool over = false, VoidCallback? onUnshared}) {
-    CardDialog.show(
-      ref,
-      (_) => UnshareRecordDialog(shareId: shareId, onUnshared: onUnshared),
-      over: over,
-    );
+  static void show(RefBase ref, {required String shareId, VoidCallback? onUnshared}) {
+    CardDialog.show(ref, (_) => UnshareRecordDialog(shareId: shareId, onUnshared: onUnshared));
   }
 
   @override
