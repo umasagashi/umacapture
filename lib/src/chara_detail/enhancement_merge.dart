@@ -1405,7 +1405,11 @@ final class EnhancementMerge {
           store.store.adoptRecordInMemory(record);
         }
       }
-      _renameInMemoryReferences(olderId: olderId, retiredId: retiredId);
+      _renameInMemoryReferences(
+        olderId: olderId,
+        retiredId: retiredId,
+        survivorSource: _inArchive(content) ? RecordSource.archive : RecordSource.active,
+      );
       await _fillInheritance(stores, survivor);
     } catch (error, stackTrace) {
       logger.e('A merge of $olderId and $retiredId was applied; republishing it into memory threw.', error, stackTrace);
@@ -1545,8 +1549,14 @@ final class EnhancementMerge {
   /// delete already dropped the retired row. The capture state is one call for
   /// both of the capture state's rows — the event's `recordId` is derived from the
   /// state's `duplicateRecordId` and link, so re-pointing the state is what
-  /// re-points the event.
-  void _renameInMemoryReferences({required String olderId, required String retiredId}) {
+  /// re-points the event. A pending focus request is the one holder that also
+  /// names a record set, so it is re-pointed when it names either input, and
+  /// the set the table shows stays the user's.
+  void _renameInMemoryReferences({
+    required String olderId,
+    required String retiredId,
+    required RecordSource survivorSource,
+  }) {
     for (final provider in [selectedRecordIdsProvider, pinnedRecordIdsProvider]) {
       final ids = _ref.read(provider);
       if (!ids.contains(retiredId)) {
@@ -1558,9 +1568,10 @@ final class EnhancementMerge {
         olderId,
       });
     }
-    if (_ref.read(charaDetailFocusRecordProvider) == retiredId) {
-      _ref.read(charaDetailFocusRecordProvider.notifier).set(olderId);
-    }
+    // A pending request for either input names the survivor now, in the set the survivor lives in: a cross-store
+    // merge moves the older id itself to the enhanced side's store.
+    final survivor = RecordFocusRequest(olderId, survivorSource);
+    relocateRecordFocus(_ref.base, {retiredId: survivor, olderId: survivor});
     _ref.read(charaDetailCaptureStateProvider.notifier).renameRecord(from: retiredId, to: olderId);
   }
 

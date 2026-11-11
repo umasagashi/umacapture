@@ -1202,9 +1202,13 @@ class Grid {
   /// Includes nested (injected) columns, not just top-level ones.
   final Map<String, int> filteredCounts;
 
-  Grid(this.columns, this.rows, this.filteredCounts);
+  /// The record set whose rows these are, or null when the rows are of no settled set: the set is still loading,
+  /// or the grid is a placeholder. A focus request for a record waits for a grid of its own set.
+  final RecordSource? source;
 
-  static Grid get empty => Grid([], [], {});
+  Grid(this.columns, this.rows, this.filteredCounts, {required this.source});
+
+  static Grid get empty => Grid([], [], {}, source: null);
 }
 
 /// Field id of the synthetic checkbox column injected in selection mode.
@@ -1303,6 +1307,7 @@ Grid _buildGrid(
   RefBase ref,
   List<CharaDetailRecord> recordList,
   List<ColumnSpec> specList, {
+  required RecordSource? source,
   bool selectionMode = false,
   Set<String> pinnedIds = const {},
 }) {
@@ -1413,7 +1418,7 @@ Grid _buildGrid(
       .sortedBy<num>((e) => e.sortIdx)
       .toList();
 
-  return Grid(columns, rows, filteredCounts);
+  return Grid(columns, rows, filteredCounts, source: source);
 }
 
 final currentGridProvider = Provider<Grid>((ref) {
@@ -1427,6 +1432,11 @@ final currentGridProvider = Provider<Grid>((ref) {
   // rebuilt solely when selection mode itself toggles (enter/exit).
   final gridRef = selectionMode ? ref.base.readOnly : ref.base;
   final recordList = gridRef.watch(displayedRecordsProvider);
+  // The archive lists nothing until it has loaded, which is not the same as holding no record.
+  final source = switch (gridRef.watch(recordSourceProvider)) {
+    RecordSource.archive when !gridRef.watch(charaDetailArchiveStorageLoaderProvider).hasValue => null,
+    final source => source,
+  };
   final specList = gridRef.watch(currentColumnSpecsProvider);
   // Pinned rows render frozen at the top. In selection mode this resolves through
   // the readOnly ref so toggling pins (disabled there anyway) won't rebuild and
@@ -1435,7 +1445,14 @@ final currentGridProvider = Provider<Grid>((ref) {
   final pinnedIds = gridRef.watch(pinnedRecordIdsProvider);
 
   try {
-    return _buildGrid(gridRef, recordList, specList, selectionMode: selectionMode, pinnedIds: pinnedIds);
+    return _buildGrid(
+      gridRef,
+      recordList,
+      specList,
+      source: source,
+      selectionMode: selectionMode,
+      pinnedIds: pinnedIds,
+    );
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);

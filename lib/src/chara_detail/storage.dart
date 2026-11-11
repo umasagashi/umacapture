@@ -3114,10 +3114,77 @@ final charaDetailArchiveStorageLoaderProvider =
       retry: retryUnlessStoreOutage,
     );
 
-/// A one-shot request to focus (highlight and scroll to) a record in the table, set to the record id
-/// to focus. The table consumes it once (on load or on change) and resets it to null. Used when the
-/// capture screen navigates to the table on a duplicate, to point at the existing record.
-final charaDetailFocusRecordProvider = settableNotifierProvider<String?>(null);
+/// A request to focus (highlight and scroll to) the record [recordId], which lives in [source].
+///
+/// The source is part of the request so that the table acts on it only against a grid whose rows are of that set
+/// ([Grid.source]): the grid that is on screen when the request is made may still hold the other set's rows.
+@immutable
+class RecordFocusRequest {
+  final String recordId;
+  final RecordSource source;
+
+  const RecordFocusRequest(this.recordId, this.source);
+
+  @override
+  bool operator ==(Object other) => other is RecordFocusRequest && other.recordId == recordId && other.source == source;
+
+  @override
+  int get hashCode => Object.hash(recordId, source);
+
+  @override
+  String toString() => 'RecordFocusRequest($recordId, ${source.name})';
+}
+
+/// A one-shot request to focus a record in the table, set through [requestRecordFocus]. The table consumes it once
+/// its source's rows are on the grid (on load or on change), and resets it to null. Made through
+/// [requestRecordFocus] when the user asks to see a record (the capture screen's record, a shared record's name), and
+/// re-pointed through [relocateRecordFocus] when an operation moves the record a pending request names.
+final charaDetailFocusRecordProvider = settableNotifierProvider<RecordFocusRequest?>(null);
+
+/// Asks the record table to focus [request]'s record: shows the record set it lives in, and leaves the request for
+/// the table to serve once that set's rows are on the grid.
+///
+/// Only a user's request to see a record comes through here, because only that may switch the set the table shows.
+/// The set is switched here, where the request is made, and not by the table: the table is not built while the set
+/// it shows has no record or no visible column, so a switch it made would never happen in exactly the states where
+/// the other set is the one to show. A request in the set already shown switches nothing, so it leaves a selection
+/// in progress alone.
+void requestRecordFocus(RefBase ref, RecordFocusRequest request) {
+  ref.read(charaDetailFocusRecordProvider.notifier).set(request);
+  if (ref.read(recordSourceProvider) != request.source) {
+    setRecordSource(ref, request.source);
+  }
+}
+
+/// Keeps a pending focus request pointing at its record after an operation moved or renamed records: [moved] maps
+/// each id the operation moved to where that record is now, by id and set. A request for any other id is left as it
+/// is, and so is a request already pointing at the new place.
+///
+/// The set the table shows is left alone. It is the user's choice — the set a request switched to, or one switched
+/// to by hand since — and an operation that moves a record is not a request to show it. The request then waits, like
+/// any request for a set not on screen, until the table shows its set.
+void relocateRecordFocus(RefBase ref, Map<String, RecordFocusRequest> moved) {
+  final request = ref.read(charaDetailFocusRecordProvider);
+  final relocated = moved[request?.recordId];
+  if (relocated != null && relocated != request) {
+    ref.read(charaDetailFocusRecordProvider.notifier).set(relocated);
+  }
+}
+
+/// A record a store holds, and the record set it lives in.
+typedef HeldRecord = ({CharaDetailRecord record, RecordSource source});
+
+/// The record [id] in [active] or [archived] — the two stores' published lists — and which of them holds it, or null
+/// when neither does.
+HeldRecord? heldRecordIn({
+  required List<CharaDetailRecord> active,
+  required List<CharaDetailRecord> archived,
+  required String id,
+}) => switch ((active.firstWhereOrNull((e) => e.id == id), archived.firstWhereOrNull((e) => e.id == id))) {
+  (final record?, _) => (record: record, source: RecordSource.active),
+  (null, final record?) => (record: record, source: RecordSource.archive),
+  (null, null) => null,
+};
 
 /// The record list the table should display, following [recordSourceProvider].
 ///
@@ -3214,7 +3281,7 @@ CharaDetailRecordMutator recordStorageFor(WidgetRef ref, RecordSource source) {
 }
 
 /// Leaves bulk-selection mode through [SelectionMode.exit].
-void exitSelection(WidgetRef ref) => ref.read(selectionModeProvider.notifier).exit();
+void exitSelection(RefBase ref) => ref.read(selectionModeProvider.notifier).exit();
 
 /// Switches the displayed [source] and clears any in-progress selection.
 ///
@@ -3222,7 +3289,7 @@ void exitSelection(WidgetRef ref) => ref.read(selectionModeProvider.notifier).ex
 /// so leaving them set would leak a stale selection across the switch (and a
 /// confirm could target ids absent from the new source). Routing every source
 /// switch through here keeps that invariant in one place.
-void setRecordSource(WidgetRef ref, RecordSource source) {
+void setRecordSource(RefBase ref, RecordSource source) {
   ref.read(recordSourceProvider.notifier).set(source);
   exitSelection(ref);
 }
@@ -3418,6 +3485,11 @@ class CharaArchiveController extends Notifier<Progress> {
                   ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert([
                     for (final id in archived) ?movedRecords[id],
                   ]);
+                  // A name pressed during the batch found its record still active, which the active store keeps
+                  // publishing until here.
+                  relocateRecordFocus(ref.base, {
+                    for (final id in archived) id: RecordFocusRequest(id, RecordSource.archive),
+                  });
                 }
               } catch (error, stackTrace) {
                 // Catches everything on purpose, rather than listing the types that reach

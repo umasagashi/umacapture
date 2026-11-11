@@ -38,6 +38,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
@@ -47,6 +49,8 @@ import 'package:umacapture/src/gui/theme_extensions.dart';
 
 import 'support/hive.dart';
 import 'support/localization.dart';
+import 'support/record_table_tabs_router.dart';
+import 'support/records.dart';
 
 // ignore: constant_identifier_names
 const _tr_event = "pages.capture.capture_control.event";
@@ -105,6 +109,24 @@ class _FixedCaptureEventNotifier extends CaptureEventNotifier {
 }
 
 CaptureMessageTile _tile(WidgetTester tester) => tester.widget<CaptureMessageTile>(find.byType(CaptureMessageTile));
+
+class _HeldActive extends CharaDetailRecordStorage {
+  _HeldActive(this._held);
+
+  final List<CharaDetailRecord> _held;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => _held;
+}
+
+class _HeldArchive extends CharaDetailArchiveStorage {
+  _HeldArchive(this._held);
+
+  final List<CharaDetailRecord> _held;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => _held;
+}
 
 /// An import that ran to the end, registered records, and still left one session with none.
 ///
@@ -798,6 +820,52 @@ void main() {
       expect(tile.text, appSentenceAt("$_tr_event.already_captured.text"));
       expect(tile.hint, contains('クリック'));
       expect(tile.onTap, isNotNull);
+    });
+
+    testWidgets('pressing an already-captured character opens the table in the set that holds the existing record, '
+        'the archive included', (tester) async {
+      // A capture is weighed against both sets, so the record it duplicates can be an archived one, while the
+      // active set holds others.
+      final container = ProviderContainer(
+        overrides: [
+          captureEventProvider.overrideWith(
+            () => _FixedCaptureEventNotifier(
+              const CharaCaptureEvent(
+                status: CharaDetailCaptureStatus.alreadyCaptured,
+                error: 'duplicated_character',
+                recordId: 'rec-archived',
+              ),
+            ),
+          ),
+          charaDetailRecordStorageLoaderProvider.overrideWith(
+            () => _HeldActive([makeRecord(id: 'rec-unrelated', card: 99)]),
+          ),
+          charaDetailArchiveStorageLoaderProvider.overrideWith(
+            () => _HeldArchive([makeRecord(id: 'rec-archived', card: 50)]),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+      await container.read(charaDetailArchiveStorageLoaderProvider.future);
+      final router = RecordTableTabsRouter(const Scaffold(body: SingleChildScrollView(child: CaptureEventView())));
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(locale: appTestLocale, theme: _theme(), routerConfig: router.config()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(CaptureMessageTile));
+      await tester.pumpAndSettle();
+
+      expect(find.text(RecordTableTabsRouter.recordTableText), findsOneWidget, reason: 'the line opens the table');
+      expect(
+        container.read(charaDetailFocusRecordProvider),
+        const RecordFocusRequest('rec-archived', RecordSource.archive),
+      );
+      expect(container.read(recordSourceProvider), RecordSource.archive);
     });
 
     test('every line that links says so', () {

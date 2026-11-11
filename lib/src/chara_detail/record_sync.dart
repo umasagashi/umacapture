@@ -333,8 +333,8 @@ final syncOnProvider = Provider<bool>(
   (ref) => ref.watch(recordSyncProvider).onFor(ref.watch(recordShareSessionProvider)?.accountId),
 );
 
-/// The image forms of an account (S-09), as the sync endpoints name them: the original PNG, the reduced JPEG, and none
-/// — the form an account holds until it sets one.
+/// The image forms of an account (S-09), as the sync endpoints name them: the original PNG, the reduced JPEG — the form
+/// a new account starts on — and none.
 const syncImageForms = ['png', 'jpeg', 'none'];
 
 /// The account's image form (S-09) as the server this device syncs with holds it ([syncServerProvider]): a setting of
