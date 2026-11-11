@@ -4192,7 +4192,7 @@ void main() {
 
                 expect(
                   await (await sync()).beforeOn(await to()),
-                  (longMemos: 1, counts: (toSend: 2, toReceive: 3)),
+                  (longMemos: 1, unbound: 0, counts: (toSend: 2, toReceive: 3, imagesToSend: 3)),
                   reason:
                       'R1 and R5, which the device alone holds, and R3, R6 and R7, which the server alone lists; '
                       'R2 is on both; the one long memo is R1\'s',
@@ -4200,7 +4200,7 @@ void main() {
                 server.paused = true;
                 expect(
                   await (await sync()).beforeOn(await to()),
-                  (longMemos: 1, counts: null),
+                  (longMemos: 1, unbound: 0, counts: null),
                   reason: 'a server that cannot be read leaves the counts unread, and the long memos told',
                 );
                 server.paused = false;
@@ -4219,8 +4219,10 @@ void main() {
                 expect(onServer().rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7'});
                 expect(
                   (await (await sync()).beforeOn(await to()))?.counts,
-                  (toSend: 0, toReceive: 1),
-                  reason: 'R4; R2, which the device removed since its base, is not taken in again',
+                  (toSend: 0, toReceive: 1, imagesToSend: 5),
+                  reason:
+                      'R4; R2, which the device removed since its base, is not taken in again; the images of R1, R3, '
+                      'R5, R6 and R7, which rounds under the form none sent none of, though their bodies move no more',
                 );
 
                 for (final scope in ['account', 'service']) {
@@ -4514,6 +4516,61 @@ void main() {
             expect(server.images, hasLength(1));
             expect(outcome.imagesUndone?.records, 2, reason: 'R1 refused part way, R2 not put');
             expect(outcome.imagesUndone?.stops, {SyncImagesStop.refused});
+          });
+
+          test('S-09 (ii): set to none while the round reduces an image to put it, the round asks to put neither that '
+              'image nor any other', () async {
+            server.form = 'jpeg';
+            seedShot(a, 'R1', 1);
+            final asked = <String>[];
+            server.beforeImagePut = (name) async => asked.add(name);
+            server.afterImagePut = (_) async {
+              server.afterImagePut = null;
+              // The user sets none once the round has gone on to reduce the next image: a timer runs after the round's
+              // own continuation, which starts the reduction, and before the reduction's answer.
+              Timer.run(() => unawaited(a.setImageForm(server, 'none')));
+            };
+            final outcome = await a.round(server);
+
+            expect(outcome.end, SyncRoundEnd.done);
+            expect(
+              asked,
+              hasLength(1),
+              reason: 'the reduced JPEG that landed before the form was set to none, and no other',
+            );
+            expect(server.images.keys, asked);
+            expect(outcome.imagesUndone, isNull);
+          });
+
+          test('the share of the images a round tells goes no lower in a later part that works again the images an '
+              'earlier part left undone', () async {
+            server.form = 'png';
+            for (var i = 1; i <= 12; i++) {
+              final id = 'L${'$i'.padLeft(4, '0')}';
+              final dir = a.seedRecord(id, bodyWrittenAt: 1767225600100 + i, fans: 1000 + i);
+              File(dir.filePath('skill.png').path).writeAsBytesSync(utf8.encode('the skill image of $id'));
+            }
+            // The first put fails as the bucket does, which ends the puts of the round, and leaves the images of the
+            // first part undone: the later parts work them again.
+            server.beforeImagePut = (_) async {
+              server.beforeImagePut = null;
+              throw const SyncRefusal(502, 'storage_unavailable');
+            };
+            final told = <SyncRoundProgress>[];
+            final sub = (await a.open()).listen(syncProgressProvider, (_, next) {
+              if (next != null) told.add(next);
+            });
+            addTearDown(sub.close);
+            final outcome = await a.round(server, bindingChunk: 4);
+
+            expect(outcome.imagesUndone, isNotNull);
+            final images = [for (final p in told.where((p) => p.step == SyncLongStep.images)) p.fraction];
+            expect(
+              told.indexWhere((p) => p.step == SyncLongStep.images),
+              lessThan(told.lastIndexWhere((p) => p.step == SyncLongStep.binding)),
+              reason: 'the images were told in a part before the last',
+            );
+            expect(images, orderedEquals([...images]..sort()), reason: 'the share of the images goes up alone');
           });
 
           test('S-09 (iii): set back from none, a round puts the images the server holds none of, of the records '
@@ -5927,6 +5984,26 @@ void main() {
 
       bool shown(String text) => find.text(text).evaluate().isNotEmpty;
 
+      // The image form the one image form dropdown shows chosen; null where none is shown, or none chosen.
+      String? imageFormShown(WidgetTester tester) {
+        final dropdown = find.byType(PopupMenuButton<String>);
+        return dropdown.evaluate().length == 1 ? tester.widget<PopupMenuButton<String>>(dropdown).initialValue : null;
+      }
+
+      // Chooses the image form labelled [label] in the one image form dropdown, as the user opens it and taps one.
+      Future<void> chooseImageForm(WidgetTester tester, String label) async {
+        final items = find.byType(PopupMenuItem<String>);
+        await tester.tap(find.byType(PopupMenuButton<String>));
+        // Hit-testable once the menu has opened: while it opens, it takes no tap.
+        await settleUntilElapsing(
+          tester,
+          () => items.hitTestable().evaluate().length == 3,
+          describe: 'the image forms to open',
+        );
+        await tester.tap(find.widgetWithText(PopupMenuItem<String>, label));
+        await settleUntilElapsing(tester, () => items.evaluate().isEmpty, describe: 'the image forms to close');
+      }
+
       testWidgets('T3b (C1): logged in, the account offers sync; the dialog that turns it on tells whose the records '
           'become, what a round would move and the long memos; the section then shows the round running, that the memos '
           'hold the rounds back, and, once they are short, what syncing now kept and each stop of the rounds in a '
@@ -6191,8 +6268,8 @@ void main() {
       // The progress of a long step of the round running (N8, N9): a first round of a device holding records from
       // before the binding, more than a chunk of them, asked for as the user syncs now.
       testWidgets('the sync card leads with the share of the bindings a first round has worked out, a bar of it under '
-          "the line and the toolbar's hover the same line; the images tell theirs only in the part no other part "
-          'follows, each share goes up alone, and the round ending ends them', (tester) async {
+          "the line and the toolbar's hover the same line; the images tell theirs in every part, counting the records "
+          'the later parts reach, each share goes up alone, and the round ending ends them', (tester) async {
         a
           ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
           ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
@@ -6245,12 +6322,17 @@ void main() {
           gate.goAll();
           fsBackend = original;
         });
-        await tester.tap(find.widgetWithText(OutlinedButton, '今すぐ同期'));
+        // Inside `runAsync`, as the app runs it: working out a binding is dozens of file reads and writes one after
+        // another, and a round started from the fake-async zone resumes after each of them only on a turn of the wait
+        // below. Each turn takes a timer tick of real time (some 15 ms on Windows), so the thousands this round makes
+        // before the gate would outlast the wait's hang detector. Started here, the round goes at the speed of the
+        // disk, and the card shows what it tells on the next pump.
+        await tester.runAsync(() => tester.tap(find.widgetWithText(OutlinedButton, '今すぐ同期')));
         var entered = false;
         unawaited(gate.entered(order[syncBindingChunk]).then((_) => entered = true));
-        await settleUntilElapsing(tester, () => entered, describe: 'the work on a binding after the first chunk');
+        await settleUntil(tester, () => entered, describe: 'the work on a binding after the first chunk');
         await tester.pump();
-        const line = '同期しています…（画像の照合: 64%）。アプリを使いながらお待ちください。';
+        const line = '同期しています…（画像の照合: 64%）。時間がかかります。途中でアプリを終了しても、次の同期で続きから進みます。';
         expect(find.text(line), findsOneWidget, reason: '64 of the 100 records are bound');
         expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, 0.64);
         final icon = find.descendant(
@@ -6260,7 +6342,7 @@ void main() {
         expect(tester.widget<Tooltip>(find.ancestor(of: icon, matching: find.byType(Tooltip)).first).message, line);
 
         gate.go(order[syncBindingChunk]);
-        await settleUntilElapsing(tester, () => !app.read(recordSyncProvider).running, describe: 'the round to end');
+        await settleUntil(tester, () => !app.read(recordSyncProvider).running, describe: 'the round to end');
         await tester.pump();
         expect(app.read(recordSyncProvider).told?.end, SyncRoundEnd.done);
         expect(find.byType(LinearProgressIndicator), findsNothing, reason: 'the round ended');
@@ -6277,8 +6359,13 @@ void main() {
         final images = steps.indexWhere((p) => p.step == SyncLongStep.images);
         expect(
           images,
-          greaterThan(steps.lastIndexWhere((p) => p.step == SyncLongStep.binding)),
-          reason: 'the images tell their share only once the last part has worked its bindings out',
+          lessThan(steps.lastIndexWhere((p) => p.step == SyncLongStep.binding)),
+          reason: 'the part before the last tells the share of its images while it puts them',
+        );
+        expect(
+          (steps[images].done, steps[images].total),
+          (0, 100),
+          reason: 'of the images of every record the round reaches, those of the later parts included, none worked yet',
         );
         expect(steps.last.step, SyncLongStep.images);
         expect(steps.last.fraction, 1);
@@ -6295,14 +6382,12 @@ void main() {
         await mountAccount(tester);
         await settleUntilElapsing(
           tester,
-          () =>
-              find.byType(RadioGroup<String>).evaluate().isNotEmpty &&
-              tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue == 'none',
+          () => imageFormShown(tester) == 'none',
           describe: 'the image form read of the server',
         );
         expect(server.images, isEmpty, reason: 'the form none sent none');
 
-        await tester.tap(find.text('縮小した画像（JPEG）'));
+        await chooseImageForm(tester, '縮小した画像');
         await settleUntilElapsing(tester, () => shown('まだ送っていない画像を送ります。'), describe: 'the note on the form');
         expect(server.form, 'jpeg');
 
@@ -6315,23 +6400,19 @@ void main() {
 
         // T3e (R-LIB11a F1): N11 sets the form too, so it tells what N8 tells as the form leaves none — set back to
         // none in the section, sync off, and on again through the dialog with JPEG.
-        await tester.tap(find.text('画像は同期しない'));
+        await chooseImageForm(tester, '画像は送らない');
         await settleUntilElapsing(tester, () => server.form == 'none', describe: 'the form none');
         await tester.tap(find.byType(Switch));
         await settleUntilElapsing(tester, () => find.text('今すぐ同期').evaluate().isEmpty, describe: 'sync off');
         await tester.tap(find.byType(Switch));
         await settleUntilElapsing(
           tester,
-          () =>
-              find.textContaining('この端末から送るレコード').evaluate().isNotEmpty &&
-              find.byType(RadioGroup<String>).evaluate().isNotEmpty &&
-              tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue == 'none',
+          () => find.textContaining('この端末から送るレコード').evaluate().isNotEmpty && imageFormShown(tester) == 'none',
           describe: 'the counts and the image form the dialog reads',
         );
         expect(shown('まだ送っていない画像を送ります。'), isFalse, reason: 'the form stays none');
 
-        await tester.tap(find.text('縮小した画像（JPEG）'));
-        await tester.pump();
+        await chooseImageForm(tester, '縮小した画像');
         expect(shown('まだ送っていない画像を送ります。'), isTrue, reason: 'T3e (F1): the dialog sets the form back');
       });
 

@@ -100,6 +100,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/trigger_catalog.dart' show AppExitRequest, appExitRequestsProvider;
@@ -498,26 +499,38 @@ class SyncRoundProgress {
 
 /// How far the round running has got with its long steps ([SyncLongStep]), which the app's rounds tell
 /// ([runSyncRound]): none while no round runs, or while a round is in none of them yet. Kept in memory and not on disk,
-/// and gone as the round ends. Within a round the share of a step never goes back: a step told again with a smaller
-/// share — the stores took in a record meanwhile, or the round reads its images again after a stale replacement — keeps
-/// the share it had.
+/// and gone as the round ends. Within a round the share of a step never goes back, though another step is told between:
+/// a step told again with a smaller share — the stores took in a record meanwhile, the round reads its images again
+/// after a stale replacement, or a later part works again the images an earlier part left undone — keeps the share it
+/// had.
 class SyncProgress extends Notifier<SyncRoundProgress?> {
+  /// The last progress of each step the round running has told, which a step told again goes on from.
+  final _steps = <SyncLongStep, SyncRoundProgress>{};
+
   @override
   SyncRoundProgress? build() => null;
 
   /// The round is at [done] of [total] items of [step].
   void tell(SyncLongStep step, int done, int total) {
     if (!ref.mounted) return;
-    final now = state;
-    if (now == null || now.step != step) {
-      state = SyncRoundProgress(step, done: done, total: total, from: done);
-    } else if (done * now.total >= now.done * total && (done, total) != (now.done, now.total)) {
-      state = SyncRoundProgress(step, done: done, total: total, from: now.from);
-    }
+    final was = _steps[step];
+    final now = switch (was) {
+      null => SyncRoundProgress(step, done: done, total: total, from: done),
+      _ when done * was.total >= was.done * total && (done, total) != (was.done, was.total) => SyncRoundProgress(
+        step,
+        done: done,
+        total: total,
+        from: was.from,
+      ),
+      _ => was,
+    };
+    _steps[step] = now;
+    if (!identical(state, now)) state = now;
   }
 
   /// The round ended.
   void end() {
+    _steps.clear();
     if (ref.mounted) state = null;
   }
 }
@@ -683,11 +696,12 @@ int syncLongMemos(SyncList list) => list.cells.entries.where((e) {
 }).length;
 
 /// What the screen that turns sync on shows before any round runs ([syncBeforeOnOf]).
-typedef SyncBeforeOn = ({int longMemos, ({int toSend, int toReceive})? counts});
+typedef SyncBeforeOn = ({int longMemos, int unbound, SyncCountsBeforeOn? counts});
 
 /// What the screen that turns sync on shows before any round runs, from one read of what the device [place] holds:
 /// S-10, how many memos longer than [memoLengthLimit] hold the rounds of the device back, counted as a round counts
-/// them ([syncLongMemos]); and N11, what a round of [against]'s account against its server would move
+/// them ([syncLongMemos]); how many records the stores hold without a binding, which a first round works out before it
+/// sends them ([SyncPlace.unbound]); and N11, what a round of [against]'s account against its server would move
 /// ([syncCountsBeforeOn]). The counts are null where there is no [against], or reading the server's list or counting
 /// failed, which is logged; the long memos are told all the same.
 ///
@@ -700,7 +714,7 @@ Future<SyncBeforeOn?> syncBeforeOnOf<C>(SyncPlace<C> place, {({SyncServer server
     return place.read();
   }();
   final counts = switch (against) {
-    null => Future<({int toSend, int toReceive})?>.value(),
+    null => Future<SyncCountsBeforeOn?>.value(),
     (:final server, :final account) => syncCountsBeforeOn(place, server, account: account, local: local).then(
       (counts) => counts,
       onError: (Object error, StackTrace stackTrace) {
@@ -711,12 +725,20 @@ Future<SyncBeforeOn?> syncBeforeOnOf<C>(SyncPlace<C> place, {({SyncServer server
   };
   final read = await local;
   if (read == null) return null;
-  return (longMemos: syncLongMemos(read.local.list), counts: await counts);
+  return (longMemos: syncLongMemos(read.local.list), unbound: place.unbound().records.length, counts: await counts);
 }
+
+/// What a round would move, as the screen that turns sync on shows it before ([syncCountsBeforeOn]).
+typedef SyncCountsBeforeOn = ({int toSend, int toReceive, int imagesToSend});
 
 /// N11 (S-08, ruling V2): what a round of [account] would leave changed of the records, as the screen that turns sync
 /// on shows it before: the records the server would list that it does not list as they are now ([toSend]), and the
-/// records the device would hold that it does not hold as they are now ([toReceive]). Counted by the round's own merge
+/// records the device would hold that it does not hold as they are now ([toReceive]); and the records of the device
+/// whose images the server is not known to hold ([imagesToSend]), which a round puts in a form that sends images
+/// whether or not their bodies move — those of a record synced under the form `none` included. That count is of what
+/// the device kept of the images of [account]'s last round ([SyncPlace.readKeptImages]) and asks the server nothing: a
+/// record wanting images ([syncImagesWanted]), or one without a binding yet, counts where the round kept none of its
+/// images as stored. Counted by the round's own merge
 /// ([mergeRecordSync]) of what the device holds with the server's list, against the base the device keeps of
 /// [account] — read again where a replacement's answer was lost, as a round reads it ([R7-5]) — or none: so a first
 /// round counts every record one side alone holds, and a record the device removed since its base is not one the
@@ -728,7 +750,7 @@ Future<SyncBeforeOn?> syncBeforeOnOf<C>(SyncPlace<C> place, {({SyncServer server
 /// and counts against [local], the device's read ([SyncPlace.read]) its caller made, and runs no round: nothing of the
 /// device is written, no list is kept, and the server is asked to change nothing. Null where a store has not loaded. A
 /// request that fails throws, as a round's does.
-Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
+Future<SyncCountsBeforeOn?> syncCountsBeforeOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
@@ -742,6 +764,8 @@ Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
   if (moved && base != null) {
     if (await place.readKept(SyncKept.sent) case final sent?) base = _baseReadAgain(base, sent, there);
   }
+  final keptImages = await place.readKeptImages();
+  final stored = keptImages?.account == account ? keptImages?.records ?? const {} : const <String, SyncImagesLeft>{};
   final read = await local;
   if (read == null) return null;
   final device = read.local.list;
@@ -751,8 +775,84 @@ Future<({int toSend, int toReceive})?> syncCountsBeforeOn<C>(
   return (
     toSend: result.where((r) => !syncRecordsAgree(r, there.rows[r.id]?.record)).length,
     toReceive: result.where((r) => !splitOff.contains(r.id) && !syncRecordsAgree(r, device.rows[r.id]?.record)).length,
+    imagesToSend: device.rows.values.where((row) {
+      final r = row.record;
+      final wants = r.body.binding == null
+          ? r.stage.value != ArchiveImageOption.none
+          : syncImagesWanted(r.body.binding, r.stage.value, icon: r.body.icon).isNotEmpty;
+      return wants && stored[r.id]?.stored != true;
+    }).length,
   );
 }
+
+/// A rough guide to a first round, as the screen that turns sync on shows it before (N11): how long it works, from a
+/// fast device and connection to a slow one ([shortest] to [longest]), and over how many days the account's daily
+/// limit of requests spreads it ([days]).
+typedef SyncRoundEstimate = ({Duration shortest, Duration longest, int days});
+
+/// The guide to a first round ([SyncRoundEstimate]) that sends [toSend] records, takes in [toReceive], works out the
+/// binding of [unbound] records first, and moves images in the account's image [form] (S-09): of the records it takes
+/// in, and of the [imagesToSend] records it puts images of. Null where the round would move nothing.
+///
+/// What spreads a round over days is the server's limit of an account's requests a day: each image is a request of
+/// its own, and a round stopped by the limit goes on where it stopped the next day it runs. The time it works is the
+/// sum of three things: the pixel work of the bindings (three images a record, each decoded, reduced and encoded),
+/// and again of the reductions a round makes as it puts the reduced form; the bytes over the connection; and the wait
+/// for each request's answer, the requests being made one after another. The device does not know the speed of either
+/// the device or the connection, so each is a range, and the guide is the sum of the fast ends to the sum of the slow.
+/// The records are taken to carry images, as captures do, and the images to be as large as captures' typically are;
+/// the server stops taking images once the account's room is full, so no more than the room holds is counted.
+SyncRoundEstimate? syncRoundEstimate({
+  required int toSend,
+  required int toReceive,
+  required int imagesToSend,
+  required int unbound,
+  required String form,
+}) {
+  final perRecord = switch (form) {
+    'png' => _estimatePngBytesPerRecord,
+    'jpeg' => _estimateJpegBytesPerRecord,
+    _ => 0,
+  };
+  int withImages(int records) => perRecord == 0 ? 0 : min(records, _estimateAccountRoomBytes ~/ perRecord);
+  final (sent, taken) = (withImages(imagesToSend), withImages(toReceive));
+  final moved = toSend + toReceive;
+  if (moved + unbound + sent == 0) return null;
+  final requests =
+      (toSend / 10).ceil() +
+      (toReceive / 10).ceil() +
+      (moved / _estimateRecordsPerListPart).ceil() * 2 +
+      (moved * 7 / 1000).ceil() +
+      _estimateImageObjectsPerRecord * (sent + taken) +
+      10;
+  // The pixel work of a record: its bindings, and its reductions where the round puts the reduced form.
+  final pixelWork = unbound + (form == 'jpeg' ? sent : 0);
+  final bits = (sent + taken) * perRecord * 8;
+  Duration time(double secondsPerRecord, double bitsPerSecond, double secondsPerRequest) =>
+      Duration(seconds: (pixelWork * secondsPerRecord + bits / bitsPerSecond + requests * secondsPerRequest).ceil());
+  return (
+    shortest: time(1, 100e6, 0.1),
+    longest: time(4, 10e6, 0.5),
+    days: max(1, (requests / _estimateRequestsPerDay).ceil()),
+  );
+}
+
+// The figures [syncRoundEstimate] rests on.
+//
+// The pixel work of one record's binding, 1 to 4 seconds in the guide: sixteen bindings are some fifteen seconds of
+// work on a desktop and over a minute on a phone ([syncProgressShownFrom]). The bytes of one record's images: its
+// three PNGs and icon came to 3,557 KiB on average over 120 captures of one user, and the reduced JPEGs an archive
+// makes of them to about 0.75 to 1.1 MiB. The connection, 10 to 100 Mbit/s, and the wait for an answer, 0.1 to 0.5
+// seconds, are assumed. The server's limits are those of `server/src/limits.mjs`: the room of an account's sync
+// (`ACCOUNT_SYNC_BYTES_CAP`, 2 GiB), and the requests of an account a day (`ACCOUNT_SYNC_REQUESTS_PER_DAY`, 8,000, of
+// which about 7,995 go to requests other than the list's), counting every device of the account. A list part holds
+// about 39 records (128 parts for 5,000 records), each put or fetched once and followed by a replacement.
+const _estimatePngBytesPerRecord = 3557 * 1024;
+const _estimateJpegBytesPerRecord = 1024 * 1024;
+const _estimateImageObjectsPerRecord = 4;
+const _estimateAccountRoomBytes = 2 * 1024 * 1024 * 1024;
+const _estimateRequestsPerDay = 7995;
+const _estimateRecordsPerListPart = 39;
 
 /// How many records without a binding a round works the binding out for before it sends, where the device holds fewer
 /// with one: a round works out as many as this or as the device holds bound, whichever is more, and the rest of the
@@ -910,6 +1010,10 @@ class _RoundImages {
 
   /// What of the server's stopped the round's images, the last that did ([SyncServerStop]); null where none did.
   SyncServerStop? serverStop;
+
+  /// How many records the image steps of the round's earlier parts had to work on. The image step of a part tells its
+  /// progress past them ([_syncImages]), so the share of the images goes on from part to part of a first round.
+  var worked = 0;
 
   /// Whether the round puts images still.
   bool get puts => !_ended && !room.up;
@@ -1192,9 +1296,9 @@ Future<_Attempt> _attempt<C>(
   }
 
   // The round goes on with the next part where it held records back and worked some out. The image step of such a
-  // part tells no progress: the next part works its images out again over more records, so the share would go back.
+  // part counts the records held back as images still to work, which the parts after it reach.
   final more = heldBack.isNotEmpty && worked > 0;
-  final imagesProgress = more ? null : progress;
+  final ahead = more ? heldBack.length : 0;
   final thereParts = syncListParts(there);
   if (_sameParts(syncListParts(next), thereParts)) {
     final undone = await _syncImages(
@@ -1205,7 +1309,8 @@ Future<_Attempt> _attempt<C>(
       changed,
       account: account,
       round: images,
-      progress: imagesProgress,
+      progress: progress,
+      ahead: ahead,
     );
     return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
   }
@@ -1300,7 +1405,8 @@ Future<_Attempt> _attempt<C>(
     changed,
     account: account,
     round: images,
-    progress: imagesProgress,
+    progress: progress,
+    ahead: ahead,
   );
   return (outcome(SyncRoundEnd.done, imagesUndone: undone), stale: false, more: more);
 }
@@ -1334,6 +1440,10 @@ Future<_Attempt> _attempt<C>(
 /// it changes how the round ended, for the list is the server's; what a request that did not land left undone is
 /// answered ([SyncImagesUndone], [R7-1]; null where it left none), and nothing is kept of those records, so that the
 /// next round works them again whatever the form.
+///
+/// Tells [progress] the share of the records the round's image steps work on that it has worked: the ones of the
+/// round's earlier parts ([_RoundImages.worked]), this step's, and [ahead] — the records a first round sent in parts
+/// holds back for its parts after this one —, so that the share goes on from part to part instead of starting again.
 Future<SyncImagesUndone?> _syncImages<C>(
   SyncPlace<C> place,
   SyncServer server,
@@ -1343,6 +1453,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
   required String account,
   required _RoundImages round,
   required SyncProgress? progress,
+  required int ahead,
 }) async {
   final keptImages = await place.readKeptImages();
   final was = keptImages == null || keptImages.account != account
@@ -1411,8 +1522,14 @@ Future<SyncImagesUndone?> _syncImages<C>(
         if (!syncImagesOwed(binding, r.stage.value, held)) left[r.id] = it;
       }
 
+      // The share told: of the records the round's image steps work on — those of its earlier parts, this part's, and
+      // those [ahead] —, the ones worked. Counted past this part's work before it begins, so a part that stops part way
+      // leaves the next part's share no lower than the last one told.
+      final earlier = round.worked;
+      round.worked += work.length;
+      final total = round.worked + ahead;
       for (final (i, (r, binding, wanted)) in work.indexed) {
-        if (i % _progressEvery == 0) progress?.tell(SyncLongStep.images, i, work.length);
+        if (i % _progressEvery == 0) progress?.tell(SyncLongStep.images, earlier + i, total);
         final stage = r.stage.value;
         final icon = r.body.icon;
         // What was kept of its files tells the work, where it is of the images the record wants now.
@@ -1429,12 +1546,18 @@ Future<SyncImagesUndone?> _syncImages<C>(
         var form = round.form;
         var w = syncImageWork(binding, stage, images.bound, held, form: form, icon: icon);
         var landed = true;
+        // The form a put is of is the one the round follows as it is put: a form this device set since the work was
+        // worked out — the reduction of a put running meanwhile too — decides the puts left, those of the images the
+        // server holds no form of yet.
+        bool formMoved() {
+          if (round.form == form) return false;
+          form = round.form;
+          w = syncImageWork(binding, stage, images.bound, held, form: form, icon: icon);
+          return true;
+        }
+
         for (var i = 0; i < w.puts.length; i++) {
-          // A form this device set since the work was worked out decides the puts left: those of the images the server
-          // holds no form of yet.
-          if (round.form != form) {
-            form = round.form;
-            w = syncImageWork(binding, stage, images.bound, held, form: form, icon: icon);
+          if (formMoved()) {
             i = -1;
             continue;
           }
@@ -1446,7 +1569,13 @@ Future<SyncImagesUndone?> _syncImages<C>(
             continue;
           }
           final file = images.files[put.file];
-          final bytes = file == null || !put.reduce ? file : archiveJpegOf(file);
+          // The reduction is pixel work of hundreds of milliseconds an image on a desktop: off the UI isolate where the
+          // platform has one. Web has none, and there it runs on the UI isolate as the binding's pixel work does.
+          final bytes = file == null || !put.reduce ? file : await compute(archiveJpegOf, file);
+          if (formMoved()) {
+            i = -1;
+            continue;
+          }
           // Of a file that is not the image named — the icon the device keeps of its own being another than the one
           // its body names ([syncImageWork]) —, nothing is put, and the server's forms are not known.
           if (bytes == null || syncObjectName(bytes) != put.name) {
@@ -1488,7 +1617,7 @@ Future<SyncImagesUndone?> _syncImages<C>(
           leave(r, binding, (wants: wanted, holds: before, stored: false));
         }
       }
-      if (work.isNotEmpty) progress?.tell(SyncLongStep.images, work.length, work.length);
+      if (work.isNotEmpty) progress?.tell(SyncLongStep.images, round.worked, total);
     } catch (error, stackTrace) {
       logger.w('Sync could not put or take the images; the next round goes on with them.', error, stackTrace);
       round.note(_stopOf(error), syncServerStopOf(error));

@@ -1580,3 +1580,76 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
     );
   }
 }
+
+/// A settings-style single choice: the chosen label centred in a box over a bottom rule, which opens a menu of
+/// [values]. Not bound to a provider, so a setting of the device, a column's commit-on-OK field and a value the
+/// server holds all show the same control.
+///
+/// [selected] null shows an empty box. [itemTooltip] gives each entry a tooltip, and [disabledTooltip] the reason an
+/// entry in [disabled] cannot be chosen. [tooltip] is the whole button's; empty (the default) shows none. [enabled]
+/// false makes the button inert; greying it is the caller's [Disabled].
+class ChoiceDropdown<T> extends StatelessWidget {
+  final List<T> values;
+  final T? selected;
+  final String Function(T) label;
+  final String Function(T)? itemTooltip;
+  final Set<T> disabled;
+  final String Function(T)? disabledTooltip;
+  final String tooltip;
+  final bool enabled;
+  final TextStyle? style;
+  final ValueChanged<T> onSelected;
+
+  const ChoiceDropdown({
+    super.key,
+    required this.values,
+    required this.selected,
+    required this.label,
+    this.itemTooltip,
+    this.disabled = const {},
+    this.disabledTooltip,
+    this.tooltip = "",
+    this.enabled = true,
+    this.style,
+    required this.onSelected,
+  });
+
+  Widget _entry(T value) {
+    final text = Text(label(value));
+    final message = disabled.contains(value) ? disabledTooltip?.call(value) : itemTooltip?.call(value);
+    return SizedBox(
+      width: double.infinity,
+      child: message == null ? text : Tooltip(message: message, child: text),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selected = this.selected;
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      enabled: enabled,
+      initialValue: selected,
+      itemBuilder: (context) => [
+        for (final value in values)
+          PopupMenuItem<T>(value: value, enabled: !disabled.contains(value), child: _entry(value)),
+      ],
+      onSelected: onSelected,
+      // No `alignment` on the Container: one with an alignment expands to fill the parent's bounded constraints, which
+      // makes a ListTile trailing consume the whole tile width. The Text centres the label, and the minWidth lets the
+      // box grow with a longer label instead of wrapping it.
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 100),
+          child: Text(selected == null ? "" : label(selected), textAlign: TextAlign.center, style: style),
+        ),
+      ),
+    );
+  }
+}
