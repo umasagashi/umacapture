@@ -128,6 +128,16 @@ These are outward-facing or account-level operations. Nothing in the repository 
    `https://umacapture.com/api/auth/callback/google` for production. Its client id goes into
    `vars.GOOGLE_CLIENT_ID`, its secret into `GOOGLE_CLIENT_SECRET`. While `GOOGLE_CLIENT_ID` is empty,
    a login begin refuses to run rather than send Google a request without a client.
+
+   How a login comes back differs by app, and the callback tells them apart by whether the login
+   carries a loopback port. The web app replaces itself with the start page in its own tab (a
+   password manager's "Sign in with" follows one tab), keeping the login's secret in that tab's
+   `sessionStorage`; the callback answers a `302` to `<PUBLIC_ORIGIN>/#/account` with the proof as a
+   cookie, and the app loaded there claims the login once, at start-up. While a capture or a video
+   import runs, the web app refuses to leave and says so. The Windows app opens the start page in
+   the default browser, and the callback hands its proof to the app's loopback port. The cookie
+   reaches the app's claim only while `AUTH_REDIRECT_ORIGIN` is the app's own origin, as it is on
+   both targets.
 9. **Identity key.** `IDENTITY_HMAC_KEY` is the key every login identity is stored under
    (HMAC-SHA256 of the provider and the provider's user id). Make it once per environment and keep a
    copy outside Cloudflare: a secret cannot be read back, and an environment whose key is lost or

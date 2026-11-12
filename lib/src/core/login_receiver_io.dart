@@ -4,6 +4,9 @@ import 'dart:io';
 import '/src/core/utils.dart';
 import 'login_receiver.dart';
 
+/// Windows' login comes back to a loopback listener: see [LoopbackLoginReturn].
+LoginReturn platformLoginReturn() => const LoopbackLoginReturn(bindLoginListener);
+
 /// Listens on a loopback port for the callback of the login whose secret hashes to [h].
 ///
 /// Bound to `127.0.0.1` only, on a port the OS picks, before the start page is opened. A second
@@ -11,7 +14,7 @@ import 'login_receiver.dart';
 /// so one process holds at most the listeners its own dialogs opened.
 ///
 /// [startTimer] creates the timer for [loginListenSeconds]; a test passes its own to run the clock.
-Future<LoginListener?> bindLoginListener({
+Future<LoginListener> bindLoginListener({
   required String h,
   Timer Function(Duration, void Function()) startTimer = Timer.new,
 }) async {

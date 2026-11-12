@@ -36,14 +36,24 @@ class _AccountCardState extends ConsumerState<AccountCard> {
   /// What the last login or logout ended with, told under the account's state.
   String? _note;
   bool _loggingOut = false;
-  late final _login = LoginDriver(
-    ref,
-    onSettled: (outcome) {
-      if (mounted) {
-        setState(() => _note = loginOutcomeText(outcome));
+  late final _login = LoginDriver(ref, onSettled: _tell);
+
+  void _tell(LoginOutcome outcome) {
+    if (mounted) {
+      setState(() => _note = loginOutcomeText(outcome));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // A web login comes back to this tab after the callback, and is told here whichever dialog or card began it.
+    ref.listenManual(returnedLoginProvider, (_, next) {
+      if (next case AsyncData(value: final outcome?)) {
+        _tell(outcome);
       }
-    },
-  );
+    }, fireImmediately: true);
+  }
 
   @override
   void dispose() {

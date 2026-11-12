@@ -14,6 +14,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
@@ -37,17 +38,20 @@ import 'package:umacapture/src/chara_detail/spec/share_state.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/login_receiver.dart';
+import 'package:umacapture/src/core/video_import_ops.dart' show VideoImportPhase, VideoImportState;
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
+import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_card.dart';
 import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
@@ -55,6 +59,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/preference/settings_state.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/file_picker.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/record_table_tabs_router.dart';
@@ -223,6 +228,22 @@ class _Shown extends CharaDetailRecordStorage {
   }
 }
 
+/// A record store whose resolution of imported records parks on [gate], and says it has reached it on [entered].
+///
+/// The resolution is the last thing a record import does, and the step it parks is the one its claim has to cover.
+class _ResolvingImport extends _Shown {
+  final Completer<void> entered;
+  final Future<void> gate;
+
+  _ResolvingImport(super.shownRecords, {required this.entered, required this.gate});
+
+  @override
+  Future<void> resolveImportedInheritance(Iterable<String> ids) async {
+    if (!entered.isCompleted) entered.complete();
+    await gate;
+  }
+}
+
 /// A record store that holds nothing: the record a note was made for has been deleted.
 class _Emptied extends CharaDetailRecordStorage {
   @override
@@ -252,6 +273,26 @@ class _FakeListener implements LoginListener {
       _code.completeError(const LoginListenClosed(timedOut: false));
     }
   }
+}
+
+/// The web login's handover, as the tab's `sessionStorage` and `location.assign` serve it. A test passes one handover
+/// to the container of the next page load, as the tab's storage outlives a page load.
+class _FakeHandover implements LoginHandover {
+  String? kept;
+  final left = <Uri>[];
+
+  @override
+  void keep(String secret) => kept = secret;
+
+  @override
+  String? take() {
+    final secret = kept;
+    kept = null;
+    return secret;
+  }
+
+  @override
+  void leaveFor(Uri page) => left.add(page);
 }
 
 const _token = "TOKENtokenTOKENtokenTOKENtokenTOKENtoken123";
@@ -288,6 +329,9 @@ void main() {
   late ProviderContainer container;
   late List<Uri> opened;
 
+  /// The web login's handover of the latest container; one without a listener logs in through it.
+  late _FakeHandover handover;
+
   /// Whether `GET /api/me` is answered apart from the other requests ([_FakeServer.me]): on the account tab, where
   /// the public profile asks for it beside the shares' list.
   var meApart = false;
@@ -305,16 +349,29 @@ void main() {
     List<Object> usage = const [],
     List<Object> me = const [],
     List<CharaDetailRecord> archived = const [],
+    _FakeHandover? tab,
+    bool capturing = false,
+    VideoImportState? importing,
+    PathInfo? importInto,
+    CharaDetailRecordStorage Function()? store,
   }) {
     server = _FakeServer(answers, usage: usage, me: meApart ? me : null);
     opened = [];
+    handover = tab ?? _FakeHandover();
     final c = ProviderContainer(
       overrides: [
         loginPageOpenerProvider.overrideWithValue((uri) async {
           opened.add(uri);
           return true;
         }),
-        loginListenerBinderProvider.overrideWithValue(({required String h}) async => listener),
+        // With a listener the login is Windows', without one web's.
+        loginReturnProvider.overrideWithValue(
+          listener == null
+              ? SameTabLoginReturn(handover)
+              : LoopbackLoginReturn(({required String h}) async => listener),
+        ),
+        if (capturing) capturingStateProvider.overrideWithValue(true),
+        if (importing != null) videoImportListenableProvider.overrideWithValue(ValueNotifier(importing)),
         trainerIdProvider.overrideWithValue(trainerId ?? record.metadata.trainerId),
         moduleVersionLoader.overrideWith(
           (ref) async => ModuleVersion(
@@ -330,6 +387,14 @@ void main() {
         // The wait after a 429 is the site's rate-limit window; a test does not wait it out in real time.
         shareImagesRetryDelayProvider.overrideWithValue(Duration.zero),
         if (pathInfo != null) pathInfoProvider.overrideWithValue(pathInfo),
+        if (importInto != null) ...[
+          pathInfoLoader.overrideWith((ref) async => importInto),
+          pathLayoutLoader.overrideWith((ref) async => importInto),
+        ],
+        if (store != null) ...[
+          charaDetailRecordStorageLoaderProvider.overrideWith(store),
+          charaDetailArchiveStorageLoaderProvider.overrideWith(() => _Archived(archived)),
+        ],
         if (table != null) ...[
           displayedRecordsProvider.overrideWithValue(table.records),
           if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
@@ -350,6 +415,14 @@ void main() {
   }
 
   RecordShares notes() => container.read(recordSharesProvider.notifier);
+
+  /// A web login: the press leaves the app for the start page, and the app the tab comes back to claims it. The two
+  /// page loads share one container here; the account tab's tests load the second page in a container of its own.
+  Future<LoginOutcome?> webLogin() async {
+    final session = container.read(recordShareSessionProvider.notifier);
+    expect(await session.beginLogin(), isA<LoginLeavesApp>());
+    return session.resumeLogin();
+  }
 
   Future<void> storeSession({bool deleting = false}) => StorageBox(StorageBoxKey.recordShares).push(
     shareSessionKey,
@@ -921,122 +994,6 @@ void main() {
       expect(container.read(recordShareSessionProvider), isNull);
     });
 
-    testWidgets('with no listener, the login is claimed each time the page is shown again, with no second press', (
-      tester,
-    ) async {
-      container = containerFor([
-        _json(409, {"error": "login_incomplete"}),
-        _json(200, _claimed()),
-        _json(200, {"trainer_id": record.metadata.trainerId}),
-      ], shown: record);
-      // The login page opens in another tab; coming back to this one is the page being shown again.
-      void leaveAndReturn() {
-        for (final state in [
-          AppLifecycleState.inactive,
-          AppLifecycleState.hidden,
-          AppLifecycleState.inactive,
-          AppLifecycleState.resumed,
-        ]) {
-          tester.binding.handleAppLifecycleStateChanged(state);
-        }
-      }
-
-      await shareFromMenu(tester, record);
-      await settleUntil(
-        tester,
-        () => find.text('Google でログイン').evaluate().isNotEmpty,
-        describe: 'the way to the login',
-      );
-      await tester.tap(find.text('Google でログイン'));
-      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-      expect(server.sent, isEmpty, reason: 'nothing is claimed before the page is shown again');
-
-      leaveAndReturn();
-      await tester.pump(const Duration(seconds: 1));
-      await settleUntil(tester, () => server.sent.length == 1, describe: 'the claim of the first return');
-      expect(find.text('Google でログイン'), findsOneWidget, reason: 'an unfinished login waits for the next return');
-
-      leaveAndReturn();
-      await tester.pump(const Duration(seconds: 1));
-      await settleUntil(tester, () => server.sent.length == 3, describe: 'the trainer registration');
-      await tester.pump(const Duration(seconds: 1));
-      await settleUntil(
-        tester,
-        () => container.read(recordShareSessionProvider) != null && find.text('長押しで共有').evaluate().isNotEmpty,
-        describe: 'the login to finish',
-      );
-      expect(server.sent.map((s) => s.uri.path), ["/api/auth/claim", "/api/auth/claim", "/api/me/trainers"]);
-      expect(opened, hasLength(1));
-    });
-
-    testWidgets('a login that does not simply succeed says why, next to what to do about it', (tester) async {
-      const login = 'Google でログイン';
-      final cases = [
-        (
-          'incomplete',
-          <Object>[
-            _json(409, {"error": "login_incomplete"}),
-          ],
-          'ログインがまだ終わっていません。開いたログインのタブで続けてから、もう一度押してください。',
-        ),
-        (
-          'expired',
-          <Object>[
-            _json(410, {"error": "login_expired"}),
-          ],
-          'ログインの有効期限が切れました。もう一度ログインしてください。',
-        ),
-        (
-          'refused',
-          <Object>[
-            _json(403, {"error": "forbidden"}),
-          ],
-          'ログインを確認できませんでした。もう一度ログインしてください。',
-        ),
-        ('unreachable', <Object>[_lostConnection], 'サーバーに接続できなかったため、ログインを確認できませんでした。もう一度お試しください。'),
-        (
-          'trainer limit',
-          <Object>[
-            _json(200, _claimed()),
-            _json(409, {"error": "trainer_limit"}),
-          ],
-          'ログインしました。ただし、このアカウントに登録できるトレーナー ID の数が上限に達しているため、'
-              'この端末のトレーナー ID は登録されませんでした。この端末で育成したレコードは共有できます。',
-        ),
-      ];
-      for (final (name, answers, sentence) in cases) {
-        // No listener: the proof is claimed by pressing the login button a second time.
-        container = containerFor(answers, shown: record);
-        opened = [];
-
-        await shareFromMenu(tester, record);
-        await settleUntil(tester, () => find.text(login).evaluate().isNotEmpty, describe: 'the way to the login');
-        expect(find.text('共有にはログインが必要です。'), findsOneWidget, reason: name);
-        await tester.tap(find.text(login));
-        await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-        await tester.tap(find.text(login));
-        await tester.pump(const Duration(seconds: 1));
-        await settleUntil(tester, () => find.text(sentence).evaluate().isNotEmpty, describe: 'the $name sentence');
-
-        if (name == 'trainer limit') {
-          expect(container.read(recordShareSessionProvider), isNotNull);
-          expect(find.text('長押しで共有'), findsOneWidget, reason: 'signed in, the share can be confirmed');
-          expect(find.text(login), findsNothing);
-        } else {
-          expect(container.read(recordShareSessionProvider), isNull, reason: name);
-          expect(find.text('共有にはログインが必要です。'), findsNothing, reason: 'the login sentence takes its place');
-        }
-        if (name == 'expired' || name == 'refused') {
-          // An ended attempt cannot be claimed again; the next press starts a new login.
-          await tester.tap(find.text(login));
-          await settleUntil(tester, () => opened.length == 2, describe: 'a new login page to open');
-          expect(server.sent, hasLength(1), reason: 'nothing is claimed with the ended attempt');
-        }
-        await tester.tap(find.byIcon(Symbols.close_rounded).last);
-        await tester.pumpAndSettle();
-      }
-    });
-
     testWidgets("a record that is not a training of the account's trainers sends nothing", (tester) async {
       final friend = CharaDetailRecord.fromRecordJson(_recordBytes(recordType: "FriendStandard"));
       // Another trainer's record asks the account which trainers it holds; a friend's record asks nothing.
@@ -1245,18 +1202,24 @@ void main() {
       final records = ownRecords(9);
       final heldAnswer = Completer<Object>();
       const tokenB = 'second-account-token';
-      container = containerFor([
-        _lostConnection,
-        heldAnswer.future,
-        // The shares' card asks for each account's list as the account tab shows it.
-        _sharesList([]),
-        _empty(204),
-        _json(200, {..._claimed(), 'account_id': 'acct-0002', 'token': tokenB}),
-        _json(200, {'trainer_id': record.metadata.trainerId}),
-        _sharesList([]),
-        // Answers the last record only if it is wrongly sent under the second account.
-        _results([_created('id-8')]),
-      ], held: records);
+      // Windows' login: a web login leaves the page, and the share in flight with it.
+      final listener = _FakeListener();
+      container = containerFor(
+        [
+          _lostConnection,
+          heldAnswer.future,
+          // The shares' card asks for each account's list as the account tab shows it.
+          _sharesList([]),
+          _empty(204),
+          _json(200, {..._claimed(), 'account_id': 'acct-0002', 'token': tokenB}),
+          _json(200, {'trainer_id': record.metadata.trainerId}),
+          _sharesList([]),
+          // Answers the last record only if it is wrongly sent under the second account.
+          _results([_created('id-8')]),
+        ],
+        held: records,
+        listener: listener,
+      );
       List<String> sentBesidesListing() => [
         for (final s in server.sent)
           if (s.uri.path != "/api/me/shares") "${s.method} ${s.uri.path}",
@@ -1281,7 +1244,7 @@ void main() {
       await settleUntilElapsing(tester, () => find.text('Google でログイン').evaluate().isNotEmpty, describe: 'logout');
       await tester.tap(find.text('Google でログイン'));
       await settleUntil(tester, () => opened.isNotEmpty, describe: "the second account's login page");
-      await tester.tap(find.text('Google でログイン'));
+      listener.callback("proof-from-the-callback");
       await settleUntilElapsing(tester, () => sentBesidesListing().length == 5, describe: "the second account's login");
       await settleUntilElapsing(
         tester,
@@ -1486,6 +1449,209 @@ void main() {
         expect(accountListUrl(_accountId), "${Const.sharingOrigin}/u/$_accountId");
       },
     );
+
+    testWidgets('web: the press leaves the app for the start page with the secret kept and no port; the app the tab '
+        'comes back to claims that login once, with exactly s, and shows the account logged in', (tester) async {
+      container = containerFor([]);
+      await mountAccount(tester);
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => handover.left.isNotEmpty, describe: 'the tab to leave for the start page');
+
+      final page = handover.left.single;
+      final kept = handover.kept ?? fail('no secret was kept');
+      expect(page.path, "/api/auth/start");
+      expect(page.queryParameters["p"], "google");
+      expect(page.queryParameters.containsKey("port"), isFalse);
+      expect(page.toString(), isNot(contains(kept)), reason: 'the start page carries the hash only');
+      expect(page.queryParameters["h"], sha256.convert(utf8.encode(kept)).toString());
+      expect(opened, isEmpty, reason: 'no other browser opens');
+      expect(server.sent, isEmpty, reason: 'nothing is claimed before the tab comes back');
+
+      // The page the callback loads in the same tab: a new app, over the tab's storage.
+      final tab = handover;
+      await tester.pumpWidget(const SizedBox());
+      container = containerFor([
+        _json(200, _claimed()),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+        _sharesList([]),
+      ], tab: tab);
+      await mountAccount(tester);
+      await settleUntilElapsing(tester, () => find.text('ログアウト').evaluate().isNotEmpty, describe: 'the login');
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有したレコードはありません。').evaluate().isNotEmpty,
+        describe: "the account's list",
+      );
+
+      expect(sentBesidesListing(), ["POST /api/auth/claim", "POST /api/me/trainers"]);
+      expect(jsonDecode(server.sent.first.body), {"s": kept});
+      expect(container.read(recordShareSessionProvider)?.token, _token);
+      expect(tab.kept, isNull, reason: 'the kept secret goes with its claim');
+      // Loaded once more, as a reload of the tab: nothing is left to claim.
+      container.invalidate(returnedLoginProvider);
+      expect(await container.read(returnedLoginProvider.future), isNull);
+      expect(sentBesidesListing(), hasLength(2));
+    });
+
+    testWidgets('web: a login the tab comes back to that did not simply succeed says why on the account', (
+      tester,
+    ) async {
+      final cases = [
+        (
+          'incomplete',
+          <Object>[
+            _json(409, {"error": "login_incomplete"}),
+          ],
+          'ログインが完了していません。もう一度ログインしてください。',
+        ),
+        (
+          'expired',
+          <Object>[
+            _json(410, {"error": "login_expired"}),
+          ],
+          'ログインの有効期限が切れました。もう一度ログインしてください。',
+        ),
+        (
+          'refused',
+          <Object>[
+            _json(403, {"error": "forbidden"}),
+          ],
+          'ログインを確認できませんでした。もう一度ログインしてください。',
+        ),
+        ('unreachable', <Object>[_lostConnection], 'サーバーに接続できなかったため、ログインを確認できませんでした。もう一度お試しください。'),
+        (
+          'trainer limit',
+          <Object>[
+            _json(200, _claimed()),
+            _json(409, {"error": "trainer_limit"}),
+            _sharesList([]),
+          ],
+          'ログインしました。ただし、このアカウントに登録できるトレーナー ID の数が上限に達しているため、'
+              'この端末のトレーナー ID は登録されませんでした。この端末で育成したレコードは共有できます。',
+        ),
+      ];
+      for (final (name, answers, sentence) in cases) {
+        container = containerFor(answers, tab: _FakeHandover()..kept = "kept-secret-of-$name");
+        await mountAccount(tester);
+        await settleUntilElapsing(tester, () => find.text(sentence).evaluate().isNotEmpty, describe: name);
+
+        expect(jsonDecode(server.sent.first.body), {"s": "kept-secret-of-$name"}, reason: name);
+        if (name == 'trainer limit') {
+          expect(container.read(recordShareSessionProvider), isNotNull);
+          await settleUntilElapsing(
+            tester,
+            () => find.text('共有したレコードはありません。').evaluate().isNotEmpty,
+            describe: "the account's list",
+          );
+        } else {
+          expect(container.read(recordShareSessionProvider), isNull, reason: name);
+        }
+        await tester.pumpWidget(const SizedBox());
+      }
+    });
+
+    testWidgets(
+      'web: a press during a capture, a video import or a long job says why in a toast and stays in the app',
+      (tester) async {
+        final cases = [
+          ('capturing', true, null, null, 'キャプチャ中はログインできません。'),
+          ('importing', false, const VideoImportState(phase: VideoImportPhase.importing), null, '動画の取り込み中はログインできません。'),
+          // A zip export runs on after its dialog has closed, and says so on the long-read registry.
+          ('exporting', false, null, LongReadKind.export, 'エクスポート中はログインできません。'),
+        ];
+        for (final (name, capturing, importing, running, sentence) in cases) {
+          container = containerFor([], capturing: capturing, importing: importing);
+          if (running != null) {
+            container
+                .read(longReadRegistryProvider.notifier)
+                .claimUntilReleased(kind: running, paths: [DirectoryPath('/data/storage/chara_detail/active/a')]);
+          }
+          final toasts = <String?>[];
+          container.listen(
+            plainToastEventProvider,
+            (_, next) => next.whenData((toast) => toasts.add(toast.description)),
+          );
+          await mountAccount(tester);
+          await tester.tap(find.text('Google でログイン'));
+          await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the refusal of $name');
+
+          expect(toasts, [sentence], reason: name);
+          expect(handover.kept, isNull, reason: name);
+          expect(handover.left, isEmpty, reason: name);
+          expect(server.sent, isEmpty, reason: name);
+          await tester.pumpWidget(const SizedBox());
+        }
+      },
+    );
+
+    testWidgets('web: a press while a zip import is still resolving the inheritance of what it wrote is refused', (
+      tester,
+    ) async {
+      // The resolution writes links and relation bonuses back into the stored records after the last zip, and
+      // nothing runs it again, so leaving the page there loses it as surely as leaving mid-zip.
+      final root = Directory.systemTemp.createTempSync('uma_share_import');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final info = PathInfo(
+        documentDir: DirectoryPath(root.path),
+        supportDir: DirectoryPath(root.path),
+        executableDir: DirectoryPath(root.path) / 'exe',
+        downloadDir: DirectoryPath(root.path) / 'dl',
+        dataRoot: DirectoryPath(root.path),
+      );
+      final archive = Archive();
+      final json = utf8.encode(
+        jsonEncode({
+          'metadata': {
+            'record_id': {'self': 'imported'},
+          },
+        }),
+      );
+      archive.addFile(ArchiveFile('chara_detail/active/imported/record.json', json.length, json));
+      final zip = '${root.path}${Platform.pathSeparator}records.zip';
+      File(zip).writeAsBytesSync(ZipEncoder().encode(archive));
+      installFakeFilePicker().answerWithPaths([zip]);
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      container = containerFor(
+        [],
+        importInto: info,
+        store: () => _ResolvingImport(const [], entered: entered, gate: gate.future),
+      );
+      // The import resolves only over a store that was built before it: the table is what builds it in the app.
+      await tester.runAsync(() => container.read(charaDetailRecordStorageLoaderProvider.future));
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: Scaffold(body: CharaDetailImportButton())),
+        ),
+      );
+      await tester.runAsync(() => tester.tap(find.byType(IconButton)));
+      await settleUntil(tester, () => entered.isCompleted, describe: 'the import to reach its inheritance resolution');
+
+      final toasts = <String?>[];
+      container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
+      await mountAccount(tester);
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(
+        tester,
+        () => toasts.contains('インポート中はログインできません。'),
+        describe: 'the refusal of a login during the import',
+      );
+
+      expect(toasts, ['インポート中はログインできません。']);
+      expect(handover.kept, isNull);
+      expect(handover.left, isEmpty);
+      expect(server.sent, isEmpty);
+
+      gate.complete();
+      await settleUntil(
+        tester,
+        () => container.read(longReadRegistryProvider).isEmpty,
+        describe: 'the import to give its claim back',
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
 
     testWidgets("logged in, the account's usage is shown below the account against the server's caps", (tester) async {
       await storeSession();
@@ -2560,8 +2726,7 @@ void main() {
         expect(container.read(recordShareSessionProvider), isNull);
         expect(notes().entryOf(record.id), isNotNull, reason: 'a 401 alone keeps the notes');
 
-        final attempt = await container.read(recordShareSessionProvider.notifier).beginLogin();
-        expect(await attempt.claim(), LoginOutcome.signedIn);
+        expect(await webLogin(), LoginOutcome.signedIn);
         final outcomes = await notes().shareAll([record, other], source: RecordSource.active);
 
         final sentKeys = sharesSent(3).map((s) => s["client_key"]).toList();
@@ -2773,8 +2938,7 @@ void main() {
         _json(200, {"account_id": _accountId}),
       ]);
 
-      final attempt = await session().beginLogin();
-      expect(await attempt.claim(), LoginOutcome.signedIn);
+      expect(await webLogin(), LoginOutcome.signedIn);
       await session().send("GET", "/api/me");
 
       expect(server.sent.map((r) => r.uri.path), ["/api/auth/claim", "/api/me/trainers", "/api/me"]);
@@ -2820,8 +2984,7 @@ void main() {
       await session().send("GET", "/api/me");
       expect((container.read(recordShareSessionProvider), dropped()), (null, true));
 
-      final attempt = await session().beginLogin();
-      expect(await attempt.claim(), LoginOutcome.signedIn);
+      expect(await webLogin(), LoginOutcome.signedIn);
       expect(dropped(), isFalse, reason: 'logged in again');
 
       expect(await session().logout(), isTrue);
@@ -2850,8 +3013,7 @@ void main() {
         _json(200, {"trainer_id": record.metadata.trainerId}),
       ], listener: listener);
 
-      final attempt = await session().beginLogin();
-      expect(attempt.waitsForCallback, isTrue);
+      final attempt = (await session().beginLogin() as LoginInBrowser).attempt;
       expect(server.sent, isEmpty, reason: 'nothing is claimed before the callback');
       listener.callback("proof-from-the-callback");
 
@@ -2870,7 +3032,7 @@ void main() {
       final listener = _FakeListener();
       container = containerFor([], listener: listener);
 
-      final attempt = await session().beginLogin();
+      final attempt = (await session().beginLogin() as LoginInBrowser).attempt;
       final completion = attempt.completion;
       await attempt.cancel();
 
@@ -2879,41 +3041,13 @@ void main() {
       expect(server.sent, isEmpty);
     });
 
-    test(
-      'a login without a listener names no port, claims with exactly s, and succeeds after login_incomplete',
-      () async {
-        container = containerFor([
-          _json(409, {"error": "login_incomplete"}),
-          _json(200, _claimed()),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-        ]);
-
-        final attempt = await session().beginLogin();
-        expect(attempt.waitsForCallback, isFalse);
-        expect(opened.single.queryParameters.containsKey("port"), isFalse);
-
-        expect(await attempt.claim(), LoginOutcome.incomplete);
-        expect(container.read(recordShareSessionProvider), isNull);
-        expect(await attempt.claim(), LoginOutcome.signedIn);
-
-        for (final i in [0, 1]) {
-          expect(bodyOf(i).keys.toSet(), {"s"});
-        }
-        expect(bodyOf(0)["s"], bodyOf(1)["s"]);
-        expect(opened.single.queryParameters["h"], sha256.convert(utf8.encode(bodyOf(1)["s"] as String)).toString());
-        expect(container.read(recordShareSessionProvider)?.token, _token);
-      },
-    );
-
     test('an account already holding as many trainers as it may still logs in', () async {
       container = containerFor([
         _json(200, _claimed()),
         _json(409, {"error": "trainer_limit"}),
       ]);
 
-      final attempt = await session().beginLogin();
-
-      expect(await attempt.claim(), LoginOutcome.trainerLimit);
+      expect(await webLogin(), LoginOutcome.trainerLimit);
       expect(container.read(recordShareSessionProvider)?.token, _token);
       expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNotNull);
     });
@@ -3029,8 +3163,7 @@ void main() {
             _empty(204),
           ]);
 
-          final attempt = await session().beginLogin();
-          expect(await attempt.claim(), LoginOutcome.signedIn);
+          expect(await webLogin(), LoginOutcome.signedIn);
           expect(stored()?.deleting, isTrue);
           expect(await session().deleteAccount(), AccountDeletionOutcome.deleted);
 
@@ -3066,7 +3199,7 @@ void main() {
           _empty(204),
         ], listener: listener);
 
-        final attempt = await session().beginLogin();
+        final attempt = (await session().beginLogin() as LoginInBrowser).attempt;
         listener.callback("proof-from-the-callback");
         expect(await attempt.completion, LoginOutcome.signedIn);
         await expectLater(session().send("GET", "/api/me"), throwsA(isA<DioException>()));

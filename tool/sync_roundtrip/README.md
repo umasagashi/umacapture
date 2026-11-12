@@ -128,9 +128,10 @@ Logging in is the user's, once, in a visible Chrome on the same profile — with
 "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="C:\Projects\umacapture\.notes\sync-roundtrip\chrome-profile" --no-first-run https://umacapture-web-staging.umasagashi.workers.dev/
 ```
 
-In that window: the アカウント tab → **Google でログイン**, finish the login in the tab it opens, return to the
-app's tab, check that the account card reads 「Google アカウントでログインしています。」, then close **every**
-window of that Chrome (the profile stays locked while any is open). Run `stop` first if the daemon is up.
+In that window: the アカウント tab → **Google でログイン**, finish the login in the same browser tab, which
+returns to the app's アカウント tab. Check that the account card reads 「Google アカウントでログインしています。」,
+then close **every** window of that Chrome (the profile stays locked while any is open). Run `stop` first if
+the daemon is up.
 
 Why the headless browser is still logged in afterwards: the app keeps its server session (token, expiry,
 account id) in the `recordShares` storage box (`RecordShareSession` in

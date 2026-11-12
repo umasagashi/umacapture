@@ -20,7 +20,7 @@ import {
   untilTomorrow,
 } from "./api.mjs";
 import * as limits from "./limits.mjs";
-import { loginDoneResponse, loginFailureResponse, loginPageResponse } from "./login_page.mjs";
+import { loginFailureResponse, loginPageResponse } from "./login_page.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { clientId, clientSecret, identityKey, isProvider, PROVIDERS, redirectUri } from "./providers.mjs";
 import { base64url, hexBytes, isLoginSecret, isSecretHash, newAccountId, randomSecret, sha256, toHex } from "./secrets.mjs";
@@ -255,8 +255,8 @@ async function subjectHmac(env, provider, sub) {
 /**
  * GET /api/auth/callback/<provider>?state&code, where the provider sends the browser back. Completes
  * the login the state belongs to, only in the browser that began it: on the web the proof goes to
- * that browser as a cookie the app's claim carries; for the Windows app it goes to the app's
- * loopback listener in a redirect. `now` is the Worker's clock.
+ * that browser as a cookie the app's claim carries, in a redirect back to the app; for the Windows
+ * app it goes to the app's loopback listener in a redirect. `now` is the Worker's clock.
  */
 export async function loginCallback(request, env, providerName, now) {
   if (!isProvider(providerName)) return loginFailureResponse(400);
@@ -314,13 +314,24 @@ async function completeCallback(request, env, { login, h, stateHash, params, at 
       headers: { Location: target, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" },
     });
   }
-  const done = loginDoneResponse();
-  done.headers.append(
-    "Set-Cookie",
-    `${loginCookie(h)}=${proof}; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=${limits.LOGIN_TTL_SECONDS}`,
-  );
-  return done;
+  // The web app is a browser tab, and a password manager's "Sign in with" follows one tab, so the app left for the
+  // start page in its own tab: this sends that tab back to the app's account tab, whose start-up claims with the
+  // cookie. The target is fixed, never taken from the request. `/#/account` is the app's route under Flutter's
+  // default (hash) URL strategy.
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: `${env.PUBLIC_ORIGIN}${APP_ACCOUNT_TAB}`,
+      "Set-Cookie": `${loginCookie(h)}=${proof}; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=${limits.LOGIN_TTL_SECONDS}`,
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex",
+    },
+  });
 }
+
+/** Where a web login's callback sends its tab, under PUBLIC_ORIGIN. */
+export const APP_ACCOUNT_TAB = "/#/account";
 
 /**
  * POST /api/auth/claim `{s, code?}`: the app exchanges its login for a session. `s` is the secret

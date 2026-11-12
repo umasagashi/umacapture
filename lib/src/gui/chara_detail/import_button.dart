@@ -197,10 +197,49 @@ class RecordImportProgress {
   }
 }
 
-/// Runs a record import: [action] calls [RecordImportProgress.run] for each step it has, under the import's claim
-/// over the record store; then the stores are re-listed, sync is told, [report] tells the outcome of the steps as the
-/// caller words it, every refused record is told by its reason, and the inheritance of the written records is
-/// resolved.
+/// What an import does once its steps have run, inside its claim: the stores are re-listed, sync is told, [report]
+/// tells the outcome of the steps, every refused record is told by its reason, and the inheritance of the written
+/// records is resolved.
+Future<void> _publishImport(
+  ProviderContainer container,
+  PathInfo pathInfo,
+  RecordImportProgress progress, {
+  required RecordWriteEffects effects,
+  required void Function(RecordImportProgress progress) report,
+}) async {
+  // Deliberately not gated on the toolbar still being mounted: the records are on disk and the
+  // app-scoped stores are stale whether or not it survived, so the toast (published to an
+  // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
+  // user navigated away from stays invisible in the table until the app is restarted.
+  // Asked before the rescan below rebuilds the store: a container that never built it has no
+  // record set to resolve against, the same silence the duplicate check in [runRecordImport] takes.
+  final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
+  final importedIds = progress.importedIds;
+  if (progress._committed) {
+    // Over the container's ref rather than the toolbar's own: the import outlives the widget that started it,
+    // which is the same reason this reads the container before the first await.
+    applyRecordsPublished(container.read(containerRefProvider), pathInfo, writtenIds: importedIds, effects: effects);
+    // The records an import put in are an edit of what sync carries.
+    if (importedIds.isNotEmpty) container.read(syncLocalEditsProvider.notifier).edited();
+  }
+  report(progress);
+  // The per-record half of the outcome, which the step-level messages of [report]
+  // cannot express: a step can be read end to end and still have records the
+  // store refused. Those records are in what the user asked for and are not
+  // in the table afterwards, so each reason says how many and what (if
+  // anything) to do about it.
+  for (final toast in importRefusalToasts(progress.refusals)) {
+    Toaster.show(toast);
+  }
+  if (progress._committed && resolvesAfterImport) {
+    await _resolveImportedInheritance(container, importedIds);
+  }
+}
+
+/// Runs a record import: [action] calls [RecordImportProgress.run] for each step it has; then the stores are
+/// re-listed, sync is told, [report] tells the outcome of the steps as the caller words it, every refused record is
+/// told by its reason, and the inheritance of the written records is resolved. All of it runs under the import's
+/// claim over the record store.
 ///
 /// The one way into the store for every import the toolbar starts — a zip and a shared record's link —, so the claim,
 /// the duplicate rule, the resolution and the refusals' sentences cannot differ between them. [operation] names the
@@ -259,6 +298,13 @@ Future<bool> runRecordImport(
     // and the toolbar being disposed mid-import, end the claim by the same path
     // (`release` returns early once the container is gone, which is the case the
     // widget's disposal produces).
+    //
+    // **The claim ends after the inheritance resolution, not after the last zip.** The resolution
+    // writes links and relation bonuses back into the stored records, and nothing re-runs it on
+    // its own, so it is part of the import's work: whatever is refused while an import runs (a
+    // relocation, a delete, a web login that would leave the page) is refused until it is done.
+    // Nothing inside waits on this claim: the rescan's claim and the resolution's declaration
+    // register without asking whether the record store is free.
     try {
       await container
           .read(longReadRegistryProvider.notifier)
@@ -266,7 +312,10 @@ Future<bool> runRecordImport(
             kind: LongReadKind.import,
             paths: recordImportLongReadPaths(pathInfo),
             contention: LongReadContention.refuse,
-            action: (_) => action(progress),
+            action: (_) async {
+              await action(progress);
+              await _publishImport(container, pathInfo, progress, effects: effects, report: report);
+            },
           );
     } on LongReadNotStartedException catch (exception) {
       // Caught here, inside the generic `catch` below, so a refusal is not
@@ -278,33 +327,6 @@ Future<bool> runRecordImport(
       // spinner down.
       announceLongReadNotStarted(exception, operation: operation);
       return false;
-    }
-    // Deliberately not gated on the toolbar still being mounted: the records are on disk and the
-    // app-scoped stores are stale whether or not it survived, so the toast (published to an
-    // app-wide stream) and the rescan below both still have to happen -- otherwise an import the
-    // user navigated away from stays invisible in the table until the app is restarted.
-    // Asked before the rescan below rebuilds the store: a container that never built it has no
-    // record set to resolve against, the same silence the duplicate check above takes.
-    final resolvesAfterImport = container.exists(charaDetailRecordStorageLoaderProvider);
-    final importedIds = progress.importedIds;
-    if (progress._committed) {
-      // Over the container's ref rather than the toolbar's own: the import outlives the widget that started it,
-      // which is the same reason this reads the container before the first await.
-      applyRecordsPublished(container.read(containerRefProvider), pathInfo, writtenIds: importedIds, effects: effects);
-      // The records an import put in are an edit of what sync carries.
-      if (importedIds.isNotEmpty) container.read(syncLocalEditsProvider.notifier).edited();
-    }
-    report(progress);
-    // The per-record half of the outcome, which the step-level messages of [report]
-    // cannot express: a step can be read end to end and still have records the
-    // store refused. Those records are in what the user asked for and are not
-    // in the table afterwards, so each reason says how many and what (if
-    // anything) to do about it.
-    for (final toast in importRefusalToasts(progress.refusals)) {
-      Toaster.show(toast);
-    }
-    if (progress._committed && resolvesAfterImport) {
-      await _resolveImportedInheritance(container, importedIds);
     }
     return true;
   } catch (error, stackTrace) {

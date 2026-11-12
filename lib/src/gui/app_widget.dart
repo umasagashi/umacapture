@@ -11,6 +11,7 @@ import '/const.dart';
 import '/src/addon/addon_dispatcher.dart';
 import '/src/app/pages.dart';
 import '/src/app/route.dart';
+import '/src/chara_detail/record_share_session.dart' show returnedLoginProvider;
 import '/src/chara_detail/record_sync.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
@@ -413,6 +414,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
     // The toasts of a stop of the rounds (N10), heard wherever the user is.
     ref.read(syncHaltToastsProvider);
+
+    // The claim of a web login this page was loaded to finish; the account tab, where the login lands, tells it.
+    ref.read(returnedLoginProvider);
 
     // Rebuild this widget when requested.
     ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));

@@ -50,6 +50,7 @@ import 'package:umacapture/src/chara_detail/spec/memo.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/core/login_receiver.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
@@ -415,6 +416,18 @@ RecordSyncState _on({SyncRoundOutcome? told, SyncToldCounts? counts, bool runnin
 
 // ---------------------------------------------------------------------------------------------------------------
 
+/// Keeps drawing a login screen without navigating away from the fixture.
+class _ScreenLoginHandover implements LoginHandover {
+  @override
+  void keep(String secret) {}
+
+  @override
+  String? take() => null;
+
+  @override
+  void leaveFor(Uri page) {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   useStorageBoxForTest();
@@ -439,7 +452,7 @@ void main() {
     final c = ProviderContainer(
       overrides: [
         loginPageOpenerProvider.overrideWithValue((uri) async => true),
-        loginListenerBinderProvider.overrideWithValue(({required String h}) async => null),
+        loginReturnProvider.overrideWithValue(SameTabLoginReturn(_ScreenLoginHandover())),
         trainerIdProvider.overrideWithValue(trainerId ?? _record().metadata.trainerId),
         moduleVersionLoader.overrideWith(
           (ref) async => ModuleVersion(
@@ -480,7 +493,7 @@ void main() {
           (ref) => createDiagnosticDio(operation: "record_share")..httpClientAdapter = _FakeServer([...answers]),
         ),
         loginPageOpenerProvider.overrideWithValue((uri) async => true),
-        loginListenerBinderProvider.overrideWithValue(({required String h}) async => null),
+        loginReturnProvider.overrideWithValue(SameTabLoginReturn(_ScreenLoginHandover())),
       ],
     );
     addTearDown(c.dispose);
