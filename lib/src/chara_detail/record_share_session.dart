@@ -516,17 +516,17 @@ class RecordShareSession extends Notifier<ShareSession?> {
       switch (answer.status) {
         case 204:
           logger.i("The sharing account was deleted");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.deleted;
         case 401 when session.deleting:
           logger.i("The sharing account's deleting session was lost; the deletion is left to the server");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.handedToServer;
         case 401:
           return AccountDeletionOutcome.loginRequired;
         case 429 when (answer.body?["error"]) == "sync_paused_today":
           logger.i("The sharing account's deletion is left to the server for the rest of the day");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.handedToServer;
         case 200:
           // Only the deletion's own answer carries `remaining`; anything else answering 200 is not progress.
@@ -550,7 +550,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
   Future<bool> logout() async {
     final session = state;
     if (session == null) {
-      await _forgetAll();
+      await _forgetSession();
       return true;
     }
     final ShareAnswer answer;
@@ -569,21 +569,28 @@ class RecordShareSession extends Notifier<ShareSession?> {
       await answered(session.token, answer.status, answer.body?["error"]);
       return false;
     }
-    await _forgetAll();
+    await _forgetSession();
     return true;
   }
 
-  /// Drops the session, the account hint and every share note: the notes index this account's shares, and another
-  /// account logging in next must not see them as its own. The user ended the session, or the account; the server
-  /// did not drop it, so nothing is left to tell which account it was.
-  Future<void> _forgetAll() async {
+  /// Drops the session and every share note, and keeps the account hint: the notes index this account's shares, and
+  /// another account logging in next must not see them as its own, while the hint names the account the device was
+  /// last logged in as, which the user ending the session leaves true.
+  Future<void> _forgetSession() async {
     ref.read(recordShareSessionDroppedProvider.notifier)._set(false);
-    await ref.read(recordShareAccountHintProvider.notifier)._keep(null);
     state = null;
     for (final (:key, value: _) in _box.entries().toList()) {
-      await _box.delete(key);
+      if (key != shareAccountHintKey) {
+        await _box.delete(key);
+      }
     }
     ref.invalidate(recordSharesProvider);
+  }
+
+  /// Drops what [_forgetSession] drops and the account hint with it: the account is gone, so there is none to name.
+  Future<void> _forgetAccount() async {
+    await ref.read(recordShareAccountHintProvider.notifier)._keep(null);
+    await _forgetSession();
   }
 }
 
@@ -606,9 +613,9 @@ final recordShareSessionDroppedProvider = NotifierProvider<RecordShareSessionDro
 
 /// The account the device last logged in with, as the server masked its address (`ke****@gmail.com`), or null.
 ///
-/// Kept on the device only, beside the session and apart from it: a session the server drops leaves the hint, so the
-/// screen can tell a user whose session ended which account it was. Every claim replaces it, and a logout or the
-/// account's deletion removes it. Only [RecordShareSession] writes it. It is shown, never logged: every log line
+/// Kept on the device only, beside the session and apart from it: a session the server drops or the user logs out of
+/// leaves the hint, so the screen can tell a user whose session ended which account it was. Every claim replaces it,
+/// and only the account's deletion removes it. Only [RecordShareSession] writes it. It is shown, never logged: every log line
 /// becomes a crash report's breadcrumb.
 class RecordShareAccountHint extends Notifier<String?> {
   StorageBox get _box => StorageBox(StorageBoxKey.recordShares);

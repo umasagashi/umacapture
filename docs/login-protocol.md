@@ -74,10 +74,11 @@ malformed `code`: `400 {"error":"invalid_payload","field":"hint"}`, and the logi
 - **Replace** it on every successful claim: a string replaces the kept one, and `null` **or an
   absent field** removes it. A login is to whatever account the user picked this time, and a hint
   left from another account would name the wrong one.
-- **Remove** it on logout and on account deletion (both the deletion the app completes and one it
-  learns the server finished).
-- **Keep** it when the session ends any other way — the server's `401 session_required`, an expired
-  session. That is the case it exists for.
+- **Remove** it on account deletion only (both the deletion the app completes and one it learns the
+  server finished): the account it names is gone.
+- **Keep** it when the session ends any other way — a logout, the server's `401 session_required`, an
+  expired session. That is the case it exists for: the account the device was last logged in as
+  stays the same after the session ends, whoever ended it.
 - **Show** it only while logged out.
 - **Never log it**, nor the sealed `hint`, nor the loopback URL: every app log line becomes a crash
   report breadcrumb.
@@ -86,8 +87,8 @@ malformed `code`: `400 {"error":"invalid_payload","field":"hint"}`, and the logi
 
 Nothing on the server outlives the claim: the hint is never stored, the web cookie is removed by the
 claim (and expires with the login otherwise), and the sealed value in a Windows browser's history
-opens only for a claim of a login that the claim itself consumed. Logout and account deletion
-therefore have nothing to clear on the server's side; clearing the kept hint is the app's.
+opens only for a claim of a login that the claim itself consumed. Account deletion therefore has
+nothing to clear on the server's side; clearing the kept hint is the app's.
 
 ## Compatibility
 

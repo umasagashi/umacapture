@@ -1896,31 +1896,36 @@ void main() {
       expect(find.text('Google でログイン'), findsOneWidget);
     });
 
-    testWidgets('S4b (C1 ii): logging out from the account drops the session, the share notes and the account hint', (
-      tester,
-    ) async {
-      await storeSession();
-      await StorageBox(StorageBoxKey.recordShares).push(shareAccountHintKey, _hint);
-      final note = await storeNote(state: RecordShareState.shared);
-      container = containerFor([
-        _sharesList([_listed("0123456789", note.keyHash)]),
-        _empty(204),
-      ]);
-      await mountAccount(tester);
-      await tester.pumpAndSettle();
+    testWidgets(
+      'S4b (C1 ii): logging out from the account drops the session and the share notes, and names the account',
+      (tester) async {
+        await storeSession();
+        await StorageBox(StorageBoxKey.recordShares).push(shareAccountHintKey, _hint);
+        final note = await storeNote(state: RecordShareState.shared);
+        container = containerFor([
+          _sharesList([_listed("0123456789", note.keyHash)]),
+          _empty(204),
+        ]);
+        await mountAccount(tester);
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('ログアウト'));
-      await settleUntilElapsing(
-        tester,
-        () => find.text('Google でログイン').evaluate().isNotEmpty,
-        describe: 'the account to show logged out',
-      );
-      expect(sentBesidesListing().single, endsWith(" /api/auth/logout"));
-      expect(container.read(recordShareSessionProvider), isNull);
-      expect(container.read(recordSharesProvider), isEmpty);
-      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
-      expect(find.text('ログインしていません。'), findsOneWidget, reason: 'a logout leaves no account to name');
-    });
+        await tester.tap(find.text('ログアウト'));
+        await settleUntilElapsing(
+          tester,
+          () => find.text('Google でログイン').evaluate().isNotEmpty,
+          describe: 'the account to show logged out',
+        );
+        expect(sentBesidesListing().single, endsWith(" /api/auth/logout"));
+        expect(container.read(recordShareSessionProvider), isNull);
+        expect(container.read(recordSharesProvider), isEmpty);
+        expect(StorageBox(StorageBoxKey.recordShares).entries().map((entry) => entry.key), [shareAccountHintKey]);
+        expect(
+          find.text('ログインしていません。\n前回は $_hint でログインしていました。'),
+          findsOneWidget,
+          reason: 'the account a logout ended is still the one the device was last logged in as',
+        );
+      },
+    );
 
     testWidgets('a logout from the account ends a selection the table began under the share column it filtered', (
       tester,
@@ -2927,38 +2932,35 @@ void main() {
       },
     );
 
-    test(
-      'the account hint outlives a session the server drops, every claim replaces it, and a logout removes it',
-      () async {
-        container = containerFor([
-          _json(200, {..._claimed(), "account_hint": _hint}),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-          _json(401, {"error": "session_required"}),
-          // A Worker that predates the hint answers no field: the hint of the earlier login must not stay.
-          _json(200, _claimed()),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-          _json(200, {..._claimed(), "account_hint": "ab****@example.jp"}),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-          _empty(204),
-        ]);
-        String? hint() => container.read(recordShareAccountHintProvider);
-        String? stored() => StorageBox(StorageBoxKey.recordShares).pull<String>(shareAccountHintKey);
+    test('the account hint outlives a session the server drops and a logout, and every claim replaces it', () async {
+      container = containerFor([
+        _json(200, {..._claimed(), "account_hint": _hint}),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+        _json(401, {"error": "session_required"}),
+        // A Worker that predates the hint answers no field: the hint of the earlier login must not stay.
+        _json(200, _claimed()),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+        _json(200, {..._claimed(), "account_hint": "ab****@example.jp"}),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+        _empty(204),
+      ]);
+      String? hint() => container.read(recordShareAccountHintProvider);
+      String? stored() => StorageBox(StorageBoxKey.recordShares).pull<String>(shareAccountHintKey);
 
-        expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-        expect(bodyOf(0).keys.toSet(), {"s"}, reason: 'a claim without a callback sends no hint');
-        await session().send("GET", "/api/me");
-        expect(container.read(recordShareSessionProvider), isNull);
-        expect((hint(), stored()), (_hint, _hint), reason: 'the server dropped the session; the user did not log out');
+      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
+      expect(bodyOf(0).keys.toSet(), {"s"}, reason: 'a claim without a callback sends no hint');
+      await session().send("GET", "/api/me");
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect((hint(), stored()), (_hint, _hint), reason: 'the server dropped the session; the user did not log out');
 
-        expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-        expect((hint(), stored()), (null, null));
+      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
+      expect((hint(), stored()), (null, null));
 
-        expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-        expect((hint(), stored()), ("ab****@example.jp", "ab****@example.jp"));
-        expect(await session().logout(), isTrue);
-        expect((hint(), stored()), (null, null));
-      },
-    );
+      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
+      expect((hint(), stored()), ("ab****@example.jp", "ab****@example.jp"));
+      expect(await session().logout(), isTrue);
+      expect((hint(), stored()), ("ab****@example.jp", "ab****@example.jp"), reason: 'a logout leaves the account');
+    });
 
     test('closing a login with a listener closes the listener and claims nothing', () async {
       final listener = _FakeListener();
