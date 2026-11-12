@@ -50,6 +50,18 @@ describe("login start page", () => {
     assert.ok(html.includes(`data-action="login"`));
   });
 
+  test("asks for a press on the Google button, and does not submit when Turnstile passes", async () => {
+    const res = await worker.fetch(`/api/auth/start?p=google&h=${newLoginHash()}`);
+    const html = await res.text();
+    const form = html.slice(html.indexOf('<form id="begin"'), html.indexOf("</form>"));
+    assert.match(form, /<button type="submit"[^>]*>.*Google でログイン<\/span><\/button>/);
+    // The widget stays outside the form, whose fields the begin checks.
+    assert.ok(!form.includes("cf-turnstile"));
+    const callback = html.slice(html.indexOf("window.onTurnstile ="), html.indexOf("};", html.indexOf("window.onTurnstile =")));
+    assert.match(callback, /if \(pressed\) form\.submit\(\);/);
+    assert.equal(callback.match(/submit\(/g).length, 1);
+  });
+
   test("refuses a malformed h, p or port with a no-referrer page", async () => {
     const h = newLoginHash();
     for (const query of [
