@@ -1,6 +1,6 @@
-// The login start page /api/auth/start, the pages the begin and the callback answer a refusal
-// with, and the page a web login's callback ends on. The app opens
-// the start page in a browser; the visitor passes Turnstile there and presses 「Google でログイン」,
+// The login start page /api/auth/start and the pages the begin and the callback answer a refusal
+// with. The web app replaces itself with the start page in its own tab, and the Windows app opens it
+// in the default browser; the visitor passes Turnstile there and presses 「Google でログイン」,
 // and the page submits a top-level form POST to /api/auth/begin, whose 302 the browser follows to
 // the provider. The press is asked for rather than submitting once Turnstile passes, so a password
 // manager's "Sign in with" (which finds a site's Google sign-in button and presses it) can start the
@@ -150,11 +150,6 @@ export function loginFailureResponse(status, headers = {}, error = null) {
   if (message === undefined) throw new Error(`no login failure page for status ${status}, error ${error}`);
   const marker = error === null ? "" : ` data-error="${esc(error)}"`;
   return loginMessageResponse(status, `<p${marker}>${esc(message)}</p>`, headers);
-}
-
-/** The page a web login's callback ends on; the app's tab claims the session. */
-export function loginDoneResponse() {
-  return loginMessageResponse(200, `<p>${esc("ログインしました。元のタブに戻ってください。")}</p>`);
 }
 
 function loginMessageResponse(status, paragraph, headers = {}) {

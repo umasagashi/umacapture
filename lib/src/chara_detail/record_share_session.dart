@@ -1,17 +1,17 @@
 // The session with the record-sharing server: logging in, the requests made under the session, and logging out.
 //
-// Shared by web and Windows; the two log in differently only in [RecordShareSession.beginLogin] and in how a
-// [LoginAttempt] completes by itself. The
+// Shared by web and Windows; the two log in differently ([LoginReturn]) only in [RecordShareSession.beginLogin] and
+// in where the login is claimed: Windows' [LoginAttempt] in the app that began it, web's by
+// [RecordShareSession.resumeLogin] in the app its tab loads after the callback. The
 // session lives in the `recordShares` store beside the device's share notes, so both go together when the
-// store is deleted. Nothing here runs at start-up: the store is read, and the server is reached only from an
-// operation the user started.
+// store is deleted. At start-up the store is read, and the server is reached only to finish a web login the user
+// began before this page loaded ([returnedLoginProvider]); everything else is an operation the user started.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart' show launchUrl;
 
@@ -21,6 +21,7 @@ import '/src/core/login_receiver.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
+import '/src/core/video_import_ops.dart' show CaptureActivity;
 import '/src/preference/storage_box.dart';
 
 part 'record_share_session.mapper.dart';
@@ -106,13 +107,12 @@ Future<ShareAnswer> sendShareRequest(
   return (status: response.statusCode ?? 0, body: body, json: json, headers: response.headers);
 }
 
-/// Opens a login's start page: the default browser on Windows, a new tab on web.
+/// Opens a Windows login's start page in the default browser. Web's replaces the app instead
+/// ([LoginHandover.leaveFor]).
 final loginPageOpenerProvider = Provider<Future<bool> Function(Uri)>((ref) => launchUrl);
 
-/// Binds the listener a login's proof comes back to, or answers null where the platform has none.
-final loginListenerBinderProvider = Provider<Future<LoginListener?> Function({required String h})>(
-  (ref) => bindLoginListener,
-);
+/// The way this platform's login comes back to the app.
+final loginReturnProvider = Provider<LoginReturn>((ref) => platformLoginReturn());
 
 /// The provider every login names on its start page.
 const _loginProvider = "google";
@@ -123,7 +123,7 @@ enum LoginOutcome {
   /// Signed in, but the account already holds as many trainer ids as it may, so this device's was not added.
   trainerLimit,
 
-  /// The login page has not been finished yet. The attempt stays usable: claiming again may succeed.
+  /// The server holds the login unfinished: the login page was left before it was done.
   incomplete,
 
   /// The server no longer knows the login. Only starting a new one helps.
@@ -137,6 +137,40 @@ enum LoginOutcome {
 
   /// The user closed the login before it finished.
   cancelled,
+}
+
+/// What would end if a web login left the app now; a web login waits until it is over.
+enum LoginBlocker {
+  /// A live capture: leaving the page ends the screen share and the records in flight.
+  capturing,
+
+  /// 動画取り込み, the file dialog included as everywhere else ([CaptureActivity.pickingClip]).
+  importing,
+}
+
+/// How a press of a login button went on.
+sealed class LoginStart {
+  const LoginStart();
+}
+
+/// Windows: the start page is open in the default browser, and [attempt] waits for its callback.
+final class LoginInBrowser extends LoginStart {
+  const LoginInBrowser(this.attempt);
+
+  final LoginAttempt attempt;
+}
+
+/// Web: this tab is going to the start page; the app the callback loads tells the outcome
+/// ([returnedLoginProvider]).
+final class LoginLeavesApp extends LoginStart {
+  const LoginLeavesApp();
+}
+
+/// Web: leaving the page now would end [blocker], so the login did not start.
+final class LoginRefused extends LoginStart {
+  const LoginRefused(this.blocker);
+
+  final LoginBlocker blocker;
 }
 
 /// One amount the account holds, beside the server's cap on it.
@@ -185,56 +219,23 @@ enum AccountDeletionOutcome {
   failed,
 }
 
-/// One login, from opening its start page to the session it ends in.
+/// One Windows login, from opening its start page to the session it ends in.
 ///
 /// The secret is held in memory only; the start page receives its hash, and the secret itself first leaves the
 /// device in the claim's body.
 class LoginAttempt {
   final RecordShareSession _owner;
   final String _secret;
-  final LoginListener? _listener;
-  Future<LoginOutcome>? _claiming;
+  final LoginListener _listener;
   bool _finished = false;
-
-  /// Without a listener: claims each time the page is shown again, until [_ended] completes.
-  AppLifecycleListener? _returns;
-  Completer<LoginOutcome>? _ended;
 
   LoginAttempt._(this._owner, this._secret, this._listener);
 
-  /// Whether the proof arrives as the listener's callback. Without one, the attempt claims with the login's cookie:
-  /// by itself when the page is shown again, and through [claim] when the user asks.
-  bool get waitsForCallback => _listener != null;
-
-  /// Whether the attempt has ended: signed in, expired, refused or cancelled. Only a new login helps after that;
-  /// an incomplete or unreachable claim leaves it open to be claimed again.
-  bool get isFinished => _finished;
-
-  /// The login completing by itself: resolves with the outcome that ends the attempt.
-  ///
-  /// With a listener, that is the claim of its callback's proof. Without one, every time the page is shown again it
-  /// claims, since the login page sets its cookie from another tab and nothing tells this page when; a claim that
-  /// finds the login unfinished or gets no answer waits for the next time. A [claim] that ends the attempt resolves it
-  /// too.
-  Future<LoginOutcome> get completion {
-    final listener = _listener;
-    return listener == null ? _completeOnReturn() : _completeOnCallback(listener);
-  }
-
-  Future<LoginOutcome> _completeOnReturn() {
-    final ended = _ended ??= Completer<LoginOutcome>();
-    if (!_finished) {
-      _returns ??= AppLifecycleListener(onResume: () => unawaited(_claim()));
-    } else if (!ended.isCompleted) {
-      ended.complete(LoginOutcome.cancelled);
-    }
-    return ended.future;
-  }
-
-  Future<LoginOutcome> _completeOnCallback(LoginListener listener) async {
+  /// The login completing by itself: the claim of its callback's proof, or why there was none.
+  Future<LoginOutcome> get completion async {
     final String code;
     try {
-      code = await listener.code;
+      code = await _listener.code;
     } on LoginListenClosed catch (e) {
       _finished = true;
       // The listener outlives the server's login, so a listener that timed out waited past an expired login.
@@ -243,47 +244,15 @@ class LoginAttempt {
     if (_finished) {
       return LoginOutcome.cancelled;
     }
-    return _claim(code: code);
-  }
-
-  /// Claims the login with the cookie the login page left in this browser. Called from the dialog's login button;
-  /// [completion] claims the same way when the page is shown again, and a claim already on its way is shared rather
-  /// than sent twice.
-  Future<LoginOutcome> claim() {
-    if (_listener != null) {
-      throw StateError("a login with a listener completes through completion");
-    }
-    return _claim();
-  }
-
-  Future<LoginOutcome> _claim({String? code}) {
-    if (_finished) {
-      return Future.value(LoginOutcome.cancelled);
-    }
-    return _claiming ??= _owner._claim(_secret, code: code).then((outcome) {
-      _claiming = null;
-      if (outcome != LoginOutcome.incomplete && outcome != LoginOutcome.unreachable) {
-        _finished = true;
-        _endReturns(outcome);
-      }
-      return outcome;
-    });
-  }
-
-  void _endReturns(LoginOutcome outcome) {
-    _returns?.dispose();
-    _returns = null;
-    final ended = _ended;
-    if (ended != null && !ended.isCompleted) {
-      ended.complete(outcome);
-    }
+    // The listener hands over one code, so this claim is the attempt's last, whatever it answers.
+    _finished = true;
+    return _owner._claim(_secret, code: code);
   }
 
   /// Ends the attempt when its dialog closes: the listener lets go of its port and nothing more is claimed.
   Future<void> cancel() async {
     _finished = true;
-    _endReturns(LoginOutcome.cancelled);
-    await _listener?.close();
+    await _listener.close();
   }
 }
 
@@ -316,18 +285,51 @@ class RecordShareSession extends Notifier<ShareSession?> {
     }
   }
 
-  /// Starts a login and opens its start page.
-  Future<LoginAttempt> beginLogin() async {
+  /// Starts a login and opens its start page, or on web refuses to while leaving the page would end something
+  /// ([LoginBlocker]).
+  Future<LoginStart> beginLogin() async {
     final secret = newLoginSecret();
     final h = secretHash(secret);
-    // Windows listens for the proof on a loopback port: the app is not a browser, so it cannot read the cookie
-    // the login page sets. Web has no listener, and its claim carries that cookie instead.
-    final listener = await ref.read(loginListenerBinderProvider)(h: h);
-    final page = Uri.parse(
+    Uri page({int? port}) => Uri.parse(
       "${Const.sharingOrigin}/api/auth/start",
-    ).replace(queryParameters: {"p": _loginProvider, "h": h, if (listener != null) "port": "${listener.port}"});
-    await ref.read(loginPageOpenerProvider)(page);
-    return LoginAttempt._(this, secret, listener);
+    ).replace(queryParameters: {"p": _loginProvider, "h": h, "port": ?port?.toString()});
+    switch (ref.read(loginReturnProvider)) {
+      // Windows is not a browser: the login runs in the default browser and its proof comes back to a loopback port.
+      case LoopbackLoginReturn(:final bind):
+        final listener = await bind(h: h);
+        await ref.read(loginPageOpenerProvider)(page(port: listener.port));
+        return LoginInBrowser(LoginAttempt._(this, secret, listener));
+      // Web is the browser tab itself, and a login in another tab breaks a password manager's "Sign in with", which
+      // follows one tab: the start page replaces the app, which ends whatever the page is doing.
+      case SameTabLoginReturn(:final handover):
+        if (_loginBlockerOf(ref.read(captureActivityProvider)) case final blocker?) {
+          return LoginRefused(blocker);
+        }
+        handover.keep(secret);
+        handover.leaveFor(page());
+        return const LoginLeavesApp();
+    }
+  }
+
+  static LoginBlocker? _loginBlockerOf(CaptureActivity activity) => switch (activity) {
+    CaptureActivity.idle => null,
+    CaptureActivity.capturing => LoginBlocker.capturing,
+    CaptureActivity.pickingClip || CaptureActivity.importing => LoginBlocker.importing,
+  };
+
+  /// Claims the web login this tab left the app for ([LoginLeavesApp]), with the secret kept across the page loads
+  /// and the cookie the callback set. Null when there is none, and always on Windows, whose login never leaves the
+  /// app. The secret is taken before the claim is sent, so a login is claimed once whatever the answer.
+  Future<LoginOutcome?> resumeLogin() async {
+    final secret = switch (ref.read(loginReturnProvider)) {
+      LoopbackLoginReturn() => null,
+      SameTabLoginReturn(:final handover) => handover.take(),
+    };
+    if (secret == null) {
+      return null;
+    }
+    logger.i("Claiming the login this page was loaded to finish");
+    return _claim(secret);
   }
 
   Future<LoginOutcome> _claim(String secret, {String? code}) async {
@@ -574,6 +576,13 @@ class RecordShareSession extends Notifier<ShareSession?> {
 }
 
 final recordShareSessionProvider = NotifierProvider<RecordShareSession, ShareSession?>(RecordShareSession.new);
+
+/// What the web login this page was loaded to finish ended with ([RecordShareSession.resumeLogin]): null while its
+/// claim is out, and for good when the page was not loaded by a login. Read at start-up, so the claim does not wait
+/// for the account tab, which tells the outcome.
+final returnedLoginProvider = FutureProvider<LoginOutcome?>(
+  (ref) => ref.read(recordShareSessionProvider.notifier).resumeLogin(),
+);
 
 /// Whether the device holds no session because the server dropped it: a sharing or a sync request answered 401
 /// ([RecordShareSession.answered]), and the user has not logged in since. False where the user logged out, deleted the

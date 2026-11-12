@@ -126,10 +126,10 @@ Widget _actionRow(List<_Action> actions) => Wrap(
   ],
 );
 
-/// Drives one login from a dialog: the first press opens the start page and waits for the login to complete by
-/// itself, and on a platform with no listener a later press also claims it. [onSettled] receives the outcome that
-/// ends the attempt, and that of a later press which leaves it open; an attempt that has ended is dropped, so the
-/// next press starts a new login.
+/// Drives the logins of one dialog or card. On Windows a press opens the start page and waits for the login to
+/// complete by itself, replacing a login an earlier press left waiting, and [onSettled] receives its outcome. On web a
+/// press leaves the app for the start page, and the app the login comes back to tells the outcome
+/// ([returnedLoginProvider]); a press that cannot leave says why in a toast.
 class LoginDriver {
   final WidgetRef _ref;
   final ValueChanged<LoginOutcome> onSettled;
@@ -138,30 +138,31 @@ class LoginDriver {
   LoginDriver(this._ref, {required this.onSettled});
 
   Future<void> press() async {
-    final attempt = _attempt;
-    if (attempt != null && !attempt.waitsForCallback && !attempt.isFinished) {
-      final outcome = await attempt.claim();
-      // An outcome that ends the attempt is told once, by the completion the first press awaits.
-      if (!attempt.isFinished) {
+    await _attempt?.cancel();
+    _attempt = null;
+    switch (await _ref.read(recordShareSessionProvider.notifier).beginLogin()) {
+      case LoginInBrowser(:final attempt):
+        _attempt = attempt;
+        final outcome = await attempt.completion;
+        if (identical(_attempt, attempt)) {
+          _attempt = null;
+        }
         onSettled(outcome);
-      }
-      return;
+      case LoginLeavesApp():
+        break;
+      case LoginRefused(:final blocker):
+        Toaster.show(ToastData.info(description: loginRefusalText(blocker)));
     }
-    await attempt?.cancel();
-    final started = await _ref.read(recordShareSessionProvider.notifier).beginLogin();
-    _attempt = started;
-    _settle(started, await started.completion);
-  }
-
-  void _settle(LoginAttempt attempt, LoginOutcome outcome) {
-    if (attempt.isFinished && identical(_attempt, attempt)) {
-      _attempt = null;
-    }
-    onSettled(outcome);
   }
 
   Future<void> dispose() async => _attempt?.cancel();
 }
+
+/// Why a web login did not leave the app: what leaving would have ended.
+String loginRefusalText(LoginBlocker blocker) => switch (blocker) {
+  LoginBlocker.capturing => "$tr_record_share.login.refused_capturing".tr(),
+  LoginBlocker.importing => "$tr_record_share.login.refused_importing".tr(),
+};
 
 /// What the user can do about a login that did not simply succeed; null when there is nothing to tell. A
 /// cancelled login is the user's own doing (the dialog closed, or a new press replaced it), so it says nothing.

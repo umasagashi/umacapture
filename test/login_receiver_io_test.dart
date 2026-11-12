@@ -38,7 +38,7 @@ void main() {
   tearDown(() => debugBreadcrumbSink = realSink);
 
   test('binds a loopback port the start page accepts, before any request', () async {
-    final listener = (await io.bindLoginListener(h: _h))!;
+    final listener = await io.bindLoginListener(h: _h);
     addTearDown(listener.close);
     expect(listener.port, inInclusiveRange(1024, 65535));
     final socket = await Socket.connect(InternetAddress.loopbackIPv4, listener.port);
@@ -54,7 +54,7 @@ void main() {
   });
 
   test('ignores another login, completes on its own and releases the port after answering', () async {
-    final listener = (await io.bindLoginListener(h: _h))!;
+    final listener = await io.bindLoginListener(h: _h);
     addTearDown(listener.close);
     var done = false;
     unawaited(listener.code.then((_) => done = true));
@@ -72,7 +72,7 @@ void main() {
   });
 
   test('close() cancels the wait and releases the port', () async {
-    final listener = (await io.bindLoginListener(h: _h))!;
+    final listener = await io.bindLoginListener(h: _h);
     final port = listener.port;
     final code = expectLater(
       listener.code,
@@ -86,14 +86,14 @@ void main() {
   test('closes by itself after loginListenSeconds', () async {
     Duration? asked;
     void Function()? fire;
-    final listener = (await io.bindLoginListener(
+    final listener = await io.bindLoginListener(
       h: _h,
       startTimer: (duration, callback) {
         asked = duration;
         fire = callback;
         return Timer(const Duration(days: 1), () {});
       },
-    ))!;
+    );
     final port = listener.port;
     expect(asked, const Duration(seconds: 600));
     final code = expectLater(

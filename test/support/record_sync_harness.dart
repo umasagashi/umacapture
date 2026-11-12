@@ -48,6 +48,7 @@ import 'package:umacapture/src/chara_detail/value_write_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/fs_backend_io.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
+import 'package:umacapture/src/core/login_receiver.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
@@ -87,6 +88,9 @@ class SyncTestDevice {
   SyncTestDevice(String name) : _temp = Directory.systemTemp.createTempSync('uma_sync_$name');
 
   final Directory _temp;
+
+  /// The tab's storage a web login keeps its secret in across the page loads ([login]).
+  final _handover = _TabHandover();
 
   /// The data root, as the app's `dataRoot`.
   DirectoryPath get root => DirectoryPath(_temp.path);
@@ -139,8 +143,7 @@ class SyncTestDevice {
     if (syncTime case final time?) syncMomentTimeProvider.overrideWithValue(time),
     if (auth case final auth?) ...[
       recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = auth),
-      loginPageOpenerProvider.overrideWithValue((_) async => true),
-      loginListenerBinderProvider.overrideWithValue(({required String h}) async => null),
+      loginReturnProvider.overrideWithValue(SameTabLoginReturn(_handover)),
     ] else
       recordShareSessionProvider.overrideWith(_LoggedIn.new),
     if (beforeMetadataWrite case final before?)
@@ -195,14 +198,15 @@ class SyncTestDevice {
       (await (await open()).read(recordSyncProvider.notifier).syncNow(server)) ??
       (fail('no round ran: is sync on on this device?'));
 
-  /// The user logs in to [account] through the app's login ([RecordShareSession.beginLogin], [LoginAttempt.claim]),
-  /// against [auth]. The session is kept in the settings store, which every device of a test shares: the test's end
-  /// drops it.
+  /// The user logs in to [account] through the app's web login ([RecordShareSession.beginLogin], then
+  /// [RecordShareSession.resumeLogin] as the page the tab comes back to runs it), against [auth]. The session is kept
+  /// in the settings store, which every device of a test shares: the test's end drops it.
   Future<void> login(String account) async {
     addTearDown(() => StorageBox(StorageBoxKey.recordShares).delete(shareSessionKey));
     auth!.account = account;
-    final attempt = await (await open()).read(recordShareSessionProvider.notifier).beginLogin();
-    expect(await attempt.claim(), LoginOutcome.signedIn);
+    final session = (await open()).read(recordShareSessionProvider.notifier);
+    expect(await session.beginLogin(), isA<LoginLeavesApp>());
+    expect(await session.resumeLogin(), LoginOutcome.signedIn);
   }
 
   /// The user logs out through the app's logout ([RecordShareSession.logout]), against [auth].
@@ -448,6 +452,24 @@ class SyncTestDevice {
     File((shelf / id).filePath('record.json').path).writeAsBytesSync(bytes);
     await open();
   }
+}
+
+/// A web login's handover, as the tab's `sessionStorage` serves it; leaving for the start page goes nowhere.
+class _TabHandover implements LoginHandover {
+  String? _kept;
+
+  @override
+  void keep(String secret) => _kept = secret;
+
+  @override
+  String? take() {
+    final secret = _kept;
+    _kept = null;
+    return secret;
+  }
+
+  @override
+  void leaveFor(Uri page) {}
 }
 
 /// The network a device of the tests reaches where its sync server is not given one ([SyncTestDevice.syncHttp]):

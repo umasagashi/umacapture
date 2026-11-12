@@ -379,7 +379,7 @@ describe("login callback, claim and sessions", () => {
     // Already completed: the same callback a second time.
     const done = newLogin();
     const callback = worker.authorize(await beginIn(jar, done));
-    assert.equal((await worker.visit(callback, jar)).status, 200);
+    assert.equal((await worker.visit(callback, jar)).status, 302);
     const calls = worker.google.calls.length;
     await refused(await worker.visit(callback, jar), 400);
     assert.equal(worker.google.calls.length, calls);
@@ -437,10 +437,10 @@ describe("login callback, claim and sessions", () => {
     const secondCallback = worker.authorize(await beginIn(jar, second));
 
     const res = await worker.visit(firstCallback, jar);
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 302);
     assert.deepEqual(setCookieNames(res).sort(), [`uc_begin_${first.h}`, `uc_login_${first.h}`]);
     assert.ok(jar.get(`uc_begin_${second.h}`));
-    assert.equal((await worker.visit(secondCallback, jar)).status, 200);
+    assert.equal((await worker.visit(secondCallback, jar)).status, 302);
 
     assert.equal(await stage(first), 1);
     assert.equal(await stage(second), 1);
@@ -449,7 +449,7 @@ describe("login callback, claim and sessions", () => {
   test("creates an account for a new subject, storing only the HMAC of the subject, and finds it again", async () => {
     const jar = new CookieJar();
     const first = newLogin();
-    assert.equal((await signIn(jar, first)).status, 200);
+    assert.equal((await signIn(jar, first)).status, 302);
     const session = await claimed(await worker.claim({ s: first.s }, jar));
     assert.match(session.account_id, /^[0-9a-hjkmnp-tv-z]{16}$/);
 
@@ -461,10 +461,10 @@ describe("login callback, claim and sessions", () => {
     assert.ok(!Buffer.from(identities[0].subject_hmac).includes(GOOGLE.SUB));
 
     const again = newLogin();
-    assert.equal((await signIn(jar, again)).status, 200);
+    assert.equal((await signIn(jar, again)).status, 302);
     assert.equal((await claimed(await worker.claim({ s: again.s }, jar))).account_id, session.account_id);
     const other = newLogin();
-    assert.equal((await signIn(jar, other, { sub: "200000000000000000002" })).status, 200);
+    assert.equal((await signIn(jar, other, { sub: "200000000000000000002" })).status, 302);
     assert.notEqual((await claimed(await worker.claim({ s: other.s }, jar))).account_id, session.account_id);
     assert.equal(await worker.count("accounts"), 2);
     assert.equal((await worker.db.prepare("SELECT SUM(accounts_created) AS n FROM daily").first()).n, 2);
@@ -486,8 +486,8 @@ describe("login callback, claim and sessions", () => {
     const [first, second] = [newLogin(), newLogin()];
     const firstCallback = worker.authorize(await beginIn(jar, first));
     const secondCallback = worker.authorize(await beginIn(jar, second));
-    assert.equal((await worker.visit(secondCallback, jar)).status, 200);
-    assert.equal((await worker.visit(firstCallback, jar)).status, 200);
+    assert.equal((await worker.visit(secondCallback, jar)).status, 302);
+    assert.equal((await worker.visit(firstCallback, jar)).status, 302);
 
     const res = await worker.claim({ s: first.s }, jar);
     assert.deepEqual(setCookieNames(res), [`uc_login_${first.h}`]);
@@ -496,6 +496,20 @@ describe("login callback, claim and sessions", () => {
     await claimed(await worker.claim({ s: second.s }, jar));
     assert.equal(await worker.count("sessions"), 2);
     assert.equal(await worker.count("logins"), 0);
+  });
+
+  test("sends a web login's tab back to the app's account tab with its proof as a cookie, and claims with that cookie", async () => {
+    const jar = new CookieJar();
+    const login = newLogin();
+    const res = await signIn(jar, login);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), `${ORIGIN}/#/account`);
+    assert.equal(res.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.equal(await res.text(), "");
+    assert.deepEqual(setCookieNames(res).sort(), [`uc_begin_${login.h}`, `uc_login_${login.h}`]);
+
+    await claimed(await worker.claim({ s: login.s }, jar));
   });
 
   test("hands the Windows app's proof to its loopback port, and claims with that code", async () => {
@@ -526,7 +540,7 @@ describe("login callback, claim and sessions", () => {
     }
     // The web's proof is the cookie of this login's h only.
     const web = newLogin();
-    assert.equal((await signIn(jar, web)).status, 200);
+    assert.equal((await signIn(jar, web)).status, 302);
     const stray = new CookieJar();
     stray.store(new Response(null, { headers: { "Set-Cookie": `uc_login_${mine.h}=${jar.get(`uc_login_${web.h}`).value}` } }));
     assert.equal((await worker.claim({ s: web.s }, stray)).status, 403);
@@ -551,7 +565,7 @@ describe("login callback, claim and sessions", () => {
     // replace the completed login while it lives.
     const jar = new CookieJar();
     const login = newLogin();
-    assert.equal((await signIn(jar, login)).status, 200);
+    assert.equal((await signIn(jar, login)).status, 302);
     assert.equal(await stage(login), 1);
     assert.equal(jar.get(`uc_begin_${login.h}`), undefined);
     const completed = await worker.login(login.h);
@@ -598,7 +612,7 @@ describe("login callback, claim and sessions", () => {
     const jar = new CookieJar();
     const location = await beginIn(jar, newLogin());
     assert.equal(new URL(location).searchParams.get("redirect_uri"), expected);
-    assert.equal((await worker.visit(worker.authorize(location), jar)).status, 200);
+    assert.equal((await worker.visit(worker.authorize(location), jar)).status, 302);
     assert.equal(worker.google.calls.length, 1);
     const exchange = worker.google.calls[0].form;
     assert.equal(exchange.get("redirect_uri"), expected);
@@ -610,7 +624,7 @@ describe("login callback, claim and sessions", () => {
   async function sessionToken() {
     const jar = new CookieJar();
     const login = newLogin();
-    assert.equal((await signIn(jar, login)).status, 200);
+    assert.equal((await signIn(jar, login)).status, 302);
     return (await claimed(await worker.claim({ s: login.s }, jar))).token;
   }
 
