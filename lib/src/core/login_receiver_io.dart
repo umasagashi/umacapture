@@ -26,12 +26,12 @@ Future<LoginListener?> bindLoginListener({
 class _IoLoginListener implements LoginListener {
   _IoLoginListener(this._server, this._h) : port = _server.port {
     // A dialog closed before anything awaited [code] must not surface an unhandled error.
-    _callback.future.ignore();
+    _code.future.ignore();
   }
 
   final HttpServer _server;
   final String _h;
-  final _callback = Completer<LoginCallback>();
+  final _code = Completer<String>();
   Timer? _timer;
 
   /// Read once at bind: a closed [HttpServer] no longer reports its port.
@@ -39,7 +39,7 @@ class _IoLoginListener implements LoginListener {
   final int port;
 
   @override
-  Future<LoginCallback> get callback => _callback.future;
+  Future<String> get code => _code.future;
 
   @override
   Future<void> close() => _end(const LoginListenClosed(timedOut: false));
@@ -53,7 +53,7 @@ class _IoLoginListener implements LoginListener {
     final query = request.uri.queryParameters;
     final code = query['code'];
     final ours = request.method == 'GET' && request.uri.path == '/cb' && query['h'] == _h;
-    if (!ours || code == null || code.isEmpty || _callback.isCompleted) {
+    if (!ours || code == null || code.isEmpty || _code.isCompleted) {
       // Another login's redirect, or anything else: refuse it and keep waiting for ours.
       request.response.statusCode = HttpStatus.notFound;
       await request.response.close();
@@ -67,15 +67,11 @@ class _IoLoginListener implements LoginListener {
     await request.response.close();
     logger.i('Login listener on port $port received its callback.');
     await _shutdown();
-    // The hint rides beside the proof only when the login came back with one; an empty one is none.
-    final hint = query['hint'];
-    if (!_callback.isCompleted) {
-      _callback.complete((code: code, hint: hint == null || hint.isEmpty ? null : hint));
-    }
+    if (!_code.isCompleted) _code.complete(code);
   }
 
   Future<void> _end(LoginListenClosed reason) async {
-    if (!_callback.isCompleted) _callback.completeError(reason);
+    if (!_code.isCompleted) _code.completeError(reason);
     await _shutdown();
   }
 

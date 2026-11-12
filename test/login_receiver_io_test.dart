@@ -57,7 +57,7 @@ void main() {
     final listener = (await io.bindLoginListener(h: _h))!;
     addTearDown(listener.close);
     var done = false;
-    unawaited(listener.callback.then((_) => done = true));
+    unawaited(listener.code.then((_) => done = true));
 
     expect((await _get(listener.port, '/cb?h=$_otherH&code=$_proof')).$1, 404);
     expect((await _get(listener.port, '/other?h=$_h&code=$_proof')).$1, 404);
@@ -66,28 +66,16 @@ void main() {
     final (status, body) = await _get(listener.port, '/cb?h=$_h&code=$_proof');
     expect(status, 200);
     expect(body, isNot(contains(_proof)));
-    expect(await listener.callback, (code: _proof, hint: null), reason: 'a callback without a hint hands none');
+    expect(await listener.code, _proof);
     await _expectRefused(listener.port);
     expect(logged.join('\n'), isNot(contains(_proof)));
-  });
-
-  test('hands back the account hint beside the proof exactly as received, and logs neither', () async {
-    const sealed = 'c2VhbGVk-LWhpbnQ_b3BhcXVl';
-    final listener = (await io.bindLoginListener(h: _h))!;
-    addTearDown(listener.close);
-
-    final (status, body) = await _get(listener.port, '/cb?h=$_h&code=$_proof&hint=$sealed');
-    expect(status, 200);
-    expect(body, isNot(contains(sealed)));
-    expect(await listener.callback, (code: _proof, hint: sealed));
-    expect(logged.join('\n'), allOf(isNot(contains(_proof)), isNot(contains(sealed))));
   });
 
   test('close() cancels the wait and releases the port', () async {
     final listener = (await io.bindLoginListener(h: _h))!;
     final port = listener.port;
     final code = expectLater(
-      listener.callback,
+      listener.code,
       throwsA(isA<LoginListenClosed>().having((e) => e.timedOut, 'timedOut', false)),
     );
     await listener.close();
@@ -109,7 +97,7 @@ void main() {
     final port = listener.port;
     expect(asked, const Duration(seconds: 600));
     final code = expectLater(
-      listener.callback,
+      listener.code,
       throwsA(isA<LoginListenClosed>().having((e) => e.timedOut, 'timedOut', true)),
     );
     fire!();

@@ -432,7 +432,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   Map<String, RecordShare> build() {
     final entries = <String, RecordShare>{};
     for (final (:key, :value) in _box.entries()) {
-      if (shareLoginKeys.contains(key) || value is! String) {
+      if (key == shareSessionKey || value is! String) {
         continue;
       }
       try {

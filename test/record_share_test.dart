@@ -231,33 +231,28 @@ class _Emptied extends CharaDetailRecordStorage {
 
 /// A loopback listener the test hands the callback's proof to.
 class _FakeListener implements LoginListener {
-  final _callback = Completer<LoginCallback>();
+  final _code = Completer<String>();
   bool closed = false;
 
   @override
   int get port => 54321;
 
   @override
-  Future<LoginCallback> get callback => _callback.future;
+  Future<String> get code => _code.future;
 
-  /// The login's callback arriving with [proof], and with the sealed account [hint] when the login carried one.
-  void answer(String proof, {String? hint}) => _callback.complete((code: proof, hint: hint));
+  void callback(String proof) => _code.complete(proof);
 
   /// The listener's own deadline passing with no callback.
-  void timeOut() => _callback.completeError(const LoginListenClosed(timedOut: true));
+  void timeOut() => _code.completeError(const LoginListenClosed(timedOut: true));
 
   @override
   Future<void> close() async {
     closed = true;
-    if (!_callback.isCompleted) {
-      _callback.completeError(const LoginListenClosed(timedOut: false));
+    if (!_code.isCompleted) {
+      _code.completeError(const LoginListenClosed(timedOut: false));
     }
   }
 }
-
-/// The account hint as the server masks it, and the sealed form a Windows callback carries it in.
-const _hint = "ke****@gmail.com";
-const _sealedHint = "c2VhbGVkLWhpbnQtb3BhcXVlLXRvLXRoZS1hcHA";
 
 const _token = "TOKENtokenTOKENtokenTOKENtokenTOKENtoken123";
 const _accountId = "acct-0001";
@@ -887,7 +882,7 @@ void main() {
 
       await tester.tap(find.text('Google でログイン'));
       await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-      listener.answer("proof-from-the-callback");
+      listener.callback("proof-from-the-callback");
       // Dio reads each answer on the fake clock: one step for the claim, one for the trainer registration.
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
@@ -1118,7 +1113,7 @@ void main() {
 
       await tester.tap(find.text('Google でログイン'));
       await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-      listener.answer("proof-from-the-callback");
+      listener.callback("proof-from-the-callback");
       await tester.pump(const Duration(seconds: 1));
       await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
       await tester.pump(const Duration(seconds: 1));
@@ -1478,7 +1473,7 @@ void main() {
 
         await tester.tap(find.text('Google でログイン'));
         await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-        listener.answer("proof-from-the-callback");
+        listener.callback("proof-from-the-callback");
         await tester.pump(const Duration(seconds: 1));
         await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
         await tester.pump(const Duration(seconds: 1));
@@ -1867,65 +1862,27 @@ void main() {
       });
     });
 
-    testWidgets("logged in, a session the server drops leaves the account shown as the login's hint named it", (
-      tester,
-    ) async {
-      final listener = _FakeListener();
+    testWidgets('S4b (C1 ii): logging out from the account drops the session and the share notes', (tester) async {
+      await storeSession();
+      final note = await storeNote(state: RecordShareState.shared);
       container = containerFor([
-        _json(200, {..._claimed(), "account_hint": _hint}),
-        _json(200, {"trainer_id": record.metadata.trainerId}),
-        // The shares' card asks for the account's list as it appears with the login, and the server no longer knows
-        // the session.
-        _json(401, {"error": "session_required"}),
-      ], listener: listener);
+        _sharesList([_listed("0123456789", note.keyHash)]),
+        _empty(204),
+      ]);
       await mountAccount(tester);
       await tester.pumpAndSettle();
-      expect(find.text('ログインしていません。'), findsOneWidget, reason: 'no login has named an account yet');
 
-      await tester.tap(find.text('Google でログイン'));
-      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
-      listener.answer("proof-from-the-callback", hint: _sealedHint);
+      await tester.tap(find.text('ログアウト'));
       await settleUntilElapsing(
         tester,
-        () => server.sent.length == 3 && container.read(recordShareSessionProvider) == null,
-        describe: "the shares' list to find the session dropped",
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the account to show logged out',
       );
-      await tester.pumpAndSettle();
-
-      expect(find.text('ログインしていません。\n前回は $_hint でログインしていました。'), findsOneWidget);
-      expect(find.text('Google でログイン'), findsOneWidget);
+      expect(sentBesidesListing().single, endsWith(" /api/auth/logout"));
+      expect(container.read(recordShareSessionProvider), isNull);
+      expect(container.read(recordSharesProvider), isEmpty);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
     });
-
-    testWidgets(
-      'S4b (C1 ii): logging out from the account drops the session and the share notes, and names the account',
-      (tester) async {
-        await storeSession();
-        await StorageBox(StorageBoxKey.recordShares).push(shareAccountHintKey, _hint);
-        final note = await storeNote(state: RecordShareState.shared);
-        container = containerFor([
-          _sharesList([_listed("0123456789", note.keyHash)]),
-          _empty(204),
-        ]);
-        await mountAccount(tester);
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('ログアウト'));
-        await settleUntilElapsing(
-          tester,
-          () => find.text('Google でログイン').evaluate().isNotEmpty,
-          describe: 'the account to show logged out',
-        );
-        expect(sentBesidesListing().single, endsWith(" /api/auth/logout"));
-        expect(container.read(recordShareSessionProvider), isNull);
-        expect(container.read(recordSharesProvider), isEmpty);
-        expect(StorageBox(StorageBoxKey.recordShares).entries().map((entry) => entry.key), [shareAccountHintKey]);
-        expect(
-          find.text('ログインしていません。\n前回は $_hint でログインしていました。'),
-          findsOneWidget,
-          reason: 'the account a logout ended is still the one the device was last logged in as',
-        );
-      },
-    );
 
     testWidgets('a logout from the account ends a selection the table began under the share column it filtered', (
       tester,
@@ -2900,7 +2857,7 @@ void main() {
       final attempt = await session().beginLogin();
       expect(attempt.waitsForCallback, isTrue);
       expect(server.sent, isEmpty, reason: 'nothing is claimed before the callback');
-      listener.answer("proof-from-the-callback");
+      listener.callback("proof-from-the-callback");
 
       expect(await attempt.completion, LoginOutcome.signedIn);
       final page = opened.single;
@@ -2911,55 +2868,6 @@ void main() {
       expect(claim.keys.toSet(), {"s", "code"});
       expect(claim["code"], "proof-from-the-callback");
       expect(page.queryParameters["h"], sha256.convert(utf8.encode(claim["s"] as String)).toString());
-    });
-
-    test(
-      "a callback's account hint goes back to the claim as received, and the claim's hint is kept on the device",
-      () async {
-        final listener = _FakeListener();
-        container = containerFor([
-          _json(200, {..._claimed(), "account_hint": _hint}),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-        ], listener: listener);
-
-        final attempt = await session().beginLogin();
-        listener.answer("proof-from-the-callback", hint: _sealedHint);
-
-        expect(await attempt.completion, LoginOutcome.signedIn);
-        expect(bodyOf(0), {"s": bodyOf(0)["s"], "code": "proof-from-the-callback", "hint": _sealedHint});
-        expect(container.read(recordShareAccountHintProvider), _hint);
-        expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareAccountHintKey), _hint);
-      },
-    );
-
-    test('the account hint outlives a session the server drops and a logout, and every claim replaces it', () async {
-      container = containerFor([
-        _json(200, {..._claimed(), "account_hint": _hint}),
-        _json(200, {"trainer_id": record.metadata.trainerId}),
-        _json(401, {"error": "session_required"}),
-        // A Worker that predates the hint answers no field: the hint of the earlier login must not stay.
-        _json(200, _claimed()),
-        _json(200, {"trainer_id": record.metadata.trainerId}),
-        _json(200, {..._claimed(), "account_hint": "ab****@example.jp"}),
-        _json(200, {"trainer_id": record.metadata.trainerId}),
-        _empty(204),
-      ]);
-      String? hint() => container.read(recordShareAccountHintProvider);
-      String? stored() => StorageBox(StorageBoxKey.recordShares).pull<String>(shareAccountHintKey);
-
-      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-      expect(bodyOf(0).keys.toSet(), {"s"}, reason: 'a claim without a callback sends no hint');
-      await session().send("GET", "/api/me");
-      expect(container.read(recordShareSessionProvider), isNull);
-      expect((hint(), stored()), (_hint, _hint), reason: 'the server dropped the session; the user did not log out');
-
-      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-      expect((hint(), stored()), (null, null));
-
-      expect(await (await session().beginLogin()).claim(), LoginOutcome.signedIn);
-      expect((hint(), stored()), ("ab****@example.jp", "ab****@example.jp"));
-      expect(await session().logout(), isTrue);
-      expect((hint(), stored()), ("ab****@example.jp", "ab****@example.jp"), reason: 'a logout leaves the account');
     });
 
     test('closing a login with a listener closes the listener and claims nothing', () async {
@@ -3120,7 +3028,7 @@ void main() {
         () async {
           await storeNote();
           container = containerFor([
-            _json(200, {..._claimed(), "deleting": true, "account_hint": _hint}),
+            _json(200, {..._claimed(), "deleting": true}),
             remaining({"shares": 1, "sync": 0}),
             _empty(204),
           ]);
@@ -3128,7 +3036,6 @@ void main() {
           final attempt = await session().beginLogin();
           expect(await attempt.claim(), LoginOutcome.signedIn);
           expect(stored()?.deleting, isTrue);
-          expect(container.read(recordShareAccountHintProvider), _hint);
           expect(await session().deleteAccount(), AccountDeletionOutcome.deleted);
 
           // A deletion-only session registers no trainer id: every later request is the deletion's.
@@ -3138,7 +3045,6 @@ void main() {
             "DELETE /api/me",
           ]);
           expect(container.read(recordShareSessionProvider), isNull);
-          expect(container.read(recordShareAccountHintProvider), isNull, reason: 'the account is gone, so is its hint');
           expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
         },
       );
@@ -3158,14 +3064,14 @@ void main() {
       test('through a login, a request under the session, a lost connection and a logout', () async {
         final listener = _FakeListener();
         container = containerFor([
-          _json(200, {..._claimed(), "account_hint": _hint}),
+          _json(200, _claimed()),
           _json(200, {"trainer_id": record.metadata.trainerId}),
           _lostConnection,
           _empty(204),
         ], listener: listener);
 
         final attempt = await session().beginLogin();
-        listener.answer("proof-from-the-callback", hint: _sealedHint);
+        listener.callback("proof-from-the-callback");
         expect(await attempt.completion, LoginOutcome.signedIn);
         await expectLater(session().send("GET", "/api/me"), throwsA(isA<DioException>()));
         expect(await session().logout(), isTrue);
@@ -3173,7 +3079,7 @@ void main() {
         expect(server.sent, hasLength(4));
         expect(logged.where((line) => line.contains('Network request error')), isNotEmpty);
         final secret = bodyOf(0)["s"] as String;
-        for (final value in [_token, secret, "proof-from-the-callback", _sealedHint, _hint]) {
+        for (final value in [_token, secret, "proof-from-the-callback"]) {
           for (final line in logged) {
             expect(line, isNot(contains(value)));
           }

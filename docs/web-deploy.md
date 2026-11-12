@@ -131,9 +131,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
 9. **Identity key.** `IDENTITY_HMAC_KEY` is the key every login identity is stored under
    (HMAC-SHA256 of the provider and the provider's user id). Make it once per environment and keep a
    copy outside Cloudflare: a secret cannot be read back, and an environment whose key is lost or
-   changed can no longer reach any of its accounts by logging in. The key that seals a login's
-   account hint in transit is derived from it ([`login-protocol.md`](login-protocol.md)); no further
-   secret is put for that.
+   changed can no longer reach any of its accounts by logging in.
 
    ```bash
    python -c "import secrets; print(secrets.token_hex(32))"

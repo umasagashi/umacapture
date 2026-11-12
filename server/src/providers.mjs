@@ -43,30 +43,9 @@ export function clientSecret(env, provider) {
  * HMAC-SHA256. Losing it makes every account unreachable by its login.
  */
 export async function identityKey(env) {
-  return crypto.subtle.importKey("raw", identitySecret(env), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-}
-
-/**
- * The AES-GCM key a login's account hint is sealed under while it travels through the browser,
- * derived from IDENTITY_HMAC_KEY by HKDF under a label of its own, so it is never the identity key
- * itself and no further secret has to be put.
- */
-export async function hintKey(env) {
-  const material = await crypto.subtle.importKey("raw", identitySecret(env), "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode("umacapture account hint v1") },
-    material,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
-}
-
-/** IDENTITY_HMAC_KEY's 32 bytes. */
-function identitySecret(env) {
   const hex = requiredVar(env, "IDENTITY_HMAC_KEY");
   if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error("IDENTITY_HMAC_KEY must be 64 lowercase hex digits");
-  return hexBytes(hex);
+  return crypto.subtle.importKey("raw", hexBytes(hex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
 /** `env[name]`, which must be a non-empty string; anything else is a configuration error. */
