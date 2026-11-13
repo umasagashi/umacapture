@@ -84,4 +84,29 @@ export const CFG = Object.freeze({
   GUARD_DATABASE_ID,
   /** Unit prices in micro-USD per unit (requests, CPU milliseconds, rows written, rows read). */
   PRICE_MICROS: Object.freeze({ requests: 0.3, cpu_ms: 0.02, rows_written: 1, rows_read: 0.001 }),
+  /** The ledger's metrics billing reconciliation compares, day by day. */
+  METRICS: Object.freeze(["requests", "cpu_ms", "rows_read", "rows_written"]),
+  /**
+   * Every kind of Billable Usage row the account is expected to see, keyed by `billKey(ServiceName,
+   * ConsumedUnit)` (exact match; an empty unit is the empty string). A kind not listed stops reconciliation.
+   *  - `reconcile`: the same quantity as one ledger metric; `ConsumedQuantity x multiplier` is compared with it.
+   *    ConsumedQuantity is counted before included allowances and in the ledger's units (requests, CPU ms, rows),
+   *    so the multiplier is 1.
+   *  - `storage`: bounded by a named term of the budget (D1 storage, F_D1: every database of the account,
+   *    at most 10 GB each); neither evidence nor a reason to stop.
+   *  - `retired`: R2, whose bucket was deleted on 2026-11-03: a row of a day starting at or after
+   *    BILL_RETIRED_END_S is a new way of being billed outside the ledger and stops reconciliation.
+   */
+  BILL_CLASS: Object.freeze({
+    "Workers Standard Requests (first 10M are included)\u0000": Object.freeze({ class: "reconcile", metric: "requests", multiplier: 1 }),
+    "Workers CPU ms (first 30M are included)\u0000": Object.freeze({ class: "reconcile", metric: "cpu_ms", multiplier: 1 }),
+    "D1 - Rows Read (first 25 billion included)\u0000": Object.freeze({ class: "reconcile", metric: "rows_read", multiplier: 1 }),
+    "D1 - Rows Written (first 50 million included)\u0000": Object.freeze({ class: "reconcile", metric: "rows_written", multiplier: 1 }),
+    "D1 - Storage GB-mo (first 5GB included)\u0000GB-months": Object.freeze({ class: "storage", term: "F_D1" }),
+    "R2 Data Storage (First 10GB-Month included)\u0000GB-months": Object.freeze({ class: "retired" }),
+    "R2 Storage Class A Operations (First 1M included)\u0000": Object.freeze({ class: "retired" }),
+    "R2 Storage Class B Operations (First 10M included)\u0000": Object.freeze({ class: "retired" }),
+  }),
+  /** The first instant a retired kind may not be billed for: the day after its last observed row (2026-11-04T00:00:00Z). */
+  BILL_RETIRED_END_S: 1_793_750_400,
 });
