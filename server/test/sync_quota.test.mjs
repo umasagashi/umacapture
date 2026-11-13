@@ -183,7 +183,7 @@ describe("sync daily limits and capacity", () => {
     assert.equal((await answer(worker.fetch("/api/me/usage"))).status, 401);
   });
 
-  test("a put of a name the account holds answers exists with every limit used up and the caps full, and reaches no B2", async () => {
+  test("a put of a name the account holds answers exists with every limit used up and the caps full, reaches no B2, and writes no daily counter", async () => {
     const { id, client } = await account("exists");
     await client.setImageForm("png");
     const image = newImage();
@@ -193,19 +193,33 @@ describe("sync daily limits and capacity", () => {
     assert.equal((await client.putPart(part)).status, 200);
     assert.equal((await client.replace(0, root({ 0: part.name }))).status, 200);
     assert.equal((await client.putImage(image.name, image.bytes)).status, 200);
+    // With the form "none", a PNG the account does not hold is 409 images_not_synced before any limit.
+    assert.equal((await client.setImageForm("none")).status, 200);
 
     await setUsed("account", id, LIMITS.account);
     await setUsed("service", null, LIMITS.service);
     await addStored(id, limits.ACCOUNT_SYNC_BYTES_CAP);
     await addHiddenToday(id, limits.ACCOUNT_SYNC_HIDDEN_BYTES_CAP + 1);
     const puts = worker.b2.count("PUT");
+    const counters = async () => [
+      await worker.db
+        .prepare("SELECT daily_day, daily_requests, daily_rows_read, daily_rows_written FROM sync_accounts WHERE account_id = ?")
+        .bind(id)
+        .first(),
+      await worker.db.prepare("SELECT requests, rows_read, rows_written FROM sync_daily WHERE day = ?").bind(await today()).first(),
+    ];
+    const before = await counters();
     const body = await client.putBodies([record.body]);
     assert.deepEqual([body.status, body.body], [200, { results: [{ name: record.body.name, status: "exists" }] }]);
     const img = await client.putImage(image.name, image.bytes);
     assert.deepEqual([img.status, img.body], [200, { name: image.name, status: "exists" }]);
     const again = await client.putPart(part);
     assert.deepEqual([again.status, again.body], [200, { name: part.name, status: "exists" }]);
+    const unbound = newImage();
+    const notSynced = await client.putImage(unbound.name, unbound.bytes);
+    assert.deepEqual([notSynced.status, notSynced.body], [409, { error: "images_not_synced" }]);
     assert.equal(worker.b2.count("PUT"), puts);
+    assert.deepEqual(await counters(), before);
   });
 
   test("an account at its records cap may change and delete records but not add one", async () => {

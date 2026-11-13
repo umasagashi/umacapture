@@ -38,7 +38,7 @@ export class Refused extends Error {
 /**
  * A D1 handle that adds up the rows read and written its statements report (`meta.rows_read`,
  * `meta.rows_written`; the triggers' rows included), and knows the account to charge them to once
- * `admit` or `countFor` named one.
+ * `admit`, `countWithin` or `countFor` named one.
  */
 export class MeteredD1 {
   rowsRead = 0;
@@ -159,12 +159,10 @@ const DAILY_LIMITS = [
 ];
 
 /**
- * Admits a request of account `accountId` on `db` at clock `clk` against the daily limits, and charges
- * it to the account from here on. `use` "normal" is refused when what is left of any limit is not more
- * than the reserve; "reserve" (a part put or a replacement) only when a limit is used up. Throws
- * Refused with 429 daily_limit `{scope}` ("account" or "service") and a Retry-After to the next UTC day.
+ * What is left of each of the six daily limits for account `accountId` on `db` at clock `clk`, in the
+ * order of DAILY_LIMITS: [scope, left, reserve]. A counter of an earlier UTC day counts as zero.
  */
-export async function admit(db, accountId, clk, use) {
+async function dailyLeft(db, accountId, clk) {
   const row = await db
     .prepare(
       `SELECT CASE WHEN a.daily_day = ?2 THEN a.daily_requests ELSE 0 END AS account_requests,
@@ -176,14 +174,36 @@ export async function admit(db, accountId, clk, use) {
     )
     .bind(accountId, clk.day)
     .first();
-  for (const [scope, counter, limit, reserve] of DAILY_LIMITS) {
-    const left = limit - row[`${scope}_${counter}`];
+  return DAILY_LIMITS.map(([scope, counter, limit, reserve]) => [scope, limit - row[`${scope}_${counter}`], reserve]);
+}
+
+/**
+ * Admits a request of account `accountId` on `db` at clock `clk` against the daily limits, and charges
+ * it to the account from here on. `use` "normal" is refused when what is left of any limit is not more
+ * than the reserve; "reserve" (a part put or a replacement) only when a limit is used up. Throws
+ * Refused with 429 daily_limit `{scope}` ("account" or "service") and a Retry-After to the next UTC day.
+ */
+export async function admit(db, accountId, clk, use) {
+  for (const [scope, left, reserve] of await dailyLeft(db, accountId, clk)) {
     if (left <= (use === "normal" ? reserve : 0)) {
-      // Refused here, the request is charged to nobody, even when `countFor` named its account before:
+      // Refused here, the request is charged to nobody, even when `countWithin` named its account before:
       // charging it would take a request and rows out of the reserve it was refused to keep.
       db.accountId = null;
       throw new Refused(fail(429, "daily_limit", { scope }, { "Retry-After": String(untilTomorrow(clk)) }));
     }
+  }
+  countFor(db, accountId);
+}
+
+/**
+ * Charges the request run on `db` to account `accountId` while no daily limit is used up, without
+ * refusing it: an answer that stores nothing (a held name's "exists", a 409) is given whatever the
+ * limits, and once a limit is used up it is given without writing the two counter rows, so such
+ * requests past the limit cost D1 no writes.
+ */
+export async function countWithin(db, accountId, clk) {
+  for (const [, left] of await dailyLeft(db, accountId, clk)) {
+    if (left <= 0) return;
   }
   countFor(db, accountId);
 }
