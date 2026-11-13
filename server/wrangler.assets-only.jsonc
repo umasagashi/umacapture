@@ -34,13 +34,13 @@
   "routes": [{ "pattern": "umacapture.com", "custom_domain": true }],
 
   "env": {
-    // The same Worker name and host as env.staging of server/wrangler.jsonc, so a deploy replaces
-    // the staging deployment made from there. assets, routes and workers_dev are inherited from the
+    // The same Worker name and host (staging.umacapture.com) as env.staging of server/wrangler.jsonc,
+    // so a deploy replaces the staging deployment made from there. assets, routes and workers_dev are inherited from the
     // top level unless set here; routes and workers_dev are, because staging must never claim the
     // production domain.
     "staging": {
-      "routes": [],
-      "workers_dev": true,
+      "routes": [{ "pattern": "staging.umacapture.com", "custom_domain": true }],
+      "workers_dev": false,
       "preview_urls": false
     }
   }

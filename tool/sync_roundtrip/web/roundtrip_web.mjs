@@ -18,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '..', '..', '..');
 const DEFAULTS = {
   profile: path.join(repo, '.notes', 'sync-roundtrip', 'chrome-profile'),
-  url: 'https://umacapture-web-staging.umasagashi.workers.dev/',
+  url: 'https://staging.umacapture.com/',
   chrome: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   idleMinutes: 120,
   width: 1440,

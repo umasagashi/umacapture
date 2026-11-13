@@ -1,0 +1,44 @@
+// The guard: a Worker with no entrance of its own that runs every minute, reads the account's usage from
+// GraphQL Analytics and keeps rule G -- the zone's WAF block rule -- open only as far as that usage is
+// proven complete and within budget. Its code is guard/src/, its D1 schema guard/migrations/.
+//
+// No route, no workers.dev URL, no preview URL: nothing outside Cloudflare's cron can make it run, so it
+// bills only its own minute-by-minute runs. Use the wrangler pinned in server/package.json
+// (server/node_modules/.bin/wrangler) with `-c wrangler.guard.jsonc`.
+{
+  "name": "umacapture-guard",
+  // The run's entry (the scheduled handler).
+  "main": "guard/src/index.mjs",
+  // No later than the newest date the pinned wrangler's local runtime accepts (4.113.0 accepts up to
+  // 2026-07-28), so the tests can run this Worker.
+  "compatibility_date": "2026-07-28",
+  // Usage metrics off for every command that reads this file.
+  "send_metrics": false,
+  "observability": { "enabled": false },
+  // CPU time per run, set well above the heaviest run measured (61.4 ms): a run cut off proves nothing, and
+  // without proof production closes.
+  "limits": { "cpu_ms": 500 },
+  "workers_dev": false,
+  "preview_urls": false,
+  // Every minute: each run is the guard's control event for its minute.
+  "triggers": { "crons": ["* * * * *"] },
+  // The account whose usage the guard reads, the zone umacapture.com whose rule G it keeps, and the
+  // Sentry DSN its notifications go to: the same DSN the app and the server Worker's reports use
+  // (REPORT_SENTRY_DSN in wrangler.jsonc); its events carry the environment "guard". Ids and a DSN are
+  // not secrets, so they are vars. The tokens are secrets (GUARD_CF_TOKEN, GUARD_BILL_TOKEN).
+  "vars": {
+    "GUARD_ACCOUNT_ID": "6962635e027f873c84f5593af2570107",
+    "GUARD_ZONE_ID": "66547a62327a02bf73697731ce3bd864",
+    "GUARD_SENTRY_DSN": "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477"
+  },
+  "d1_databases": [
+    {
+      "binding": "GUARD_DB",
+      "database_name": "umacapture-guard",
+      // The same id as GUARD_DATABASE_ID in guard/src/config.mjs: the guard picks its own D1 rows out of
+      // Analytics by it, so the two change together.
+      "database_id": "3284839e-cb75-4520-9653-5abeb055bf5e",
+      "migrations_dir": "guard/migrations"
+    }
+  ]
+}

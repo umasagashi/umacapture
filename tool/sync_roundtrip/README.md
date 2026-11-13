@@ -16,7 +16,7 @@ archive, merge, export, a screenshot — is one invocation, so a round-trip scri
 
   ```sh
   .fvm/flutter_sdk/bin/flutter build windows --profile -t test_driver/app.dart \
-    --dart-define=UMACAPTURE_SHARING_ORIGIN=https://umacapture-web-staging.umasagashi.workers.dev
+    --dart-define=UMACAPTURE_SHARING_ORIGIN=https://staging.umacapture.com
   ```
 
 - `uv` (the script carries its own dependencies) and `node` on `PATH` (for the relay).
@@ -125,7 +125,7 @@ Chrome started on a profile that is already open hands its arguments to the runn
 Logging in is the user's, once, in a visible Chrome on the same profile — without a debugging port:
 
 ```bat
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="C:\Projects\umacapture\.notes\sync-roundtrip\chrome-profile" --no-first-run https://umacapture-web-staging.umasagashi.workers.dev/
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="C:\Projects\umacapture\.notes\sync-roundtrip\chrome-profile" --no-first-run https://staging.umacapture.com/
 ```
 
 In that window: the アカウント tab → **Google でログイン**, finish the login in the same browser tab, which
