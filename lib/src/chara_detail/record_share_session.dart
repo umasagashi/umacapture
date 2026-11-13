@@ -20,6 +20,7 @@ import '/src/chara_detail/record_share.dart' show newLoginSecret, recordSharesPr
 import '/src/core/login_receiver.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/long_read_registry.dart' show LongReadClaim, LongReadKind, longReadRegistryProvider;
 import '/src/core/utils.dart';
 import '/src/core/video_import_ops.dart' show CaptureActivity;
 import '/src/preference/storage_box.dart';
@@ -140,12 +141,38 @@ enum LoginOutcome {
 }
 
 /// What would end if a web login left the app now; a web login waits until it is over.
+///
+/// One member per operation the user can tell apart, so the refusal names what to wait for.
 enum LoginBlocker {
   /// A live capture: leaving the page ends the screen share and the records in flight.
   capturing,
 
   /// 動画取り込み, the file dialog included as everywhere else ([CaptureActivity.pickingClip]).
   importing,
+
+  /// Selected records being written out as a zip ([LongReadKind.export]).
+  exporting,
+
+  /// A storage-view folder being bundled into a zip ([LongReadKind.zip]).
+  zipping,
+
+  /// Zips being read into the record store ([LongReadKind.import]).
+  importingRecords,
+
+  /// Records being moved into 殿堂入り ([LongReadKind.archive]).
+  archiving,
+
+  /// A re-recognition batch ([LongReadKind.regeneration]).
+  regenerating,
+
+  /// The inheritance resolution started from the settings ([LongReadKind.inherit]).
+  resolvingInheritance,
+
+  /// Two records being merged ([LongReadKind.merge]).
+  merging,
+
+  /// A delete from the record table or the storage view ([LongReadKind.delete]).
+  deleting,
 }
 
 /// How a press of a login button went on.
@@ -302,7 +329,8 @@ class RecordShareSession extends Notifier<ShareSession?> {
       // Web is the browser tab itself, and a login in another tab breaks a password manager's "Sign in with", which
       // follows one tab: the start page replaces the app, which ends whatever the page is doing.
       case SameTabLoginReturn(:final handover):
-        if (_loginBlockerOf(ref.read(captureActivityProvider)) case final blocker?) {
+        if (_loginBlockerOf(ref.read(captureActivityProvider), ref.read(longReadRegistryProvider).values)
+            case final blocker?) {
           return LoginRefused(blocker);
         }
         handover.keep(secret);
@@ -311,10 +339,36 @@ class RecordShareSession extends Notifier<ShareSession?> {
     }
   }
 
-  static LoginBlocker? _loginBlockerOf(CaptureActivity activity) => switch (activity) {
-    CaptureActivity.idle => null,
-    CaptureActivity.capturing => LoginBlocker.capturing,
-    CaptureActivity.pickingClip || CaptureActivity.importing => LoginBlocker.importing,
+  /// What a web login would end now: the capture card's activity, then every job on the long-read registry, which is
+  /// where each operation that runs past the press that started it says it is running.
+  static LoginBlocker? _loginBlockerOf(CaptureActivity activity, Iterable<LongReadClaim> claims) {
+    final byActivity = switch (activity) {
+      CaptureActivity.idle => null,
+      CaptureActivity.capturing => LoginBlocker.capturing,
+      CaptureActivity.pickingClip || CaptureActivity.importing => LoginBlocker.importing,
+    };
+    return byActivity ?? claims.map((claim) => _loginBlockerOfKind(claim.kind)).nonNulls.firstOrNull;
+  }
+
+  /// Whether leaving the page would lose the job of [kind]: null for a job the next page load runs again by itself.
+  static LoginBlocker? _loginBlockerOfKind(LongReadKind kind) => switch (kind) {
+    LongReadKind.liveCapture => LoginBlocker.capturing,
+    LongReadKind.videoImport => LoginBlocker.importing,
+    LongReadKind.export => LoginBlocker.exporting,
+    LongReadKind.zip => LoginBlocker.zipping,
+    LongReadKind.import => LoginBlocker.importingRecords,
+    LongReadKind.archive => LoginBlocker.archiving,
+    LongReadKind.regeneration => LoginBlocker.regenerating,
+    LongReadKind.inherit => LoginBlocker.resolvingInheritance,
+    LongReadKind.merge => LoginBlocker.merging,
+    LongReadKind.delete => LoginBlocker.deleting,
+    // Every page load scans the store and finishes the transactions an interrupted session left behind.
+    LongReadKind.scan || LongReadKind.recover => null,
+    // Every page load checks the module against the latest and installs it again unless its marker, written last,
+    // says it is in place.
+    LongReadKind.moduleInstall => null,
+    // Desktop only: web has no data root to relocate and does not run the archive repair.
+    LongReadKind.relocate || LongReadKind.repair => null,
   };
 
   /// Claims the web login this tab left the app for ([LoginLeavesApp]), with the secret kept across the page loads

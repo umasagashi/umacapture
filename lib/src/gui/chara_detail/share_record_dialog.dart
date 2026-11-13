@@ -162,6 +162,14 @@ class LoginDriver {
 String loginRefusalText(LoginBlocker blocker) => switch (blocker) {
   LoginBlocker.capturing => "$tr_record_share.login.refused_capturing".tr(),
   LoginBlocker.importing => "$tr_record_share.login.refused_importing".tr(),
+  LoginBlocker.exporting => "$tr_record_share.login.refused_exporting".tr(),
+  LoginBlocker.zipping => "$tr_record_share.login.refused_zipping".tr(),
+  LoginBlocker.importingRecords => "$tr_record_share.login.refused_importing_records".tr(),
+  LoginBlocker.archiving => "$tr_record_share.login.refused_archiving".tr(),
+  LoginBlocker.regenerating => "$tr_record_share.login.refused_regenerating".tr(),
+  LoginBlocker.resolvingInheritance => "$tr_record_share.login.refused_resolving_inheritance".tr(),
+  LoginBlocker.merging => "$tr_record_share.login.refused_merging".tr(),
+  LoginBlocker.deleting => "$tr_record_share.login.refused_deleting".tr(),
 };
 
 /// What the user can do about a login that did not simply succeed; null when there is nothing to tell. A

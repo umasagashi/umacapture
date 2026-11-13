@@ -14,6 +14,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
@@ -43,12 +44,14 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/record_write_effects.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
+import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_card.dart';
 import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
@@ -56,6 +59,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/preference/settings_state.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/file_picker.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/record_table_tabs_router.dart';
@@ -224,6 +228,22 @@ class _Shown extends CharaDetailRecordStorage {
   }
 }
 
+/// A record store whose resolution of imported records parks on [gate], and says it has reached it on [entered].
+///
+/// The resolution is the last thing a record import does, and the step it parks is the one its claim has to cover.
+class _ResolvingImport extends _Shown {
+  final Completer<void> entered;
+  final Future<void> gate;
+
+  _ResolvingImport(super.shownRecords, {required this.entered, required this.gate});
+
+  @override
+  Future<void> resolveImportedInheritance(Iterable<String> ids) async {
+    if (!entered.isCompleted) entered.complete();
+    await gate;
+  }
+}
+
 /// A record store that holds nothing: the record a note was made for has been deleted.
 class _Emptied extends CharaDetailRecordStorage {
   @override
@@ -332,6 +352,8 @@ void main() {
     _FakeHandover? tab,
     bool capturing = false,
     VideoImportState? importing,
+    PathInfo? importInto,
+    CharaDetailRecordStorage Function()? store,
   }) {
     server = _FakeServer(answers, usage: usage, me: meApart ? me : null);
     opened = [];
@@ -365,6 +387,14 @@ void main() {
         // The wait after a 429 is the site's rate-limit window; a test does not wait it out in real time.
         shareImagesRetryDelayProvider.overrideWithValue(Duration.zero),
         if (pathInfo != null) pathInfoProvider.overrideWithValue(pathInfo),
+        if (importInto != null) ...[
+          pathInfoLoader.overrideWith((ref) async => importInto),
+          pathLayoutLoader.overrideWith((ref) async => importInto),
+        ],
+        if (store != null) ...[
+          charaDetailRecordStorageLoaderProvider.overrideWith(store),
+          charaDetailArchiveStorageLoaderProvider.overrideWith(() => _Archived(archived)),
+        ],
         if (table != null) ...[
           displayedRecordsProvider.overrideWithValue(table.records),
           if (table.columns case final columns?) currentColumnSpecsProvider.overrideWithValue(columns),
@@ -1520,27 +1550,107 @@ void main() {
       }
     });
 
-    testWidgets('web: a press during a capture or a video import says why in a toast and stays in the app', (
+    testWidgets(
+      'web: a press during a capture, a video import or a long job says why in a toast and stays in the app',
+      (tester) async {
+        final cases = [
+          ('capturing', true, null, null, 'キャプチャ中はログインできません。'),
+          ('importing', false, const VideoImportState(phase: VideoImportPhase.importing), null, '動画の取り込み中はログインできません。'),
+          // A zip export runs on after its dialog has closed, and says so on the long-read registry.
+          ('exporting', false, null, LongReadKind.export, 'エクスポート中はログインできません。'),
+        ];
+        for (final (name, capturing, importing, running, sentence) in cases) {
+          container = containerFor([], capturing: capturing, importing: importing);
+          if (running != null) {
+            container
+                .read(longReadRegistryProvider.notifier)
+                .claimUntilReleased(kind: running, paths: [DirectoryPath('/data/storage/chara_detail/active/a')]);
+          }
+          final toasts = <String?>[];
+          container.listen(
+            plainToastEventProvider,
+            (_, next) => next.whenData((toast) => toasts.add(toast.description)),
+          );
+          await mountAccount(tester);
+          await tester.tap(find.text('Google でログイン'));
+          await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the refusal of $name');
+
+          expect(toasts, [sentence], reason: name);
+          expect(handover.kept, isNull, reason: name);
+          expect(handover.left, isEmpty, reason: name);
+          expect(server.sent, isEmpty, reason: name);
+          await tester.pumpWidget(const SizedBox());
+        }
+      },
+    );
+
+    testWidgets('web: a press while a zip import is still resolving the inheritance of what it wrote is refused', (
       tester,
     ) async {
-      final cases = [
-        ('capturing', true, null, 'キャプチャ中はログインできません。'),
-        ('importing', false, const VideoImportState(phase: VideoImportPhase.importing), '動画の取り込み中はログインできません。'),
-      ];
-      for (final (name, capturing, importing, sentence) in cases) {
-        container = containerFor([], capturing: capturing, importing: importing);
-        final toasts = <String?>[];
-        container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
-        await mountAccount(tester);
-        await tester.tap(find.text('Google でログイン'));
-        await settleUntil(tester, () => toasts.isNotEmpty, describe: 'the refusal of $name');
+      // The resolution writes links and relation bonuses back into the stored records after the last zip, and
+      // nothing runs it again, so leaving the page there loses it as surely as leaving mid-zip.
+      final root = Directory.systemTemp.createTempSync('uma_share_import');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final info = PathInfo(
+        documentDir: DirectoryPath(root.path),
+        supportDir: DirectoryPath(root.path),
+        executableDir: DirectoryPath(root.path) / 'exe',
+        downloadDir: DirectoryPath(root.path) / 'dl',
+        dataRoot: DirectoryPath(root.path),
+      );
+      final archive = Archive();
+      final json = utf8.encode(
+        jsonEncode({
+          'metadata': {
+            'record_id': {'self': 'imported'},
+          },
+        }),
+      );
+      archive.addFile(ArchiveFile('chara_detail/active/imported/record.json', json.length, json));
+      final zip = '${root.path}${Platform.pathSeparator}records.zip';
+      File(zip).writeAsBytesSync(ZipEncoder().encode(archive));
+      installFakeFilePicker().answerWithPaths([zip]);
+      final entered = Completer<void>();
+      final gate = Completer<void>();
+      container = containerFor(
+        [],
+        importInto: info,
+        store: () => _ResolvingImport(const [], entered: entered, gate: gate.future),
+      );
+      // The import resolves only over a store that was built before it: the table is what builds it in the app.
+      await tester.runAsync(() => container.read(charaDetailRecordStorageLoaderProvider.future));
 
-        expect(toasts, [sentence], reason: name);
-        expect(handover.kept, isNull, reason: name);
-        expect(handover.left, isEmpty, reason: name);
-        expect(server.sent, isEmpty, reason: name);
-        await tester.pumpWidget(const SizedBox());
-      }
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: Scaffold(body: CharaDetailImportButton())),
+        ),
+      );
+      await tester.runAsync(() => tester.tap(find.byType(IconButton)));
+      await settleUntil(tester, () => entered.isCompleted, describe: 'the import to reach its inheritance resolution');
+
+      final toasts = <String?>[];
+      container.listen(plainToastEventProvider, (_, next) => next.whenData((toast) => toasts.add(toast.description)));
+      await mountAccount(tester);
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(
+        tester,
+        () => toasts.contains('インポート中はログインできません。'),
+        describe: 'the refusal of a login during the import',
+      );
+
+      expect(toasts, ['インポート中はログインできません。']);
+      expect(handover.kept, isNull);
+      expect(handover.left, isEmpty);
+      expect(server.sent, isEmpty);
+
+      gate.complete();
+      await settleUntil(
+        tester,
+        () => container.read(longReadRegistryProvider).isEmpty,
+        describe: 'the import to give its claim back',
+      );
+      await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets("logged in, the account's usage is shown below the account against the server's caps", (tester) async {
