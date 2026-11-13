@@ -27,7 +27,7 @@ import { Bucket, objectKey, sha256Hex, StorageFailed } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { Unavailable } from "./store.mjs";
-import { admit, admitGrowth, chargeRequest, countFor, MeteredD1, Refused } from "./sync_quota.mjs";
+import { admit, admitGrowth, chargeRequest, countWithin, MeteredD1, Refused } from "./sync_quota.mjs";
 import { distinctJson, goneBy, HELD, named, namesJoined, pendingMove, putWritten, settle, STATEMENT, tidyLeftoversOf, writing, written } from "./sync_refs.mjs";
 
 /** An object name: the SHA-256 of its bytes as 64 lowercase hex digits. */
@@ -220,7 +220,7 @@ export const putBodies = (request, env, now) =>
     const held = await heldNames(env.DB, session.accountId, items.map((x) => x.name), at);
     const fresh = items.filter((x) => !held.has(x.name));
     // A body the account holds is answered "exists" whatever the limits: nothing new is stored.
-    countFor(env.DB, session.accountId);
+    await countWithin(env.DB, session.accountId, clk);
     if (fresh.length > 0) {
       await admit(env.DB, session.accountId, clk, "normal");
       await admitGrowth(env.DB, session.accountId, at, fresh.reduce((sum, x) => sum + x.bytes.length, 0));
@@ -359,7 +359,7 @@ export const putImage = (request, env, name, now) =>
     }
     if (length > limits.MAX_SYNC_IMAGE) throw new InvalidPayload("body");
     const held = await heldNames(env.DB, session.accountId, [name], at);
-    countFor(env.DB, session.accountId);
+    await countWithin(env.DB, session.accountId, clk);
     if (held.has(name)) {
       await request.body?.cancel();
       return json(200, { name, status: "exists" });

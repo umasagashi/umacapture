@@ -21,7 +21,7 @@ import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { Unavailable } from "./store.mjs";
 import { canonicalImages, d1, heldNames, insertObjects, NAME, putAll, storeObjects, syncWrite } from "./sync.mjs";
-import { admit, admitDatabase, countFor, recordsRefusal } from "./sync_quota.mjs";
+import { admit, admitDatabase, countWithin, recordsRefusal } from "./sync_quota.mjs";
 import {
   claimHidden,
   clearUnreferenced,
@@ -152,7 +152,7 @@ export const putPart = (request, env, now) =>
     if (bytes.length > limits.MAX_SYNC_PART) throw new InvalidPayload("part");
     if ((await sha256Hex(bytes)) !== name) throw new InvalidPayload("name");
     const { slot, rows, refs } = await readPart(part);
-    countFor(env.DB, session.accountId);
+    await countWithin(env.DB, session.accountId, clk);
     if ((await heldNames(env.DB, session.accountId, [name], at)).has(name)) return json(200, { name, status: "exists" });
     // A part put may use the reserve the daily limits and the database keep for one replacement (sync_quota.mjs).
     await admit(env.DB, session.accountId, clk, "reserve");
