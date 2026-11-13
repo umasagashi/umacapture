@@ -31,7 +31,8 @@ CREATE TABLE guard_env (
   CHECK (mode <> 'open' OR open_until_s IS NOT NULL)
 );
 
--- Intentions and observations only, one row.
+-- Intentions and observations only, one row. last_reread_s and last_sweep_s are when a run last took
+-- the hourly re-read and the daily sweep (a compare-and-set claims each), so two runs do not both do it.
 CREATE TABLE guard_health (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   arm_requested_s INTEGER,
@@ -39,7 +40,9 @@ CREATE TABLE guard_health (
   rule_seen_since_s INTEGER,
   last_measurable_s INTEGER,
   last_patch_error TEXT,
-  api_backoff_until_s INTEGER
+  api_backoff_until_s INTEGER,
+  last_reread_s INTEGER,
+  last_sweep_s INTEGER
 );
 
 -- The control records: one row per run, written by the run's first statement. Rows older than 31 days

@@ -19,6 +19,14 @@
   "preview_urls": false,
   // Every minute: each run is the guard's control event for its minute.
   "triggers": { "crons": ["* * * * *"] },
+  // Not filled yet: the rollout sets the account and zone ids and the Sentry DSN. Until then every call
+  // that needs one fails, which the guard reads as "could not be read" (it extends nothing), and every
+  // notification stays unconfirmed. The tokens are secrets (GUARD_CF_TOKEN, GUARD_BILL_TOKEN).
+  "vars": {
+    "GUARD_ACCOUNT_ID": "",
+    "GUARD_ZONE_ID": "",
+    "GUARD_SENTRY_DSN": ""
+  },
   "d1_databases": [
     {
       "binding": "GUARD_DB",
