@@ -276,7 +276,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
 | `data.umacapture.com` (custom domain) | Recognizer modules and announcements (`umacapture-data`, static assets only, no R2) | Applies, unused | Production entrance |
 | `og.umacapture.com` (Vercel project domain, CNAME, DNS only) | The OGP image function (`umacapture-og` on Vercel) | Does not apply: the zone does not proxy it. The Vercel Firewall rule applies (see the Vercel section) | Production entrance |
 | `umacapture-og.vercel.app` | The project's own production domain on Vercel | Does not apply | Kept. It answers without the bypass header: `/` gets the platform's 404 and `/r/<id>.png` reaches the function, because production domains are outside deployment protection. Whether the Vercel Firewall rule also applies here is not measured: the burst test ran against `og.umacapture.com` only |
-| `umacapture-web-staging.umasagashi.workers.dev` | Staging (`umacapture-web-staging`), assets only once sharing is off there | Does not apply | Open, linked from nowhere (see "Staging") |
+| `umacapture-web-staging.umasagashi.workers.dev` | Staging (`umacapture-web-staging`) | Does not apply | Closed: `workers_dev: false` (see "Staging") |
 | `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
 | B2 buckets `umacapture-sync`, `umacapture-sync-staging` | File sync's objects (`a/`) and shared images (`s/`), reached only by the Worker with the bucket's key. Nothing under `a/` is public. A bundle under `s/` is served to anyone who knows its share's id, through the Worker's `GET /api/shares/<id>/images` on the entrance above, while the share records it stored and `SHARE_IMAGES_ENABLED` is `"true"` | Does not apply to the bucket; the zone's rule applies to the Worker's `/api/` | Private |
@@ -959,9 +959,9 @@ verified through the public URL.
   `https://umacapture-web-staging.umasagashi.workers.dev/api/auth/callback/google`
   (`env.staging.vars.AUTH_REDIRECT_ORIGIN`), so a staging login comes back to staging, where its
   row is.
-- **workers.dev.** Staging has no custom domain. Its `workers.dev` URL bypasses the zone WAF and
-  anyone who has it can open it; nothing links to it. It shares the plan's included Worker and D1
-  usage with production, while its daily limits are counted in its own D1.
+- **workers.dev.** Staging has no custom domain, and its `workers.dev` URL and preview URLs are
+  off (`workers_dev: false`, `preview_urls: false` in both configs), so nothing outside reaches it.
+  It shares the plan's included Worker and D1 usage with production, while its daily limits are counted in its own D1.
 - **No Sentry.** A staging run uploads no source maps and needs neither `SENTRY_AUTH_TOKEN` nor
   `sentry-cli`; the maps are still excluded from the deployment by `.assetsignore`.
 - **Name tables.** Staging's Worker reads them from the staging database, which every module
