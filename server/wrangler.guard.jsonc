@@ -1,0 +1,32 @@
+// The guard: a Worker with no entrance of its own that runs every minute, reads the account's usage from
+// GraphQL Analytics and keeps rule G -- the zone's WAF block rule -- open only as far as that usage is
+// proven complete and within budget. Its code is guard/src/, its D1 schema guard/migrations/.
+//
+// No route, no workers.dev URL, no preview URL: nothing outside Cloudflare's cron can make it run, so it
+// bills only its own minute-by-minute runs. Use the wrangler pinned in server/package.json
+// (server/node_modules/.bin/wrangler) with `-c wrangler.guard.jsonc`.
+{
+  "name": "umacapture-guard",
+  // The run's entry (the scheduled handler).
+  "main": "guard/src/index.mjs",
+  // No later than the newest date the pinned wrangler's local runtime accepts (4.113.0 accepts up to
+  // 2026-07-28), so the tests can run this Worker.
+  "compatibility_date": "2026-07-28",
+  // Usage metrics off for every command that reads this file.
+  "send_metrics": false,
+  "observability": { "enabled": false },
+  "workers_dev": false,
+  "preview_urls": false,
+  // Every minute: each run is the guard's control event for its minute.
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "GUARD_DB",
+      "database_name": "umacapture-guard",
+      // Not created yet: this placeholder is replaced, together with GUARD_DATABASE_ID in
+      // guard/src/config.mjs, by the id `wrangler d1 create umacapture-guard` prints.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "guard/migrations"
+    }
+  ]
+}
