@@ -2,7 +2,7 @@
 //
 // The top level is production: the assets at umacapture.com with the Worker in front of /r/*,
 // /u/* and /api/*, its own D1 and its own Turnstile widget. env.staging is the same Worker,
-// with its own D1, on no route and no workers.dev URL. wrangler.assets-only.jsonc deploys either one without the Worker.
+// with its own D1, at staging.umacapture.com and no workers.dev URL. wrangler.assets-only.jsonc deploys either one without the Worker.
 //
 // Deploy through tool/cloudflare/deploy_web.sh, never with a bare `wrangler deploy`: the script is
 // what guarantees build/web/ was built from this commit in the same run. Use the wrangler pinned in
@@ -92,13 +92,14 @@
   },
 
   "env": {
-    // Not served anywhere: no route, and workers.dev and preview URLs are off, so no request from
-    // outside reaches its Worker; its hourly run still runs. It has its own D1. Its Worker and D1 usage is billed to the same account as production's.
+    // Served only at the custom domain staging.umacapture.com, so the zone's WAF applies to every
+    // request to it: the guard's WAF rule blocks the host except while a test window is open.
+    // workers.dev and preview URLs are off because the WAF does not apply to them. It has its own D1. Its Worker and D1 usage is billed to the same account as production's.
     "staging": {
       "main": "src/index.mjs",
       // routes, workers_dev and assets are inherited from the top level unless set here; staging
       // must never claim the production domain.
-      "routes": [],
+      "routes": [{ "pattern": "staging.umacapture.com", "custom_domain": true }],
       "workers_dev": false,
       "preview_urls": false,
       "triggers": { "crons": ["45 * * * *"] },
@@ -119,9 +120,9 @@
         }
       ],
       "vars": {
-        // <worker name>-<env>.<account workers.dev subdomain>.workers.dev; tool/cloudflare/deploy_web.sh
-        // verifies the staging deployment on the same origin.
-        "PUBLIC_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
+        // The custom domain of env.staging.routes; tool/cloudflare/deploy_web.sh verifies the staging
+        // deployment on the same origin.
+        "PUBLIC_ORIGIN": "https://staging.umacapture.com",
         // Staging has no OGP image deployment of its own; its origin is decided if staging gets
         // its Worker back.
         "OG_IMAGE_MODE": "static",
@@ -135,14 +136,14 @@
         // action of this environment. "false" refuses them; production must say "false".
         "TURNSTILE_TESTING_KEY": "true",
         // siteverify must report this hostname and action, or the login's begin is refused.
-        "TURNSTILE_HOSTNAME": "umacapture-web-staging.umasagashi.workers.dev",
+        "TURNSTILE_HOSTNAME": "staging.umacapture.com",
         "TURNSTILE_ACTION": "login",
         // Staging's own value: the top level's vars are not inherited once env.staging sets "vars".
         // Staging signs in through production's OAuth client, which also registers staging's
         // redirect URI, so this is production's client id.
         "GOOGLE_CLIENT_ID": "398895641600-5oqtrm01eo0j66qvne28dslqvq84bb2k.apps.googleusercontent.com",
         // Staging's own origin, so staging's logins come back to staging, where their rows are.
-        "AUTH_REDIRECT_ORIGIN": "https://umacapture-web-staging.umasagashi.workers.dev",
+        "AUTH_REDIRECT_ORIGIN": "https://staging.umacapture.com",
         // "false" answers every endpoint under /api/sync/ 503 sync_paused; sharing and logins go on.
         "SYNC_ENABLED": "true",
         // "false" stops shared images coming in and going out, as at the top level.

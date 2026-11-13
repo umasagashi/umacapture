@@ -4,7 +4,7 @@
 #
 #   --target   where it goes
 #     production (default)  https://umacapture.com (the top level of the config)
-#     staging               https://umacapture-web-staging.umasagashi.workers.dev
+#     staging               https://staging.umacapture.com
 #                           (env.staging of the config)
 #   --sharing  whether the Worker (logins, record sharing, file sync and its
 #              hourly run) comes with the assets
@@ -138,8 +138,9 @@ case "$TARGET" in
     ENV_ARGS=()
     ;;
   staging)
-    # <worker name>-<env>.<account workers.dev subdomain>.workers.dev
-    PUBLIC_ROOT="https://umacapture-web-staging.umasagashi.workers.dev"
+    # The custom domain of env.staging.routes. The guard's WAF rule blocks it outside a test
+    # window, so stage 8 passes only while `guard.sh open staging` holds one open.
+    PUBLIC_ROOT="https://staging.umacapture.com"
     # Staging deployments send nothing to Sentry.
     SENTRY_MAPS=0
     # Point the app's record sharing at this deployment's own origin, not production.
@@ -245,6 +246,9 @@ step "7 wrangler deploy"
 
 # ---- 8 verify ----------------------------------------------------------------
 step "8 verify via $PUBLIC_ROOT"
+if [[ "$TARGET" == staging ]]; then
+  echo "    Staging is reachable only inside a test window (guard.sh open staging); outside one, this check fails."
+fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 

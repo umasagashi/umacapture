@@ -2,7 +2,8 @@
 // path from the request URL and refuses everything that is not /r/<id>.png.
 //
 // PUBLIC_ORIGIN is where the public JSON, the fonts and the logo come from: https://umacapture.com in
-// production, the staging workers.dev origin on a preview deployment.
+// production, https://staging.umacapture.com on a preview deployment. Staging answers only inside
+// a test window, so a preview deployment can render no image outside one.
 
 import { createHandler } from "../src/handler.mjs";
 

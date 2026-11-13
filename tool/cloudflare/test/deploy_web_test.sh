@@ -8,7 +8,7 @@
 # records its call in $STUB_LOG.
 #
 # Hosts are directories under $STUB_WEB/<host>/. The fake `wrangler deploy`
-# copies build/web/ to umacapture.com, or to the staging workers.dev host when
+# copies build/web/ to umacapture.com, or to staging.umacapture.com when
 # given `--env staging`; `--dry-run` copies nothing. A deploy of
 # server/wrangler.jsonc also brings up the sharing and sync Worker on that host
 # (marked by $STUB_WEB/<host>.worker), unless STUB_NO_WORKER is set; a deploy
@@ -38,9 +38,13 @@
 #       still says D1, and stage 8 accepts the static 404
 #   (7) production where the deploy brings up no Worker: stage 8 fails on the
 #       static 404
+#   (8) the staging env of server/wrangler.jsonc and of
+#       server/wrangler.assets-only.jsonc (the real files, not copies): workers.dev
+#       and preview URLs are off, and its only route is the custom domain
+#       staging.umacapture.com, the host the guard's WAF rule closes
 #
 # Run from Git Bash:  bash tool/cloudflare/test/deploy_web_test.sh
-# Needs git and sha256sum.
+# Needs git, sha256sum and node.
 # ============================================================================
 set -euo pipefail
 
@@ -55,7 +59,7 @@ pass() { echo "  ok: $*"; PASSED=$((PASSED + 1)); }
 flunk() { echo "  FAIL: $*"; FAILED=$((FAILED + 1)); }
 check() { local name="$1"; shift; if "$@"; then pass "$name"; else flunk "$name"; fi; }
 
-STAGING_HOST="umacapture-web-staging.umasagashi.workers.dev"
+STAGING_HOST="staging.umacapture.com"
 
 # ---- A repository holding the script and fake build steps, committed ---------
 TEMPLATE="$ROOT/template"
@@ -92,7 +96,7 @@ config=""
 prev=""
 for a in "$@"; do
   [[ "$a" == --dry-run ]] && exit 0
-  [[ "$prev" == --env && "$a" == staging ]] && host="umacapture-web-staging.umasagashi.workers.dev"
+  [[ "$prev" == --env && "$a" == staging ]] && host="staging.umacapture.com"
   [[ "$prev" == -c ]] && config="$a"
   prev="$a"
 done
@@ -254,6 +258,26 @@ echo "(7) production, the deploy brings up no Worker"
 SENTRY_AUTH_TOKEN=stub-sentry STUB_NO_WORKER=1 run_world prod_no_worker --yes
 check "stops" test "$STATUS" -ne 0
 check "stops at the Worker check" grep -q "is not answered by the sharing and sync Worker" "$ROOT/prod_no_worker/out.log"
+
+echo "(8) the staging env of both configs"
+# Prints env.staging's workers_dev, preview_urls and routes, read from the JSONC
+# file with its comments and trailing commas removed (strings are kept whole).
+staging_env_of() {
+  (cd "$SRC_ROOT" && node -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8")
+      .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m, str) => str ?? "")
+      .replace(/("(?:\\.|[^"\\])*")|,(\s*[}\]])/g, (m, str, close) => str ?? close);
+    const env = JSON.parse(text).env.staging;
+    console.log(JSON.stringify([env.workers_dev, env.preview_urls, env.routes]));
+  ' "$1")
+}
+STAGING_ENV_WANT='[false,false,[{"pattern":"staging.umacapture.com","custom_domain":true}]]'
+for config in server/wrangler.jsonc server/wrangler.assets-only.jsonc; do
+  got="$(staging_env_of "$config" || echo unreadable)"
+  check "$config: staging has no workers.dev or preview URL and is routed only to staging.umacapture.com" \
+    test "$got" = "$STAGING_ENV_WANT"
+  [[ "$got" == "$STAGING_ENV_WANT" ]] || echo "    got $got"
+done
 
 echo
 echo "passed $PASSED, failed $FAILED"

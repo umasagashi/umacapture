@@ -227,8 +227,8 @@ These are outward-facing or account-level operations. Nothing in the repository 
     exactly one such rule, with those fields, that counting key, that period and that timeout; if
     the zone already has one, decide which to keep rather than overwriting it.
 
-    **Check the rule from outside**, against production: staging's `workers.dev` URL does not pass
-    the zone (see the Entrance list). Send 20 requests within 10 seconds to one path at a time, and
+    **Check the rule from outside**, against production: staging is blocked by the guard's WAF
+    rule outside a test window (see the Entrance list). Send 20 requests within 10 seconds to one path at a time, and
     wait between paths so that one path's block does not carry into the next:
 
     ```bash
@@ -276,14 +276,16 @@ These are outward-facing or account-level operations. Nothing in the repository 
 | `data.umacapture.com` (custom domain) | Recognizer modules and announcements (`umacapture-data`, static assets only, no R2) | Applies, unused | Production entrance |
 | `og.umacapture.com` (Vercel project domain, CNAME, DNS only) | The OGP image function (`umacapture-og` on Vercel) | Does not apply: the zone does not proxy it. The Vercel Firewall rule applies (see the Vercel section) | Production entrance |
 | `umacapture-og.vercel.app` | The project's own production domain on Vercel | Does not apply | Kept. It answers without the bypass header: `/` gets the platform's 404 and `/r/<id>.png` reaches the function, because production domains are outside deployment protection. Whether the Vercel Firewall rule also applies here is not measured: the burst test ran against `og.umacapture.com` only |
-| `umacapture-web-staging.umasagashi.workers.dev` | Staging (`umacapture-web-staging`) | Does not apply | Closed: `workers_dev: false` (see "Staging") |
+| `staging.umacapture.com` (custom domain) | Staging (`umacapture-web-staging`) | Applies: the guard's rule blocks the host except while a test window is open | Staging entrance, closed outside a test window (see "Staging") |
+| `umacapture-web-staging.umasagashi.workers.dev` | Would serve staging | Does not apply | Closed: `workers_dev: false` |
 | `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
 | B2 buckets `umacapture-sync`, `umacapture-sync-staging` | File sync's objects (`a/`) and shared images (`s/`), reached only by the Worker with the bucket's key. Nothing under `a/` is public. A bundle under `s/` is served to anyone who knows its share's id, through the Worker's `GET /api/shares/<id>/images` on the entrance above, while the share records it stored and `SHARE_IMAGES_ENABLED` is `"true"` | Does not apply to the bucket; the zone's rule applies to the Worker's `/api/` | Private |
 
 After the first deployment, confirm in the dashboard (Worker › Settings › Domains & Routes) that
 `workers.dev` and preview URLs are shown as disabled and that each Worker has exactly one domain:
-`umacapture.com` for `umacapture-web`, `data.umacapture.com` for `umacapture-data`. No zone route
+`umacapture.com` for `umacapture-web`, `data.umacapture.com` for `umacapture-data`,
+`staging.umacapture.com` for `umacapture-web-staging`. No zone route
 points at either of them.
 
 ## Deploying
@@ -937,7 +939,7 @@ not show that Cloudflare's edge applies them, which only the post-deployment che
 ## Staging
 
 `bash tool/cloudflare/deploy_web.sh --target staging [--sharing on|off] [--dry-run] [--yes]`
-deploys the same `build/web/` to `https://umacapture-web-staging.umasagashi.workers.dev`, from
+deploys the same `build/web/` to `https://staging.umacapture.com`, from
 `env.staging` of the config the `--sharing` option picks: with sharing on, together with the
 Worker (`server/src/`), the staging database, the staging bucket and staging's hourly run
 (`45 * * * *`), from `server/wrangler.jsonc`; with sharing off, the assets alone, from
@@ -945,6 +947,10 @@ Worker (`server/src/`), the staging database, the staging bucket and staging's h
 `umacapture-web-staging`, so either deployment replaces the other. The invariants are the
 production ones: a clean tree, a fresh build from `HEAD` in the same run, and a `deploy.json`
 verified through the public URL.
+
+Staging is closed outside a test window, so stage 8 (the check through the public URL) fails
+there. Deploy staging only inside a window opened with `guard.sh open staging`, and close it with
+`guard.sh close staging` when the test is done.
 
 - **Credentials.** The API token also needs Account › D1 › Edit (`tool/cloudflare/.env.example`).
   The staging database (`umacapture-share-staging`) is created once by hand, its id written into
@@ -956,11 +962,13 @@ verified through the public URL.
   Turnstile's always-passing test keys, so its login has no abuse protection.
 - **Google login.** `env.staging.vars.GOOGLE_CLIENT_ID` names the client staging logs in with, and
   that client must have staging's redirect URI registered:
-  `https://umacapture-web-staging.umasagashi.workers.dev/api/auth/callback/google`
+  `https://staging.umacapture.com/api/auth/callback/google`
   (`env.staging.vars.AUTH_REDIRECT_ORIGIN`), so a staging login comes back to staging, where its
   row is.
-- **workers.dev.** Staging has no custom domain, and its `workers.dev` URL and preview URLs are
-  off (`workers_dev: false`, `preview_urls: false` in both configs), so nothing outside reaches it.
+- **Entrance.** Staging's only entrance is the custom domain `staging.umacapture.com`
+  (`env.staging.routes` in both configs), where the zone's WAF applies and the guard's rule blocks
+  it outside a test window. Its `workers.dev` URL and preview URLs are off (`workers_dev: false`,
+  `preview_urls: false` in both configs), because the WAF does not apply to them.
   It shares the plan's included Worker and D1 usage with production, while its daily limits are counted in its own D1.
 - **No Sentry.** A staging run uploads no source maps and needs neither `SENTRY_AUTH_TOKEN` nor
   `sentry-cli`; the maps are still excluded from the deployment by `.assetsignore`.
@@ -1132,12 +1140,13 @@ the deployment URL that an absent id and a query string both answer 404 from the
   is unset (`og/api/og.mjs` throws `PUBLIC_ORIGIN is not set`), so every request to that
   deployment fails. Set it in the project before the first deployment to each environment:
   `https://umacapture.com` for **Production**, and the staging origin
-  `https://umacapture-web-staging.umasagashi.workers.dev` for **Preview**. With the pinned CLI,
+  `https://staging.umacapture.com` for **Preview**. Staging answers only inside a test window, so a preview
+  deployment renders no image outside one. With the pinned CLI,
   from `og/` and with `VERCEL_TOKEN` exported from `tool/vercel/.env`:
 
   ```bash
   node_modules/.bin/vercel env add PUBLIC_ORIGIN production --value https://umacapture.com --yes
-  node_modules/.bin/vercel env add PUBLIC_ORIGIN preview --value https://umacapture-web-staging.umasagashi.workers.dev --yes
+  node_modules/.bin/vercel env add PUBLIC_ORIGIN preview --value https://staging.umacapture.com --yes
   ```
 
   `deploy_og.sh` neither sets nor checks this variable.
