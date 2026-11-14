@@ -3,7 +3,7 @@
 // parameters, so every statement goes with its values written in (inlineSql). A batch is one --command
 // holding its statements in order.
 //
-//   node guard_cli.mjs <command> [<env>] [--allowance <USD>] [--for <duration>] [--base <USD>] [--through <day>]
+//   node guard_cli.mjs <command> [<env>] [--allowance <USD>] [--for <duration>] [--gen <n>] [--base <USD>] [--through <day>]
 //
 // Environment: GUARD_WRANGLER_JS (the wrangler entry script node runs), GUARD_WRANGLER_CONFIG (the
 // guard's wrangler config) and GUARD_BY (who is recorded as the operator).
@@ -89,7 +89,8 @@ async function main() {
         forS = durationToSeconds(flags.for);
         if (forS === null) throw new Error("--for must be <n>s, <n>m or <n>h");
       }
-      result = await openEnv(remote, { env, allowanceMicros: money("allowance"), forS, nowSec, by, cfg: CFG });
+      if (!/^\d{1,15}$/.test(flags.gen ?? "")) throw new Error("--gen must be the environment's gen as status shows it");
+      result = await openEnv(remote, { env, allowanceMicros: money("allowance"), forS, gen: Number(flags.gen), nowSec, by, cfg: CFG });
       break;
     }
     case "close":
@@ -111,6 +112,12 @@ async function main() {
   if (result.refuse !== undefined) {
     console.error(`refused: ${result.refuse}`);
     return 1;
+  }
+  if (result.lost && command === "open") {
+    console.error(
+      "the environment's gen is no longer the one given: its state changed since that gen was read (an open of yours whose answer was lost may have taken effect). Nothing was written. Read the status again and decide anew.",
+    );
+    return 3;
   }
   if (result.lost || result.bridged?.some((b) => !b.moved)) {
     console.error("another writer changed the state first; nothing more was written. Read the status again and repeat the command.");

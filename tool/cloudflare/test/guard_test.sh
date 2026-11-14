@@ -82,8 +82,9 @@ rc_is() { [[ "$RC" == "$1" ]]; }
 out_has() { grep -qF -- "$1" <<<"$OUT"; }
 
 echo "(1) the grammar is checked before D1 is read"
-for bad in "" "open" "open production" "open production --allowance 1 --for 1h" "open staging --allowance 1" \
-  "open staging --allowance 1 --for 9d" "open staging --allowance -1 --for 1h" "close" "close dev" \
+for bad in "" "open" "open production" "open production --allowance 1 --for 1h --gen 4" "open staging --allowance 1 --gen 2" \
+  "open staging --allowance 1 --for 9d --gen 2" "open staging --allowance -1 --for 1h --gen 2" "open staging --allowance 1 --for 1h" \
+  "open production --allowance 1" "open production --allowance 1 --gen -1" "close" "close dev" \
   "limit staging --base 1" "limit production --base 1.0000001" "recon-accept production --through 2026-1-1" \
   "recon-accept staging --through 2026-10-01" "status now" "renew production --for 1h"; do
   # shellcheck disable=SC2086
@@ -100,16 +101,21 @@ check "status writes nothing" no_write
 check "status does not ask" eval '! out_has "Type '"'"'yes'"'"'"'
 
 echo "(3) a write not answered 'yes' sends no write"
-run "no" open staging --allowance 1 --for 2h
+run "no" open staging --allowance 1 --for 2h --gen 2
 check "the answer 'no' aborts" eval 'rc_is 1 && out_has aborted'
 check "the current state was shown" out_has '"mode": "closed"'
 check "no write reached wrangler" no_write
 
 echo "(4) open staging --yes"
-run "" open staging --allowance 1.5 --for 2h --yes
+run "" open staging --allowance 1.5 --for 2h --gen 2 --yes
 check "exits 0" rc_is 0
 check "the UPDATE moves gen on and is guarded by the gen read" log_has "gen = gen + 1 WHERE env = 'staging' AND gen = 2"
 check "it writes the allowance in micro-USD" log_has "pending_allowance_micros = 1500000"
+
+echo "(4b) open under a gen other than the one read sends no write"
+run "" open staging --allowance 1 --for 2h --gen 1 --yes
+check "exits 3 and says the gen moved" eval 'rc_is 3 && out_has "gen is no longer the one given"'
+check "no write" no_write
 
 echo "(5) a write that lost its compare-and-set exits 3"
 STUB_CHANGES=0 run "" close production --yes

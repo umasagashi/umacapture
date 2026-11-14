@@ -54,6 +54,25 @@ const racing = (sql) => {
     },
   };
 };
+/**
+ * An executor whose first batch applies only the statements at the indices in `keep`, one by one, and then
+ * loses its answer: the remote D1 is not known to run a multi-statement command as one transaction, so any
+ * of its statements may be the ones that took effect.
+ */
+const partial = (keep) => {
+  let cut = false;
+  return {
+    query: x.query,
+    batch: async (statements) => {
+      if (cut) return x.batch(statements);
+      cut = true;
+      for (const i of keep) await db.prepare(statements[i].sql).bind(...statements[i].params).run();
+      throw new Error("answer lost");
+    },
+  };
+};
+/** Every subset of the indices 0..n-1, in order. */
+const subsets = (n) => Array.from({ length: 2 ** n }, (_, m) => [...Array(n).keys()].filter((i) => m & (1 << i)));
 const BUMP_GEN = "UPDATE guard_env SET gen = gen + 1";
 /** guard_health, production and guard_bill in the state `arm` accepts at NOW. */
 async function armable() {
@@ -113,7 +132,7 @@ describe("guard.sh commands", () => {
 
   describe("open", () => {
     test("open staging writes the window and the allowance and moves gen", async () => {
-      const r = await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 7_200, nowSec: NOW, by: "op", cfg });
+      const r = await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 7_200, gen: 0, nowSec: NOW, by: "op", cfg });
       assert.equal(r.done, true);
       const s = await env("staging");
       assert.deepEqual(
@@ -123,31 +142,46 @@ describe("guard.sh commands", () => {
     });
     test("open production writes no open_until_s and refuses --for", async () => {
       await db.prepare("UPDATE guard_env SET mode = 'tripped', open_until_s = 123 WHERE env = 'production'").run();
-      assert.ok((await openEnv(x, { env: "production", allowanceMicros: 1, forS: 60, nowSec: NOW, by: "op", cfg })).refuse);
-      assert.equal((await openEnv(x, { env: "production", allowanceMicros: 2_000_000, nowSec: NOW, by: "op", cfg })).done, true);
+      assert.ok((await openEnv(x, { env: "production", allowanceMicros: 1, forS: 60, gen: 0, nowSec: NOW, by: "op", cfg })).refuse);
+      assert.equal((await openEnv(x, { env: "production", allowanceMicros: 2_000_000, gen: 0, nowSec: NOW, by: "op", cfg })).done, true);
       const p = await env("production");
       assert.deepEqual([p.mode, p.pending_allowance_micros, p.open_until_s], ["open", 2_000_000, 123]);
     });
-    test("a staging window longer than 8 hours, a missing --for or a zero allowance is refused and writes nothing", async () => {
+    test("a staging window longer than 8 hours, a missing --for or --gen, or a zero allowance is refused and writes nothing", async () => {
       const before = await snapshot();
       for (const a of [
         { env: "staging", allowanceMicros: 1, forS: cfg.STAGING_WINDOW_MAX_S + 1 },
         { env: "staging", allowanceMicros: 1 },
         { env: "staging", allowanceMicros: 0, forS: 60 },
+        { env: "staging", allowanceMicros: 1, forS: 60, gen: undefined },
       ]) {
-        assert.ok((await openEnv(x, { ...a, nowSec: NOW, by: "op", cfg })).refuse, JSON.stringify(a));
+        assert.ok((await openEnv(x, { gen: 0, ...a, nowSec: NOW, by: "op", cfg })).refuse, JSON.stringify(a));
       }
       assert.deepEqual(await snapshot(), before);
     });
-    test("an open environment is refused, so repeating an open grants no second allowance", async () => {
-      await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, nowSec: NOW, by: "op", cfg });
+    test("an open environment is refused even under its current gen, so no second allowance is added to the first", async () => {
+      await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, gen: 0, nowSec: NOW, by: "op", cfg });
       const before = await snapshot();
-      const r = await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, nowSec: NOW + 5, by: "op", cfg });
+      const r = await openEnv(x, { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, gen: 1, nowSec: NOW + 5, by: "op", cfg });
       assert.ok(r.refuse);
       assert.deepEqual(await snapshot(), before);
     });
+    test("an open whose answer was lost, repeated after the guard tripped the environment, grants nothing", async () => {
+      await db.prepare("UPDATE guard_env SET mode = 'tripped', gen = 3 WHERE env = 'production'").run();
+      const open = (nowSec) => openEnv(x, { env: "production", allowanceMicros: 2_000_000, gen: 3, nowSec, by: "op", cfg });
+      assert.equal((await open(NOW)).done, true); // took effect; its answer is lost
+      // The guard consumes the allowance and, at the limit, trips production again (one transition).
+      await db
+        .prepare("UPDATE guard_env SET mode = 'tripped', limit_micros = 2_000_000, pending_allowance_micros = NULL, tripped_at_s = ?1, gen = gen + 1 WHERE env = 'production'")
+        .bind(NOW + 600)
+        .run();
+      const before = await snapshot();
+      const r = await open(NOW + 900); // the operator repeats the command
+      assert.deepEqual(r, { lost: true });
+      assert.deepEqual(await snapshot(), before);
+    });
     test("open loses to a writer that moved gen and writes nothing", async () => {
-      const r = await openEnv(racing(BUMP_GEN), { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, nowSec: NOW, by: "op", cfg });
+      const r = await openEnv(racing(BUMP_GEN), { env: "staging", allowanceMicros: 1_000_000, forS: 3_600, gen: 0, nowSec: NOW, by: "op", cfg });
       assert.deepEqual(r, { lost: true });
       const s = await env("staging");
       assert.deepEqual([s.mode, s.pending_allowance_micros, s.gen], ["closed", null, 1]);
@@ -252,6 +286,28 @@ describe("guard.sh commands", () => {
       assert.equal(r.bridged[0].moved, false);
       assert.equal((await all("SELECT COUNT(*) AS n FROM guard_holes WHERE dataset = ?1", r.bridged[0].dataset))[0].n, 0);
     });
+    test("a bridge stopped after any of its statements moves no ledger past its hole, and repeating it reaches the state of one that ran whole", async () => {
+      const old = NOW - 30 * 3_600;
+      const reached = async () => ({
+        ledger: await all("SELECT dataset, from_s, to_s FROM guard_ledger ORDER BY dataset"),
+        holes: await all("SELECT dataset, from_s, to_s FROM guard_holes ORDER BY dataset"),
+      });
+      await seedLedger(old);
+      await ledgerBridge(x, { nowSec: NOW, by: "op", cfg });
+      const whole = await reached();
+      for (const keep of subsets(2)) {
+        await db.batch([db.prepare("DELETE FROM guard_ledger"), db.prepare("DELETE FROM guard_holes")]);
+        await seedLedger(old);
+        await assert.rejects(ledgerBridge(partial(keep), { nowSec: NOW, by: "op", cfg }));
+        const { ledger, holes } = await reached();
+        for (const l of ledger.filter((l) => l.to_s !== old)) {
+          // A ledger that moved lets the guard measure again; it may only move over a recorded hole.
+          assert.ok(holes.some((h) => h.dataset === l.dataset && h.from_s === old && h.to_s >= l.to_s), `${keep}: ${l.dataset} moved without its hole`);
+        }
+        await ledgerBridge(x, { nowSec: NOW, by: "op", cfg });
+        assert.deepEqual(await reached(), whole, `${keep}`);
+      }
+    });
   });
 
   describe("recon-accept", () => {
@@ -283,6 +339,33 @@ describe("guard.sh commands", () => {
       assert.deepEqual(r, { lost: true });
       assert.equal((await all("SELECT COUNT(*) AS n FROM guard_bill_accepts"))[0].n, 0);
       assert.equal((await env("production")).open_until_s, 0);
+    });
+    test("a recon-accept stopped after any of its statements extends nothing it has not recorded, and repeating it reaches the state of one that ran whole", async () => {
+      const accept = (ex) => reconAccept(ex, { env: "production", through: "2026-11-01", nowSec: NOW, by: "op", cfg });
+      const reached = async () => ({
+        accepts: await all("SELECT from_s, to_s FROM guard_bill_accepts ORDER BY from_s"),
+        bill: await all("SELECT from_s, to_s FROM guard_bill"),
+        open_until_s: (await env("production")).open_until_s,
+      });
+      const initial = await reached();
+      await accept(x);
+      const whole = await reached();
+      for (const keep of subsets(3)) {
+        await db.batch([
+          db.prepare("DELETE FROM guard_bill_accepts"),
+          db.prepare("UPDATE guard_bill SET from_s = NULL, to_s = NULL"),
+          db.prepare("UPDATE guard_env SET open_until_s = 0 WHERE env = 'production'"),
+        ]);
+        await assert.rejects(accept(partial(keep)));
+        const s = await reached();
+        const reach = s.bill[0].to_s;
+        // A reach no record covers would let arm through on days the guard never reconciled.
+        if (reach !== initial.bill[0].to_s) assert.ok(s.accepts.some((a) => a.to_s >= reach), `${keep}: reach without its record`);
+        // open_until_s is the guard's extension: it may move only with the reach it belongs to.
+        if (s.open_until_s !== initial.open_until_s) assert.equal(s.open_until_s, reach + cfg.T_R_S, `${keep}`);
+        await accept(x);
+        assert.deepEqual(await reached(), whole, `${keep}`);
+      }
     });
   });
 });

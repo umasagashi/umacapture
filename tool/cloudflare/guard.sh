@@ -14,9 +14,10 @@
 #                                            is at least RENEW_WARN_S away, and
 #                                            billing reconciliation passed a day
 #                                            of its own past the last recon-accept
-#   open production --allowance <USD>        open production with an allowance
+#   open production --allowance <USD> --gen <n>
+#                                            open production with an allowance
 #                                            (no --for: the guard extends it)
-#   open staging --allowance <USD> --for <n>s|<n>m|<n>h
+#   open staging --allowance <USD> --for <n>s|<n>m|<n>h --gen <n>
 #                                            open a staging test window (at most
 #                                            8 hours)
 #   close production|staging                 close the environment
@@ -33,7 +34,12 @@
 #
 # `open` is refused while the environment is open: the guard consumes an
 # allowance, so granting one twice would add a second on top of the first.
-# Close first to grant a new one.
+# Close first to grant a new one. --gen is the environment's gen as `status`
+# shows it when you decide to open; the write holds only while gen is still
+# that value. Every change to the environment moves gen on (the open itself,
+# and the guard consuming the allowance, tripping or ending the window), so
+# repeating an open whose answer was lost writes nothing more, whatever the
+# guard did in between. Read the status again before a new open.
 #
 # Every write shows the current state and asks for 'yes' (--yes answers it).
 # The commands themselves are guard/src/operator.mjs, shared with the guard's
@@ -59,7 +65,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 
 fail() { echo "error: $*" >&2; exit 1; }
 
-usage="usage: $0 status | arm | ledger-bridge | open production --allowance <USD> | open staging --allowance <USD> --for <n>s|<n>m|<n>h | close production|staging | limit production --base <USD> | recon-accept production --through <YYYY-MM-DD>  [--yes]"
+usage="usage: $0 status | arm | ledger-bridge | open production --allowance <USD> --gen <n> | open staging --allowance <USD> --for <n>s|<n>m|<n>h --gen <n> | close production|staging | limit production --base <USD> | recon-accept production --through <YYYY-MM-DD>  [--yes]"
 
 ASSUME_YES=0
 ARGS=()
@@ -71,6 +77,7 @@ done
 USD_RE='^[0-9]{1,9}(\.[0-9]{1,6})?$'
 FOR_RE='^[0-9]{1,6}[smh]$'
 DAY_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+GEN_RE='^[0-9]{1,15}$'
 
 # The grammar of every command, checked before anything is read. guard_cli.mjs checks the values again.
 set -- "${ARGS[@]}"
@@ -78,8 +85,8 @@ case "$1" in
   status|arm|ledger-bridge)
     [[ $# -eq 1 ]] || fail "$usage" ;;
   open)
-    if [[ $# -eq 4 && "$2" == production && "$3" == --allowance && "$4" =~ $USD_RE ]]; then :
-    elif [[ $# -eq 6 && "$2" == staging && "$3" == --allowance && "$4" =~ $USD_RE && "$5" == --for && "$6" =~ $FOR_RE ]]; then :
+    if [[ $# -eq 6 && "$2" == production && "$3" == --allowance && "$4" =~ $USD_RE && "$5" == --gen && "$6" =~ $GEN_RE ]]; then :
+    elif [[ $# -eq 8 && "$2" == staging && "$3" == --allowance && "$4" =~ $USD_RE && "$5" == --for && "$6" =~ $FOR_RE && "$7" == --gen && "$8" =~ $GEN_RE ]]; then :
     else fail "$usage"; fi ;;
   close)
     [[ $# -eq 2 && ( "$2" == production || "$2" == staging ) ]] || fail "$usage" ;;

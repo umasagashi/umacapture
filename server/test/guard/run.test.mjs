@@ -452,22 +452,30 @@ describe("guard run", () => {
       assert.deepEqual(await alertKeys(), []);
     });
 
+    // The operator closing production once, as guard.sh does: one change, gen moved on by one. Before the
+    // commit it beats the run's compare-and-set, after which gen is exactly what the run's own commit would
+    // have left (so only the lost commit stops the rule); after the commit it moves gen past that value.
+    const OPERATOR_CLOSE = "UPDATE guard_env SET mode = 'closed', gen = gen + 1 WHERE env = 'production'";
     for (const [name, gate] of [
-      ["a lost compare-and-set", { lose: true }],
+      ["a lost compare-and-set", { closeAt: "graphql" }],
+      ["a change by another writer after the run's commit", { closeAt: "GET" }],
       ["a run past RUN_DEADLINE_MS", { lateMs: CFG.RUN_DEADLINE_MS + 1 }],
     ]) {
       test(`${name} writes no rule, while billing reconciliation and the notifications still run`, async () => {
         const c = await armed({
           state: { prod: { pending_allowance_micros: 1_000_000, open_until_s: T1 + 47 * HOUR }, bill: { last_try_s: null } },
         });
-        if (gate.lose) {
-          const graphql = c.graphql;
-          c.graphql = async (body) => {
-            await db.prepare("UPDATE guard_env SET gen = gen + 1 WHERE env = 'production'").run(); // another writer
-            return graphql(body);
-          };
-        }
+        let closed = false;
+        const closeOnce = async () => {
+          if (closed) return;
+          closed = true;
+          await db.prepare(OPERATOR_CLOSE).run();
+        };
+        const { graphql, cf } = c;
+        if (gate.closeAt === "graphql") c.graphql = async (body) => (await closeOnce(), graphql(body));
+        if (gate.closeAt === "GET") c.cf = async (req) => (req.method === "GET" && (await closeOnce()), cf(req));
         const r = await runAt(c, T1, { lateMs: gate.lateMs ?? 2_500 });
+        assert.equal(r.committed, gate.closeAt !== "graphql");
         assert.equal(r.mayWriteRules, false);
         assert.equal(c.writes().length, 0);
         assert.equal(c.calls.bill, 1);
@@ -626,14 +634,17 @@ describe("guard run", () => {
       }
     });
 
-    test("an unreadable billing answer sends bill_unreadable once, and the next readable attempt clears it", async () => {
-      const c = await armed({ state: { bill: { last_try_s: null } } });
+    test("an unreadable billing answer sends bill_unreadable once and leaves bill_unmapped, which it cannot judge, as it is; the next readable attempt clears both", async () => {
+      const c = await armed({ state: { bill: { last_try_s: null }, alerts: [["bill_unmapped", NOW - DAY]] } });
       await runAt(c, T1);
       assert.equal(c.calls.bill, 1);
       assert.deepEqual(c.sentNames(), ["bill_unreadable"]);
       await runAt(c, T1 + MIN); // the day's attempt is taken: no second try, no second notification
       assert.equal(c.calls.bill, 1);
-      assert.deepEqual(await alertKeys(), ["bill_unreadable"]);
+      assert.deepEqual(await all("SELECT key, since_s FROM guard_alerts ORDER BY key"), [
+        { key: "bill_unmapped", since_s: NOW - DAY },
+        { key: "bill_unreadable", since_s: T1 },
+      ]);
       // A day on, an answer holding only a storage row is readable (and passes no day).
       c.bill = () => ({
         status: 200,
@@ -654,7 +665,7 @@ describe("guard run", () => {
       });
       await runAt(c, T1 + DAY);
       assert.equal(c.calls.bill, 2);
-      assert.ok(!(await alertKeys()).includes("bill_unreadable"));
+      assert.ok(!(await alertKeys()).some((k) => k.startsWith("bill_")));
     });
 
     test("ledger rows missing once reconciliation began are not put back: the run cannot measure and ledger_stalled is sent per dataset", async () => {

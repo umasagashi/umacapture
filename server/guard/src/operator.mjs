@@ -10,7 +10,7 @@
 // no rule from that decision.
 
 import { bridgePlan, bridgeStatements } from "./ledger.mjs";
-import { reconAcceptPlan, reconAcceptStatements } from "./bill.mjs";
+import { reconAcceptPlan, reconAcceptRepair, reconAcceptStatements } from "./bill.mjs";
 
 const ENVS = ["production", "staging"];
 
@@ -70,24 +70,29 @@ async function commitEnv(x, row, set, nowSec) {
 }
 
 /**
- * `open production --allowance <USD>` / `open staging --allowance <USD> --for <duration>`. Refused while the
- * environment is already open: an allowance is consumed by the guard (limit = spent + allowance), so granting
- * it again on an open environment, or repeating a command whose answer was lost, would add a second
- * allowance on top of the first. To grant a new one, close the environment first.
+ * `open production --allowance <USD> --gen <n>` / `open staging --allowance <USD> --for <duration> --gen <n>`.
+ * `gen` is the environment's gen as the operator read it (`status`) before deciding to open, and the
+ * compare-and-set is on that value, not on one read now. Every change to the row moves gen on — this open
+ * itself, and the guard consuming the allowance, tripping or closing the window — so the same command
+ * repeated after its answer was lost writes nothing, whatever the guard did in between, instead of granting
+ * the allowance again. Refused while the environment is open: the guard consumes an allowance (limit = spent
+ * + allowance), so a second one would add to the first. To grant a new one, close first and read the new gen.
  */
-export async function openEnv(x, { env, allowanceMicros, forS, nowSec, by, cfg }) {
+export async function openEnv(x, { env, allowanceMicros, forS, gen, nowSec, by, cfg }) {
   if (!ENVS.includes(env)) return { refuse: "unknown environment" };
   if (!Number.isSafeInteger(allowanceMicros) || allowanceMicros <= 0) return { refuse: "the allowance must be a positive amount of USD" };
   if (env === "production" && forS !== undefined) return { refuse: "production takes no --for: the guard extends its open_until_s" };
   if (env === "staging" && !(Number.isSafeInteger(forS) && forS > 0 && forS <= cfg.STAGING_WINDOW_MAX_S)) {
     return { refuse: `staging needs --for, longer than 0 and at most ${cfg.STAGING_WINDOW_MAX_S} seconds` };
   }
+  if (!Number.isSafeInteger(gen) || gen < 0) return { refuse: "open needs --gen, the environment's gen as status shows it" };
   const row = await envRow(x, env);
   if (row === null) return { refuse: "guard_env has no row for the environment" };
+  if (row.gen !== gen) return { lost: true };
   if (row.mode === "open") return { refuse: "already open; close it first to grant a new allowance" };
   const set = { mode: "open", stage_a: 0, pending_allowance_micros: allowanceMicros, opened_at_s: nowSec, opened_by: by };
   if (env === "staging") set.open_until_s = nowSec + forS;
-  return commitEnv(x, row, set, nowSec);
+  return commitEnv(x, { env, gen }, set, nowSec);
 }
 
 /** `close <env>`. An environment that is not open (closed, or tripped, whose record is kept) is left as it is. */
@@ -172,7 +177,11 @@ export async function reconAccept(x, { env, through, nowSec, by, cfg }) {
   if (env !== "production") return { refuse: "only production is reconciled" };
   const [row] = await x.query("SELECT to_s FROM guard_bill WHERE id = 1");
   const plan = reconAcceptPlan({ through, old: row?.to_s ?? null, nowSec });
-  if (plan.refuse !== undefined || plan.noop) return plan;
+  if (plan.refuse !== undefined) return plan;
+  if (plan.noop) {
+    const [repair] = await x.batch([reconAcceptRepair(row.to_s, nowSec, cfg)]);
+    return repair.changes === 1 ? { done: true, repaired: true, new: row.to_s } : plan;
+  }
   const r = await x.batch(reconAcceptStatements(plan, nowSec, by, cfg));
   return r[1].changes === 1 ? { done: true, old: plan.old, new: plan.new } : { lost: true };
 }

@@ -293,15 +293,27 @@ export function bridgePlan({ ledger, runs, gaps, nowSec, cfg }) {
  * The statements of one bridge, one batch: the hole is recorded and the ledger moved on only while to_s is
  * still the value the plan read, so a bridge another writer beat records nothing, and a bridge repeated
  * after it took effect finds the ledger no longer stalled.
+ *
+ * The batch goes to the remote D1 as one `wrangler d1 execute --command`, which is not known to run as one
+ * transaction, so each statement must leave a state that extends nothing should the batch stop after it.
+ * The hole comes first: it only withholds the days it touches from billing reconciliation. The ledger moves
+ * on last, and only over a hole already recorded up to its new to_s; a ledger that moved would let the guard
+ * measure again. A hole left by a batch that stopped is widened, not refused, by the bridge that repeats it.
  */
 export const bridgeStatements = ({ dataset, old, new: to }, nowSec, by) => [
   {
     sql:
       "INSERT INTO guard_holes (dataset, from_s, to_s, bridged_at_s, bridged_by) SELECT ?1, ?2, ?3, ?4, ?5 " +
-      "WHERE (SELECT to_s FROM guard_ledger WHERE dataset = ?1) = ?2",
+      "WHERE (SELECT to_s FROM guard_ledger WHERE dataset = ?1) = ?2 " +
+      "ON CONFLICT (dataset, from_s) DO UPDATE SET to_s = max(guard_holes.to_s, excluded.to_s)",
     params: [dataset, old, to, nowSec, by],
   },
-  { sql: "UPDATE guard_ledger SET to_s = ?1 WHERE dataset = ?2 AND to_s = ?3", params: [to, dataset, old] },
+  {
+    sql:
+      "UPDATE guard_ledger SET to_s = ?1 WHERE dataset = ?2 AND to_s = ?3 " +
+      "AND EXISTS (SELECT 1 FROM guard_holes WHERE dataset = ?2 AND from_s = ?3 AND to_s >= ?1)",
+    params: [to, dataset, old],
+  },
 ];
 
 /** Runs every bridge of `plan`, one batch each. Returns, per bridge, whether it moved the ledger. */

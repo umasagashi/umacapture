@@ -278,24 +278,51 @@ export function reconAcceptPlan({ through, old, nowSec }) {
  * The batch of a recon-accept: the acceptance record, guard_bill.to_s (and from_s when unset) and
  * production's open_until_s, every statement conditional on guard_bill.to_s still being `old`, so a lost
  * race writes nothing at all.
+ *
+ * The batch goes to the remote D1 as one `wrangler d1 execute --command`, which is not known to run as one
+ * transaction, so each statement must leave a state that extends nothing should the batch stop after it,
+ * and each holds only on what the one before it wrote. The acceptance record comes first: it only raises
+ * what `arm` asks of reconciliation. The reach moves only over a record that covers it (a reach past the
+ * last record would let `arm` through on days the guard never reconciled), and open_until_s only on that
+ * reach. A record left by a batch that stopped is widened, not refused, by the accept that repeats it; an
+ * open_until_s a stopped batch did not write is written by the repeat's reconAcceptRepair.
  */
 export const reconAcceptStatements = ({ old, new: to }, nowSec, by, cfg) => [
   {
-    sql: "INSERT INTO guard_bill_accepts (from_s, to_s, accepted_at_s, accepted_by) SELECT COALESCE(?1, ?2 - 86400), ?2, ?3, ?4 WHERE (SELECT to_s FROM guard_bill WHERE id = 1) IS ?1",
+    sql:
+      "INSERT INTO guard_bill_accepts (from_s, to_s, accepted_at_s, accepted_by) SELECT COALESCE(?1, ?2 - 86400), ?2, ?3, ?4 " +
+      "WHERE (SELECT to_s FROM guard_bill WHERE id = 1) IS ?1 ON CONFLICT (from_s) DO UPDATE SET to_s = max(guard_bill_accepts.to_s, excluded.to_s)",
     params: [old, to, nowSec, by],
   },
-  { sql: "UPDATE guard_bill SET to_s = ?2, from_s = COALESCE(from_s, ?2) WHERE id = 1 AND to_s IS ?1", params: [old, to] },
   {
-    sql: "UPDATE guard_env SET open_until_s = ?1 + ?2, updated_at_s = ?3 WHERE env = 'production' AND (SELECT to_s FROM guard_bill WHERE id = 1) = ?1",
-    params: [to, cfg.T_R_S, nowSec],
+    sql:
+      "UPDATE guard_bill SET to_s = ?2, from_s = COALESCE(from_s, ?2) WHERE id = 1 AND to_s IS ?1 " +
+      "AND EXISTS (SELECT 1 FROM guard_bill_accepts WHERE from_s = COALESCE(?1, ?2 - 86400) AND to_s >= ?2)",
+    params: [old, to],
   },
+  reconAcceptRepair(to, nowSec, cfg),
 ];
+
+/**
+ * production's open_until_s for a reach of `to`: end + T_R, written only while guard_bill.to_s is `to` and
+ * only when it differs, so it changes nothing after a batch that completed. The last statement of a
+ * recon-accept, and the whole of a recon-accept repeated on the reach it already holds — which a batch
+ * that stopped after moving the reach leaves without its open_until_s.
+ */
+export const reconAcceptRepair = (to, nowSec, cfg) => ({
+  sql:
+    "UPDATE guard_env SET open_until_s = ?1 + ?2, updated_at_s = ?3 WHERE env = 'production' " +
+    "AND (SELECT to_s FROM guard_bill WHERE id = 1) = ?1 AND open_until_s IS NOT ?1 + ?2",
+  params: [to, cfg.T_R_S, nowSec],
+});
 
 /** Runs a recon-accept on a D1 binding. Returns the plan's refusal or no-op, `{ accepted: true }`, or `{ lost: true }` when another writer moved to_s first. */
 export async function applyReconAccept(db, { through, nowSec, by, cfg }) {
   const row = await db.prepare("SELECT to_s FROM guard_bill WHERE id = 1").first();
   const plan = reconAcceptPlan({ through, old: row?.to_s ?? null, nowSec });
-  if (plan.refuse !== undefined || plan.noop) return plan;
-  const results = await db.batch(reconAcceptStatements(plan, nowSec, by, cfg).map((s) => db.prepare(s.sql).bind(...s.params)));
+  if (plan.refuse !== undefined) return plan;
+  const run = (statements) => db.batch(statements.map((s) => db.prepare(s.sql).bind(...s.params)));
+  if (plan.noop) return (await run([reconAcceptRepair(row.to_s, nowSec, cfg)]))[0].meta.changes === 1 ? { accepted: true, repaired: true } : plan;
+  const results = await run(reconAcceptStatements(plan, nowSec, by, cfg));
   return results[1].meta.changes === 1 ? { accepted: true } : { lost: true };
 }
