@@ -8,10 +8,10 @@
 /** The guard's own script and D1 database: their rows are the control events (`witness`) and count towards production. */
 export const GUARD_SCRIPT = "umacapture-guard";
 /**
- * The id of the D1 database `umacapture-guard`. Not created yet: this placeholder is replaced, together with
- * `database_id` in wrangler.guard.jsonc, by the id `wrangler d1 create umacapture-guard` prints.
+ * The id of the D1 database `umacapture-guard`, the same as `database_id` in wrangler.guard.jsonc: the two
+ * change together.
  */
-export const GUARD_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
+export const GUARD_DATABASE_ID = "3284839e-cb75-4520-9653-5abeb055bf5e";
 
 export const CFG = Object.freeze({
   /** Length of one cell: the guard compares its own events with Analytics one 60-second cell at a time. */

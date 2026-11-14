@@ -19,21 +19,22 @@
   "preview_urls": false,
   // Every minute: each run is the guard's control event for its minute.
   "triggers": { "crons": ["* * * * *"] },
-  // Not filled yet: the rollout sets the account and zone ids and the Sentry DSN. Until then every call
-  // that needs one fails, which the guard reads as "could not be read" (it extends nothing), and every
-  // notification stays unconfirmed. The tokens are secrets (GUARD_CF_TOKEN, GUARD_BILL_TOKEN).
+  // The account whose usage the guard reads, the zone umacapture.com whose rule G it keeps, and the
+  // Sentry DSN its notifications go to: the same DSN the app and the server Worker's reports use
+  // (REPORT_SENTRY_DSN in wrangler.jsonc); its events carry the environment "guard". Ids and a DSN are
+  // not secrets, so they are vars. The tokens are secrets (GUARD_CF_TOKEN, GUARD_BILL_TOKEN).
   "vars": {
-    "GUARD_ACCOUNT_ID": "",
-    "GUARD_ZONE_ID": "",
-    "GUARD_SENTRY_DSN": ""
+    "GUARD_ACCOUNT_ID": "6962635e027f873c84f5593af2570107",
+    "GUARD_ZONE_ID": "66547a62327a02bf73697731ce3bd864",
+    "GUARD_SENTRY_DSN": "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477"
   },
   "d1_databases": [
     {
       "binding": "GUARD_DB",
       "database_name": "umacapture-guard",
-      // Not created yet: this placeholder is replaced, together with GUARD_DATABASE_ID in
-      // guard/src/config.mjs, by the id `wrangler d1 create umacapture-guard` prints.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // The same id as GUARD_DATABASE_ID in guard/src/config.mjs: the guard picks its own D1 rows out of
+      // Analytics by it, so the two change together.
+      "database_id": "3284839e-cb75-4520-9653-5abeb055bf5e",
       "migrations_dir": "guard/migrations"
     }
   ]
