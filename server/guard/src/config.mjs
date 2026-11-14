@@ -40,8 +40,11 @@ export const CFG = Object.freeze({
   ALLOW_HOSTS: Object.freeze(["data.umacapture.com"]),
   /** The production host, whose dynamic paths stage A closes. */
   PRODUCTION_HOST: "umacapture.com",
-  /** Rows one guard_runs INSERT writes (k). Measured at rollout; null until then, which no count meets. */
-  PROBE_ROWS: null,
+  /**
+   * Rows one guard_runs INSERT writes (k): 2, the `meta.rows_written` the D1 binding reported for that INSERT
+   * on the remote database umacapture-guard, the same path the guard counts it on.
+   */
+  PROBE_ROWS: 2,
   /** The interval of the hourly re-read of the budget window. Provisional. */
   REREAD_STEP_S: 3_600,
   /** Time from the first sight of the rule in its protecting form until it is taken to have reached every edge. Provisional. */
