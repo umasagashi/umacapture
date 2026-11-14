@@ -86,8 +86,15 @@ export function patchNeeded(cls, want, cfg) {
   return want.Ep - cur.Ep >= cfg.RENEW_STEP_S || want.Es - cur.Es >= cfg.RENEW_STEP_S;
 }
 
-/** The body of a POST or PATCH of rule G: every field, first in the phase. */
-const ruleBody = (expression) => ({ action: "block", expression, description: RULE_MARK, enabled: true, position: { before: "" } });
+/**
+ * The body of a POST or PATCH of rule G: every field, and `position: { before: "" }` (first in the phase)
+ * unless the rule is already first — the rulesets API refuses that position for a rule already at the top
+ * (400, code 20011) and changes nothing.
+ */
+const ruleBody = (expression, alreadyFirst) => {
+  const body = { action: "block", expression, description: RULE_MARK, enabled: true };
+  return alreadyFirst ? body : { ...body, position: { before: "" } };
+};
 
 /** Whether a management API answer is a success (200 with `success: true`). */
 const succeeded = (answer) => isObject(answer) && answer.status === 200 && isObject(answer.body) && answer.body.success === true;
@@ -151,7 +158,7 @@ export async function converge(db, call, { zoneId, cls, lease, env, health, nowS
       .then((r) => r.meta.changes === 1)
       .catch(() => false);
     if (!claimed) return { action: "none", failure: null };
-    const answer = await call({ method: "POST", path: `/zones/${zoneId}/rulesets/${cls.rulesetId}/rules`, body: ruleBody(expression) }).catch(() => null);
+    const answer = await call({ method: "POST", path: `/zones/${zoneId}/rulesets/${cls.rulesetId}/rules`, body: ruleBody(expression, false) }).catch(() => null);
     return { action: "post", failure: await noteWrite(db, "POST", answer, nowSec, cfg) };
   }
   if (health.create_attempt_s !== null) {
@@ -166,7 +173,7 @@ export async function converge(db, call, { zoneId, cls, lease, env, health, nowS
     return { action: "refused", failure: null };
   }
   const path = `/zones/${zoneId}/rulesets/${cls.rulesetId}/rules/${cls.rule.id}`;
-  const answer = await call({ method: "PATCH", path, body: ruleBody(expression) }).catch(() => null);
+  const answer = await call({ method: "PATCH", path, body: ruleBody(expression, cls.first) }).catch(() => null);
   return { action: "patch", failure: await noteWrite(db, "PATCH", answer, nowSec, cfg) };
 }
 

@@ -143,13 +143,29 @@ function cloud(over = {}) {
       if (!c.entrypoint) return { status: 404, body: { result: null, success: false, errors: [{ code: 10003, message: "could not find entrypoint ruleset" }], messages: [] } };
       return { status: 200, body: { success: true, errors: [], messages: [], result: { id: "rs1", rules: structuredClone(c.rules) } } };
     }
-    const { position: _, ...rule } = body;
-    if (method === "POST") c.rules.unshift({ id: `new${++c.ruleSeq}`, ...rule });
+    // As measured on the live API: `position: { before: "" }` moves a rule first, and a PATCH carrying it
+    // for a rule already first is refused with 400 / code 20011 and changes nothing. A PATCH without
+    // `position` is assumed to keep the rule where it is (not measured).
+    const { position, ...rule } = body;
+    const toTop = position?.before === "";
+    if (method === "POST") {
+      const created = { id: `new${++c.ruleSeq}`, ...rule };
+      if (toTop) c.rules.unshift(created);
+      else c.rules.push(created);
+    }
     if (method === "PATCH") {
       const id = path.split("/").pop();
       const i = c.rules.findIndex((r) => r.id === id);
-      const [old] = c.rules.splice(i, 1);
-      c.rules.unshift({ ...old, ...rule });
+      if (toTop && i === 0) {
+        const message = "'' is not a valid value for before because the rule is already at the top";
+        return { status: 400, body: { success: false, errors: [{ code: 20011, message, source: { pointer: "/position/before" } }], messages: [], result: null } };
+      }
+      if (toTop) {
+        const [old] = c.rules.splice(i, 1);
+        c.rules.unshift({ ...old, ...rule });
+      } else {
+        c.rules[i] = { ...c.rules[i], ...rule };
+      }
     }
     if (c.loseWrites) throw new Error("answer lost");
     return { status: 200, body: { success: true, errors: [], messages: [], result: {} } };
@@ -278,7 +294,7 @@ describe("guard run", () => {
       assert.deepEqual(c.sentNames(), ["rule_missing"]);
     });
 
-    test("one rule G is taken and patched, and the create attempt is cleared", async () => {
+    test("one rule G already first is patched in place, without a position, and the create attempt is cleared", async () => {
       const c = await armed({ state: { healthRow: { create_attempt_s: T1 - 2 * cfg.CREATE_HOLD_S } } });
       await runAt(c, T1);
       assert.deepEqual(
@@ -286,8 +302,10 @@ describe("guard run", () => {
         [["PATCH", "/zones/zone/rulesets/rs1/rules/g1"]],
       );
       const { expression, ...fields } = c.writes()[0].body;
-      assert.deepEqual(fields, { action: "block", description: RULE_MARK, enabled: true, position: { before: "" } });
+      assert.deepEqual(fields, { action: "block", description: RULE_MARK, enabled: true });
       assert.equal((await health()).create_attempt_s, null);
+      assert.equal((await health()).last_patch_error, null);
+      assert.equal(c.rules[0].id, "g1");
       assert.equal(c.lease().Ep, NOW - 2 * MIN + cfg.D_S);
     });
 
@@ -334,6 +352,7 @@ describe("guard run", () => {
         c.rules = rule === null ? [otherRule(), gRule({ Ep: NOW + 600 })] : [rule, otherRule()];
         await runAt(c, T1);
         assert.equal(c.writes().length, 1);
+        assert.deepEqual(c.writes()[0].body.position, rule === null ? { before: "" } : undefined);
         assert.equal(c.rules[0].id, "g1");
         assert.equal(c.rules[0].enabled, true);
         assert.equal(c.rules[0].action, "block");
