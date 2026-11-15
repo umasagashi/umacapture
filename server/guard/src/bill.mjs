@@ -51,9 +51,15 @@ export const billPath = (accountId, { from, to }) => `/accounts/${accountId}/bil
  * Reads a Billable Usage response. Refuses it (`unreadable`) when the status is not 200, `success` is not
  * true, `errors` is not an empty array, `result` is not a non-empty array, or the response says there are
  * more pages. Refuses it (`unmapped`, with the first such row's kind and day) when any row, on any day, is of
- * a kind cfg.BILL_CLASS does not hold, or of a retired kind on a day from BILL_RETIRED_END_S on. Refuses
- * it (`unreadable`) when a row of a reconciled kind is not in USD, has a ConsumedQuantity that is not a
- * finite number >= 0, or a period that is not one UTC day. Storage and retired rows are not read further.
+ * a kind cfg.BILL_CLASS does not hold, of a retired kind on a day from BILL_RETIRED_END_S on, or of an
+ * included kind whose rows of one billing period sum to more than its allowance. Refuses it (`unreadable`)
+ * when a row of a reconciled or included kind is not in USD or has a ConsumedQuantity that is not a finite
+ * number >= 0, a reconciled row's period is not one UTC day, or an included row's BillingPeriodStart is not
+ * a UTC midnight. Storage and retired rows are not read further.
+ *
+ * Every billing period an answer holds is there from its first day: the range starts on the first day of the
+ * reach's period (billRange), and any later period starts inside the range. So the sum over one period's rows
+ * is that period's whole use so far.
  */
 export function parseBill({ status, body, cfg }) {
   const unreadable = { ok: false, reason: "unreadable" };
@@ -72,11 +78,19 @@ export function parseBill({ status, body, cfg }) {
       }
     }
   }
+  const quantityOk = (row) => row.BillingCurrency === "USD" && typeof row.ConsumedQuantity === "number" && Number.isFinite(row.ConsumedQuantity) && row.ConsumedQuantity >= 0;
+  const used = new Map(); // `${kind}\u0000${period}` -> { sum, allowance, first row }
   for (const row of body.result) {
-    if (classOf(row, cfg).class !== "reconcile") continue;
-    const q = row.ConsumedQuantity;
-    if (row.BillingCurrency !== "USD" || typeof q !== "number" || !Number.isFinite(q) || q < 0 || dayOfRow(row) === null) return unreadable;
+    const c = classOf(row, cfg);
+    if (c.class === "reconcile" && (!quantityOk(row) || dayOfRow(row) === null)) return unreadable;
+    if (c.class !== "included") continue;
+    if (!quantityOk(row) || !MIDNIGHT_RE.test(row.BillingPeriodStart ?? "")) return unreadable;
+    const id = `${billKey(row.ServiceName, row.ConsumedUnit)}\u0000${row.BillingPeriodStart}`;
+    const u = used.get(id) ?? { sum: 0, allowance: c.included_per_period, row };
+    u.sum += row.ConsumedQuantity;
+    used.set(id, u);
   }
+  for (const u of used.values()) if (u.sum > u.allowance) return { ok: false, reason: "unmapped", row: describe(u.row) };
   return { ok: true, rows: body.result };
 }
 
@@ -198,7 +212,8 @@ export async function readLedgerDays(db, { fromS, untilS }, cfg) {
  *
  * Returns what the notifications need: `{ tried, verdict, day, unreadable, unmapped, mismatch, advanced }`,
  * where `unreadable` is true when the API failed or its answer was refused, `unmapped` is the kind and day
- * of an unknown or retired row, and `mismatch` the day, metric and both quantities that disagreed.
+ * of an unknown or retired row or of an included row past its allowance, and `mismatch` the day, metric and
+ * both quantities that disagreed.
  */
 export async function reconcileBilling(db, { fetchBill, accountId, nowSec, cfg }) {
   const none = { tried: false, verdict: null, day: null, unreadable: false, unmapped: null, mismatch: null, advanced: false };

@@ -43,8 +43,11 @@ function rows(dataset, counted, production = new Map()) {
   return out;
 }
 
-/** One dataset's reading at nowSec of a ledger at toS. */
-function readOne(dataset, { counted, runs, gaps = [], nowSec, toS = nowSec - MIN }) {
+/**
+ * One dataset's reading at nowSec of a ledger at toS. By default the ledger reaches the horizon, so no cell of
+ * the range is one an earlier response proved: a shortfall is Analytics' and not a response's.
+ */
+function readOne(dataset, { counted, runs, gaps = [], nowSec, toS = nowSec - cfg.H_W_S }) {
   const range = queryRange(toS, nowSec, cfg);
   const ledger = { from_s: T0 - 86_400, to_s: toS };
   const answer = rows(dataset, counted).filter((r) => r.t >= range.qFrom && r.t < range.qTo); // what a query for the range returns

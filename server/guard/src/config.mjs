@@ -23,7 +23,7 @@ export const CFG = Object.freeze({
   /** A missing control event older than this may be accepted at once when a later cell proves the response complete. Provisional. */
   GAP_ACCEPT_S: 300,
   /** At most this many gaps per dataset within the last H_W_S are accepted at once; past it a gap waits for the horizon. Provisional. */
-  K_GAP: 3,
+  K_GAP: 4,
   /** The longest range one Analytics response covers while the ledger catches up. Provisional. */
   Q_MAX_S: 21_600,
   /** The row limit every Analytics query sends: the datasets' maxPageSize. A response that reaches it is refused. */
@@ -97,8 +97,12 @@ export const CFG = Object.freeze({
    *    so the multiplier is 1.
    *  - `storage`: bounded by a named term of the budget (D1 storage, F_D1: every database of the account,
    *    at most 10 GB each); neither evidence nor a reason to stop.
-   *  - `retired`: R2, whose bucket was deleted on 2026-11-03: a row of a day starting at or after
+   *  - `retired`: R2 storage, whose bucket was deleted on 2026-11-03: a row of a day starting at or after
    *    BILL_RETIRED_END_S is a new way of being billed outside the ledger and stops reconciliation.
+   *  - `included`: R2 operations, which the account's own API calls (listing buckets) are billed as with no
+   *    bucket at all. Within one billing period (the rows' BillingPeriodStart) the rows' ConsumedQuantity,
+   *    summed, may reach `included_per_period`, the allowance the period bills nothing for; past it the kind
+   *    stops reconciliation. Neither evidence nor a reason to extend anything.
    */
   BILL_CLASS: Object.freeze({
     "Workers Standard Requests (first 10M are included)\u0000": Object.freeze({ class: "reconcile", metric: "requests", multiplier: 1 }),
@@ -107,8 +111,8 @@ export const CFG = Object.freeze({
     "D1 - Rows Written (first 50 million included)\u0000": Object.freeze({ class: "reconcile", metric: "rows_written", multiplier: 1 }),
     "D1 - Storage GB-mo (first 5GB included)\u0000GB-months": Object.freeze({ class: "storage", term: "F_D1" }),
     "R2 Data Storage (First 10GB-Month included)\u0000GB-months": Object.freeze({ class: "retired" }),
-    "R2 Storage Class A Operations (First 1M included)\u0000": Object.freeze({ class: "retired" }),
-    "R2 Storage Class B Operations (First 10M included)\u0000": Object.freeze({ class: "retired" }),
+    "R2 Storage Class A Operations (First 1M included)\u0000": Object.freeze({ class: "included", included_per_period: 1_000_000 }),
+    "R2 Storage Class B Operations (First 10M included)\u0000": Object.freeze({ class: "included", included_per_period: 10_000_000 }),
   }),
   /** The first instant a retired kind may not be billed for: the day after its last observed row (2026-11-04T00:00:00Z). */
   BILL_RETIRED_END_S: 1_793_750_400,

@@ -37,15 +37,16 @@ const needOf = (dataset, cfg) => (dataset === "workers" ? 1 : cfg.PROBE_ROWS);
  * (`{ dataset, cell, seen_s }`) as read at the start of the run; only this dataset's are used, the
  * K_GAP limit included.
  *
- * Returns `{ readable, tp, gapRows, lost, stalled, hold, cells, unknownScripts }`: `cells` are the counted
- * cells to write to the ledger (`{ env, cell, ...columns }`, cells ending at or before tp and starting at or
- * after the ledger's from_s); `hold` is true when this run must extend no lease on this dataset's evidence
- * (it records a gap, it is catching up, or the ledger is stalled); `stalled` is null when the response
- * could not be read, since the run then cannot judge it.
+ * Returns `{ readable, tp, gapRows, lost, missing, stalled, hold, cells, unknownScripts }`: `cells` are the
+ * counted cells to write to the ledger (`{ env, cell, ...columns }`, cells ending at or before tp and starting
+ * at or after the ledger's from_s); `missing` is true when the response lacks a cell the ledger already holds
+ * (scanDataset); `hold` is true when this run must extend no lease on this dataset's evidence (it records a
+ * gap, the response lacks a cell, it is catching up, or the ledger is stalled); `stalled` is null when the
+ * response could not be read, since the run then cannot judge it.
  */
 export function readDataset({ dataset, rows, range, ledger, runs, gaps: allGaps, nowSec, cfg }) {
   const gaps = allGaps.filter((g) => g.dataset === dataset);
-  const refused = { readable: false, tp: null, gapRows: [], lost: false, stalled: null, hold: true, cells: [], unknownScripts: [] };
+  const refused = { readable: false, tp: null, gapRows: [], lost: false, missing: false, stalled: null, hold: true, cells: [], unknownScripts: [] };
   if (rows === null) return refused;
   const cells = rangeCells(range, cfg);
   const first = cells[0];
@@ -54,7 +55,7 @@ export function readDataset({ dataset, rows, range, ledger, runs, gaps: allGaps,
 
   const a = new Map();
   for (const r of rows) a.set(cellOf(r.t, cfg), (a.get(cellOf(r.t, cfg)) ?? 0) + controlOf(dataset, r, cfg));
-  const { tp, gapRows, lost } = scanDataset({ runs, a, need: needOf(dataset, cfg), cells, gaps, nowSec, cfg });
+  const { tp, gapRows, lost, missing } = scanDataset({ runs, a, need: needOf(dataset, cfg), cells, gaps, ledger, nowSec, cfg });
   const stalled = ledgerStalled({ toS: ledger.to_s, nowSec, runs, gaps: new Set(gaps.map((g) => g.cell)), cfg });
 
   const counted = new Map();
@@ -77,8 +78,8 @@ export function readDataset({ dataset, rows, range, ledger, runs, gaps: allGaps,
   }
   const out = [...counted.values()].map(({ cpu_us, ...c }) => (dataset === "workers" ? { ...c, cpu_ms: Math.ceil(cpu_us / 1000) } : c));
   const unknownScripts = dataset === "workers" ? [...new Set(rows.map((r) => r.key))].filter((k) => !cfg.KNOWN_SCRIPTS.includes(k)) : [];
-  const hold = gapRows.length > 0 || range.qTo < nowSec || stalled;
-  return { readable: true, tp, gapRows, lost, stalled, hold, cells: out, unknownScripts };
+  const hold = gapRows.length > 0 || missing || range.qTo < nowSec || stalled;
+  return { readable: true, tp, gapRows, lost, missing, stalled, hold, cells: out, unknownScripts };
 }
 
 /** The run's reading of both datasets: t_p is the smaller of the two (null if either is), and any dataset's hold holds the run. */

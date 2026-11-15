@@ -21,7 +21,7 @@ import {
 } from "../../guard/src/bill.mjs";
 import { CFG } from "../../guard/src/config.mjs";
 import { rereadRaise } from "../../guard/src/ledger.mjs";
-import { dayOf, dayStart } from "../../guard/src/time.mjs";
+import { dayOf, dayStart, periodStart } from "../../guard/src/time.mjs";
 import { migrationStatements } from "../support/worker_harness.mjs";
 
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "guard", "migrations");
@@ -38,8 +38,8 @@ const NAMES = {
   rows_written: "D1 - Rows Written (first 50 million included)",
 };
 const STORAGE = ["D1 - Storage GB-mo (first 5GB included)", "GB-months"];
-const RETIRED = [
-  ["R2 Data Storage (First 10GB-Month included)", "GB-months"],
+const RETIRED = [["R2 Data Storage (First 10GB-Month included)", "GB-months"]];
+const INCLUDED = [
   ["R2 Storage Class A Operations (First 1M included)", ""],
   ["R2 Storage Class B Operations (First 10M included)", ""],
 ];
@@ -47,12 +47,13 @@ const RETIRED = [
 const USAGE = Object.freeze({ requests: 100_000, cpu_ms: 2_000_000, rows_read: 50_000_000, rows_written: 100_000 });
 
 const iso = (s) => new Date(s * 1000).toISOString().replace(".000Z", "Z");
-/** One Billable Usage row of a kind for the UTC day starting at `s`. */
+/** One Billable Usage row of a kind for the UTC day starting at `s`, in the billing period holding it. */
 const row = (name, unit, s, q, over = {}) => ({
   ServiceName: name,
   ConsumedUnit: unit,
   ChargePeriodStart: iso(s),
   ChargePeriodEnd: iso(s + DAY),
+  BillingPeriodStart: iso(periodStart(s, cfg)),
   BillingCurrency: "USD",
   ConsumedQuantity: q,
   ...over,
@@ -365,9 +366,9 @@ describe("guard billing reconciliation", () => {
     assert.equal((await attempt(fakeBill({ status: 403, body: {} }), NOW + 2 * DAY)).unreadable, true);
   });
 
-  test("an answer holding all eight real kinds passes a day whose four metrics agree: storage and retired rows do not stop it", () => {
+  test("an answer holding all eight real kinds passes a day whose four metrics agree: storage, retired and included rows do not stop it", () => {
     const s = D("2026-10-30");
-    const result = [s, s + DAY].flatMap((x) => [...dayRows(x), row(...STORAGE, x, 0.0019), ...RETIRED.map(([n, u]) => row(n, u, x, 3))]);
+    const result = [s, s + DAY].flatMap((x) => [...dayRows(x), row(...STORAGE, x, 0.0019), ...[...RETIRED, ...INCLUDED].map(([n, u]) => row(n, u, x, 3))]);
     const r = run({ toS: s, result });
     assert.deepEqual([r.to, r.openUntil], [s + DAY, s + DAY + cfg.T_R_S]);
   });
@@ -388,6 +389,29 @@ describe("guard billing reconciliation", () => {
       assert.deepEqual(p, { ok: false, reason: "unmapped", row: { ServiceName: n, ConsumedUnit: u, day: "2026-11-04" } });
     }
     assert.equal(parseBill({ ...answer([...dayRows(s), ...dayRows(s + DAY), row(...RETIRED[0], s, 1)]), cfg }).ok, true);
+  });
+
+  test("R2 operations rows after 2026-11-04 within the billing period's allowance let the reach move; past it they are refused as unmapped and move nothing", async () => {
+    const now = D("2026-11-15") + 12 * HOUR;
+    const s = D("2026-11-13");
+    const [classA, classB] = INCLUDED;
+    const base = [...dayRows(s), ...dayRows(s + DAY)];
+    await seedLedger(s, now);
+    await setReach(s);
+    const within = await attempt(fakeBill(answer([...base, row(...classA, s, 1), row(...classA, s + DAY, 3), row(...classB, s + DAY, 2)])), now);
+    assert.deepEqual([within.verdict, within.advanced], ["no_row", true]);
+    assert.equal((await billRow()).to_s, s + DAY);
+    assert.equal(await openUntil(), s + DAY + cfg.T_R_S);
+    // The allowance is per billing period: 1,000,001 Class A operations in one period are past it, the same
+    // number split over two periods is not.
+    await setReach(s);
+    const over = await attempt(fakeBill(answer([...base, row(...classA, s, 400_000), row(...classA, s + DAY, 600_001)])), now);
+    assert.deepEqual([over.verdict, over.advanced], ["unmapped", false]);
+    assert.deepEqual(over.unmapped, { ServiceName: classA[0], ConsumedUnit: "", day: "2026-11-13" });
+    assert.equal((await billRow()).to_s, s);
+    assert.equal(await openUntil(), s + DAY + cfg.T_R_S);
+    const split = [row(...classA, D("2026-11-21"), 600_000), row(...classA, D("2026-11-22"), 400_001)];
+    assert.equal(parseBill({ ...answer([...base, ...split]), cfg }).ok, true);
   });
 
   test("an unknown ServiceName (only the bracketed text differs) or a ConsumedUnit that differs is refused as unmapped", () => {
@@ -426,9 +450,9 @@ describe("guard billing reconciliation", () => {
     assert.deepEqual([r.to, r.openUntil, r.verdict], [d, null, "no_row"]);
   });
 
-  test("an answer with storage and retired rows only, no reconciled row, passes nothing even with a ledger within a", () => {
+  test("an answer with storage, retired and included rows only, no reconciled row, passes nothing even with a ledger within a", () => {
     const d = D("2026-10-30");
-    const result = [d, d + DAY].flatMap((x) => [row(...STORAGE, x, 0.0019), ...RETIRED.map(([n, u]) => row(n, u, x, 1))]);
+    const result = [d, d + DAY].flatMap((x) => [row(...STORAGE, x, 0.0019), ...[...RETIRED, ...INCLUDED].map(([n, u]) => row(n, u, x, 1))]);
     const tiny = { requests: 1, cpu_ms: 1, rows_read: 4, rows_written: 2 };
     const r = run({ toS: d, result, ledgerDay: () => ({ ...tiny }) });
     assert.deepEqual([r.to, r.openUntil, r.verdict], [d, null, "no_row"]);

@@ -78,7 +78,7 @@ export async function recordRun(db, runId, nowSec, cfg) {
  */
 async function readCells(deps, ledger, nowSec) {
   const { db, cfg } = deps;
-  const refused = { readable: false, tp: null, gapRows: [], lost: false, stalled: null, hold: true, cells: [], unknownScripts: [] };
+  const refused = { readable: false, tp: null, gapRows: [], lost: false, missing: false, stalled: null, hold: true, cells: [], unknownScripts: [] };
   const present = DATASETS.filter((d) => ledger[d] !== undefined);
   const ranges = Object.fromEntries(present.map((d) => [d, queryRange(ledger[d].to_s, nowSec, cfg)]));
   let runs = null;

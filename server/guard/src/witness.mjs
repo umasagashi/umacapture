@@ -58,6 +58,12 @@ export function witness({ runs, a, need, cells, gaps, cfg }) {
 /**
  * The scan of one readable response together with the gaps the run records. When the scan stops on a
  * cell c counted short:
+ *  - c lies in the ledger, from the cell of `ledger.from_s` up to but not including the cell of
+ *    `ledger.to_s`: an earlier response already proved c (to_s only moves to the start of a cell a scan
+ *    passed, and a scan starts at or before to_s and passes every cell with a run on its way), so it is
+ *    this response that lacks c's events, not
+ *    Analytics that lost them. Nothing is recorded or reported, and the run extends no lease (`missing`).
+ *    The cell of to_s itself is left out: the first run's ledger and a ledger-bridge start there unproven.
  *  - c started before nowSec - H_W_S (the horizon): every cell of the range counted short that started
  *    before the horizon is recorded, and the loss is reported (`lost`).
  *  - otherwise, c started before nowSec - GAP_ACCEPT_S, a later cell of the same response passed (it has
@@ -65,26 +71,29 @@ export function witness({ runs, a, need, cells, gaps, cfg }) {
  *    than K_GAP of this dataset's gaps were seen within the last H_W_S: c alone is recorded (accepted
  *    at once, not reported).
  * A run that records a gap extends no lease; the next run passes over the recorded cells.
- * `gaps` are this dataset's guard_gaps rows as read at the start of the run (`{ cell, seen_s }`).
+ * `gaps` are this dataset's guard_gaps rows as read at the start of the run (`{ cell, seen_s }`), `ledger`
+ * the dataset's guard_ledger row as read at the start of the run (`{ from_s, to_s }`).
  */
-export function scanDataset({ runs, a, need, cells, gaps, nowSec, cfg }) {
-  if (!validNeed(need)) return { tp: null, gapRows: [], lost: false };
+export function scanDataset({ runs, a, need, cells, gaps, ledger, nowSec, cfg }) {
+  const none = { gapRows: [], lost: false, missing: false };
+  if (!validNeed(need)) return { tp: null, ...none };
   const gapCells = new Set(gaps.map((g) => g.cell));
   const { tp, stop, R } = scan({ runs, a, need, cells, gaps: gapCells, cfg });
-  if (stop === null) return { tp, gapRows: [], lost: false };
+  if (stop === null) return { tp, ...none };
+  if (stop >= cellOf(ledger.from_s, cfg) && stop < cellOf(ledger.to_s, cfg)) return { tp, ...none, missing: true };
   const short = (c) => (R.get(c) ?? 0) > 0 && !gapCells.has(c) && (a.get(c) ?? 0) < need * (R.get(c) ?? 0);
   const row = (c) => ({ cell: c, runs: R.get(c) ?? 0, counted: a.get(c) ?? 0, seen_s: nowSec });
   const startsBefore = (c, t) => c * cfg.CELL_S < t;
   if (startsBefore(stop, nowSec - cfg.H_W_S)) {
     const rows = cells.filter((c) => short(c) && startsBefore(c, nowSec - cfg.H_W_S)).map(row);
-    return { tp, gapRows: rows, lost: true };
+    return { tp, ...none, gapRows: rows, lost: true };
   }
   const laterPasses = cells.some((c) => c > stop && (R.get(c) ?? 0) >= 1 && (a.get(c) ?? 0) >= need * (R.get(c) ?? 0));
   const recent = gaps.filter((g) => g.seen_s > nowSec - cfg.H_W_S).length;
   if (startsBefore(stop, nowSec - cfg.GAP_ACCEPT_S) && laterPasses && recent < cfg.K_GAP) {
-    return { tp, gapRows: [row(stop)], lost: false };
+    return { tp, ...none, gapRows: [row(stop)] };
   }
-  return { tp, gapRows: [], lost: false };
+  return { tp, ...none };
 }
 
 /**

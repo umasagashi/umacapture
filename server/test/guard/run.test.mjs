@@ -545,8 +545,8 @@ describe("guard run", () => {
     });
 
     test("probe_lost is sent by the run that waited for the horizon, not by the run that accepted a gap at once", async () => {
-      // An isolated loss in Workers 10 minutes back: accepted at once, nothing sent.
-      let c = await armed();
+      // An isolated loss in Workers 10 minutes back, past the ledger's reach: accepted at once, nothing sent.
+      let c = await armed({ state: { ledger: { from: NOW - 70 * MIN, to: NOW - 15 * MIN } } });
       c.dropped.workers.add(NOW - 10 * MIN);
       await runAt(c, T1);
       assert.deepEqual(await all("SELECT dataset, cell FROM guard_gaps"), [{ dataset: "workers", cell: cellOf(NOW - 10 * MIN, cfg) }]);
@@ -573,6 +573,30 @@ describe("guard run", () => {
       assert.equal(c.lease().Ep, NOW + 600);
       const second = await runAt(c, T1 + MIN);
       assert.equal(second.read.tp, NOW - MIN);
+      assert.equal(c.lease().Ep, NOW - MIN + cfg.D_S);
+    });
+
+    test("an answer lacking a cell the ledger already holds records no gap, sends no probe_lost and extends nothing; the next answer extends", async () => {
+      // The ledger reaches NOW - 5 min, so earlier answers proved every cell before it; only this run's
+      // answer lacks the cell's control event. First the range's first cell, older than the horizon.
+      let c = await armed();
+      c.dropped.workers.add(NOW - 60 * MIN);
+      const first = await runAt(c, T1);
+      assert.deepEqual(await all("SELECT dataset, cell FROM guard_gaps"), []);
+      assert.ok(!c.sentNames().includes("probe_lost"));
+      assert.equal(first.read.datasets.workers.missing, true);
+      // Then a cell 10 minutes back, with t_p before it still far enough ahead to extend a lease ending at NOW + 60.
+      await resetDb();
+      c = await armed({ Ep: NOW + 60 });
+      c.dropped.workers.add(NOW - 10 * MIN);
+      const near = await runAt(c, T1);
+      assert.deepEqual(await all("SELECT dataset, cell FROM guard_gaps"), []);
+      assert.equal(near.read.tp, NOW - 11 * MIN);
+      assert.equal(c.lease().Ep, NOW + 60);
+      assert.equal(c.writes().length, 0);
+      c.dropped.workers.delete(NOW - 10 * MIN);
+      const next = await runAt(c, T1 + MIN);
+      assert.equal(next.read.tp, NOW - MIN);
       assert.equal(c.lease().Ep, NOW - MIN + cfg.D_S);
     });
   });
