@@ -60,6 +60,8 @@ These are outward-facing or account-level operations. Nothing in the repository 
    - For the release checks, read only: Account › Turnstile › Read, Zone › Zone WAF › Read,
      Account › Billing › Read
 
+   The billing guard has a token of its own ("The guard's token"); this one is never given to it.
+
    The same file carries `CLOUDFLARE_ACCOUNT_ID`. `deploy_web.sh` and `publish_modules.sh` read
    both from it and stop when either is empty; a `wrangler login` does not stand in for them. A
    wrangler command run by hand takes them from the same file ("The pinned wrangler").
@@ -73,9 +75,12 @@ These are outward-facing or account-level operations. Nothing in the repository 
 3. **Pre-deployment checks.** Confirm and write down the result before the first deployment.
    They are the grounds for what this deployment can be billed for:
    - The account is on **Workers Paid** (Dashboard › Workers & Pages › Plans). Past what the plan
-     includes a month it bills rather than stops. File sync's service-wide daily limits in
+     includes a month it bills rather than stops; what stops the Workers and D1 charges is the
+     billing guard ("The billing guard"). File sync's service-wide daily limits in
      `server/src/limits.mjs` are set so that production and staging both using them up every day of
-     a month stay within what the plan includes; their comments derive each figure.
+     a month stay within what the plan includes; their comments derive each figure. They count the
+     requests of logged-in accounts up to each limit, so they bound neither a request from someone
+     who is not logged in nor one past a limit: each of those still runs the Worker.
    - `server/wrangler.jsonc` declares **one binding**, the D1 database `DB`, and no R2.
      `server/wrangler.assets-only.jsonc` declares none at all. Read both again before deploying.
    - **Backblaze B2** is billed by Backblaze, outside Cloudflare. Its data caps and alerts (below)
@@ -211,9 +216,9 @@ These are outward-facing or account-level operations. Nothing in the repository 
     other value is a configuration error. `wrangler deploy` replaces the Worker's vars with the ones in the config,
     so a var set in the dashboard does not survive the next deployment.
 12. **Zone rate limiting.** One WAF rate limiting rule on the `umacapture.com` zone: requests whose
-    URI path starts with `/r/`, `/u/` or `/api/` but not with `/api/sync/`, and that do not come
-    from a verified bot, counted per IP, 10 requests in 10 seconds, blocked for 10 seconds. The
-    path part of its expression:
+    URI path starts with `/r/`, `/u/` or `/api/` but not with `/api/sync/`, counted per IP and per
+    Cloudflare data centre (the counting characteristics `ip.src` and `cf.colo.id`), 10 requests in
+    10 seconds, blocked for 10 seconds. Its expression:
 
     ```
     (starts_with(http.request.uri.path, "/r/") or starts_with(http.request.uri.path, "/u/")
@@ -221,10 +226,15 @@ These are outward-facing or account-level operations. Nothing in the repository 
     and not starts_with(http.request.uri.path, "/api/sync/")
     ```
 
-    File sync is left out on purpose: it is held by its own limits instead (per account and over
-    every account, per day, [`sync-server.md`](sync-server.md#limits)). Every
+    File sync is left out on purpose: a normal sync round would trip the rule. Its requests are made
+    one after another, each as soon as the previous one is answered (`syncRoundEstimate` in
+    `lib/src/chara_detail/record_sync_round.dart`), so with an answer in 0.1 seconds a round makes
+    about 100 requests in 10 seconds, ten times what the rule lets through, and a first sync of many
+    records runs to thousands. Sync's own limits (per account and over every account, per day,
+    [`sync-server.md`](sync-server.md#limits)) bound what accepted requests store and do; what
+    bounds the bill for every request, sync's included, is the billing guard. Every
     sync endpoint is under `/api/sync/`, so the one prefix covers them. The zone's Free plan allows
-    exactly one such rule, with those fields, that counting key, that period and that timeout; if
+    exactly one such rule, with those fields, those counting characteristics, that period and that timeout; if
     the zone already has one, decide which to keep rather than overwriting it.
 
     **Check the rule from outside**, against production: staging is blocked by the guard's WAF
@@ -272,11 +282,13 @@ These are outward-facing or account-level operations. Nothing in the repository 
 
 | Entrance | What it serves | Zone WAF | Expected setting |
 |---|---|---|---|
-| `umacapture.com` (custom domain) | The web app and the Worker (`umacapture-web`) | Applies: the rate limiting rule on `/r/`, `/u/` and `/api/`, except `/api/sync/` | Production entrance |
-| `data.umacapture.com` (custom domain) | Recognizer modules and announcements (`umacapture-data`, static assets only, no R2) | Applies, unused | Production entrance |
+| `umacapture.com` (custom domain) | The web app and the Worker (`umacapture-web`) | Applies: the rate limiting rule on `/r/`, `/u/` and `/api/`, except `/api/sync/`; rule G closes `/r/`, `/u/` and `/api/` at stage A and the whole host at the budget or when the guard cannot measure ("The billing guard") | Production entrance |
+| `data.umacapture.com` (custom domain) | Recognizer modules and announcements (`umacapture-data`, static assets only, no R2) | Applies; rule G never blocks it (its allow list: no request there runs a Worker) | Production entrance |
 | `og.umacapture.com` (Vercel project domain, CNAME, DNS only) | The OGP image function (`umacapture-og` on Vercel) | Does not apply: the zone does not proxy it. The Vercel Firewall rule applies (see the Vercel section) | Production entrance |
 | `umacapture-og.vercel.app` | The project's own production domain on Vercel | Does not apply | Kept. It answers without the bypass header: `/` gets the platform's 404 and `/r/<id>.png` reaches the function, because production domains are outside deployment protection. Whether the Vercel Firewall rule also applies here is not measured: the burst test ran against `og.umacapture.com` only |
-| `staging.umacapture.com` (custom domain) | Staging (`umacapture-web-staging`) | Applies: the guard's rule blocks the host except while a test window is open | Staging entrance, closed outside a test window (see "Staging") |
+| `staging.umacapture.com` (custom domain) | Staging (`umacapture-web-staging`) | Applies: rule G blocks the host except while a test window is open | Staging entrance, closed outside a test window (see "Staging") |
+| Any other proxied host of the zone | — | Applies: rule G blocks it whenever it blocks staging: outside a test window, and whenever it closes production | A new proxied DNS record of the zone is blocked from its first request; decide what it is for before adding one |
+| `umacapture-guard` (no route, no custom domain) | The billing guard: a Worker run only by its Cron trigger, every minute | Does not apply: no request reaches it | Closed: no route, `workers_dev: false`, `preview_urls: false` (`server/wrangler.guard.jsonc`) |
 | `umacapture-web-staging.umasagashi.workers.dev` | Would serve staging | Does not apply | Closed: `workers_dev: false` |
 | `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
@@ -285,8 +297,11 @@ These are outward-facing or account-level operations. Nothing in the repository 
 After the first deployment, confirm in the dashboard (Worker › Settings › Domains & Routes) that
 `workers.dev` and preview URLs are shown as disabled and that each Worker has exactly one domain:
 `umacapture.com` for `umacapture-web`, `data.umacapture.com` for `umacapture-data`,
-`staging.umacapture.com` for `umacapture-web-staging`. No zone route
-points at either of them.
+`staging.umacapture.com` for `umacapture-web-staging`, and none for `umacapture-guard`. No zone route
+points at any of them.
+
+Rule G exists only once the guard has been armed ("The billing guard"); until then it blocks nothing
+in this table.
 
 ## Deploying
 
@@ -950,7 +965,7 @@ verified through the public URL.
 
 Staging is closed outside a test window, so stage 8 (the check through the public URL) fails
 there. Deploy staging only inside a window opened with `guard.sh open staging`, and close it with
-`guard.sh close staging` when the test is done.
+`guard.sh close staging` when the test is done ("The billing guard").
 
 - **Credentials.** The API token also needs Account › D1 › Edit (`tool/cloudflare/.env.example`).
   The staging database (`umacapture-share-staging`) is created once by hand, its id written into
@@ -989,6 +1004,217 @@ there. Deploy staging only inside a window opened with `guard.sh open staging`, 
   is a separate step. Every module publish still writes its name tables to the staging database,
   sharing or not, so deleting it stops every publish before the pointer changes, for as long as
   `publish_modules.sh` names staging among its targets.
+
+## The billing guard
+
+The billing guard stops the account's Workers and D1 charges with no one acting. Its Worker,
+`umacapture-guard` (`server/guard/`, configured by `server/wrangler.guard.jsonc`), runs every minute
+from its Cron trigger, measures the account's usage and keeps one WAF custom rule of the
+`umacapture.com` zone, **rule G**, open only as far as it has proven that usage complete and within
+budget. Rule G is a block rule whose expression carries the times it blocks from; the guard moves
+them forward while it may, and when it stops, the times pass and the zone closes by itself. A guard
+that cannot read Analytics, cannot reach the API, has lost its token or is gone therefore closes
+production about 20 minutes (`D_S`) after the last minute it proved.
+
+### What it reads
+
+- **Usage, every minute.** One GraphQL Analytics query a dataset for the whole account: Workers
+  invocations by minute and script (requests, CPU time) and D1 by minute and database (rows read,
+  rows written). The guard's own runs are its control events: each run is one invocation of its
+  script and writes `PROBE_ROWS` rows into its own D1, so a minute for which Analytics returns all of
+  the guard's own events is a minute Analytics has counted. The latest minute proven that way is
+  `t_p`; the guard adds the usage of the minutes before it to its ledger, in its D1.
+- **Spend.** The ledger's usage at list prices (`PRICE_MICROS` in `server/guard/src/config.mjs`),
+  with nothing taken off for what the plan includes, so it grows from the first request even while
+  the bill is $0. `umacapture-web-staging` and its D1 are staging; every other script and database
+  is production, the guard's own included. It is summed over the billing period, which starts on
+  the 22nd (UTC), from one day before the period's start.
+- **The bill, once a day** (`BILL_STEP_S`): the Billable Usage API, compared with the ledger (below).
+
+### What rule G closes, and when
+
+Rule G carries three times (`server/guard/src/lease.mjs`). Each blocks from that time on:
+
+| Time | Blocks |
+|---|---|
+| `Ep` | Every host but `data.umacapture.com`: production, staging and any other host of the zone |
+| `Es` | Every host but `umacapture.com` and `data.umacapture.com`: staging and any other host |
+| `Ea` | `/r/`, `/u/` and `/api/` on `umacapture.com` (stage A) |
+
+`data.umacapture.com` is never blocked: it serves static assets only, so no request there runs a
+Worker.
+
+- **Production** (`Ep`) is moved to `t_p` + 20 minutes (`D_S`) by every run that measured and found
+  production's spend under its limit, and never past production's `open_until_s` (billing
+  reconciliation, below).
+- **Stage A** (`Ea`) latches when production's spend reaches 80% of its limit (`warn_permille`):
+  `/r/`, `/u/` and `/api/` close — the record and list pages and every API: logins, sharing, link
+  imports, sync and reports — while the web app's own pages go on loading.
+- **The budget.** At its limit an environment is `tripped`; for production `Ep` becomes 0 and the
+  whole host closes. Production's limit each billing period is its base: $10 as the guard's first
+  migration sets it, changed with `limit production --base`. The guard never takes an environment
+  out of `tripped`; only `open` does.
+- **Staging** (`Es`) is closed outside a test window. `open staging` opens one with its own
+  allowance, for at most 8 hours; staging closes at the window's end, and trips at the allowance.
+- **When the guard cannot measure** — Analytics does not answer or leaves out some of the guard's
+  own events, the ledger cannot move on — it extends nothing, and the times already written run
+  out. Not measuring changes no state: production opens again by itself on the first run that
+  measures.
+- **A new billing period** sets the limit back to the base. It does not clear `tripped` or stage A.
+
+### Rule G is written by the guard alone
+
+- The guard knows its rule by the description, which starts with `umacapture-guard lease`. It
+  writes no rule until the operator arms it (`guard.sh arm`). From then on it creates the rule, first
+  in the zone's custom rules, when there is none, and rewrites it when its times move or its form was
+  changed (not first, disabled, not a block, or an expression the guard did not write).
+- It never deletes the rule, and never creates or replaces the custom-rules entry point: a `PUT`
+  would replace every rule of the phase. The entry point has to exist before `arm`; without it the
+  guard writes nothing and sends `entrypoint_missing`.
+- **Do not edit, disable, move or delete rule G, and do not give another rule a description that
+  starts with `umacapture-guard lease`.** A changed rule G is rewritten (`rule_tampered`), and a
+  deleted one is created again. With two such rules the guard writes neither, so both run out and
+  the zone closes (`rule_ambiguous`) until the extra one is deleted.
+
+### Billing reconciliation
+
+Rule G's times stand on Analytics; billing reconciliation checks Analytics against the bill. Once a
+day the guard reads the Billable Usage API (`GUARD_BILL_TOKEN`) and compares it with its ledger, one
+UTC day and one metric at a time: requests, CPU milliseconds, D1 rows read and rows written, each
+within 10% of the ledger plus $0.01 a day (`BILL_TAU`, `BILL_A_MICROS`).
+
+- A day passes only when the bill also holds a later day of the same metric. A day's rows arrive
+  some hours after it ends, so a try normally passes the day before yesterday.
+- Each day that passes moves the reach (`guard_bill.to_s`) past it, and production's
+  `open_until_s` to the end of that day plus `T_R`, 7 days. Production's times in rule G never go
+  past `open_until_s`.
+- A day that disagrees (`bill_mismatch`), or for which the bill or the ledger has nothing, stops the
+  walk; no day is skipped. A bill that cannot be read (`bill_unreadable`) or that holds a kind of row
+  the guard does not know (`bill_unmapped`, `BILL_CLASS` in `server/guard/src/config.mjs`: a new
+  way of being billed outside the ledger) stops it too. R2's operations are let through while a
+  billing period's total stays within what the plan includes, which bills nothing.
+- If reconciliation stays stopped, production closes `T_R` after the end of the last day that
+  matched; `lease_closing_soon` is sent 48 hours (`RENEW_WARN_S`) before. Should reconciliation
+  catch up afterwards, production opens again by itself.
+- `status` shows the reach (`bill.to_s`) and the last try (`last_try_s`, `last_verdict`,
+  `last_day`). `last_verdict` `no_row` is the normal state of most days (the next day's rows have not
+  arrived yet); a reach that has not moved over two tries or more is the sign that reconciliation
+  has stopped.
+
+### Notifications
+
+Each notification is one Sentry event in the app's project, through the DSN that
+`server/wrangler.guard.jsonc` carries as `GUARD_SENTRY_DSN` (the one `REPORT_SENTRY_DSN` names):
+environment `guard`, level `warning`, message `guard: <event>`, tag `event`, fingerprint
+`["guard", <event>]`, and only aggregate values (days, metrics, quantities, statuses), never a row of
+an answer. A lasting condition is sent once when it starts; a send that fails is tried again by the
+next run, so an event can arrive twice. In Sentry, create one issue alert rule on the app's project:
+environment `guard`; when a new issue is created, or an issue changes state from resolved to
+unresolved; then notify the operator. Each event name is one issue, so resolve it once handled, or
+the next occurrence does not notify.
+
+| Event | What happened | What to do |
+|---|---|---|
+| `trip` | An environment reached its limit and closed (production: the whole host) | Find what spent it, then `open` (below) |
+| `stage_a` | Production reached 80% of its limit: `/r/`, `/u/` and `/api/` are closed | Find what spent it, then `close production` and `open production` |
+| `blind_start`, `blind_end` | The guard could not measure, and could again (`blind_end` carries how long) | Nothing while it is short: production closes after about 20 minutes of it and opens again by itself |
+| `probe_lost` | Analytics never returned some of the guard's own events, an hour on | Nothing for one; many mean Analytics is losing events |
+| `probe_rows_mismatch` | A run's own D1 write did not write `PROBE_ROWS` rows; the guard extends nothing | Find out how D1 counts that write now |
+| `ledger_stalled` | A dataset's ledger cannot move on: no run of the guard is recorded past it | Find out why the guard did not run, then `ledger-bridge` |
+| `ledger_undercount` | The hourly re-read found more usage than the ledger held, and raised the ledger | Nothing |
+| `unknown_script` | A Worker the guard does not know (`KNOWN_SCRIPTS`) ran in the account; it counts as production | Decide whether it should exist |
+| `rules_unreadable`, `entrypoint_missing`, `rule_missing`, `rule_ambiguous`, `rule_tampered`, `patch_failed` | Reading or writing rule G failed, or rule G is missing, doubled or not as the guard wrote it | `rule_missing` comes once right after `arm`, until the rule appears. Otherwise read `status` (`last_patch_error`) and the zone's custom rules |
+| `lease_closing_soon` | Production's `open_until_s` is less than 48 hours away: reconciliation has not moved | Read `status` (`bill`) |
+| `bill_unreadable`, `bill_unmapped`, `bill_mismatch` | The bill could not be read, holds a kind of row the guard does not know, or disagrees with the ledger on a day | Find the cause; `recon-accept` only after |
+
+### The operator's commands
+
+`tool/cloudflare/guard.sh` reads and writes the guard's D1 (`umacapture-guard`) through the pinned
+wrangler, with the deploy token of `tool/cloudflare/.env`; the guard's own token is not used. Run it
+from Git Bash at the repository root:
+
+```bash
+GUARD_BY=<who> bash tool/cloudflare/guard.sh <command> [...] [--yes]
+```
+
+Every command but `status` shows the state first and asks for `yes` (`--yes` answers it). Each write
+is a compare-and-set on the values it was planned on, so a command another writer beat writes
+nothing, and a command repeated after it took effect writes nothing more. Exit status: `0` written
+or nothing to do, `1` refused or failed, `3` another writer changed the state first (read `status`
+and repeat).
+
+| Command | When |
+|---|---|
+| `status` | Before every other command, and to see why something closed. Writes nothing. Shows each environment (`mode`, `gen`, `stage_a`, limits, `open_until_s`, the trip), the guard's health (`last_measurable_s`, `arm_requested_s`, `rule_seen_since_s`, `last_patch_error`), the ledger, gaps and holes, billing reconciliation (`bill`) and the open notifications |
+| `arm` | Once, at rollout: the guard creates rule G and from then on keeps it. Refused unless the guard measured within the last 10 minutes, production's `open_until_s` is at least 48 hours away, and billing reconciliation has passed a day of its own after the last `recon-accept` |
+| `open production --allowance <USD> --gen <n>` | After a trip, or after `close production` to clear stage A: on its first run that measures, the guard sets the limit for the rest of the billing period to what is spent plus the allowance. Takes no `--for`: the guard extends production |
+| `open staging --allowance <USD> --for <n>s\|<n>m\|<n>h --gen <n>` | A test window of at most 8 hours, with its own allowance |
+| `close production\|staging` | Closes the environment at once. Closing production closes the whole host |
+| `limit production --base <USD>` | Changes production's limit from the next billing period |
+| `ledger-bridge` | After `ledger_stalled`, once the cause is known: accepts the stretch the ledger cannot cover and moves the ledger on. Days that touch the stretch are not reconciled, so reconciliation stops at the first of them until a `recon-accept` |
+| `recon-accept production --through <YYYY-MM-DD>` | At rollout (the ledger's first day cannot be reconciled), and after investigating a reconciliation that stopped: accepts every UTC day up to that one and moves production's `open_until_s` to its end plus `T_R`. Refused for a day that has not ended or lies before the reach |
+
+- **`--gen <n>` is required by both `open`s.** It is the environment's `gen` as `status` shows it
+  when you decide to open, and the write holds only while `gen` is still that value. Every change to
+  the environment moves `gen` on — the open itself, and the guard consuming the allowance, tripping
+  or ending the window — so an open repeated after its answer was lost writes nothing more. Read
+  `status` again before a new open.
+- **`open` is refused while the environment is open**: a second allowance would add to the first.
+  To grant a new one, `close` first. Stage A is cleared only by an `open`, so clearing it closes
+  production entirely between the `close` and the guard's first run after the `open`.
+- **`arm` cannot be taken back**: no command undoes it, and from then on production is open only as
+  long as the guard keeps it so. Before it, check what `arm` does not: that the custom-rules entry
+  point exists, that the guard has sent no notification other than an `unknown_script` of a known
+  cause, and that the zone has no proxied host other than `umacapture.com`, `data.umacapture.com`
+  and `staging.umacapture.com` (rule G would block it).
+- **`recon-accept` is never run on a schedule.** It accepts days the bill was not checked for; run
+  regularly, it would take away what billing reconciliation guards against.
+
+### When something has closed
+
+| What is closed | Seen as | Notification | How it reopens |
+|---|---|---|---|
+| `umacapture.com`, the whole host, after a trip | Every request is blocked by the zone; the Worker does not run | `trip` | `status`, find the cause, then `open production --allowance <USD> --gen <n>` |
+| `/r/`, `/u/`, `/api/` on `umacapture.com` (stage A) | The web app's pages load; record and list pages, logins, sharing, link imports and sync fail | `stage_a` | `close production`, then `open production --allowance <USD> --gen <n>` |
+| The whole host, the guard not measuring | As after a trip | `blind_start` | By itself on the first run that measures (`blind_end`) |
+| The whole host, `open_until_s` passed | As after a trip | `lease_closing_soon` two days before, and the `bill_*` that stopped reconciliation | By itself if reconciliation catches up; otherwise find the cause, then `recon-accept` |
+| `staging.umacapture.com` | Blocked outside a test window, as designed | `trip` when a window used up its allowance | `open staging` |
+
+### The guard's token
+
+The guard holds one user API token (My Profile › API Tokens; the permissions of an account API
+token did not take effect for it) with:
+
+- Account › Account Analytics › Read
+- Account › Billing › Read
+- Zone › Zone WAF › Edit, zone `umacapture.com`
+
+The same value goes into both of the guard's secrets: `GUARD_CF_TOKEN` (Analytics, and reading and
+writing rule G) and `GUARD_BILL_TOKEN` (the bill).
+
+```bash
+server/node_modules/.bin/wrangler secret put GUARD_CF_TOKEN -c server/wrangler.guard.jsonc
+server/node_modules/.bin/wrangler secret put GUARD_BILL_TOKEN -c server/wrangler.guard.jsonc
+```
+
+It has no expiry: a token that stops working makes every read fail, which closes production rather
+than leaving it open. Never give the guard the deploy token (`CLOUDFLARE_API_TOKEN`), which deploys
+Workers and edits billing.
+
+### Taking the guard down
+
+Taking the guard down closes the site, and goes in this order:
+
+1. `guard.sh close production` and `guard.sh close staging`.
+2. Check in the zone's custom rules that rule G's `Ep` and `Es` are 0 (the guard writes them on its
+   next run).
+3. Delete the Worker: `server/node_modules/.bin/wrangler delete -c server/wrangler.guard.jsonc`.
+4. Delete its token.
+5. Delete its D1 database, `umacapture-guard`.
+
+Rule G stays, and keeps every host but `data.umacapture.com` closed. Deleting it puts the site back
+with nothing stopping its bill, and is a decision of its own. Rolling back the site's Worker
+(`wrangler rollback`) leaves rule G and the guard as they are.
 
 ## Publishing to data.umacapture.com
 
@@ -1384,7 +1610,8 @@ synced objects or shares whose images are stored, their bucket is not deleted; w
 D1, deleting it stops every module publish ("Publishing to data.umacapture.com"). `b2_list_file_versions`, under the same authorization
 as the lifecycle check (One-time preparation, step 10), lists every version a bucket holds, hidden
 ones included. The kept copy of `IDENTITY_HMAC_KEY` goes only with
-the accounts it reaches.
+the accounts it reaches. The billing guard and rule G come down in their own order, which closes the
+site ("Taking the guard down").
 
 ### Other
 
