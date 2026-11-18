@@ -15,6 +15,9 @@
   // Usage metrics off for every command that reads this file.
   "send_metrics": false,
   "observability": { "enabled": false },
+  // CPU time per run, set well above the heaviest run measured (61.4 ms): a run cut off proves nothing, and
+  // without proof production closes.
+  "limits": { "cpu_ms": 500 },
   "workers_dev": false,
   "preview_urls": false,
   // Every minute: each run is the guard's control event for its minute.

@@ -27,6 +27,9 @@
   },
   // Workers Logs off. env.staging inherits this.
   "observability": { "enabled": false },
+  // CPU time per invocation, which bounds what a flood of requests can bill: 200 ms is about three times the
+  // heaviest invocation measured on production (70.4 ms). env.staging inherits this.
+  "limits": { "cpu_ms": 200 },
   // The hourly run (src/scheduled.mjs), at half past every hour UTC: off the hour, and its 00:30 run
   // the first after sync's daily limits (limits.mjs, counted per UTC day) reset at 00:00 UTC. One
   // run hides at most 1,000 names (SYNC_LEFTOVER_HIDES), so hourly keeps what a cut-off request
