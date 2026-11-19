@@ -6,6 +6,7 @@
 #pragma clang diagnostic pop
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 #include "chara_detail/chara_detail_config.h"
@@ -14,9 +15,10 @@
 #include "util/misc.h"
 
 namespace uma {
-// Used only by const reference in CharaDetailSceneStitcher::stitchTab; the full definition
-// (cv/frame.h) is pulled in by the implementation, not by consumers of this header.
+// Used only by const reference in CharaDetailSceneStitcher::stitchTab; the full definitions
+// (cv/frame.h) are pulled in by the implementation, not by consumers of this header.
 class Frame;
+struct TabFrameResize;
 }  // namespace uma
 
 namespace uma::chara_detail {
@@ -51,7 +53,8 @@ private:
         const Frame &base_image,
         const std::filesystem::path &input_dir,
         const std::filesystem::path &output_dir,
-        const PathEntry &path_entry) const;
+        const PathEntry &path_entry,
+        const std::optional<TabFrameResize> &frame_resize) const;
 
     [[nodiscard]] static cv::Mat createDummyImage(const Size<int> &size);
 

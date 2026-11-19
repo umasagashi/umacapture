@@ -579,13 +579,25 @@ TEST_CASE("a factor list drawn left of its place is read where it is drawn, on b
         recognizer.recognize(frame, RecordInfo{"record", record::Standard}, record, crop_info, history);
         const auto prefix = reader.visibleSelfPrefix(frame, boundOnly(config.area));
         return std::make_tuple(
-            idsOf(record.factors.self), idsOf(prefix), frame.anchor().mapToFrame(crop_info.trainee_icon).left());
+            idsOf(record.factors.self), idsOf(prefix), frame.anchor().mapToFrame(crop_info.trainee_icon).left(),
+            crop_info.factor_list_alignment);
     };
 
-    const auto [nominal_ids, nominal_prefix, nominal_icon_left] = readTab(0);
-    const auto [shifted_ids, shifted_prefix, shifted_icon_left] = readTab(-6);
+    const auto [nominal_ids, nominal_prefix, nominal_icon_left, nominal_alignment] = readTab(0);
+    const auto [shifted_ids, shifted_prefix, shifted_icon_left, shifted_alignment] = readTab(-6);
 
-    // At the layout's place the list is read as before: the shift is 0, and so is every cell's move.
+    // The stitched read reports the alignment it read the list with (prediction.json's factor_tab_alignment).
+    const int nominal_left = static_cast<int>(std::lround(config.banner_edge.nominal_left * kShiftedUnit));
+    REQUIRE(nominal_alignment.has_value());
+    CHECK(nominal_alignment->banner_left_edge == std::optional<int>{nominal_left});
+    CHECK(nominal_alignment->nominal_left == nominal_left);
+    CHECK(nominal_alignment->shift == 0);
+    REQUIRE(shifted_alignment.has_value());
+    CHECK(shifted_alignment->banner_left_edge == std::optional<int>{nominal_left - 6});
+    CHECK(shifted_alignment->nominal_left == nominal_left);
+    CHECK(shifted_alignment->shift == -6);
+
+    // At the layout's place the shift is 0, and so is every cell's move: each cell is read at its nominal position.
     CHECK(nominal_ids == std::vector<int>{kListMarker});
     CHECK(nominal_prefix == std::vector<int>{kListMarker});
     CHECK(nominal_icon_left == static_cast<int>(std::lround(0.0481 * kShiftedUnit)));
@@ -614,7 +626,8 @@ TEST_CASE("a banner edge that cannot be measured leaves the list at its nominal 
     const auto list = reader.alignToList(frame, config.area);
     REQUIRE(list.has_value());
     CHECK_FALSE(list->banner.left_edge.has_value());
-    CHECK(list->shift == 0);
+    CHECK(list->alignment.shift == 0);
+    CHECK_FALSE(list->alignment.banner_left_edge.has_value());
     CHECK(idsOf(reader.visibleSelfPrefix(frame, boundOnly(config.area))) == std::vector<int>{kListMarker});
 }
 

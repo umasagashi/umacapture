@@ -14,7 +14,8 @@
 //   * whatever it does to the record itself -- retention, the store merge, the captured event -- still
 //     happens.
 //
-// Rows B to E below are the four outcomes, each with its in-attempt control.
+// Rows B to E below are the four outcomes, each with its in-attempt control. Row F is the same
+// attempt after the core failed it: an early duplicate check that lands then is skipped whole too.
 //
 // WHAT THIS FILE STRUCTURALLY CANNOT SEE: that the core puts the id it will finish under on the
 // announcement, and the built (not the discarded) id on a restart. Every message here is hand-built;
@@ -389,6 +390,53 @@ void main() {
         expect((env.container.read(captureEventProvider) as CharaCaptureEvent).error, 'stitch_failed');
         expect(env.sounds, ['error'], reason: '$recordId');
       }
+    });
+  });
+
+  group('row F: an outcome of the attempt on screen after it failed', () {
+    test('a probe after the failure keeps the failure on the card and makes no sound', () async {
+      final storage = _DuplicateProbeStorage();
+      final env = build(storage: storage);
+      await env.container.read(charaDetailRecordStorageLoaderProvider.future);
+      await env.container.read(charaDetailArchiveStorageLoaderProvider.future);
+      env.controller.handleNativeMessage(_started('r1'));
+      env.controller.handleNativeMessage(
+        jsonEncode({'type': 'onTabAwaitingHead', 'index': _factorTab, 'awaiting': false}),
+      );
+      env.controller.handleNativeMessage(
+        jsonEncode({'type': 'onScrollPosition', 'index': _factorTab, 'top_of_content': 'at_top'}),
+      );
+      env.controller.handleNativeMessage(_error('capture_size_changed', recordId: 'r1'));
+      await pumpEventQueue();
+      expect(env.sounds, ['error']);
+
+      env.controller.handleNativeMessage(_probe('r1'));
+      await pumpEventQueue();
+
+      expect(storage.probedRecordIds, isEmpty);
+      expect(stateOf(env.container).status, CharaDetailCaptureStatus.failed);
+      expect(stateOf(env.container).error, 'capture_size_changed');
+      expect((env.container.read(captureEventProvider) as CharaCaptureEvent).error, 'capture_size_changed');
+      expect(env.sounds, ['error'], reason: 'the failure cue only: no duplicate cue and no standby cue');
+    });
+
+    test('a probe after the failure and the close makes no sound', () async {
+      final storage = _DuplicateProbeStorage();
+      final env = build(storage: storage);
+      await env.container.read(charaDetailRecordStorageLoaderProvider.future);
+      await env.container.read(charaDetailArchiveStorageLoaderProvider.future);
+      env.controller.handleNativeMessage(_started('r1'));
+      env.controller.handleNativeMessage(_error('capture_size_changed', recordId: 'r1'));
+      env.controller.handleNativeMessage(_closed);
+      await pumpEventQueue();
+      expect(env.sounds, ['error']);
+
+      env.controller.handleNativeMessage(_probe('r1'));
+      await pumpEventQueue();
+
+      expect(storage.probedRecordIds, isEmpty);
+      expect(stateOf(env.container).status, CharaDetailCaptureStatus.waitingForDetail);
+      expect(env.sounds, ['error'], reason: 'no duplicate cue and no standby cue about the closed screen');
     });
   });
 

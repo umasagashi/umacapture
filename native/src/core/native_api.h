@@ -773,7 +773,8 @@ public:
     }
 
     // Hands one captured frame to the pipeline. `original_size` is always the PRE-CROP captured size
-    // (.claude/rules/platform-parity.md); passing a shaped size can release the detail-crop latch.
+    // (.claude/rules/platform-parity.md); passing a shaped size can release the detail-crop latch. The frame is
+    // stamped with it (Frame::withCapturedSize), and it reaches the record's resize facts as `captured_size`.
     //
     // Returns whether the frame ENTERED the pipeline. False means it is gone and no stage will ever see it:
     // either no pipeline was running (a frame racing startEventLoop/joinEventLoop), or the frame queue refused
@@ -811,17 +812,18 @@ public:
     [[nodiscard]] PaneModeLatch::Snapshot frameShapingSnapshot(const Size<int> &captured_size) const;
     [[nodiscard]] bool isFrameShapingSnapshotCurrent(const PaneModeLatch::Snapshot &snapshot) const;
 
-    // Drops the auto-calibrated detail crop and its latch, so the crop is measured again from scratch. Only
-    // arms a request flag: lock-free, safe from any thread, and a no-op while the pipeline is stopped (the
-    // request is consumed by the first frame of the next session, when there is nothing to drop anyway).
+    // Drops the auto-calibrated detail crop and its latch, so the crop is measured again from scratch. Safe
+    // from any thread (DetailCropTracker::requestRelease): the shared pane latch is released at once under the
+    // tracker's small mutex, and the tracker's own state is dropped by the next frame that reaches it -- while
+    // the pipeline is stopped, the first frame of the next session.
     // Called at the start of a capture session -- from startCaptureSession itself, so it happens once per
     // session for every kind and every front end (the Windows runner's doStartCapture and the web worker's
-    // startLive both reach it through that one call) -- and by the settings "restore defaults" action, which
-    // -- unlike the on/off switch -- deliberately works mid-session: this acts on the live flag rather than on
-    // a config the pipeline read at start.
+    // startLive both reach it through that one call) -- and when the calibration is turned off in the
+    // settings. That row is disabled while capturing, so in the app that call lands between sessions.
     //
-    // Those explicit resets plus a change of the pre-resize frame size (noteFrameSize) are the whole release
-    // contract on DESKTOP. Web has a fourth, implicit one: `finishUpdate` terminates the worker, which
+    // Those explicit resets, a change of the pre-resize frame size (noteFrameSize), and a snapshot-free frame
+    // whose size differs from the one the correction was measured on (DetailCropTracker::beginFrame) are the
+    // whole release contract on DESKTOP. Web has one more, implicit one: `finishUpdate` terminates the worker, which
     // destroys the module and this singleton with it, so a latch does not survive a regeneration batch's
     // teardown there. That is teardown rather than a release -- nothing to wire, and nothing that can be
     // wired -- but the asymmetry is real and worth knowing before concluding the two platforms behave

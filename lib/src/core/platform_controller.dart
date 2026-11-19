@@ -1032,6 +1032,21 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   /// does to the store still happens; it only says nothing about the character now on screen.
   bool isCurrentAttempt(String recordId) => recordId == state.attemptId;
 
+  /// Whether the attempt [recordId] is the one on screen and has already ended in a hard failure.
+  ///
+  /// The core fails an attempt on the scraper thread and keeps it failed until the detail screen is
+  /// closed, but an outcome read off another thread (the early duplicate check) can still arrive for
+  /// it afterwards. Such an outcome describes a capture that no longer exists: it must neither replace
+  /// the failure on the card nor sound a cue that tells the user to carry on.
+  bool hasFailed(String recordId) => isCurrentAttempt(recordId) && state.status == CharaDetailCaptureStatus.failed;
+
+  /// Whether the attempt [recordId] is the one on screen and its detail screen is still open.
+  ///
+  /// Closing the screen keeps the attempt's id but drops its error (see [CharaDetailCaptureState.reset]), so
+  /// [hasFailed] alone no longer remembers a failure once the screen closed. An outcome about the screen
+  /// that is gone describes nothing the user can act on.
+  bool isOpen(String recordId) => isCurrentAttempt(recordId) && state.detailOpened;
+
   /// Completes the attempt [id], and only that one; returns whether it was applied.
   ///
   /// An id of another attempt leaves the state unchanged and is logged. The transition itself,
@@ -2021,6 +2036,20 @@ class PlatformController {
               logger.i("Factor probe for ${jsonEncode(probeRecordId)} is not about the current attempt; skipped");
               break;
             }
+            // A probe of an attempt that has already failed is skipped whole as well, chimes included. The
+            // probe is read on the recognizer's thread, so it can land after the scraper failed the same
+            // attempt; the failure is what the user must act on (reopen and retake), and a duplicate hint or
+            // a "you may scroll now" cue would replace it with an instruction about a dead capture.
+            if (captureState.hasFailed(probeRecordId)) {
+              logger.i("Factor probe for $probeRecordId arrived after that attempt failed; skipped");
+              break;
+            }
+            // The same holds once the screen of that attempt has closed: the close drops the failure from
+            // the card but not the attempt id, and a cue about a closed screen is about a dead capture too.
+            if (!captureState.isOpen(probeRecordId)) {
+              logger.i("Factor probe for $probeRecordId arrived after its detail screen closed; skipped");
+              break;
+            }
             final cueOwed = data['cue_owed'] as bool? ?? true;
             // Native deferred the factor-tab scroll-ready cue and instead sent the self-factors
             // visible before scrolling. Run the early duplicate check: emit the scroll-ready cue only
@@ -2215,10 +2244,10 @@ class PlatformController {
           } else {
             // THE HALF OF THIS MESSAGE THAT USED TO BE PARSED AND THROWN AWAY. `success: false` is the
             // core's single announcement that a session reached a terminal state having produced
-            // nothing, from all four of its emitters (the detail screen closed mid-capture, the input
-            // ended mid-capture, a session whose scraping directory could not be created, a stitch that
-            // failed), and it is the only one of the four that is a fact about the SESSION rather than a
-            // string about the cause.
+            // nothing, from all five of its emitters (the detail screen closed mid-capture, the input
+            // ended mid-capture, the game screen changed size mid-capture, a session whose scraping
+            // directory could not be created, a stitch that failed), and it is the only one of the five
+            // that is a fact about the SESSION rather than a string about the cause.
             //
             // Counted, and nothing else — deliberately. The user-facing report of these endings is the
             // `onError` that native sends immediately after each of them, which already reaches
@@ -2228,7 +2257,7 @@ class PlatformController {
             // to know that a session ended empty, not what killed it.
             //
             // Counting HERE rather than off those `onError` tags is what makes the number right: the
-            // tags are four different strings that this side would have to keep in step with C++ by
+            // tags are five different strings that this side would have to keep in step with C++ by
             // hand, `stitch_failed` is not among the two the design named, and an error tag can arrive
             // for things that are not a session ending at all. One emitter, one count.
             videoImportSessionTally.noteSessionEndedWithoutRecord();
@@ -2469,8 +2498,8 @@ class PlatformController {
 
   /// Turns the live capture preview on or off at the source.
   ///
-  /// A command, not a config delta, and for the same reason [resetDetailCropCalibration] is:
-  /// the preference gates a per-frame emission and must take effect mid-session.
+  /// A command, not a config delta: the preference gates a per-frame emission and must take effect
+  /// mid-session.
   ///
   /// A failure is logged and nothing else. The preview is a refinement — it must never toast,
   /// never reach the `onError` path (which carries the chime and the add-on triggers), and
@@ -2484,10 +2513,12 @@ class PlatformController {
 
   /// Drops the core's auto-calibrated detail crop and its latch, so it is measured again from scratch.
   ///
-  /// Works mid-session (native only arms a lock-free flag the next frame consumes), which is the whole
-  /// point of the control. The locally cached [detailCropReportProvider] is cleared right away rather than
-  /// waited on: outside a capture session no frame will arrive to report the release, so the display would
-  /// otherwise keep showing — and offering to reset — a correction that no longer exists.
+  /// Called when the calibration is turned off ([setDetailCropCalibration]); that settings row is disabled
+  /// while capturing, so the call lands between sessions. The core releases the shared pane latch at once
+  /// and leaves the rest of the cleanup to the next frame it accepts. The locally cached
+  /// [detailCropReportProvider] is cleared right away rather than waited on: with no capture running no
+  /// frame arrives to report the release, so the display would otherwise keep showing a correction that no
+  /// longer exists.
   Future<void> resetDetailCropCalibration() {
     _ref.read(detailCropReportProvider.notifier).set(null);
     return _platformChannel.resetDetailCropCalibration().catchError((Object error, StackTrace stackTrace) {

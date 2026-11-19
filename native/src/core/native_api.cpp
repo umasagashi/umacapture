@@ -272,6 +272,10 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto chara_detail_opened_connection =
         scraper_runner->makeConnection<chara_detail::SceneInfo>("chara_detail_opened");
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>("chara_detail_closed");
+    // On the scraper's runner with the three above, so a size change is handled in order with the frames sent
+    // before it and always ahead of any later scene begin (event_util.h: one queue per runner).
+    const auto chara_detail_resized_connection =
+        scraper_runner->makeConnection<std::optional<Size<int>>, std::optional<Size<int>>>("chara_detail_resized");
 
     {
         // Detail-crop auto-calibration, on unless the config turns it off. Absent key == enabled, so the
@@ -300,6 +304,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
             chara_detail_opened_connection,
             chara_detail_updated_connection,
             chara_detail_closed_connection,
+            chara_detail_resized_connection,
             std::chrono::milliseconds(200),
             std::chrono::milliseconds(1000),
             detail_crop_calibration ? detail_crop_tracker : nullptr,
@@ -436,11 +441,20 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         [this](const auto &discarded, const auto &begun) { notifyCharaDetailRestarted(discarded, begun); });
 
     // The attempt cannot continue: creating its scraping directory failed, so it has nowhere to scrape into, or
-    // one of its fragments could not be written, so the record would be short. Terminal for the attempt, and reported exactly as a stitch failure is -- the record will never exist, so
-    // the UI is told the attempt finished unsuccessfully instead of being left waiting for a capture that can
-    // never progress.
-    const auto session_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
-    session_failed_connection->listen([this](const auto &info) { notifyAttemptFailed(info, "scrape_failed"); });
+    // one of its fragments could not be written, so the record would be short (scrape_failed); or the capture
+    // size changed while it was scraping (capture_size_changed). Terminal for the attempt, and reported exactly
+    // as a stitch failure is -- the record will never exist, so the UI is told the attempt finished
+    // unsuccessfully, and why, instead of being left waiting for a capture that can never progress.
+    const auto session_failed_connection =
+        event_util::makeDirectConnection<chara_detail::RecordInfo, chara_detail::SessionFailure>();
+    session_failed_connection->listen([this](const auto &info, chara_detail::SessionFailure reason) {
+        switch (reason) {
+            case chara_detail::SessionFailure::ScrapeFailed: notifyAttemptFailed(info, "scrape_failed"); return;
+            case chara_detail::SessionFailure::CaptureSizeChanged:
+                notifyAttemptFailed(info, "capture_size_changed");
+                return;
+        }
+    });
 
     // Every verdict the factor character-switch rule reaches, counted for the run (FactorSwitchVerdictTally) and
     // relayed to no front end. Direct: the note is taken inside the scraper's processing of the judged frame.
@@ -527,6 +541,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         chara_detail_opened_connection,
         lap_time_wrapper,
         lap_discard_wrapper,
+        chara_detail_resized_connection,
         closed_before_completed_connection,
         scroll_ready_connection,
         scroll_updated_connection,
@@ -874,7 +889,8 @@ bool NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
     // capture, the frame's own size on the web path, the pre-crop decode size for CLI video), so nothing
     // here may assume a relation to frame.size(); all that matters is that it changes when the input does.
     // Done before the running check and before the send, so the request is armed no later than the frame
-    // that carries the new geometry. Lock-free, so it costs the capture thread nothing.
+    // that carries the new geometry. Lock-free while the size is unchanged; a change takes the tracker's small
+    // release mutex once (DetailCropTracker::requestRelease).
     detail_crop_tracker->noteFrameSize(original_size);
 
     // A frame can arrive before startEventLoop or after joinEventLoop, and can race teardown() on the capture
@@ -903,7 +919,9 @@ bool NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
         // clones before mutating), and the capture producers hand over a freshly allocated buffer per frame,
         // so the shallow Mat share is safe. See the Frame class doc for the full ownership contract. Do not
         // add a clone() here to "be safe" -- it would be pure overhead unless the producer contract changes.
-        accepted = sender->send(frame);
+        // The frame is stamped with `original_size` (a header copy, pixels shared) so the size the producer
+        // captured travels with the frame to the forwarding site, which records it next to the record.
+        accepted = sender->send(frame.withCapturedSize(original_size));
         // HOP 1 IN of the offline producer's brake (core/frame_flow_counters.h): the frame is now on the
         // distributor's queue, and FrameDistributor::update is the dequeue that pairs with it. This is the hop a
         // decoder outruns FIRST -- every pushed frame lands here, whereas nothing reaches the scraper's hop until

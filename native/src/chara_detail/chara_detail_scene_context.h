@@ -59,6 +59,7 @@ public:
         const event_util::Sender<SceneInfo> &on_scene_begin,
         const event_util::Sender<Frame, SceneState> &on_scene_updated,
         const event_util::Sender<> &on_scene_end,
+        const event_util::Sender<std::optional<Size<int>>, std::optional<Size<int>>> &on_scene_resized,
         const chrono_util::time_unit &scene_begin_timeout,
         const chrono_util::time_unit &scene_end_timeout,
         const std::shared_ptr<DetailCropTracker> &detail_crop = nullptr,
@@ -79,9 +80,12 @@ private:
     // locked here for the whole scene, so a transient first-match during the opening animation must not win — it
     // has to persist. Keyed off frame timestamps for replay-deterministic timing, mirroring the scene-end
     // debounce. A zero timeout commits on the first met frame (legacy behavior).
-    void beginSceneWhenStable(const Frame &input, record::RecordType record_type);
+    // The begin window also restarts when the producer's captured size changes, so a scene only begins once the
+    // size has held for the whole window (a window being dragged does not begin one).
+    void beginSceneWhenStable(
+        const Frame &input, record::RecordType record_type, const std::optional<Size<int>> &captured_size);
 
-    void beginScene(record::RecordType record_type);
+    void beginScene(record::RecordType record_type, const std::optional<Size<int>> &captured_size);
 
     void endScene();
 
@@ -152,6 +156,12 @@ private:
     const event_util::Sender<SceneInfo> on_scene_begin;
     const event_util::Sender<Frame, SceneState> on_scene_updated;
     const event_util::Sender<> on_scene_end;
+    // THE PRODUCER'S CAPTURED SIZE CHANGED WHILE A SCENE WAS RUNNING, carrying the scene's size and the new one.
+    // Sent once per change, on the first frame of the new size that reaches this context, whether or not the
+    // condition tree still recognizes that frame: a resized frame often does not, and it is exactly the frame
+    // that must not go unnoticed. The scene itself goes on -- the detail screen is still open -- and its owner
+    // decides what the change means for the attempt in flight (the scraper fails it).
+    const event_util::Sender<std::optional<Size<int>>, std::optional<Size<int>>> on_scene_resized;
 
     const chrono_util::time_unit scene_begin_timeout;
     const chrono_util::time_unit scene_end_timeout;
@@ -167,10 +177,20 @@ private:
     // run on the full-resolution image -- so the calibration never scans a rescaled frame.
     const std::optional<Range<int>> forwarded_frame_band;
 
-    std::optional<uint64> scene_begin_pending_since;
-    std::optional<record::RecordType> scene_begin_pending_type;
+    // A begin window in progress: since when the same record type has been met, at which captured size.
+    struct PendingBegin {
+        uint64 since;
+        record::RecordType record_type;
+        std::optional<Size<int>> captured_size;
+    };
+    std::optional<PendingBegin> scene_begin_pending;
     std::optional<uint64> scene_end_pending_since;
-    bool scene_active = false;
+    // The scene begun and not yet ended (its end debounce included), with the producer's captured size it is
+    // running at. Present exactly while a scene is active, so the size cannot outlive or predate its scene.
+    struct ActiveScene {
+        std::optional<Size<int>> captured_size;
+    };
+    std::optional<ActiveScene> active_scene;
     bool met_ = false;
     mutable bool simultaneous_match_warned_ = false;
 };

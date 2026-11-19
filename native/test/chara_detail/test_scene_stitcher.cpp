@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,7 @@
 #include "chara_detail/chara_detail_scene_scraper.h"
 #include "chara_detail/chara_detail_scene_stitcher.h"
 #include "chara_detail/record_info.h"
+#include "chara_detail/scraped_frame_resize.h"
 #include "util/event_util.h"
 #include "util/fake_predictor.h"
 #include "util/json_util.h"
@@ -255,12 +257,17 @@ LiveGeometry geometryOf(const LiveShape shape, const int unit) {
 }
 
 // Stitches one record whose base image and factor fragment #0 are cut from `live` the way the scraper cuts them,
-// and returns the stitched factor image as the recognizer opens it.
+// and returns the stitched factor image as the recognizer opens it. `scraped`, when given, is written to the
+// scraping directory as the scraper writes it; `side_jsons`, when given, receives the skill, factor and campaign
+// side JSONs the stitch wrote.
 Frame stitchFactorTab(
     const Frame &live,
     const scraper_config::SceneScraperConfig &layout,
     const stitcher_config::CharaDetailSceneStitcherConfig &stitcher_config,
-    const std::string &name) {
+    const std::string &name,
+    const std::optional<ScrapedFrameResize> &scraped = std::nullopt,
+    std::vector<json_util::Json> *side_jsons = nullptr,
+    const std::optional<std::string> &frame_resize_bytes = std::nullopt) {
     const auto root = freshTempDir("uma_stitch_identity_" + name);
     const auto scraping_dir = root / "scrape";
     const auto stitching_dir = root / "stitch";
@@ -291,10 +298,22 @@ Frame stitchFactorTab(
     completed->listen([&](const RecordInfo &) { completed_count++; });
     const CharaDetailSceneStitcher stitcher(
         scraping_dir, stitching_dir, ready, completed, failed, stitcher_config, io_util::DirectoryHooks{});
+    if (scraped.has_value()) {
+        json_util::write(scraping_dir / record_id / kScrapedFrameResizeFilename, scraped.value(), 4);
+    }
+    if (frame_resize_bytes.has_value()) {
+        std::ofstream(scraping_dir / record_id / kScrapedFrameResizeFilename, std::ios::binary)
+            << frame_resize_bytes.value();
+    }
     RecordInfo info;
     info.record_id = record_id;
     ready->send(info);
     REQUIRE(completed_count == 1);
+    if (side_jsons != nullptr) {
+        for (const auto &entry : {path_config.skill, path_config.factor, path_config.campaign}) {
+            side_jsons->push_back(json_util::read(stitching_dir / record_id / (entry.stem() + ".json")));
+        }
+    }
 
     // Frame::open decodes into memory, so the directory can go before the frame is used.
     auto stitched = Frame::open(stitching_dir / record_id / path_config.factor.filename());
@@ -356,6 +375,54 @@ TEST_CASE("the stitched factor image finds the banner at the live frame's row, c
                 CHECK(on_stitched->column == on_live->column);
                 CHECK(on_stitched->search_rows == on_live->search_rows);
                 CHECK(on_stitched->run_end_row == on_live->run_end_row);
+            }
+        }
+    }
+}
+
+TEST_CASE("the scraper's resize facts reach every tab image's side JSON, split per tab") {
+    const auto scraper = shippedConfig<scraper_config::CharaDetailSceneScraperConfig>("scene_scraper.json");
+    const auto stitcher = shippedConfig<stitcher_config::CharaDetailSceneStitcherConfig>("scene_stitcher.json");
+    const auto geometry = geometryOf(LiveShape::Exact, 540);
+    const auto live = liveFrame(geometry.frame_size, geometry.intersection, scraper.common.scroll_area_rect);
+
+    SUBCASE("written by the scraper") {
+        const ForwardedFrameResize enlarged{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540, ResizeArm::Enlarged};
+        const ForwardedFrameResize untouched{Range<int>{540, 720}, Size<int>{560, 996}, 560, 560, ResizeArm::Untouched};
+        const ScrapedFrameResize scraped{enlarged, {{enlarged, 3}}, {{enlarged, 5}, {untouched, 2}}, {}};
+        std::vector<json_util::Json> sides;
+        stitchFactorTab(live, scraper.common, stitcher, "frame_resize_written", scraped, &sides);
+        REQUIRE(sides.size() == 3);
+        for (const auto &side : sides) {
+            REQUIRE(side.contains("frame_resize"));
+            CHECK(side["frame_resize"]["base"]["arm"] == "enlarged");
+            CHECK(side["frame_resize"]["base"]["captured_size"]["width"] == 404);
+            CHECK(side.contains("intersection"));
+        }
+        CHECK(sides[0]["frame_resize"]["tab_frames"].size() == 1);
+        REQUIRE(sides[1]["frame_resize"]["tab_frames"].size() == 2);
+        CHECK(sides[1]["frame_resize"]["tab_frames"][0]["frames"] == 5);
+        CHECK(sides[1]["frame_resize"]["tab_frames"][1]["arm"] == "untouched");
+        CHECK(sides[1]["frame_resize"]["tab_frames"][1]["frames"] == 2);
+        CHECK(sides[2]["frame_resize"]["tab_frames"].empty());
+    }
+    SUBCASE("absent from the scraping directory") {
+        std::vector<json_util::Json> sides;
+        stitchFactorTab(live, scraper.common, stitcher, "frame_resize_absent", std::nullopt, &sides);
+        REQUIRE(sides.size() == 3);
+        for (const auto &side : sides) {
+            CHECK_FALSE(side.contains("frame_resize"));
+        }
+    }
+    SUBCASE("unreadable in the scraping directory") {
+        // A write cut short leaves a partial file; the record is still stitched, without the facts.
+        for (const std::string bytes : {"", "{\"base\": {\"arm\""}) {
+            CAPTURE(bytes);
+            std::vector<json_util::Json> sides;
+            stitchFactorTab(live, scraper.common, stitcher, "frame_resize_unreadable", std::nullopt, &sides, bytes);
+            REQUIRE(sides.size() == 3);
+            for (const auto &side : sides) {
+                CHECK_FALSE(side.contains("frame_resize"));
             }
         }
     }

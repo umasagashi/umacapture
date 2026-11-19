@@ -803,10 +803,10 @@ class WasmWorkerClient {
   }
 
   /// Asks the core to drop its auto-calibrated detail crop and its latch, so the crop is measured again
-  /// from scratch (the settings "restore defaults" action).
+  /// from scratch (sent when the calibration is turned off).
   ///
-  /// Unlike [updateInitConfig] this is not part of the replayed setup: it acts on the *running* core's
-  /// lock-free flag and takes effect on the next frame, mid-session. A worker that has not been spawned
+  /// Unlike [updateInitConfig] this is not part of the replayed setup: it acts on the *running* core, which
+  /// releases the latch it holds at once and leaves the rest of the cleanup to the next frame. A worker that has not been spawned
   /// holds no calibration to release, so the message is simply not sent — the next session starts
   /// uncalibrated anyway (the worker resets at every session start).
   void resetDetailCropCalibration() {

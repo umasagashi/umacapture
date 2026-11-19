@@ -439,7 +439,7 @@ class PlatformChannel {
     _worker.updateInitConfig(jsonEncode(startConfig));
   }
 
-  /// Drops the core's auto-calibrated detail crop and its latch (the settings "restore defaults" action).
+  /// Drops the core's auto-calibrated detail crop and its latch (sent when the calibration is turned off).
   ///
   /// Mirrors the desktop method channel call. The worker guards the embind entry point, so a vendored core
   /// predating it degrades to a logged no-op there rather than failing this call.
@@ -449,7 +449,7 @@ class PlatformChannel {
 
   /// Turns the live capture preview on or off.
   ///
-  /// Like [resetDetailCropCalibration] and unlike [setPlatformConfig], this acts on the
+  /// Unlike [setPlatformConfig], this acts on the
   /// *running* worker: the worker relays the pair into the core's `setPreviewEnabled`, which
   /// gates the per-frame emission directly, so a mid-session toggle takes effect within one
   /// throttle window rather than at the next session. Same call, same core, as the Windows

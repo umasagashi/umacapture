@@ -61,16 +61,16 @@ class PlatformChannel {
   /// Drops the auto-calibrated detail crop and its latch in the core, so it is measured again from scratch.
   ///
   /// Deliberately its own method rather than a config delta: the delta path only takes effect at the next
-  /// session start, while this acts on a live lock-free flag and is meant to work mid-session.
+  /// session start, while this acts on the running core: it releases a latch the core already holds at once
+  /// and arms a flag the next accepted frame consumes to clear the rest.
   Future<void> resetDetailCropCalibration() {
     return channel.invokeMethod('resetDetailCropCalibration');
   }
 
   /// Turns the live capture preview on or off in the core.
   ///
-  /// Deliberately its own method rather than a config delta, for the same reason as
-  /// [resetDetailCropCalibration]: the delta path only takes effect at the next session start,
-  /// while this flips a live lock-free flag and must work mid-capture.
+  /// Deliberately its own method rather than a config delta: the delta path only takes effect at the next
+  /// session start, while the preview is toggled by a user watching it and must take effect mid-capture.
   ///
   /// The state travels as a JSON string, not as a map: the Windows runner's method dispatcher reads every
   /// argument as a `std::string`. JSON is the simplest strict representation of both booleans without a

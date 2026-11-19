@@ -185,8 +185,33 @@ private:
     std::unique_ptr<const recognizer::Predictor<int>> skill_level_model;
 };
 
+// Where the factor tab's list was found against where the layout puts it (FactorRowReader::alignToList), in the
+// pixels of the frame that was read.
+// - `banner_left_edge`: the measured left edge of the banner; nullopt when it could not be measured.
+// - `nominal_left`: where the layout puts that edge.
+// - `shift`: how far the list is read right of its nominal place (negative: left); 0 when the edge is within the
+//   deadband of the nominal one or was not measured.
+struct FactorListAlignment {
+    std::optional<int> banner_left_edge;
+    int nominal_left;
+    int shift;
+};
+
+// Written into prediction.json as `factor_tab_alignment`; `measured` states whether the edge was measured.
+inline void to_json(json_util::Json &json, const FactorListAlignment &alignment) {
+    json = json_util::Json::object();
+    json["measured"] = alignment.banner_left_edge.has_value();
+    json["banner_left_edge"] = alignment.banner_left_edge.has_value()
+                                 ? json_util::Json(alignment.banner_left_edge.value())
+                                 : json_util::Json(nullptr);
+    json["nominal_left"] = alignment.nominal_left;
+    json["shift"] = alignment.shift;
+}
+
 struct CropInfo {
     Rect<double> trainee_icon;
+    // The factor list's alignment on the stitched factor image; nullopt when the banner was not found.
+    std::optional<FactorListAlignment> factor_list_alignment;
 };
 
 // A predictor that more than one pipeline stage calls, admitted one call at a time in the order the calls
@@ -266,13 +291,12 @@ struct BannerHit {
 //   the game drew them. Only the list is read through it.
 // - `viewport` is the scroll area in the pixels of the searched frame, clipped to it. It is NOT moved: the scroll
 //   area is part of the screen around the list, which stays where the layout puts it when the list moves.
-// - `shift` is how many pixels the list is drawn right of its nominal place (negative: left); 0 when the banner's
-//   left edge is within the deadband of the nominal one or could not be measured.
+// - `alignment` is the measurement the list frame was moved by; its `shift` is the move.
 struct ListFrame {
     BannerHit banner;
     Frame frame;
     Rect<int> viewport;
-    int shift;
+    FactorListAlignment alignment;
 };
 
 // Reads the factor tab's rows of (factor, star) off a frame, and owns the pipeline's only pair of factor models.

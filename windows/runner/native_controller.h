@@ -94,10 +94,10 @@ public:
 
         channel->addMethodCallHandler("stopCapture", [this]() { stop_requested->send(); });
 
-        // The settings "restore defaults" action for the detail-crop calibration. Handled without any of
-        // this controller's locks or state: it only arms a lock-free flag on the process-lifetime NativeApi,
-        // which is why it is allowed to run mid-session (unlike the on/off switch, which the pipeline reads
-        // once at start and whose row is therefore disabled while capturing).
+        // The detail-crop calibration release sent when the calibration is turned off in the settings. Handled
+        // without any of this controller's locks or state: it goes straight to the process-lifetime NativeApi,
+        // whose release is safe from any thread (see NativeApi::resetDetailCropCalibration). The settings row
+        // that sends it is disabled while capturing, like every switch the pipeline reads once at start.
         channel->addMethodCallHandler(
             "resetDetailCropCalibration", []() { app::NativeApi::instance().resetDetailCropCalibration(); });
 

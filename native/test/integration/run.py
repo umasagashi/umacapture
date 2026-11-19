@@ -306,6 +306,49 @@ def frame_resize_complaint(completed: subprocess.CompletedProcess) -> str | None
     )
 
 
+# THE RESIZE FACTS EVERY RECORD CARRIES. The core copies the capture's resize facts into each record's
+# prediction.json (`frame_resize`, one entry per tab image). This judge reads the factor tab's entry as the
+# representative and checks that the facts arrived through the whole path -- stamped by updateFrame, attached at
+# the forwarding site, counted by the scraper, written by the stitcher, copied by the recognizer:
+#   - `base` is present, its `unit` is the case's anchor_unit, its `band` is present exactly when the case states
+#     frame_resize true, and its `captured_size` is present;
+#   - `tab_frames` is non-empty and every entry counts a positive number of frames.
+# Which arm a unit falls in is NOT judged here: that is the core's rule (Frame::forwardedThroughBand), pinned by
+# its own unit tests, and restating it here would make a second owner of it.
+def frame_resize_failure(case: dict, output_dir: Path) -> str | None:
+    """Does every record's prediction.json carry the capture's resize facts? Returns a detail, or None."""
+    active = output_dir / "storage" / "chara_detail" / "active"
+    for record_json in sorted(active.glob("*/record.json")):
+        prediction_path = record_json.parent / "prediction.json"
+        if not prediction_path.exists():
+            return f"{record_json.parent.name}: no prediction.json beside record.json"
+        prediction = json.loads(prediction_path.read_text(encoding="utf-8"))
+        facts = (prediction.get(FRAME_RESIZE_KEY) or {}).get("factor")
+        name = record_json.parent.name
+        if not isinstance(facts, dict):
+            return f"{name}: prediction.json carries no frame_resize.factor ({facts!r})"
+        base = facts.get("base")
+        if not isinstance(base, dict):
+            return f"{name}: frame_resize.factor.base is {base!r}"
+        detail = "pre_band_unit={!r} unit={!r} arm={!r} captured_size={!r}".format(
+            base.get("pre_band_unit"), base.get("unit"), base.get("arm"), base.get("captured_size")
+        )
+        if base.get("unit") != case_anchor_unit(case):
+            return f"{name}: base unit is not the case's anchor_unit {case_anchor_unit(case)} ({detail})"
+        if (base.get("band") is not None) != case_frame_resize(case):
+            return f"{name}: base band {base.get('band')!r} disagrees with frame_resize {case_frame_resize(case)}"
+        if base.get("captured_size") is None:
+            return f"{name}: base captured_size is missing ({detail})"
+        tab_frames = facts.get("tab_frames")
+        if not isinstance(tab_frames, list) or not tab_frames:
+            return f"{name}: frame_resize.factor.tab_frames is {tab_frames!r}; the factor tab counted no frames"
+        for entry in tab_frames:
+            frames = entry.get("frames") if isinstance(entry, dict) else None
+            if not isinstance(frames, int) or isinstance(frames, bool) or frames <= 0:
+                return f"{name}: a factor tab_frames entry counts {frames!r} frames"
+    return None
+
+
 def golden_path(case: dict) -> Path | None:
     """Return the case's committed record baseline, or None for a case that deliberately has none."""
     golden = case.get("golden")
@@ -654,6 +697,10 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
             return "fail", probe_failure
 
         actual = collect_records(output_dir)
+
+        resize_failure = frame_resize_failure(case, output_dir)
+        if resize_failure is not None:
+            return "fail", resize_failure
 
     # The record count, measured on disk and cross-checked against the count the core states in its summary
     # line. Two independent measurements on purpose: a core that stopped counting and a pipeline that stopped

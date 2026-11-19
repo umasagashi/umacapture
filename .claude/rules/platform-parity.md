@@ -50,7 +50,8 @@ and must carry a stated reason at the point where it diverges.**
 - The offline producers query nothing: they emit the full decoded frame with
   the default anchor and **no pane snapshot**, and `DetailCropTracker::beginFrame`
   applies the latched pane on the consumer side for any frame that carries no
-  snapshot. Carrying a snapshot *is* the act of shaping the frame, so snapshot
+  snapshot and is of the size the pane was measured on; a snapshot-free frame
+  of another size releases the latch there instead. Carrying a snapshot *is* the act of shaping the frame, so snapshot
   presence — not the latch alone — is what tells the consumer that a producer's
   anchor is authoritative and must be left alone.
 - A producer that crops must also construct or reanchor its `Frame` so the

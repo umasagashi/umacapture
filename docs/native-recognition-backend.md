@@ -86,14 +86,49 @@ in `native/src/chara_detail/chara_detail_record.h`.
   residue with background color. It saves `skill.png` / `factor.png` /
   `campaign.png` to `storage_dir/chara_detail/active/<record_id>/`, **each with a
   sibling `.json` holding the `intersection` rect** so the coordinate system can
-  be reconstructed at recognition time (see below).
+  be reconstructed at recognition time (see below). The sibling `.json` also
+  holds `frame_resize`, the capture's resize facts (see "Resize facts" below),
+  when the scraper wrote them.
 - **Recognizer** (`chara_detail_recognizer.h`) reopens the three images with
   `Frame::open` (restoring the anchor from the saved `intersection`), then runs
   per-area recognizers (`StatusHeaderRecognizer`, `SkillTabRecognizer`,
   `FactorTabRecognizer`, `CampaignTabRecognizer`). Models are loaded from
   `modules_dir`; the model wrapper is `native/src/cv/model.h`. Output: a
-  `record.json`, a `prediction.json` (every prediction's rect + confidence), and
-  a cropped `trainee.jpg`.
+  `record.json`, a `prediction.json`, and a cropped `trainee.jpg`.
+  `prediction.json` holds every prediction's rect + confidence per area, plus
+  `frame_resize` (the three sibling `.json` files' resize facts, copied as they
+  are, `null` for a file without them) and `factor_tab_alignment` (where the
+  factor list's banner edge was measured against its nominal place, and the
+  shift the list was read with; `null` when the banner was not found).
+
+### Resize facts
+
+The frame-resize band (`Frame::resizedIntoBand`) changes a frame's size after
+capture, per frame. What it did travels with the frame and ends up beside the
+record, so a record shows whether its images were enlarged from a capture below
+the band, and how large the capture was:
+
+- `NativeApi::updateFrame` stamps each frame with its `original_size`
+  (`captured_size`, the size before any producer shaping).
+- `CharaDetailSceneContext::update` applies the band through
+  `Frame::forwardedThroughBand`, which attaches a `ForwardedFrameResize`: the
+  band (`null` when the setting is off), `captured_size`, the anchor unit before
+  and after the band, and the `arm` (`untouched` / `enlarged` / `shrunk`) judged
+  from those two units.
+- The scraper counts the distinct facts of the frames each tab scraped and keeps
+  the facts of the frame the base image came from, and writes them as
+  `frame_resize.json` beside `base.png`.
+- The stitcher writes each tab's share into its image's sibling `.json` as
+  `frame_resize: {base, tab_frames}`. `base` decides the saved images'
+  resolution; `tab_frames` lists every distinct set with its frame count.
+- The recognizer copies them into `prediction.json`. It does not interpret them,
+  so a re-recognition copies the same values again. A record stitched without
+  them (one made before they existed, or a CLI `stitch` of a scraping directory
+  without the file) has none, and `prediction.json` says `null`.
+
+Archiving deletes `prediction.json`. When the archive keeps the images, the
+sibling `.json` files are kept with only their `intersection` rescaled, so the
+facts stay with the record; an archive without images deletes them too.
 
 `RecordType` (`Standard` / `InheritanceOnly` / `Friend`,
 `chara_detail_record.h`) gates which tabs/fields are processed — e.g.
@@ -205,7 +240,7 @@ serializes them to JSON (round-trip-verifying each).
   runtime config object is assembled in `createConfig` (`native/src/core/cli.cpp`)
   for CLI runs.
 - Runtime dirs (from the config's `directory` block):
-  - `temp_dir/chara_detail/<record_id>/` — scraper output (fragments, base, tab buttons).
+  - `temp_dir/chara_detail/<record_id>/` — scraper output (fragments, base, tab buttons, `frame_resize.json`).
   - `storage_dir/chara_detail/active/<record_id>/` — stitched `skill/factor/campaign.png` (+ `.json`), and the recognizer's `record.json` / `prediction.json` / `trainee.jpg`.
   - `modules_dir` — ML model files loaded by the recognizer.
 

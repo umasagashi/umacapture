@@ -4,6 +4,7 @@
 
 #include "chara_detail/chara_detail_config.h"
 #include "chara_detail/record_info.h"
+#include "chara_detail/scraped_frame_resize.h"
 #include "cv/frame.h"
 #include "util/logger_util.h"
 #include "util/stds.h"
@@ -86,9 +87,29 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
         const auto base_path = input_dir / path_config.base.filename();
         Frame base_image(readImageBGR(base_path));
 
-        stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill);
-        stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);
-        stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign);
+        // The scraper's resize facts, split per tab image (scraped_frame_resize.h). Absent from a scraping
+        // directory the scraper did not write them into; the tab images then carry none. They are diagnostics, so
+        // an unreadable file is logged and treated as absent rather than failing the record.
+        std::optional<ScrapedFrameResize> scraped;
+        if (const auto path = input_dir / kScrapedFrameResizeFilename; std::filesystem::exists(path)) {
+            try {
+                scraped = json_util::read(path).get<ScrapedFrameResize>();
+            } catch (const std::exception &e) {
+                log_warning("ignoring unreadable resize facts for record_id={}: {}", info.record_id, e.what());
+            }
+        }
+        const auto tabResize = [&](const std::vector<ForwardedFrameResizeCount> ScrapedFrameResize::*tab) {
+            return scraped.has_value()
+                     ? std::optional<TabFrameResize>{TabFrameResize{scraped->base, scraped.value().*tab}}
+                     : std::nullopt;
+        };
+
+        stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill,
+            tabResize(&ScrapedFrameResize::skill));
+        stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor,
+            tabResize(&ScrapedFrameResize::factor));
+        stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign,
+            tabResize(&ScrapedFrameResize::campaign));
 
         directory_hooks.rmdir(input_dir);
         on_stitch_completed->send(info);
@@ -124,7 +145,8 @@ void CharaDetailSceneStitcher::stitchTab(
     const Frame &base_image,
     const std::filesystem::path &input_dir,
     const std::filesystem::path &output_dir,
-    const PathEntry &path_entry) const {
+    const PathEntry &path_entry,
+    const std::optional<TabFrameResize> &frame_resize) const {
     const auto scroll_area_window_size = base_image.anchor().mapToFrame(config.scroll_area_rect).size();
 
     // For record types other than Standard, unnecessary tabs may be left empty -- and PageScrapingBox only
@@ -200,9 +222,9 @@ void CharaDetailSceneStitcher::stitchTab(
     canvas.fill(config.scroll_area_upper_fill_rect, background_color);
     canvas.fill(config.scroll_area_lower_fill_rect, background_color);
 
-    // Save stitched image and anchor info.
+    // Save the stitched image with its anchor info and resize facts.
     directory_hooks.mkdir(output_dir);
-    canvas.dump(output_dir / path_entry.filename());
+    canvas.dump(output_dir / path_entry.filename(), frame_resize);
 }
 
 cv::Mat CharaDetailSceneStitcher::createDummyImage(const Size<int> &size) {

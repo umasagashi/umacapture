@@ -150,7 +150,7 @@ CLI's `VideoLoader` and `Ffv1Reader`. That fixes three things and they are not n
 **Full frames, default anchor, no pane snapshot.** The rule states the offline contract verbatim:
 the offline producers "query nothing: they emit the full decoded frame with the default anchor and
 **no pane snapshot**", and `DetailCropTracker::beginFrame` applies the latched pane on the consumer
-side for any frame that carries no snapshot. An import runs on a thread that is not the distributor
+side for any frame that carries no snapshot and is of the size the pane was measured on. An import runs on a thread that is not the distributor
 thread — the same concurrency situation `video_loader.h`'s class comment describes — so a producer
 that shaped frames would lose a scheduling-dependent number of them.
 
@@ -188,7 +188,8 @@ original_size)` is the one entry both of its producers use, and what distinguish
 resolved, while `native/src/cv/video_loader.h` emits the full decoded frame with the default anchor
 and no snapshot, exactly as the CLI's offline producers do (it *is* one of them). The import session
 therefore reaches the pipeline through `VideoLoader` unmodified, and `DetailCropTracker::beginFrame`
-applies the latched pane on the consumer side, as the rule requires. Read off the code; not exercised
+applies the latched pane on the consumer side to the frames of the size it was measured on, as the
+rule requires. Read off the code; not exercised
 by a run here.
 
 **And it needs a new export *name*.** The worker's compatibility guard is

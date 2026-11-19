@@ -126,12 +126,16 @@ struct Captured {
     event_util::Connection<SceneInfo> begin = event_util::makeDirectConnection<SceneInfo>();
     event_util::Connection<Frame, SceneState> updated = event_util::makeDirectConnection<Frame, SceneState>();
     event_util::Connection<> end = event_util::makeDirectConnection<>();
+    event_util::Connection<std::optional<Size<int>>, std::optional<Size<int>>> resized =
+        event_util::makeDirectConnection<std::optional<Size<int>>, std::optional<Size<int>>>();
 
     std::vector<record::RecordType> begins;
     std::vector<SceneState> updates;
     std::vector<Rect<int>> update_intersections;
     std::vector<Size<int>> update_sizes;
+    std::vector<std::optional<ForwardedFrameResize>> update_resizes;
     int ends = 0;
+    std::vector<std::pair<std::optional<Size<int>>, std::optional<Size<int>>>> resizes;
 
     Captured() {
         begin->listen([this](const SceneInfo &info) { begins.push_back(info.record_type); });
@@ -139,8 +143,12 @@ struct Captured {
             updates.push_back(state);
             update_intersections.push_back(frame.anchor().intersection());
             update_sizes.push_back(frame.size());
+            update_resizes.push_back(frame.forwardedResize());
         });
         end->listen([this]() { ends++; });
+        resized->listen([this](const std::optional<Size<int>> &from, const std::optional<Size<int>> &to) {
+            resizes.emplace_back(from, to);
+        });
     }
 };
 
@@ -154,7 +162,7 @@ TEST_CASE("ctor throws when the tab_page condition is missing") {
     Captured cap;
     const ConditionBase bad = std::make_shared<condition::NullaryCondition<Frame, rule::AlwaysTrue>>(rule::AlwaysTrue{});
     CHECK_THROWS_AS(
-        CharaDetailSceneContext(bad, cap.begin, cap.updated, cap.end, kZero, kZero), std::runtime_error);
+        CharaDetailSceneContext(bad, cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero), std::runtime_error);
 }
 
 TEST_CASE("ctor throws when a branch count does not match the enum") {
@@ -179,7 +187,7 @@ TEST_CASE("ctor throws when a branch count does not match the enum") {
         rule::LogicalAnd{}, std::vector<ConditionBase>{tab_page, record_type});
 
     CHECK_THROWS_AS(
-        CharaDetailSceneContext(root, cap.begin, cap.updated, cap.end, kZero, kZero), std::runtime_error);
+        CharaDetailSceneContext(root, cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero), std::runtime_error);
 }
 
 TEST_CASE("ctor throws when a branch tag does not match its enum value") {
@@ -203,7 +211,7 @@ TEST_CASE("ctor throws when a branch tag does not match its enum value") {
         rule::LogicalAnd{}, std::vector<ConditionBase>{tab_page, record_type});
 
     CHECK_THROWS_AS(
-        CharaDetailSceneContext(root, cap.begin, cap.updated, cap.end, kZero, kZero), std::runtime_error);
+        CharaDetailSceneContext(root, cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero), std::runtime_error);
 }
 
 TEST_CASE("zero begin timeout begins immediately and resolves tab/record by firstMet order") {
@@ -213,7 +221,7 @@ TEST_CASE("zero begin timeout begins immediately and resolves tab/record by firs
     *f.campaign = true;  // two tabs met -> Factor wins (lower enum value)
     *f.standard = true;
     *f.inheritance_only = true;  // two record types met -> Standard wins
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero);
 
     ctx.update(frameAt(1));
 
@@ -231,7 +239,7 @@ TEST_CASE("begin debounce commits only after the record_type persists past the t
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
 
     ctx.update(frameAt(0));  // window starts
     CHECK(cap.begins.empty());
@@ -247,7 +255,7 @@ TEST_CASE("begin debounce restarts when the record_type changes mid-window") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
 
     ctx.update(frameAt(0));  // pending Standard @0
     *f.standard = false;
@@ -265,7 +273,7 @@ TEST_CASE("begin debounce resets when the scene stops being met") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
 
     ctx.update(frameAt(0));  // pending @0
     *f.factor = false;  // scene no longer met
@@ -281,7 +289,7 @@ TEST_CASE("scene updates are withheld until the begin debounce commits") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
 
     ctx.update(frameAt(0));  // pending
     ctx.update(frameAt(50));  // pending
@@ -296,7 +304,7 @@ TEST_CASE("end debounce closes the scene only after the timeout of missing frame
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, ms(100));
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(100));
 
     ctx.update(frameAt(0));  // begins immediately
     REQUIRE(cap.begins.size() == 1);
@@ -315,7 +323,7 @@ TEST_CASE("a zero end timeout closes the scene on the first non-matching frame")
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero);
 
     ctx.update(frameAt(0));  // begins immediately
     REQUIRE(cap.begins.size() == 1);
@@ -329,7 +337,7 @@ TEST_CASE("a reappearance within the end timeout keeps the same scene open") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, ms(100));
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(100));
 
     ctx.update(frameAt(0));  // begin
     *f.factor = false;
@@ -349,7 +357,7 @@ TEST_CASE("onIdle closes an already-committed scene exactly once") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, ms(100));
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(100));
 
     ctx.update(frameAt(0));  // begin
     REQUIRE(cap.begins.size() == 1);
@@ -365,7 +373,7 @@ TEST_CASE("onIdle closes an already-committed scene exactly once") {
 TEST_CASE("onIdle on a context with no scene open reports nothing") {
     Captured cap;
     Flags f;  // nothing met: the scene never opens
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, ms(100));
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(100));
 
     ctx.update(frameAt(0));
     REQUIRE(cap.begins.empty());
@@ -380,7 +388,7 @@ TEST_CASE("onIdle discards a begin still in its debounce window") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
 
     ctx.update(frameAt(0));  // pending, not committed
     ctx.onIdle();
@@ -438,7 +446,7 @@ TEST_CASE("an unambiguous calibration latches without waiting for the scene time
     scan.answer = calibratedOk();
     auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
     CharaDetailSceneContext ctx(
-        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, kZero, kZero, tracker);
+        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker);
 
     // The timer has not elapsed, so the scene is not met. Calibration is independent of that verdict and
     // evaluates both pane candidates immediately.
@@ -463,7 +471,7 @@ TEST_CASE("a frame the tree does not match is scanned") {
     scan.answer = calibratedOk();
     auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
     CharaDetailSceneContext ctx(
-        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, kZero, kZero, tracker);
+        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker);
 
     ctx.update(largeFrameAt(0));
 
@@ -484,7 +492,7 @@ TEST_CASE("the producer anchor reaches the frame forwarded downstream after latc
     const auto latch = std::make_shared<PaneModeLatch>();
     auto tracker = std::make_shared<DetailCropTracker>(scan.fn(), latch);
     CharaDetailSceneContext ctx(
-        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, kZero, kZero, tracker);
+        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker);
 
     // A shaping producer resolves the pane latch and carries that token on the frame; carrying it is what
     // makes its own anchor authoritative here. (A producer that resolves nothing gets the pane applied FOR
@@ -510,7 +518,7 @@ TEST_CASE("calibration does not depend on a close-button instant node") {
     StubScan scan;
     scan.answer = calibratedOk();
     auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero, tracker);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker);
 
     ctx.update(largeFrameAt(0));
     ctx.update(largeFrameAt(100));
@@ -519,6 +527,178 @@ TEST_CASE("calibration does not depend on a close-button instant node") {
     CHECK(tracker->correction().has_value());
     CHECK(tracker->latched());
     CHECK(ctx.met());
+}
+
+DetailCropResult calibrationNotFound() {
+    DetailCropResult result;
+    result.status = DetailCropStatus::HeaderStart;
+    return result;
+}
+
+TEST_CASE("a running scene adopts no calibration, its end debounce included, and the next frame after it does") {
+    Captured cap;
+    Flags f;
+    *f.factor = true;
+    *f.standard = true;
+    StubScan scan;
+    scan.answer = calibrationNotFound();
+    auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(1000), tracker);
+
+    ctx.update(largeFrameAt(0));  // nothing to calibrate yet; the scene begins
+    REQUIRE(cap.begins.size() == 1);
+
+    // The dialog becomes measurable only now, with the scene running.
+    scan.answer = calibratedOk();
+    ctx.update(largeFrameAt(10));
+    ctx.update(largeFrameAt(15));
+    CHECK_FALSE(tracker->latched());
+
+    // The scene stops being met; its end debounce runs, and the scene is still the one that began.
+    *f.factor = false;
+    ctx.update(largeFrameAt(20));
+    ctx.update(largeFrameAt(500));
+    CHECK(cap.ends == 0);
+    CHECK_FALSE(tracker->latched());
+
+    ctx.update(largeFrameAt(1100));  // the debounce elapses: the scene ends after this frame was evaluated
+    CHECK(cap.ends == 1);
+    CHECK_FALSE(tracker->latched());
+
+    ctx.update(largeFrameAt(1200));  // the first frame outside the scene adopts
+    CHECK(tracker->latched());
+
+    // Every frame the scene forwarded kept the anchor it began with.
+    const auto uncalibrated = FrameAnchor::intersect(Size<int>{640, 480}).intersection();
+    REQUIRE(cap.update_intersections.size() == 3);
+    for (const auto &intersection : cap.update_intersections) {
+        CHECK(intersection == uncalibrated);
+    }
+}
+
+TEST_CASE("a frame that latches does not begin a scene, and the begin window starts over after it") {
+    Captured cap;
+    Flags f;
+    *f.factor = true;
+    *f.standard = true;
+    StubScan scan;
+    scan.answer = calibrationNotFound();
+    auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(200), kZero, tracker);
+
+    ctx.update(largeFrameAt(0));  // the begin window opens
+    scan.answer = calibratedOk();
+    ctx.update(largeFrameAt(200));  // the window would close here, but this frame latches
+    CHECK(tracker->latched());
+    CHECK(cap.begins.empty());
+
+    ctx.update(largeFrameAt(201));  // a new window opens: 201 is only 1 ms after the latch
+    CHECK(cap.begins.empty());
+    ctx.update(largeFrameAt(400));
+    CHECK(cap.begins.empty());
+
+    ctx.update(largeFrameAt(401));  // 200 ms after the first frame of the new window
+    REQUIRE(cap.begins.size() == 1);
+    // The scene's very first forwarded frame already carries the calibrated anchor (this producer sends no
+    // snapshot, so the latched pane is applied on this side).
+    REQUIRE(cap.update_intersections.size() == 1);
+    CHECK(cap.update_intersections[0] == kCalibrated);
+}
+
+// --- Capture size changes ------------------------------------------------------------------------------
+
+TEST_CASE("a capture size change during a scene is reported once, even from a frame the scene does not match") {
+    Captured cap;
+    Flags f;
+    *f.factor = true;
+    *f.standard = true;
+    const Size<int> before{640, 480};
+    const Size<int> after{800, 600};
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, ms(1000));
+
+    ctx.update(largeFrameAt(0).withCapturedSize(before));  // the scene begins at `before`
+    ctx.update(largeFrameAt(10).withCapturedSize(before));
+    REQUIRE(cap.begins.size() == 1);
+
+    // The resized frames are not recognized as the detail screen: the scene is in its end debounce when the
+    // first frame of the new size arrives, and that frame is where the change must be reported.
+    *f.factor = false;
+    ctx.update(largeFrameAt(20).withCapturedSize(before));
+    CHECK(cap.resizes.empty());
+    ctx.update(largeFrameAt(30).withCapturedSize(after));
+    REQUIRE(cap.resizes.size() == 1);
+    CHECK(cap.resizes[0].first == std::optional<Size<int>>{before});
+    CHECK(cap.resizes[0].second == std::optional<Size<int>>{after});
+    CHECK(cap.ends == 0);  // the detail screen did not close; only the attempt in flight is affected
+
+    // More frames of the new size, matched or not, are the same change.
+    ctx.update(largeFrameAt(40).withCapturedSize(after));
+    *f.factor = true;
+    ctx.update(largeFrameAt(50).withCapturedSize(after));
+    CHECK(cap.resizes.size() == 1);
+    CHECK(cap.ends == 0);
+
+    // Outside a scene a size change is not reported.
+    *f.factor = false;
+    ctx.update(largeFrameAt(60).withCapturedSize(after));
+    ctx.update(largeFrameAt(1100).withCapturedSize(after));
+    REQUIRE(cap.ends == 1);
+    ctx.update(largeFrameAt(1200).withCapturedSize(before));
+    CHECK(cap.resizes.size() == 1);
+}
+
+TEST_CASE("a capture size change restarts the begin window") {
+    Captured cap;
+    Flags f;
+    *f.factor = true;
+    *f.standard = true;
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero);
+
+    ctx.update(largeFrameAt(0).withCapturedSize({640, 480}));  // the window opens
+    ctx.update(largeFrameAt(100).withCapturedSize({800, 600}));  // would close it, but the size changed
+    CHECK(cap.begins.empty());
+    ctx.update(largeFrameAt(150).withCapturedSize({800, 600}));
+    CHECK(cap.begins.empty());
+    ctx.update(largeFrameAt(200).withCapturedSize({800, 600}));  // 100 ms at the new size
+    CHECK(cap.begins.size() == 1);
+    CHECK(cap.resizes.empty());
+}
+
+TEST_CASE("a capture size change is reported from a frame the tracker refuses as stale, with no frame after it") {
+    Captured cap;
+    Flags f;
+    *f.factor = true;
+    *f.standard = true;
+    StubScan scan;
+    scan.answer = calibratedOk();
+    const auto latch = std::make_shared<PaneModeLatch>();
+    auto tracker = std::make_shared<DetailCropTracker>(scan.fn(), latch);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker);
+    const Size<int> before{640, 480};
+    const Size<int> after{800, 600};
+
+    ctx.update(largeFrameAt(0).withCapturedSize(before));  // latches; does not begin a scene
+    const auto live = [&latch](std::uint64_t timestamp, const Size<int> &captured) {
+        return largeFrameAt(timestamp)
+            .withPaneModeSnapshot(latch->snapshotFor(Size<int>{640, 480}))
+            .withCapturedSize(captured);
+    };
+    ctx.update(live(10, before));  // the scene begins at `before`
+    REQUIRE(cap.begins.size() == 1);
+    const auto forwarded = cap.updates.size();
+
+    // A live producer resolves its snapshot, then the size change releases the latch (NativeApi::updateFrame's
+    // noteFrameSize): the first frame of the new size carries a stale snapshot and its pixels are refused.
+    // The capture then stops, so no later frame of the new size arrives.
+    const auto stale = live(20, after);
+    tracker->requestRelease();
+    ctx.update(stale);
+    CHECK(cap.updates.size() == forwarded);
+    REQUIRE(cap.resizes.size() == 1);
+    CHECK(cap.resizes[0].first == std::optional<Size<int>>{before});
+    CHECK(cap.resizes[0].second == std::optional<Size<int>>{after});
+    ctx.onIdle();
+    CHECK(cap.resizes.size() == 1);
 }
 
 // --- Forwarded-frame resize ---------------------------------------------------------------------------
@@ -536,16 +716,26 @@ TEST_CASE("the forwarded frame is held inside the configured band, and only once
     // largeFrameAt is 640x480, whose aspect-ratio intersection is 270 wide -- below the band, so it is
     // scaled UP to the lower bound, doubling the frame.
     CharaDetailSceneContext ctx(
-        buildTree(f), cap.begin, cap.updated, cap.end, ms(100), kZero, nullptr, Range<int>{540, 720});
+        buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, ms(100), kZero, nullptr, Range<int>{540, 720});
 
-    ctx.update(largeFrameAt(0));  // met, but still inside the begin debounce: nothing is forwarded at all
+    ctx.update(largeFrameAt(0).withCapturedSize({800, 600}));  // met, but inside the begin debounce: nothing forwarded
     CHECK(cap.update_sizes.empty());
 
-    ctx.update(largeFrameAt(150));  // commit -> the first forwarded frame
+    ctx.update(largeFrameAt(150).withCapturedSize({800, 600}));  // commit -> the first forwarded frame
 
     REQUIRE(cap.update_sizes.size() == 1);
     CHECK(cap.update_intersections[0].width() == 540);
     CHECK(cap.update_sizes[0] == Size<int>{1280, 960});
+    // The forwarded frame says what happened to it, and carries the size the producer stamped.
+    REQUIRE(cap.update_resizes[0].has_value());
+    const auto &resize = cap.update_resizes[0].value();
+    REQUIRE(resize.band.has_value());
+    CHECK(resize.band->min() == 540);
+    CHECK(resize.band->max() == 720);
+    CHECK(resize.captured_size == std::optional<Size<int>>{Size<int>{800, 600}});
+    CHECK(resize.pre_band_unit == 270);
+    CHECK(resize.unit == 540);
+    CHECK(resize.arm == ResizeArm::Enlarged);
 }
 
 TEST_CASE("a frame already inside the band is forwarded untouched") {
@@ -557,13 +747,18 @@ TEST_CASE("a frame already inside the band is forwarded untouched") {
     // arrives downstream exactly as the producer sent it. This is what a band buys over a single target, and
     // it is only expressible because the whole band -- not one resolved bound -- reaches the forward site.
     CharaDetailSceneContext ctx(
-        buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero, nullptr, Range<int>{200, 300});
+        buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, nullptr, Range<int>{200, 300});
 
     ctx.update(largeFrameAt(0));
 
     REQUIRE(cap.update_sizes.size() == 1);
     CHECK(cap.update_sizes[0] == Size<int>{640, 480});
     CHECK(cap.update_intersections[0].width() == 270);
+    REQUIRE(cap.update_resizes[0].has_value());
+    CHECK(cap.update_resizes[0]->band.has_value());
+    CHECK(cap.update_resizes[0]->pre_band_unit == 270);
+    CHECK(cap.update_resizes[0]->unit == 270);
+    CHECK(cap.update_resizes[0]->arm == ResizeArm::Untouched);
 }
 
 TEST_CASE("a frame above the band is scaled down to the upper bound") {
@@ -574,13 +769,17 @@ TEST_CASE("a frame above the band is scaled down to the upper bound") {
     // The same frame, against a band it sits ABOVE: 270 -> 135, the other end of the same decision. Pinning
     // both directions here is what stops the forward site from being wired to one bound only.
     CharaDetailSceneContext ctx(
-        buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero, nullptr, Range<int>{100, 135});
+        buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, nullptr, Range<int>{100, 135});
 
     ctx.update(largeFrameAt(0));
 
     REQUIRE(cap.update_sizes.size() == 1);
     CHECK(cap.update_intersections[0].width() == 135);
     CHECK(cap.update_sizes[0] == Size<int>{320, 240});
+    REQUIRE(cap.update_resizes[0].has_value());
+    CHECK(cap.update_resizes[0]->pre_band_unit == 270);
+    CHECK(cap.update_resizes[0]->unit == 135);
+    CHECK(cap.update_resizes[0]->arm == ResizeArm::Shrunk);
 }
 
 TEST_CASE("no resize is applied when the setting is off") {
@@ -588,13 +787,19 @@ TEST_CASE("no resize is applied when the setting is off") {
     Flags f;
     *f.factor = true;
     *f.standard = true;
-    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, kZero, kZero);
+    CharaDetailSceneContext ctx(buildTree(f), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero);
 
     ctx.update(largeFrameAt(0));
 
     REQUIRE(cap.update_sizes.size() == 1);
     CHECK(cap.update_sizes[0] == Size<int>{640, 480});
     CHECK(cap.update_intersections[0].width() == 270);
+    // The facts are attached with the setting off too: no band, nothing done, and no captured size, because this
+    // frame was not stamped by NativeApi::updateFrame.
+    REQUIRE(cap.update_resizes[0].has_value());
+    CHECK_FALSE(cap.update_resizes[0]->band.has_value());
+    CHECK_FALSE(cap.update_resizes[0]->captured_size.has_value());
+    CHECK(cap.update_resizes[0]->arm == ResizeArm::Untouched);
 }
 
 TEST_CASE("the crop calibration scans the raw frame, and the forwarded resize follows the resulting anchor") {
@@ -607,13 +812,13 @@ TEST_CASE("the crop calibration scans the raw frame, and the forwarded resize fo
     scan.answer = calibratedOk();
     auto tracker = std::make_shared<DetailCropTracker>(scan.fn());
     CharaDetailSceneContext ctx(
-        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, kZero, kZero, tracker,
+        buildTreeWithCloseButton(f, close, 50), cap.begin, cap.updated, cap.end, cap.resized, kZero, kZero, tracker,
         Range<int>{540, 720});
 
-    ctx.update(largeFrameAt(0));  // scans and adopts the crop
+    ctx.update(largeFrameAt(0).withCapturedSize({1000, 750}));  // scans and adopts the crop
     *close = true;
-    ctx.update(largeFrameAt(10));  // producer anchor is preserved; the timer starts
-    ctx.update(largeFrameAt(100));  // the timer fires -> scene begins and the frame is forwarded
+    ctx.update(largeFrameAt(10).withCapturedSize({1000, 750}));  // producer anchor is preserved; the timer starts
+    ctx.update(largeFrameAt(100).withCapturedSize({1000, 750}));  // the timer fires -> the frame is forwarded
 
     // The scan must have seen the full-resolution image: resizing before the calibration would hand it a
     // blurred frame, which is exactly what forwarding-site placement exists to prevent.
@@ -629,6 +834,11 @@ TEST_CASE("the crop calibration scans the raw frame, and the forwarded resize fo
     CHECK(forwarded.top() == 54);
     CHECK(forwarded.height() == 959);
     CHECK(cap.update_sizes[0] == Size<int>{1728, 1296});
+    // The band decided on the calibrated unit, and the captured size survives the tracker's re-anchored copy.
+    REQUIRE(cap.update_resizes[0].has_value());
+    CHECK(cap.update_resizes[0]->pre_band_unit == 200);
+    CHECK(cap.update_resizes[0]->unit == 540);
+    CHECK(cap.update_resizes[0]->captured_size == std::optional<Size<int>>{Size<int>{1000, 750}});
 }
 
 }  // namespace

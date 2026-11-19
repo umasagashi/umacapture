@@ -246,6 +246,7 @@ void FactorTabRecognizer::recognize(
         log_warning("Failed to find top banner of factor tab.");
         return;
     }
+    crop_info.factor_list_alignment = list->alignment;
 
     // Move to the space between the banner and the first factor.
     const double scan_top = list->banner.top + config.vertical_banner_bottom_delta;
@@ -289,17 +290,20 @@ std::optional<ListFrame> FactorRowReader::alignToList(const Frame &frame, const 
         Point<int>{std::min(area.right(), frame.width()), std::min(area.bottom(), frame.height())},
     };
 
+    const int nominal = anchor.mapToFrame(Point<double>{config.banner_edge.nominal_left, 0.0, IntersectStart}).x();
+    std::optional<int> edge;
     int shift = 0;
     if (banner->left_edge.has_value()) {
-        const int edge = area.left() + banner->left_edge.value();
-        const int nominal = anchor.mapToFrame(Point<double>{config.banner_edge.nominal_left, 0.0, IntersectStart}).x();
+        edge = area.left() + banner->left_edge.value();
         const double deadband = config.banner_edge.deadband * anchor.intersection().width();
-        shift = std::abs(edge - nominal) <= deadband ? 0 : edge - nominal;
-        log_debug("Factor list alignment: banner left edge {} px, nominal {} px, shift {} px.", edge, nominal, shift);
+        shift = std::abs(edge.value() - nominal) <= deadband ? 0 : edge.value() - nominal;
+        log_debug(
+            "Factor list alignment: banner left edge {} px, nominal {} px, shift {} px.", edge.value(), nominal, shift);
     } else {
         log_warning("Factor banner's left edge could not be measured; reading the list at its nominal place.");
     }
-    return ListFrame{banner.value(), frame.shiftedHorizontally(shift), viewport, shift};
+    return ListFrame{
+        banner.value(), frame.shiftedHorizontally(shift), viewport, FactorListAlignment{edge, nominal, shift}};
 }
 
 std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const Rect<double> &scroll_area) const {
@@ -1096,6 +1100,20 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         const auto &factor_frame = Frame::open(record_dir / "factor.png");
         const auto &campaign_frame = Frame::open(record_dir / "campaign.png");
 
+        // The capture's resize facts, written by the stitcher into each tab image's side JSON and copied into
+        // prediction.json as they are. They describe the capture, not this recognition, so a re-recognition
+        // copies the same values again. Null for a side JSON without them (a record stitched without them).
+        const auto frameResizeOf = [&](const char *stem) {
+            const auto info = json_util::read((record_dir / stem).replace_extension(".json"));
+            const auto found = info.find("frame_resize");
+            return found != info.end() ? *found : json_util::Json(nullptr);
+        };
+        const json_util::Json frame_resize{
+            {"skill", frameResizeOf("skill")},
+            {"factor", frameResizeOf("factor")},
+            {"campaign", frameResizeOf("campaign")},
+        };
+
         recognizer_impl::PredictionHistory status_header_history;
         recognizer_impl::PredictionHistory skill_tab_history;
         recognizer_impl::PredictionHistory factor_tab_history;
@@ -1158,6 +1176,10 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
                 {"skill_tab", skill_tab_history.toJson()},
                 {"factor_tab", factor_tab_history.toJson()},
                 {"campaign_tab", campaign_tab_history.toJson()},
+                {"frame_resize", frame_resize},
+                {"factor_tab_alignment",
+                 crop_info.factor_list_alignment.has_value() ? json_util::Json(crop_info.factor_list_alignment.value())
+                                                             : json_util::Json(nullptr)},
             },
             4);
 

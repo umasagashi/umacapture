@@ -662,5 +662,66 @@ TEST_CASE("a staged factor strip whose flush fails still leaves the page reading
     CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
 }
 
+// --- The record's resize facts ------------------------------------------------------------------------------------
+//
+// What the stitcher reads is the file, so the file is what is asserted: the base's facts, and every tab's distinct
+// facts with their frame counts, as written beside base.png.
+
+TEST_CASE("SceneScrapingBox writes the base's and every tab's resize facts beside the base image") {
+    const auto root = std::filesystem::temp_directory_path() / "unit_test_scraped_frame_resize";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    io_util::DirectoryHooks hooks;
+    hooks.mkdir = [](const std::filesystem::path &path) { std::filesystem::create_directories(path); };
+    hooks.rmdir = [](const std::filesystem::path &path) { std::filesystem::remove_all(path); };
+
+    scraper_impl::SceneScrapingBox box(
+        kPlaceholderScans, kPlaceholderScans, kPlaceholderScans, kNoFactorEndGreen, record::RecordType::Standard, root,
+        hooks);
+
+    const Range<int> band{540, 720};
+    const Frame small =
+        Frame::fixed(testutil::solid(270, 540, Color(0, 0, 0))).forwardedThroughBand(band, Size<int>{300, 600});
+    const Frame large =
+        Frame::fixed(testutil::solid(1080, 2160, Color(0, 0, 0))).forwardedThroughBand(band, Size<int>{1080, 2160});
+    box.noteTabFrame(TabPage::FactorPage, small);
+    box.noteTabFrame(TabPage::FactorPage, large);
+    box.noteTabFrame(TabPage::FactorPage, small);
+    box.noteTabFrame(TabPage::FactorPage, Frame::fixed(testutil::solid(10, 20, Color(0, 0, 0))));  // carries no facts
+    box.noteTabFrame(TabPage::SkillPage, large);
+    box.addBase(Frame::fixed(testutil::solid(10, 20, Color(0, 0, 0))), small.forwardedResize());
+    box.writeFrameResize();
+
+    const auto read = [&] { return json_util::read(root / kScrapedFrameResizeFilename); };
+    auto written = read();
+    CHECK(written["base"]["arm"] == "enlarged");
+    CHECK(written["base"]["pre_band_unit"] == 270);
+    CHECK(written["base"]["unit"] == 540);
+    CHECK(written["base"]["band"]["min"] == 540);
+    CHECK(written["base"]["band"]["max"] == 720);
+    CHECK(written["base"]["captured_size"]["width"] == 300);
+    CHECK(written["base"]["captured_size"]["height"] == 600);
+
+    REQUIRE(written["factor"].size() == 2);
+    CHECK(written["factor"][0]["arm"] == "enlarged");
+    CHECK(written["factor"][0]["frames"] == 2);
+    CHECK(written["factor"][1]["arm"] == "shrunk");
+    CHECK(written["factor"][1]["pre_band_unit"] == 1080);
+    CHECK(written["factor"][1]["unit"] == 720);
+    CHECK(written["factor"][1]["frames"] == 1);
+    REQUIRE(written["skill"].size() == 1);
+    CHECK(written["skill"][0]["frames"] == 1);
+    CHECK(written["campaign"].empty());
+
+    // A tab rebuilt from scratch counts from zero, together with its fragments; the other tabs keep theirs.
+    box.resetFactorBox();
+    box.writeFrameResize();
+    written = read();
+    CHECK(written["factor"].empty());
+    CHECK(written["skill"].size() == 1);
+
+    std::filesystem::remove_all(root);
+}
+
 }  // namespace
 }  // namespace uma::chara_detail
