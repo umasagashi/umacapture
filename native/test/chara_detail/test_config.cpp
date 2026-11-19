@@ -259,5 +259,25 @@ TEST_CASE("the shipped scroll area is one rect across the scraper, the stitcher 
     }
 }
 
+TEST_CASE("the shipped factor banner's measuring window starts on pixels the stitched image keeps") {
+    // WHAT DEPENDS ON THIS. The recognizer measures the factor banner's left edge on the live frame (the early
+    // duplicate probe and the character-switch rule) and on the stitched image (the record, and every
+    // re-recognition of it), and moves the list's cells by what it measures. The stitcher pastes only the part of
+    // the live crop right of scroll_area_cropping_rect's left edge; left of it, the stitched image holds other
+    // pixels. A window starting there would see background on a live frame and something else on the saved image,
+    // so the two would measure differently, and a record would keep the cells of the wrong one. The window has to
+    // start at least 1 px right of the cut at the smallest promised unit, 540 px, and nominal_left has to lie
+    // inside it.
+    const auto stitcher =
+        json_util::read(configPath("scene_stitcher.json")).get<stitcher_config::CharaDetailSceneStitcherConfig>();
+    const auto recognizer =
+        json_util::read(configPath("recognizer.json")).get<recognizer_config::CharaDetailRecognizerConfig>();
+    const auto &edge = recognizer.factor_tab.banner_edge;
+
+    CHECK(edge.search_from >= stitcher.scroll_area_cropping_rect.left() + 1.0 / 540.0);
+    CHECK(edge.search_from < edge.nominal_left);
+    CHECK(edge.nominal_left < edge.search_to);
+}
+
 }  // namespace
 }  // namespace uma::chara_detail

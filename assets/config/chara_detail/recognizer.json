@@ -532,6 +532,12 @@
           }
         }
       }
+    },
+    "banner_edge": {
+      "nominal_left": 0.0426,
+      "search_from": 0.0241,
+      "search_to": 0.062,
+      "deadband": 0.0028
     }
   },
   "campaign_tab": {

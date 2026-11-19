@@ -497,6 +497,21 @@ public:
         return {image, timestamp_, FrameAnchor::fixed(size(), intersection)};
     }
 
+    // A copy of this frame whose intersection is moved `dx` pixels along x, with the same unit and the same
+    // vertical placement. Shallow like any other Frame copy. It is for reading a PART of the frame that the game
+    // drew `dx` pixels away from where the layout puts it: every normalized coordinate mapped through the copy's
+    // anchor lands `dx` pixels over, and nothing else changes. The copy's anchor describes that part only, never
+    // the whole frame, so it must not leave the reader that made it.
+    //
+    // Unlike reanchored, the moved intersection MAY reach outside the image, and that is part of the contract: a
+    // part drawn near the image's left edge moves the intersection's left edge below 0. What must stay inside the
+    // image is every rect the caller reads through the copy; reading outside makes bgrAt/view throw, as on any
+    // frame. A shift of 0 yields an anchor identical to this frame's.
+    [[nodiscard]] inline Frame shiftedHorizontally(int dx) const {
+        const auto moved = anchor_.intersection() + Point<int>{dx, 0};
+        return {image, timestamp_, FrameAnchor::fixed(size(), moved)};
+    }
+
     // How far the frame's own unit may sit from a requested one before the resize is skipped as not worth
     // paying for: resizing over a negligible difference only blurs the image. The 3 px is inherited verbatim
     // from the Windows runner's original force-resize; what changed is the QUANTITY it measures (see

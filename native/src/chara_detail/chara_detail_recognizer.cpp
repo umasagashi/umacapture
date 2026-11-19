@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <map>
 #include <stdexcept>
@@ -238,41 +239,67 @@ void FactorTabRecognizer::recognize(
     PredictionHistory &history) const {
     // Find the green banner at the top of the Factors tab to calibrate the initial Y position. The search is the
     // shared reader's (findBanner), so this read and the single-frame read find the banner by one rule.
-    const auto banner = rows->findBanner(frame, config.area);
-    if (!banner) {
+    // The stitched image's scroll area is config.area. The alignment finds the banner from it and returns the
+    // list frame every cell of the list is read through, the trainee's included.
+    const auto list = rows->alignToList(frame, config.area);
+    if (!list) {
         log_warning("Failed to find top banner of factor tab.");
         return;
     }
 
     // Move to the space between the banner and the first factor.
-    const double scan_top = banner->top + config.vertical_banner_bottom_delta;
+    const double scan_top = list->banner.top + config.vertical_banner_bottom_delta;
 
-    // The stitched image's scroll area is config.area, the same rect the banner search above starts from.
     double current_y = scan_top;
     // Every list is read in full: the limit belongs to the single-frame read only (SelfFactorWindow), and each
     // list here starts where the one before it ended, which a limited read would not reach.
-    const auto self = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
-    const auto parent1 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
-    const auto parent2 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
+    const auto self = rows->recognizeOne(list->frame, list->viewport, current_y, history, std::nullopt);
+    const auto parent1 = rows->recognizeOne(list->frame, list->viewport, current_y, history, std::nullopt);
+    const auto parent2 = rows->recognizeOne(list->frame, list->viewport, current_y, history, std::nullopt);
 
     record.factors = {self, parent1, parent2};
 
-    record.trainee = recognizeTrainee(frame, record_info, scan_top, crop_info, history);
+    record.trainee = recognizeTrainee(list->frame, record_info, scan_top, crop_info, history);
 }
 
 std::vector<record::Factor>
 FactorRowReader::visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const {
     // Scan from the caller's scroll area, NOT from config.area: this frame is a live one, whose scroll
     // area moves with the record layout (see the header for the full reason).
-    const auto banner = findBanner(frame, window.scroll_area);
-    if (!banner) {
+    const auto list = alignToList(frame, window.scroll_area);
+    if (!list) {
         log_warning("Failed to find top banner of factor tab.");
         return {};
     }
 
-    double scan_top = banner->top + config.vertical_banner_bottom_delta;
+    double scan_top = list->banner.top + config.vertical_banner_bottom_delta;
     PredictionHistory history;
-    return recognizeOne(frame, window.scroll_area, scan_top, history, window.factor_limit);
+    return recognizeOne(list->frame, list->viewport, scan_top, history, window.factor_limit);
+}
+
+std::optional<ListFrame> FactorRowReader::alignToList(const Frame &frame, const Rect<double> &scroll_area) const {
+    const auto banner = findBanner(frame, scroll_area);
+    if (!banner) {
+        return std::nullopt;
+    }
+    const auto anchor = frame.anchor();
+    const auto area = anchor.mapToFrame(scroll_area);
+    const Rect<int> viewport{
+        {std::max(area.left(), 0), std::max(area.top(), 0)},
+        Point<int>{std::min(area.right(), frame.width()), std::min(area.bottom(), frame.height())},
+    };
+
+    int shift = 0;
+    if (banner->left_edge.has_value()) {
+        const int edge = area.left() + banner->left_edge.value();
+        const int nominal = anchor.mapToFrame(Point<double>{config.banner_edge.nominal_left, 0.0, IntersectStart}).x();
+        const double deadband = config.banner_edge.deadband * anchor.intersection().width();
+        shift = std::abs(edge - nominal) <= deadband ? 0 : edge - nominal;
+        log_debug("Factor list alignment: banner left edge {} px, nominal {} px, shift {} px.", edge, nominal, shift);
+    } else {
+        log_warning("Factor banner's left edge could not be measured; reading the list at its nominal place.");
+    }
+    return ListFrame{banner.value(), frame.shiftedHorizontally(shift), viewport, shift};
 }
 
 std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const Rect<double> &scroll_area) const {
@@ -291,13 +318,56 @@ std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const R
     const int hit_y = scan->hit_y.value();
     const auto area = anchor.mapToFrame(scroll_area);
     const int run_end_y = backgroundResumesAt(frame, config.bg_color, scan->x, hit_y, area.bottom());
+    const auto left_edge = measureBannerLeftEdge(frame, hit_y, run_end_y);
     return BannerHit{
         anchor.mapFromFrame(Point<int>{scan->x, hit_y}).y(),
         scan->x - area.left(),
         hit_y - scan->start_y,
         scan->length,
         run_end_y - scan->start_y,
+        left_edge.has_value() ? std::optional<int>{left_edge.value() - area.left()} : std::nullopt,
     };
+}
+
+std::optional<int> FactorRowReader::measureBannerLeftEdge(const Frame &frame, int first_row, int end_row) const {
+    const auto anchor = frame.anchor();
+    const auto &edge = config.banner_edge;
+    const int from = anchor.mapToFrame(Point<double>{edge.search_from, 0.0, IntersectStart}).x();
+    const int to = anchor.mapToFrame(Point<double>{edge.search_to, 0.0, IntersectStart}).x();
+    const int rows = end_row - first_row;
+    if (rows <= 0 || from < 0 || to >= frame.width() || to <= from) {
+        return std::nullopt;
+    }
+    const auto background = [&](int x, int y) {
+        return frame.isIn(config.bg_color, anchor.mapFromFrame(Point<int>{x, y}));
+    };
+
+    std::vector<int> values;
+    for (int y = first_row; y < end_row; y++) {
+        if (!background(from, y)) {
+            continue;
+        }
+        for (int x = from + 1; x <= to; x++) {
+            if (!background(x, y)) {
+                values.push_back(x);
+                break;
+            }
+        }
+    }
+
+    const auto majority = static_cast<std::size_t>((rows + 1) / 2);
+    if (values.size() < majority) {
+        return std::nullopt;
+    }
+    const auto median = values.begin() + static_cast<std::ptrdiff_t>((values.size() - 1) / 2);
+    std::nth_element(values.begin(), median, values.end());
+    const int edge_x = *median;
+    const auto close_to_edge =
+        std::count_if(values.begin(), values.end(), [&](int v) { return std::abs(v - edge_x) <= 1; });
+    if (static_cast<std::size_t>(close_to_edge) < majority) {
+        return std::nullopt;
+    }
+    return edge_x;
 }
 
 record::Character FactorTabRecognizer::recognizeTrainee(
@@ -337,21 +407,18 @@ record::Character FactorTabRecognizer::recognizeTrainee(
 }
 
 std::vector<record::Factor> FactorRowReader::recognizeOne(
-    const Frame &frame,
-    const Rect<double> &scroll_area,
+    const Frame &list_frame,
+    const Rect<int> &viewport,
     double &scan_top,
     PredictionHistory &history,
     const std::optional<std::size_t> factor_limit) const {
+    const Frame &frame = list_frame;
     const auto anchor = frame.anchor();
     const auto left_rect = anchor.absolute(config.left_rect);
     const auto right_rect = anchor.absolute(config.right_rect);
 
     // The region a cell has to lie in, in the pixels Frame::view crops by: the scroll area, clipped to the frame.
-    const auto area = anchor.mapToFrame(scroll_area);
-    const Rect<int> visible{
-        {std::max(area.left(), 0), std::max(area.top(), 0)},
-        Point<int>{std::min(area.right(), frame.width()), std::min(area.bottom(), frame.height())},
-    };
+    const Rect<int> &visible = viewport;
     const auto inside_visible = [&](const Rect<double> &cell) {
         const auto mapped = anchor.mapToFrame(cell);
         return mapped.left() >= visible.left() && mapped.top() >= visible.top()  //

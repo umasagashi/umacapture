@@ -238,6 +238,7 @@
     { "name": "factor_enhance_hopstep_pre", "mode": "replay", "frame_resize": true, "video": "factor_enhance_hopstep_pre.mkv", "anchor_unit": 720, "golden": "golden/factor_enhance_hopstep_pre.json" },
     { "name": "factor_enhance_hopstep_post_starup_addwhite", "mode": "replay", "frame_resize": true, "video": "factor_enhance_hopstep_post_starup_addwhite.mkv", "anchor_unit": 720, "golden": "golden/factor_enhance_hopstep_post_starup_addwhite.json" },
     { "name": "factor_enhance_cinderella_pre", "mode": "replay", "frame_resize": true, "video": "factor_enhance_cinderella_pre.mkv", "anchor_unit": 720, "golden": "golden/factor_enhance_cinderella_pre.json" },
-    { "name": "factor_enhance_cinderella_post_starup", "mode": "replay", "frame_resize": true, "video": "factor_enhance_cinderella_post_starup.mkv", "anchor_unit": 720, "golden": "golden/factor_enhance_cinderella_post_starup.json" }
+    { "name": "factor_enhance_cinderella_post_starup", "mode": "replay", "frame_resize": true, "video": "factor_enhance_cinderella_post_starup.mkv", "anchor_unit": 720, "golden": "golden/factor_enhance_cinderella_post_starup.json" },
+    { "name": "player_standard_entry_screen_no_arrows", "mode": "video", "frame_resize": true, "video": "player_standard_entry_screen_no_arrows.mp4", "anchor_unit": 720, "expect_probe_matches_golden_self": true, "expect_factor_switch_verdicts": { "same": 0, "different": 0, "empty": 0, "unreadable": 0 }, "golden": "golden/player_standard_entry_screen_no_arrows.json" }
   ]
 }

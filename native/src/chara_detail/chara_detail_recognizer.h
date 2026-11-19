@@ -249,12 +249,30 @@ struct SelfFactorWindow {
 // - `run_end_row` is the exclusive end of the non-background run that starts at `row` in the same column,
 //   bounded by the scroll area's bottom edge (and the frame's).
 // `top` is the same top edge as a normalized y, which is what the reading of the rows below the banner starts from.
+// `left_edge` is the banner's left edge, counted like `column` from the scroll area's left edge, as measured by
+// the rule in findBanner; nullopt when this frame does not let it be measured.
 struct BannerHit {
     double top;
     int column;
     int row;
     int search_rows;
     int run_end_row;
+    std::optional<int> left_edge;
+};
+
+// What a reading of the factor tab's list works from, made by FactorRowReader::alignToList.
+// - `frame` is the LIST FRAME: the searched frame with its intersection moved by `shift` pixels, so that the
+//   list's cells (the row search's columns, the factor name and star cells, the trainee icon and rank) land where
+//   the game drew them. Only the list is read through it.
+// - `viewport` is the scroll area in the pixels of the searched frame, clipped to it. It is NOT moved: the scroll
+//   area is part of the screen around the list, which stays where the layout puts it when the list moves.
+// - `shift` is how many pixels the list is drawn right of its nominal place (negative: left); 0 when the banner's
+//   left edge is within the deadband of the nominal one or could not be measured.
+struct ListFrame {
+    BannerHit banner;
+    Frame frame;
+    Rect<int> viewport;
+    int shift;
 };
 
 // Reads the factor tab's rows of (factor, star) off a frame, and owns the pipeline's only pair of factor models.
@@ -326,7 +344,30 @@ public:
     //
     // [scroll_area] is the scroll area on THIS frame: the layout's rect on a live frame, config.area on the
     // stitched image (see visibleSelfPrefix for why the two differ).
+    //
+    // It also measures the banner's left edge (BannerHit::left_edge), on every row of the banner's run in the
+    // scanned column: a row counts only when its pixel at banner_edge.search_from is background, and its value is
+    // the first non-background column after that, up to banner_edge.search_to. Starting on background is what
+    // keeps a banner that reaches left of the window from reading as one that starts at the window's edge; scanning
+    // rightwards from the left keeps the white "因子" lettering inside the banner from ending the run. The edge is
+    // the lower median of the rows that count, and is taken only when at least half the run's rows count and at
+    // least half lie within 1 px of it, so the rounded corners and a cursor over part of the banner are outvoted
+    // rather than averaged in.
     [[nodiscard]] std::optional<BannerHit> findBanner(const Frame &frame, const Rect<double> &scroll_area) const;
+
+    // THE ALIGNMENT every reading of the factor tab's list goes through: the stitched record's read
+    // (FactorTabRecognizer::recognize) and the single-frame read (visibleSelfPrefix). On some screens the game
+    // draws the factor tab's list, and only the list, a few pixels left of where it draws it everywhere else; the
+    // banner above it moves with it. This finds the banner on [frame] (findBanner), compares its measured left
+    // edge with banner_edge.nominal_left, and returns the list frame and the viewport (see ListFrame).
+    //
+    // Everything that is NOT the list is read from [frame] itself, here and only here: the banner search, the
+    // edge measurement (measured against the moved anchor it would find its own shift and report 0), and the
+    // viewport. A difference within banner_edge.deadband is not a shift: it is the measurement's own resolution.
+    // An edge that cannot be measured is read at the nominal place, with a warning.
+    //
+    // The ListFrame describes the list only; it must not leave the factor tab's reading.
+    [[nodiscard]] std::optional<ListFrame> alignToList(const Frame &frame, const Rect<double> &scroll_area) const;
 
     // Reads one factor list (self, parent1 or parent2) from [scan_top] down, advancing [scan_top] past it.
     //
@@ -335,10 +376,13 @@ public:
     // so [scan_top] is then NOT past it and must not be used to read the next list; the stitched path, which does
     // read the next list, passes std::nullopt.
     //
+    // [list_frame] and [viewport] are alignToList's: the cells are placed through the list frame, and checked
+    // against the viewport, which is in the pixels of the frame both share.
+    //
     // THE SCROLL AREA IS REQUIRED ON EVERY PATH, and a row is read only while BOTH cells handed to the models --
-    // the name cell and the star cell, derived once in cellsAt -- lie inside [scroll_area] intersected with the
-    // frame. The scan stops at the first cell that does not; a row whose left cell fits and whose right cell
-    // does not keeps its left factor and ends the list there.
+    // the name cell and the star cell, derived once in cellsAt -- lie inside [viewport] (the scroll area
+    // intersected with the frame). The scan stops at the first cell that does not; a row whose left cell fits and
+    // whose right cell does not keeps its left factor and ends the list there.
     //
     // Why the frame alone is not the bound: a live frame's scroll area ends above the bottom UI, and the row-top
     // search only asks where the background colour gives way. Measured on player_standard at a 736 px unit, a
@@ -349,8 +393,8 @@ public:
     // stitcher builds it only from this rect. The stitched path passes config.area, which spans the pasted
     // content, so one rule covers both instead of the stitched path relying on its canvas being tall enough.
     [[nodiscard]] std::vector<record::Factor> recognizeOne(
-        const Frame &frame,
-        const Rect<double> &scroll_area,
+        const Frame &list_frame,
+        const Rect<int> &viewport,
         double &scan_top,
         PredictionHistory &history,
         std::optional<std::size_t> factor_limit) const;
@@ -358,6 +402,10 @@ public:
     [[nodiscard]] std::optional<double> findNext(const Frame &frame, const Point<double> &scan_top_left) const;
 
 private:
+    // findBanner's measurement of the banner's left edge over the frame rows [first_row, end_row), in the frame's
+    // pixels; the rule is stated on findBanner.
+    [[nodiscard]] std::optional<int> measureBannerLeftEdge(const Frame &frame, int first_row, int end_row) const;
+
     // The two cells a factor row hands the models: the name cell of the column and the star-rank cell inside it,
     // both absolute. Derived in ONE place so that the fit test in recognizeOne and the crops in predictFactor are
     // made from the same rects -- a fit test written against a second derivation would be testing cells the
