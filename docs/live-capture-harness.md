@@ -6,7 +6,7 @@ the record the app produces is diffed against a committed golden.
 
 > Tooling: `tool/live_capture_test/` (Python + shell) and `native/tool/mimic_player/` (the player).
 > Clips and sidecars live under the gitignored `testdata/clips/`, and every run artefact under
-> `testdata/harness/`.
+> `testdata/harness/`. The web front end has its own headless check: `tool/web_e2e/README.md`.
 
 ## The gap it fills
 
