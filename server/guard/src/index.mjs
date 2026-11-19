@@ -3,8 +3,11 @@
 //
 // Bindings (wrangler.guard.jsonc and secrets):
 //   GUARD_DB            the guard's D1 database
-//   GUARD_CF_TOKEN      secret: Account Analytics Read and Zone WAF Edit (umacapture.com only)
-//   GUARD_BILL_TOKEN    secret: Account Billing Read only
+//   GUARD_CF_TOKEN      secret: the token for GraphQL Analytics and for reading and writing rule G; the
+//                       calls need Account Analytics Read and Zone WAF Edit (umacapture.com)
+//   GUARD_BILL_TOKEN    secret: the token for the Billable Usage API; the call needs Account Billing Read
+//   Each call reads only its own secret, so the two may hold different tokens. Both hold one and the
+//   same user API token, which carries all three permissions (docs/web-deploy.md, "The guard's token").
 //   GUARD_ACCOUNT_ID    var: the account GraphQL and Billable Usage are read for
 //   GUARD_ZONE_ID       var: the zone rule G lives in
 //   GUARD_SENTRY_DSN    var: where notifications go; empty sends none (each stays unconfirmed)

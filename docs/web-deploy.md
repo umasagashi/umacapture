@@ -81,10 +81,11 @@ These are outward-facing or account-level operations. Nothing in the repository 
      a month stay within what the plan includes; their comments derive each figure. They count the
      requests of logged-in accounts up to each limit, so they bound neither a request from someone
      who is not logged in nor one past a limit: each of those still runs the Worker.
-   - `server/wrangler.jsonc` declares **one binding**, the D1 database `DB`, and no R2.
-     `server/wrangler.assets-only.jsonc` declares none at all. Read both again before deploying.
-   - **Backblaze B2** is billed by Backblaze, outside Cloudflare. Its data caps and alerts (below)
-     stop it rather than bill past them.
+   - `server/wrangler.jsonc` declares **one binding**, the D1 database `DB`, and no R2, and caps
+     each invocation's CPU time at 200 ms ("The CPU limit per invocation").
+     `server/wrangler.assets-only.jsonc` declares no binding at all. Read both again before deploying.
+   - **Backblaze B2** is billed by Backblaze, outside Cloudflare, and the billing guard does not see
+     it. Its data caps and alerts (below) limit what it can charge a day, for what they cover.
    - The **list of existing Workers** in the account (Workers & Pages › Overview). They share the
      plan's included usage with this one; write the names down.
    - The **entrance list** below matches the actual settings.
@@ -113,7 +114,9 @@ These are outward-facing or account-level operations. Nothing in the repository 
 
    In a terminal `secret put` asks for the value; otherwise it reads it from standard input.
    It creates a new version of the Worker and deploys it at once; it uploads no local code. A
-   deployment never deletes a secret. These are every secret the Worker reads:
+   deployment with sharing on keeps the secrets; a deployment with sharing off (assets only) removes
+   them all, and they do not come back with the next deployment ("Stopping staging" under
+   "Staging"). These are every secret the Worker reads:
 
    | Secret | What it is | Without it |
    |---|---|---|
@@ -180,12 +183,22 @@ These are outward-facing or account-level operations. Nothing in the repository 
       with no `daysFromUploadingToHiding`: that would hide objects the Worker still references or
       serves. A rule with `fileNamePrefix` `""` would cover both prefixes with one number, which is
       right for neither.
-    - **Data caps and alerts** on the B2 account (Caps & Alerts), the stop for B2's charges: storage
-      $0.50 a day and download $0.20 a day, and the transaction classes that offer a cap $0.10 a day,
-      with alerts at 75% and 100%. A cap that is reached makes B2 refuse what it covers, and the
-      Worker answers those requests `502`. The caps are the account's, so file sync and shared images
-      use them up together: a day whose shared images are downloaded up to the download cap makes file
-      sync's image fetches answer `502` too, until the next UTC day.
+    - **Data caps and alerts** on the B2 account (Caps & Alerts), the stop for B2's charges. A data
+      cap limits what one kind of usage may cost a day (UTC), with alerts at 75% and 100% of it;
+      Backblaze's documentation offers them for storage and for Class A, B and C transactions. Set
+      storage at $0.50 a day, and download at $0.20 a day if the console offers a download cap.
+      As read on 2026-11-19:
+      - Backblaze's pricing makes Class A, B and C calls free for pay-as-you-go accounts; the Worker's
+        calls (PutObject, GetObject, DeleteObjects and ListObjectVersions, `server/src/b2.mjs`) are
+        all in those classes. A transaction cap therefore bounds nothing that is billed. Class D (outbound
+        event notifications) is billed and cannot be capped; the preparation above sets up no event
+        notification.
+      - What is billed is storage, and download past three times the average stored. The pages read
+        name no download cap apart from the transaction caps, so whether download can be capped is
+        not confirmed.
+      - What B2 does with a request once a cap is reached is not stated there and has not been
+        observed. A request B2 refuses, the Worker answers `502`; as the caps are the account's, file
+        sync and shared images would reach them together.
 11. **Production config.** The top level of `server/wrangler.jsonc` carries what `env.staging`
     does, with production values: `"main": "src/index.mjs"`, `assets.run_worker_first`
     `["/r/*", "/u/*", "/api/*"]`, `"observability": { "enabled": false }`, `triggers.crons`
@@ -289,8 +302,7 @@ These are outward-facing or account-level operations. Nothing in the repository 
 | `staging.umacapture.com` (custom domain) | Staging (`umacapture-web-staging`) | Applies: rule G blocks the host except while a test window is open | Staging entrance, closed outside a test window (see "Staging") |
 | Any other proxied host of the zone | — | Applies: rule G blocks it whenever it blocks staging: outside a test window, and whenever it closes production | A new proxied DNS record of the zone is blocked from its first request; decide what it is for before adding one |
 | `umacapture-guard` (no route, no custom domain) | The billing guard: a Worker run only by its Cron trigger, every minute | Does not apply: no request reaches it | Closed: no route, `workers_dev: false`, `preview_urls: false` (`server/wrangler.guard.jsonc`) |
-| `umacapture-web-staging.umasagashi.workers.dev` | Would serve staging | Does not apply | Closed: `workers_dev: false` |
-| `umacapture-web.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` |
+| `umacapture-web.<account>.workers.dev`, `umacapture-web-staging.<account>.workers.dev`, `umacapture-data.<account>.workers.dev` | Would serve the same Workers | Does not apply | Closed: `workers_dev: false` in every config. The setting takes effect when the Worker is next deployed; staging's URL, closed that way, answered `404` with `error code: 1042` |
 | Per-version preview URLs (both Workers) | Would serve each version | Does not apply | Closed: `preview_urls: false` |
 | B2 buckets `umacapture-sync`, `umacapture-sync-staging` | File sync's objects (`a/`) and shared images (`s/`), reached only by the Worker with the bucket's key. Nothing under `a/` is public. A bundle under `s/` is served to anyone who knows its share's id, through the Worker's `GET /api/shares/<id>/images` on the entrance above, while the share records it stored and `SHARE_IMAGES_ENABLED` is `"true"` | Does not apply to the bucket; the zone's rule applies to the Worker's `/api/` | Private |
 
@@ -963,9 +975,37 @@ Worker (`server/src/`), the staging database, the staging bucket and staging's h
 production ones: a clean tree, a fresh build from `HEAD` in the same run, and a `deploy.json`
 verified through the public URL.
 
-Staging is closed outside a test window, so stage 8 (the check through the public URL) fails
-there. Deploy staging only inside a window opened with `guard.sh open staging`, and close it with
-`guard.sh close staging` when the test is done ("The billing guard").
+Staging is closed outside a test window: rule G blocks `staging.umacapture.com` from `Es` on, and
+the guard keeps `Es` at 0 except while a window is open ("The billing guard"). Every test, a
+staging deployment included, goes inside a window:
+
+1. **Read the generation.** `bash tool/cloudflare/guard.sh status` shows staging's `mode` and
+   `gen`.
+2. **Open a window** with that `gen`:
+
+   ```bash
+   GUARD_BY=<who> bash tool/cloudflare/guard.sh open staging --allowance <USD> --for <n>m --gen <gen>
+   ```
+
+   `--for` takes `<n>s`, `<n>m` or `<n>h`, at most 8 hours; the allowance is what staging may spend
+   inside the window, and the budget of one test is $1. The guard writes `Es` on its next run, about
+   a minute later; until then staging is still blocked.
+3. **Deploy inside it.** Stage 8 of `deploy_web.sh` checks the deployment through
+   `https://staging.umacapture.com`, which a closed staging answers with the zone's block page
+   (`403`), so a deployment outside a window fails there after it has deployed. Stage 8 tries again
+   every 10 seconds for two minutes, which also covers the first resolution of a new host name: on
+   the first deployment to `staging.umacapture.com` the name did not resolve on the first try and did
+   on the next.
+4. **Close it** with `guard.sh close staging` when the test is done. A window left open ends by
+   itself: `Es` never goes past the window's end, so the zone blocks staging from that second on,
+   and the guard's next run records staging as `closed`.
+5. **After a trip.** A window whose allowance is used up trips staging (`trip`), and staging stays
+   blocked until the next `open`; `close` leaves a tripped staging as it is. To test again, read
+   `status` and open with the `gen` it shows.
+
+While a window is open, staging answers anyone, not only the test: requests that no one on the test
+sent have reached staging's Worker inside windows, and they spend the window's allowance as the
+test's own requests do. Keep windows as short as the test.
 
 - **Credentials.** The API token also needs Account › D1 › Edit (`tool/cloudflare/.env.example`).
   The staging database (`umacapture-share-staging`) is created once by hand, its id written into
@@ -997,11 +1037,15 @@ there. Deploy staging only inside a window opened with `guard.sh open staging`, 
 - **Stopping staging.** `env.staging.vars.SHARING_ENABLED: "false"` and a redeploy stop new
   logins and shares while reads, unshares and logouts go on; `env.staging.vars.SYNC_ENABLED:
   "false"` and a redeploy stop sync and staging's hourly run.
+  Outside a test window rule G already keeps every request from reaching staging's Worker; its
+  hourly run still runs.
   `bash tool/cloudflare/deploy_web.sh --target staging --sharing off` takes the Worker off staging
   and keeps its assets: `/r/`, `/u/` and `/api/` get the static 404, the hourly run goes, and
-  staging no longer uses the Worker and D1 usage it shares with production. Do this before the
-  Worker ships to production. The staging database and bucket are left as they are; deleting them
-  is a separate step. Every module publish still writes its name tables to the staging database,
+  staging no longer uses the Worker and D1 usage it shares with production. That deployment also
+  removes all five of staging's secrets, and a later deployment with sharing on does not bring them
+  back: before staging's Worker is used again, put each of them again with
+  `wrangler secret put <NAME> --env staging -c server/wrangler.jsonc`. The staging database and
+  bucket are left as they are; deleting them is a separate step. Every module publish still writes its name tables to the staging database,
   sharing or not, so deleting it stops every publish before the pointer changes, for as long as
   `publish_modules.sh` names staging among its targets.
 
@@ -1062,6 +1106,27 @@ Worker.
   measures.
 - **A new billing period** sets the limit back to the base. It does not clear `tripped` or stage A.
 
+### The CPU limit per invocation
+
+`limits.cpu_ms` caps the CPU time of every invocation of a Worker, its Cron runs included: 200 ms
+for `umacapture-web` and `umacapture-web-staging` (`server/wrangler.jsonc`, which `env.staging`
+inherits), and 500 ms for the guard (`server/wrangler.guard.jsonc`). The assets-only config runs no
+Worker and takes none.
+
+- **Why.** Rule G closes production about 20 minutes (`D_S`) after the last minute the guard proved,
+  so what a flood of requests is billed in that time grows with the CPU time each request may take,
+  and the budget does not bound it. 200 ms is about three times the heaviest invocation measured on
+  production (70.4 ms). The guard's limit is far above its heaviest run measured (61.4 ms): a run
+  that is cut off proves nothing, and without proof production closes.
+- **When it is exceeded**, the platform stops the invocation: the client gets error `1102`
+  (`Worker exceeded resource limits`), and Workers Analytics counts the invocation with the status
+  `exceededResources`. A guard run that is stopped may end before it writes rule G; while runs keep
+  being stopped, production closes as when the guard cannot measure.
+- **Before changing it**, compare it with the heaviest invocation measured (Workers Analytics, CPU
+  time by script), and work out again what a flood can be billed between the last proven minute and
+  rule G closing: that amount, which no budget bounds, grows with the limit. A value takes effect
+  with the next deployment of its Worker.
+
 ### Rule G is written by the guard alone
 
 - The guard knows its rule by the description, which starts with `umacapture-guard lease`. It
@@ -1106,12 +1171,15 @@ within 10% of the ledger plus $0.01 a day (`BILL_TAU`, `BILL_A_MICROS`).
 Each notification is one Sentry event in the app's project, through the DSN that
 `server/wrangler.guard.jsonc` carries as `GUARD_SENTRY_DSN` (the one `REPORT_SENTRY_DSN` names):
 environment `guard`, level `warning`, message `guard: <event>`, tag `event`, fingerprint
-`["guard", <event>]`, and only aggregate values (days, metrics, quantities, statuses), never a row of
+`["guard", <event>]`, or `["guard", <event>, <env>]` for an event about one environment (`trip`
+and `stage_a`, whose `extra.env` names it), and only aggregate values (days, metrics, quantities, statuses), never a row of
 an answer. A lasting condition is sent once when it starts; a send that fails is tried again by the
 next run, so an event can arrive twice. In Sentry, create one issue alert rule on the app's project:
 environment `guard`; when a new issue is created, or an issue changes state from resolved to
-unresolved; then notify the operator. Each event name is one issue, so resolve it once handled, or
-the next occurrence does not notify.
+unresolved; then notify the operator. Each event name, per environment where it has one, is one
+issue, so resolve it once handled, or the next occurrence does not notify. Staging's `trip` and
+production's are separate issues, so a staging test's trip left unresolved does not silence
+production's.
 
 | Event | What happened | What to do |
 |---|---|---|
@@ -1580,7 +1648,7 @@ Sync can be stopped alone, with logins and sharing going on. In this order of pr
 | `SYNC_ENABLED` `"false"` in the target's `vars`, committed, then `deploy_web.sh --target <target>` | Every endpoint under `/api/sync/` answers `503 sync_paused` before it reads anything, and the hourly run runs none of sync's kinds. Logins, sharing and account deletion go on, account deletion's B2 part and the hourly run's deletions included. D1 and B2 keep their data. What cut-off requests left to hide stays unhidden, and so undeleted by the lifecycle rule, until sync is on again | As `SHARING_ENABLED` above, the Sentry upload included for production |
 | Revoke the bucket's application key in the B2 console | B2 refuses every request the Worker sends: a sync request that has to reach B2 answers `502`, the hourly run fails, and no account deletion can finish (each call answers `502 storage_unavailable` after its D1 part). Sync resumes once a new key pair is put with `wrangler secret put B2_KEY_ID` and `B2_APPLICATION_KEY`, each of which deploys a new version at once | The B2 console only. Use it when the Worker cannot be deployed, or when the key itself may have leaked |
 | Lower a limit in `server/src/limits.mjs` (the daily limits per account and over every account, the capacity), committed, then `deploy_web.sh` | Sync past the new limit is refused (`429 daily_limit` to the next UTC day, `507` for capacity); the rest goes on ([`sync-server.md`](sync-server.md#limits)) | As `SYNC_ENABLED` |
-| B2's data caps (One-time preparation, step 10) | Bound what B2 can charge a day. A cap that is reached makes B2 refuse what it covers for the rest of the day, which the Worker answers `502`. They bound the cost, not who syncs | The B2 console only |
+| B2's data caps (One-time preparation, step 10) | Limit what B2 can charge a day for what they cover. What B2 does with a request once a cap is reached is not confirmed; a request it refuses, the Worker answers `502`. They bound the cost, not who syncs | The B2 console only |
 | Roll back to the last version without the Worker, or `deploy_web.sh --sharing off` | Sync stops together with logins and sharing (above) | As above |
 
 Turning `SYNC_ENABLED` back to `"true"` is the same commit and deployment; the next hourly run and
