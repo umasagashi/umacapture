@@ -11,7 +11,9 @@ import { Miniflare } from "miniflare";
 import { CFG, GUARD_DATABASE_ID, GUARD_SCRIPT } from "../../guard/src/config.mjs";
 import { formatLease, parseLease } from "../../guard/src/lease.mjs";
 import { RULE_MARK, RULE_MARK_PREFIX } from "../../guard/src/rules.mjs";
+import { stateConditions } from "../../guard/src/notify.mjs";
 import { runGuard } from "../../guard/src/run.mjs";
+import { sentrySender, sentrySink } from "../../guard/src/sentry.mjs";
 import { cellOf, dayOf, dayStart, periodStart } from "../../guard/src/time.mjs";
 import { migrationStatements } from "../support/worker_harness.mjs";
 
@@ -728,6 +730,28 @@ describe("guard run", () => {
       assert.deepEqual(
         c.sent.map((e) => [e.name, e.extra]),
         [["unknown_script", { script: "mystery" }]],
+      );
+    });
+
+    test("Sentry groups staging's trip and production's trip into different issues, and blind_start by its name alone", async () => {
+      const received = [];
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (_url, init) => {
+        received.push(JSON.parse(init.body.split("\n")[2]));
+        return new Response(null, { status: 200 });
+      };
+      try {
+        const send = sentrySender(sentrySink("https://key@sentry.example/42"), { environment: "guard", timeoutMs: 1_000 });
+        const tripped = { mode: "tripped", stage_a: 0, spent_at_trip_micros: 2, limit_micros: 1, open_until_s: null };
+        const trips = stateConditions({ production: tripped, staging: tripped }, NOW, cfg).filter((c) => c.start.name === "trip");
+        for (const c of trips) assert.equal(await send(c.start), true);
+        assert.equal(await send({ name: "blind_start", extra: {} }), true);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+      assert.deepEqual(
+        received.map((e) => e.fingerprint),
+        [["guard", "trip", "production"], ["guard", "trip", "staging"], ["guard", "blind_start"]],
       );
     });
   });

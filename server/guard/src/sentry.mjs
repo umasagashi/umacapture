@@ -19,6 +19,14 @@ export function sentrySink(dsn) {
 }
 
 /**
+ * The issue a notification groups into. A notification about one environment (production or staging)
+ * carries it as `extra.env`, and each environment gets its own issue: a staging test's trip left
+ * unresolved must not absorb production's trip, which Sentry would then not report as a new issue.
+ * A notification about the guard as a whole carries no env and groups by name alone.
+ */
+export const fingerprintOf = ({ name, extra }) => (typeof extra?.env === "string" ? ["guard", name, extra.env] : ["guard", name]);
+
+/**
  * The guard's `send`: posts `{ name, extra }` as one Sentry event and resolves to whether Sentry took it
  * (a 2xx). Without a sink nothing can be sent, so every notification resolves to false and stays
  * unconfirmed (the next run tries again).
@@ -38,7 +46,7 @@ export function sentrySender(sink, { environment, timeoutMs }) {
       environment,
       tags: { event: name },
       extra,
-      fingerprint: ["guard", name],
+      fingerprint: fingerprintOf({ name, extra }),
     };
     const body = [{ event_id: eventId, sent_at: sentAt, dsn: sink.dsn }, { type: "event" }, event].map((line) => JSON.stringify(line)).join("\n");
     try {
