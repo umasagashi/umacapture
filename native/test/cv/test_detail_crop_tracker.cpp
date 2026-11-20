@@ -39,6 +39,11 @@ Frame frameOfSize(int width = kWidth, int height = kHeight, uint64 timestamp = 1
     return {cv::Mat::zeros(height, width, CV_8UC3), timestamp};
 }
 
+// A frame as a shaping (live) producer hands it over: it carries the pane decision it was shaped under.
+Frame shapedFrameOfSize(const Size<int> &size) {
+    return frameOfSize(size.width(), size.height()).withPaneModeSnapshot({size, 0, std::nullopt});
+}
+
 DetailCropResult okFor(const Rect<int> &rect) {
     DetailCropResult result;
     result.status = DetailCropStatus::Ok;
@@ -88,7 +93,7 @@ struct FakeScan {
 std::optional<Frame> tryStep(DetailCropTracker &tracker, const Frame &input) {
     std::optional<Frame> frame = tracker.beginFrame(input);
     if (frame.has_value()) {
-        tracker.endFrame(*frame);
+        (void) tracker.endFrame(*frame, false);
     }
     return frame;
 }
@@ -213,9 +218,73 @@ TEST_CASE("a producer that sends no pane snapshot gets the latched pane applied 
         REQUIRE(prepared.has_value());
         CHECK(prepared->size() == kFrameSize);  // Anchored, never cropped: the pixels stay the full capture.
         CHECK(prepared->anchor().intersection() == kOneMeasured);
-        tracker.endFrame(prepared.value());
+        (void) tracker.endFrame(prepared.value(), false);
     }
     CHECK(scan.calls() == 2);  // Two candidates on the first frame; a latched tracker never re-scans.
+}
+
+TEST_CASE("a snapshot-free frame of another size is not given the correction and releases the latch") {
+    // Latched on A; the next snapshot-free frame is the LARGER B, so A's measured rect still fits inside B and
+    // only the size comparison -- not the containment gate -- can keep it off B's pixels.
+    FakeScan scan;
+    scan.answer(pane::onePaneCandidate(kFrameSize), okFor(kOneMeasured));
+    const auto latch = std::make_shared<PaneModeLatch>();
+    DetailCropTracker tracker(scan.fn(), latch);
+    step(tracker, frameOfSize());
+    REQUIRE(tracker.latched());
+
+    const Size<int> larger{800, 600};
+    REQUIRE(isCropInsideFrame(kOneMeasured, larger));
+    const Rect<int> measured_on_larger{{20, 30}, Point<int>{300, 580}};
+    scan.answer(pane::onePaneCandidate(larger), okFor(measured_on_larger));
+
+    const Frame first_larger = step(tracker, frameOfSize(larger.width(), larger.height(), 2));
+    CHECK(first_larger.anchor().intersection() == FrameAnchor::intersect(larger).intersection());
+    // Released in frame order, and this frame -- a full capture of the new size -- may be scanned at once.
+    CHECK(tracker.latched());
+    REQUIRE(tracker.correction().has_value());
+    CHECK(tracker.correction().value() == measured_on_larger);
+    CHECK(latch->rectFor(larger) == std::optional<Rect<int>>{measured_on_larger});
+
+    const Frame second_larger = step(tracker, frameOfSize(larger.width(), larger.height(), 3));
+    CHECK(second_larger.anchor().intersection() == measured_on_larger);
+}
+
+TEST_CASE("an offline size change keeps the correction on queued frames of the old size until the new size arrives") {
+    // An offline producer decodes ahead of the consumer: two more frames of size A are queued, then a frame of
+    // size B, all handed to noteFrameSize (as NativeApi::updateFrame does) before the consumer sees any of them.
+    FakeScan scan;
+    scan.answer(pane::onePaneCandidate(kFrameSize), okFor(kOneMeasured));
+    const auto latch = std::make_shared<PaneModeLatch>();
+    DetailCropTracker tracker(scan.fn(), latch);
+    tracker.noteFrameSize(frameOfSize(), kFrameSize);
+    step(tracker, frameOfSize());
+    REQUIRE(tracker.latched());
+
+    const Size<int> other{800, 600};
+    const Frame queued_a1 = frameOfSize(kWidth, kHeight, 2);
+    const Frame queued_a2 = frameOfSize(kWidth, kHeight, 3);
+    const Frame queued_b = frameOfSize(other.width(), other.height(), 4);
+    for (const auto &queued : {queued_a1, queued_a2, queued_b}) {
+        tracker.noteFrameSize(queued, queued.size());
+    }
+    CHECK(latch->rectFor(kFrameSize) == std::optional<Rect<int>>{kOneMeasured});
+
+    // A scene is running while the queue drains, so nothing may be adopted again once released.
+    for (const auto &queued : {queued_a1, queued_a2}) {
+        const auto prepared = tracker.beginFrame(queued);
+        REQUIRE(prepared.has_value());
+        CHECK(prepared->anchor().intersection() == kOneMeasured);
+        (void) tracker.endFrame(prepared.value(), true);
+    }
+    CHECK(tracker.latched());
+
+    const auto prepared_b = tracker.beginFrame(queued_b);
+    REQUIRE(prepared_b.has_value());
+    CHECK(prepared_b->anchor().intersection() == FrameAnchor::intersect(other).intersection());
+    (void) tracker.endFrame(prepared_b.value(), true);
+    CHECK_FALSE(tracker.latched());
+    CHECK_FALSE(tracker.correction().has_value());
 }
 
 TEST_CASE("requestRelease drops the pane latch immediately and tracker state on the next frame") {
@@ -239,10 +308,10 @@ TEST_CASE("a reported frame-size change releases both latches") {
     scan.answer(pane::onePaneCandidate(kFrameSize), okFor(kOneMeasured));
     const auto latch = std::make_shared<PaneModeLatch>();
     DetailCropTracker tracker(scan.fn(), latch);
-    tracker.noteFrameSize(kFrameSize);
+    tracker.noteFrameSize(shapedFrameOfSize(kFrameSize), kFrameSize);
     step(tracker, frameOfSize());
 
-    tracker.noteFrameSize({800, 600});
+    tracker.noteFrameSize(shapedFrameOfSize({800, 600}), {800, 600});
     CHECK_FALSE(latch->rectFor(kFrameSize).has_value());
     (void) tracker.beginFrame(frameOfSize(kWidth, kHeight, 2));
 
@@ -393,21 +462,22 @@ TEST_CASE("a shaped producer frame keeps both report rectangles in capture coord
         Rect<int> corrected;
     };
     std::vector<Report> reports;
-    DetailCropTracker tracker(scan.fn());
+    const auto latch = std::make_shared<PaneModeLatch>();
+    DetailCropTracker tracker(scan.fn(), latch);
     tracker.setReportCallback([&](const Rect<int> &default_rect, const Rect<int> &corrected, bool) {
         reports.push_back({default_rect, corrected});
     });
     step(tracker, frameOfSize());
 
-    // READ `shaped` AS "HAND-BUILT", NOT AS "WHAT A PRODUCER SENDS". It is pane-sized with a fixed anchor and
-    // NO pane snapshot, and no shaping mode can emit that combination -- "no shaping mode can emit cropped
-    // pixels without a pane snapshot naming that crop" below proves it directly. What this case is actually
-    // about is the REPORT: whichever frame arrives, both rectangles handed to the report callback stay in
-    // capture coordinates. The producer-shaped forms, snapshot and all, are covered by "a cropping producer's
-    // shaped frame never receives the pre-crop correction" and the two cases after it.
-    const Frame shaped = Frame::fixed(cv::Mat::zeros(kOneMeasured.height(), kOneMeasured.width(), CV_8UC3), 2);
+    // A pane-sized frame with a fixed anchor and the snapshot the producer shaped it under, the form a cropping
+    // producer sends once latched. What this case is about is the REPORT: both rectangles handed to the report
+    // callback stay in capture coordinates although the frame is smaller. How the anchor itself is produced is
+    // covered by "a cropping producer's shaped frame never receives the pre-crop correction" and the two cases
+    // after it.
+    const Frame shaped = Frame::fixed(cv::Mat::zeros(kOneMeasured.height(), kOneMeasured.width(), CV_8UC3), 2)
+                             .withPaneModeSnapshot(latch->snapshotFor(kFrameSize));
     const Frame passed = tracker.beginFrame(shaped).value();
-    tracker.endFrame(passed);
+    (void) tracker.endFrame(passed, false);
 
     REQUIRE(reports.size() == 1);
     CHECK(reports[0].default_rect == FrameAnchor::intersect(kFrameSize).intersection());
@@ -463,7 +533,7 @@ TEST_CASE("a release between beginFrame and endFrame prevents that frame from re
 
     const Frame frame = tracker.beginFrame(frameOfSize()).value();
     tracker.requestRelease();
-    tracker.endFrame(frame);
+    (void) tracker.endFrame(frame, false);
 
     CHECK(scan.calls() == 2);
     CHECK_FALSE(tracker.latched());
@@ -647,10 +717,10 @@ TEST_CASE("repeating the same reported frame size does not release either latch"
     scan.answer(pane::onePaneCandidate(kFrameSize), okFor(kOneMeasured));
     const auto latch = std::make_shared<PaneModeLatch>();
     DetailCropTracker tracker(scan.fn(), latch);
-    tracker.noteFrameSize(kFrameSize);
+    tracker.noteFrameSize(shapedFrameOfSize(kFrameSize), kFrameSize);
     step(tracker, frameOfSize());
 
-    tracker.noteFrameSize(kFrameSize);
+    tracker.noteFrameSize(shapedFrameOfSize(kFrameSize), kFrameSize);
     (void) tracker.beginFrame(frameOfSize(kWidth, kHeight, 2));
 
     CHECK(tracker.latched());
@@ -738,30 +808,6 @@ TEST_CASE("a partial copy larger than the pane keeps the producer's local anchor
     CHECK_FALSE(prepared->anchor().intersection() == kWideMeasured);
 }
 
-// The residual, stated as a fact rather than left implied: the correction branch DOES mis-anchor cropped
-// pixels -- it is simply unreachable, because the only thing that produces cropped pixels also attaches the
-// snapshot that routes them away from it. This test builds the frame by hand, bypassing shapeCapturedFrame,
-// and is therefore evidence about the guard's necessity, NOT about a reachable defect. The test below it
-// pins that no shaping mode can emit such a frame.
-TEST_CASE("only a producer bypassing the shaping seam can reach the correction with cropped pixels") {
-    FakeScan scan;
-    const auto latch = std::make_shared<PaneModeLatch>();
-    DetailCropTracker tracker(scan.fn(), latch);
-    scan.answer(pane::twoPaneCandidate(kWideSize), okFor(kWideMeasured));
-    step(tracker, frameOfSize(kWideWidth, kWideHeight));
-
-    const Point<int> copy_origin{2, 0};
-    const Frame hand_built = frameOfSize(kWideWidth - copy_origin.x(), kWideHeight, 2)
-                                 .reanchored({kWideMeasured.topLeft() - copy_origin, kWideMeasured.size()});
-    REQUIRE_FALSE(hand_built.paneModeSnapshot().has_value());
-
-    const auto prepared = tracker.beginFrame(hand_built);
-    REQUIRE(prepared.has_value());
-    // Off by the copy origin: the pre-crop rectangle applied to post-crop pixels.
-    CHECK(prepared->anchor().intersection() == kWideMeasured);
-    CHECK_FALSE(prepared->anchor().intersection() == hand_built.anchor().intersection());
-}
-
 TEST_CASE("no shaping mode can emit cropped pixels without a pane snapshot naming that crop") {
     const cv::Mat captured = cv::Mat::zeros(kWideHeight, kWideWidth, CV_8UC3);
     for (const auto mode :
@@ -805,7 +851,7 @@ TEST_CASE("a shaped frame whose capture geometry changed is dropped, not silentl
     scan.answer(pane::onePaneCandidate(kFrameSize), okFor(kOneMeasured));
     const auto latch = std::make_shared<PaneModeLatch>();
     DetailCropTracker tracker(scan.fn(), latch);
-    tracker.noteFrameSize(kFrameSize);
+    tracker.noteFrameSize(shapedFrameOfSize(kFrameSize), kFrameSize);
     step(tracker, frameOfSize());
     REQUIRE(tracker.latched());
 
@@ -819,7 +865,7 @@ TEST_CASE("a shaped frame whose capture geometry changed is dropped, not silentl
         // re-check has nothing to see and the consumer-side check is the one under test.
         pixels, 2, snapshot, frame_shaper::ShapingMode::CopiedRegion, frame_shaper::paneCopyOrigin(snapshot));
     REQUIRE(shaped.ok());
-    tracker.noteFrameSize({kWidth + 8, kHeight});
+    tracker.noteFrameSize(shaped.frame, {kWidth + 8, kHeight});
 
     CHECK_FALSE(tracker.beginFrame(shaped.frame).has_value());
 }

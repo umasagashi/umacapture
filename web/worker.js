@@ -53,9 +53,9 @@ import { decodeClipIntoPipeline, IMPORT_UNBRAKED, probeClipTimeline, grabClipFra
 //                                    // Module.init; a RUNNING loop is deliberately left alone, because the core
 //                                    // reads its keys once per session. Stamped with an arrival-order
 //                                    // `configSeq` in onmessage so an await cannot reorder two of them
-//     { type:'resetDetailCropCalibration' }   // the settings "restore defaults" action. Unlike setInitConfig it
-//                                    // acts on the RUNNING core -- the reset is a lock-free flag the next frame
-//                                    // consumes -- and before the core exists it is a logged no-op
+//     { type:'resetDetailCropCalibration' }   // sent when the calibration is turned off. Unlike setInitConfig it
+//                                    // acts on the RUNNING core -- the latch is released at once and the next
+//                                    // frame clears the rest -- and before the core exists it is a logged no-op
 //     { type:'stopLive' }            // end the live session (flush + harvest, same path as `stop`)
 //     { type:'startVideoImport', file }   // begin a VIDEO IMPORT session over `file`, a Blob/File posted by
 //                                    // structured clone (never read into an ArrayBuffer first -- mediabunny's
@@ -623,9 +623,9 @@ self.onmessage = async (event) => {
         }
         break;
       case 'resetDetailCropCalibration':
-        // The settings "restore defaults" action. Unlike setInitConfig this acts on the RUNNING core: the
-        // reset is a lock-free flag the next frame consumes, so it takes effect mid-session, which is the
-        // point of the button. Before the core exists there is nothing latched to release, so the guarded
+        // Sent when the calibration is turned off. Unlike setInitConfig this acts on the RUNNING core: the
+        // latch the module holds is released now, and the next frame clears the rest, rather than waiting
+        // for the next Module.init. Before the core exists there is nothing latched to release, so the guarded
         // no-op below is the whole handling of that case.
         if (Module === null) {
           log('worker: detail-crop calibration reset before the core loaded; nothing to release');
@@ -1033,14 +1033,8 @@ function startDrainLoop() {
       // until the 120 s timeout. The error still relays 1:1 below, so the Dart side moves to the failed state
       // exactly as on desktop.
       //
-      // The onError must be attributed to THIS update, not merely observed during it: a record regeneration is
-      // a passenger on a shared event loop (see handleUpdateRecord), so a live capture running alongside it
-      // emits its own onErrors into the very same message queue: the attempt-ending tags that
-      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, stitch_failed), and
-      // per-frame failures such as updateFrame failed. Counting one of those as the regeneration's failure
-      // would fail a record that never failed. This is the same coexistence the desktop implements on
-      // purpose (native_controller.h), so the
-      // attribution, not the coexistence, is what has to be fixed.
+      // Attribute onError to its updateRecord: live capture shares this queue (see handleUpdateRecord),
+      // so a capture failure such as capture_size_changed must not count as the update's failure.
       if (parsed && parsed.type === 'onError') {
         const target = updateFailureTarget(parsed.message);
         if (target !== null) {
@@ -1571,7 +1565,7 @@ function releaseSession(reason) {
   }
 }
 
-// Drops the detail-crop auto-calibration on the RUNNING loop, for the settings "restore defaults" action. A
+// Drops the detail-crop auto-calibration on the RUNNING loop, sent when the calibration is turned off. A
 // capture session does not call this: the reset is part of NativeApi::startCaptureSession, so it happens for an
 // adopted loop too (a reset riding on Module.init would be silently skipped for exactly that case, carrying the
 // earlier calibrated crop into the live session). A record regeneration deliberately never resets -- it reuses

@@ -204,9 +204,125 @@ private:
     inline static Size<int> base_size = {540, 960};
 };
 
+// Which way the forwarding site's band actually moved a frame's anchor unit. Decided by the frame's owner from the
+// unit before and after the band (Frame::forwardedThroughBand), not from which arm of the band applied: a frame a
+// few pixels below the lower bound selects the enlarge arm but is left alone by resizedToUnit's tolerance, and a
+// reader that re-derived the arm from the bound would call it enlarged.
+enum class ResizeArm { Untouched, Enlarged, Shrunk };
+
+inline void to_json(json_util::Json &json, const ResizeArm &arm) {
+    switch (arm) {
+        case ResizeArm::Untouched: json = "untouched"; return;
+        case ResizeArm::Enlarged: json = "enlarged"; return;
+        case ResizeArm::Shrunk: json = "shrunk"; return;
+    }
+    throw std::invalid_argument("unknown ResizeArm value");
+}
+
+// What the forwarding site (CharaDetailSceneContext::update) did to one frame's size, carried on the frame it
+// forwards so the scraper can write it next to the record it scrapes.
+// - `band`: the band the pipeline was configured with; nullopt when the frame-resize setting is off.
+// - `captured_size`: the size the producer captured, before any producer shaping (NativeApi::updateFrame's
+//   `original_size`); nullopt for a frame that did not enter through updateFrame.
+// - `pre_band_unit` / `unit`: the anchor unit (intersection width) before and after the band. The pre-band
+//   unit is the quantity the band decides on, after crop calibration -- not the width of the captured frame.
+// - `arm()`: what the band actually did, derived from the two units; see ResizeArm. Written as `arm` so a reader
+//   of the JSON need not derive it, and not read back: the two units already decide it.
+// Optional fields are written as an explicit null, so a reader can tell "off" from "not recorded".
+struct ForwardedFrameResize {
+    std::optional<Range<int>> band;
+    std::optional<Size<int>> captured_size;
+    int pre_band_unit;
+    int unit;
+
+    [[nodiscard]] ResizeArm arm() const { return armOf(pre_band_unit, unit); }
+
+    [[nodiscard]] bool operator==(const ForwardedFrameResize &other) const {
+        const bool same_band = band.has_value() == other.band.has_value()
+                            && (!band.has_value()
+                                || (band->min() == other.band->min() && band->max() == other.band->max()));
+        return same_band && captured_size == other.captured_size && pre_band_unit == other.pre_band_unit
+            && unit == other.unit;
+    }
+
+    [[nodiscard]] static ResizeArm armOf(int pre_band_unit, int unit) {
+        if (unit > pre_band_unit) {
+            return ResizeArm::Enlarged;
+        }
+        if (unit < pre_band_unit) {
+            return ResizeArm::Shrunk;
+        }
+        return ResizeArm::Untouched;
+    }
+};
+
+inline void to_json(json_util::Json &json, const ForwardedFrameResize &resize) {
+    json = json_util::Json::object();
+    json["band"] = resize.band.has_value() ? json_util::Json(resize.band.value()) : json_util::Json(nullptr);
+    json["captured_size"] =
+        resize.captured_size.has_value() ? json_util::Json(resize.captured_size.value()) : json_util::Json(nullptr);
+    json["pre_band_unit"] = resize.pre_band_unit;
+    json["unit"] = resize.unit;
+    json["arm"] = resize.arm();
+}
+
+inline ForwardedFrameResize forwardedFrameResizeFromJson(const json_util::Json &json) {
+    return {
+        json_util::optional_from_json(json, "band", json_util::AsType<std::optional<Range<int>>>()),
+        json_util::optional_from_json(json, "captured_size", json_util::AsType<std::optional<Size<int>>>()),
+        json.at("pre_band_unit").get<int>(),
+        json.at("unit").get<int>(),
+    };
+}
+
+inline void from_json(const json_util::Json &json, ForwardedFrameResize &resize) {
+    resize = forwardedFrameResizeFromJson(json);
+}
+
+// One distinct ForwardedFrameResize and how many frames carried it.
+struct ForwardedFrameResizeCount {
+    ForwardedFrameResize resize;
+    int frames;
+};
+
+inline void to_json(json_util::Json &json, const ForwardedFrameResizeCount &count) {
+    to_json(json, count.resize);
+    json["frames"] = count.frames;
+}
+
+inline void from_json(const json_util::Json &json, ForwardedFrameResizeCount &count) {
+    count = {forwardedFrameResizeFromJson(json), json.at("frames").get<int>()};
+}
+
+// The resize facts of one stitched tab image, written into its side JSON as `frame_resize`.
+// - `base`: the facts of the frame the record's base image was taken from. Every tab image is assembled on a
+//   canvas of that frame's size, so this is what decides the saved images' resolution. Null when that frame
+//   carried no facts.
+// - `tab_frames`: every distinct set of facts among the frames fed to this tab's scraper, in first-seen order,
+//   with how many frames carried it. Empty for a tab that was not scraped.
+struct TabFrameResize {
+    std::optional<ForwardedFrameResize> base;
+    std::vector<ForwardedFrameResizeCount> tab_frames;
+};
+
+inline void to_json(json_util::Json &json, const TabFrameResize &info) {
+    json = json_util::Json::object();
+    json["base"] = info.base.has_value() ? json_util::Json(info.base.value()) : json_util::Json(nullptr);
+    json["tab_frames"] = info.tab_frames;
+}
+
+inline void from_json(const json_util::Json &json, TabFrameResize &info) {
+    const auto &base = json.at("base");
+    info.base = base.is_null() ? std::nullopt : std::optional<ForwardedFrameResize>{forwardedFrameResizeFromJson(base)};
+    info.tab_frames = json.at("tab_frames").get<std::vector<ForwardedFrameResizeCount>>();
+}
+
+// The side JSON written next to every stitched tab image. `frame_resize` is omitted when the record was
+// assembled without resize facts (an offline re-stitch of a scraping directory that has none).
 struct FrameInfo {
     Rect<int> intersection;
-    EXTENDED_JSON_TYPE_NDC(FrameInfo, intersection);
+    std::optional<TabFrameResize> frame_resize;
+    EXTENDED_JSON_TYPE_NDC(FrameInfo, intersection, frame_resize);
 };
 
 // A thin handle over a reference-counted cv::Mat. Copying a Frame is shallow: copies share the same pixel
@@ -310,6 +426,24 @@ public:
 
     [[nodiscard]] inline const std::optional<PaneModeLatch::Snapshot> &paneModeSnapshot() const {
         return pane_mode_snapshot_;
+    }
+
+    // Carries the size the producer captured, before any producer shaping, through the capture queue.
+    // NativeApi::updateFrame stamps it from its `original_size`; a frame that did not pass through there has none.
+    // Unlike the pane snapshot, it is a fact about the capture the pixels came from, not about this frame's anchor
+    // or region, so every frame derived from this one carries it (see withCaptureFactsOf).
+    [[nodiscard]] inline Frame withCapturedSize(const Size<int> &captured_size) const {
+        Frame stamped = *this;
+        stamped.captured_size_ = captured_size;
+        return stamped;
+    }
+
+    [[nodiscard]] inline const std::optional<Size<int>> &capturedSize() const { return captured_size_; }
+
+    // What the forwarding site did to the capture's size; set by forwardedThroughBand, and carried by every frame
+    // derived from the one it returned (see withCaptureFactsOf).
+    [[nodiscard]] inline const std::optional<ForwardedFrameResize> &forwardedResize() const {
+        return forwarded_resize_;
     }
 
     [[nodiscard]] bool isIn(const Range<Color> &color_range, const Point<double> &point) const {
@@ -483,6 +617,8 @@ public:
     [[nodiscard]] inline Frame clone() const {
         Frame cloned{image.clone(), timestamp_, anchor_};
         cloned.pane_mode_snapshot_ = pane_mode_snapshot_;
+        cloned.captured_size_ = captured_size_;
+        cloned.forwarded_resize_ = forwarded_resize_;
         return cloned;
     }
 
@@ -494,7 +630,22 @@ public:
     // The CALLER owns the containment check (see isCropInsideFrame in cv/detail_crop_tracker.h): an
     // intersection reaching outside the image makes the coordinate math below throw from bgrAt/view.
     [[nodiscard]] inline Frame reanchored(const Rect<int> &intersection) const {
-        return {image, timestamp_, FrameAnchor::fixed(size(), intersection)};
+        return Frame{image, timestamp_, FrameAnchor::fixed(size(), intersection)}.withCaptureFactsOf(*this);
+    }
+
+    // A copy of this frame whose intersection is moved `dx` pixels along x, with the same unit and the same
+    // vertical placement. Shallow like any other Frame copy. It is for reading a PART of the frame that the game
+    // drew `dx` pixels away from where the layout puts it: every normalized coordinate mapped through the copy's
+    // anchor lands `dx` pixels over, and nothing else changes. The copy's anchor describes that part only, never
+    // the whole frame, so it must not leave the reader that made it.
+    //
+    // Unlike reanchored, the moved intersection MAY reach outside the image, and that is part of the contract: a
+    // part drawn near the image's left edge moves the intersection's left edge below 0. What must stay inside the
+    // image is every rect the caller reads through the copy; reading outside makes bgrAt/view throw, as on any
+    // frame. A shift of 0 yields an anchor identical to this frame's.
+    [[nodiscard]] inline Frame shiftedHorizontally(int dx) const {
+        const auto moved = anchor_.intersection() + Point<int>{dx, 0};
+        return Frame{image, timestamp_, FrameAnchor::fixed(size(), moved)}.withCaptureFactsOf(*this);
     }
 
     // How far the frame's own unit may sit from a requested one before the resize is skipped as not worth
@@ -581,7 +732,8 @@ public:
         const int height = std::clamp(static_cast<int>(std::lround(source.height() * scale)), 1, target.height());
         const int left = std::clamp(static_cast<int>(std::lround(source.left() * scale)), 0, target.width() - width);
         const int top = std::clamp(static_cast<int>(std::lround(source.top() * scale)), 0, target.height() - height);
-        return {resized, timestamp_, FrameAnchor::fixed(target, {{left, top}, Size<int>{width, height}})};
+        return Frame{resized, timestamp_, FrameAnchor::fixed(target, {{left, top}, Size<int>{width, height}})}
+            .withCaptureFactsOf(*this);
     }
 
     // The band form of the transform above, and the form the pipeline actually configures: resize this
@@ -616,6 +768,18 @@ public:
             return resizedToUnit(band.max());
         }
         return *this;
+    }
+
+    // The forwarding site's whole step: apply `band` when there is one (nullopt: the setting is off, forward the
+    // frame as is), and attach what happened as a ForwardedFrameResize -- the band, `captured_size`, the unit
+    // before and after, from which the arm follows. The captured size is this frame's own (capturedSize), which
+    // the crop tracker's re-anchored copy carries like any derivative.
+    [[nodiscard]] inline Frame forwardedThroughBand(const std::optional<Range<int>> &band) const {
+        const int pre_band_unit = anchor_.intersection().width();
+        Frame forwarded = band.has_value() ? resizedIntoBand(band.value()) : *this;
+        const int unit = forwarded.anchor_.intersection().width();
+        forwarded.forwarded_resize_ = ForwardedFrameResize{band, captured_size_, pre_band_unit, unit};
+        return forwarded;
     }
 
     // The shrink arm's DEAD BAND, as a MULTIPLE of the band's upper bound rather than as an absolute width.
@@ -695,11 +859,13 @@ public:
         }
     }
 
-    void dump(const std::filesystem::path &path) const {
+    // Saves the image and its side JSON (FrameInfo). `frame_resize` goes into the side JSON as is; nullopt omits it.
+    void dump(
+        const std::filesystem::path &path, const std::optional<TabFrameResize> &frame_resize = std::nullopt) const {
         save(path);
         std::filesystem::path info_path = path;
         info_path.replace_extension(".json");
-        json_util::write(info_path, FrameInfo{anchor().intersection()}, 4);
+        json_util::write(info_path, FrameInfo{anchor().intersection(), frame_resize}, 4);
     }
 
 private:
@@ -731,7 +897,18 @@ private:
         if (x < 0 || y < 0 || width < 0 || height < 0 || (x + width) > image.cols || (y + height) > image.rows) {
             throw std::out_of_range("Frame::view out of bounds");
         }
-        return fixed(image({x, y, width, height}), timestamp_);
+        return fixed(image({x, y, width, height}), timestamp_).withCaptureFactsOf(*this);
+    }
+
+    // `derived`, a frame made from `source`'s pixels, with `source`'s capture facts (capturedSize, forwardedResize).
+    // They describe the capture the pixels came from, so neither a new anchor nor a region nor a rescale makes them
+    // false. The pane snapshot is deliberately NOT carried: it is the producer's authority over the anchor, and a
+    // derivative with another anchor no longer has the anchor that authority was given for.
+    [[nodiscard]] inline Frame withCaptureFactsOf(const Frame &source) const {
+        Frame derived = *this;
+        derived.captured_size_ = source.captured_size_;
+        derived.forwarded_resize_ = source.forwarded_resize_;
+        return derived;
     }
 
     // Maps `rect` (normalized coordinates) to frame pixels and clips it to the image bounds. An empty rect
@@ -753,6 +930,8 @@ private:
     uint64 timestamp_;
     FrameAnchor anchor_;
     std::optional<PaneModeLatch::Snapshot> pane_mode_snapshot_;
+    std::optional<Size<int>> captured_size_;
+    std::optional<ForwardedFrameResize> forwarded_resize_;
 };
 
 }  // namespace uma

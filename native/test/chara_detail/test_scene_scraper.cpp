@@ -289,6 +289,8 @@ struct ScraperHarness {
     event_util::Connection<SceneInfo> opened = event_util::makeDirectConnection<SceneInfo>();
     event_util::Connection<Frame, SceneState> updated = event_util::makeDirectConnection<Frame, SceneState>();
     event_util::Connection<> closed = event_util::makeDirectConnection<>();
+    event_util::Connection<std::optional<Size<int>>, std::optional<Size<int>>> resized =
+        event_util::makeDirectConnection<std::optional<Size<int>>, std::optional<Size<int>>>();
     event_util::Connection<RecordInfo> closed_before_completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<int> scroll_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<int, double> scroll_updated = event_util::makeDirectConnection<int, double>();
@@ -307,7 +309,8 @@ struct ScraperHarness {
     event_util::Connection<RecordInfo> started = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<DiscardedSession, RecordInfo> restarted =
         event_util::makeDirectConnection<DiscardedSession, RecordInfo>();
-    event_util::Connection<RecordInfo> session_failed = event_util::makeDirectConnection<RecordInfo>();
+    event_util::Connection<RecordInfo, SessionFailure> session_failed =
+        event_util::makeDirectConnection<RecordInfo, SessionFailure>();
 
     std::vector<DiscardedSession> discards;
     // The session each reset BEGAN, in the order of `discards`, and every session build() announced. What lets a
@@ -317,6 +320,8 @@ struct ScraperHarness {
     // The identity every on_session_failed carried, in order: the id an attempt that could not be built ends
     // under. What lets a case state that a refused directory ends the attempt instead of crashing on it.
     std::vector<RecordInfo> failures;
+    // The reason each of `failures` carried, in the same order.
+    std::vector<SessionFailure> failure_reasons;
     // The identity every on_completed carried, in order: the id a session's record finishes under.
     std::vector<RecordInfo> completed_infos;
     // Every verdict the character-switch rule stated, in order, each with how many sessions had been discarded when
@@ -461,6 +466,7 @@ struct ScraperHarness {
               opened,
               updated,
               closed,
+              resized,
               closed_before_completed,
               scroll_ready,
               scroll_updated,
@@ -490,8 +496,9 @@ struct ScraperHarness {
             sequence.emplace_back("started");
             view = FrontEndView{};
         });
-        session_failed->listen([this](const RecordInfo &info) {
+        session_failed->listen([this](const RecordInfo &info, SessionFailure reason) {
             failures.push_back(info);
+            failure_reasons.push_back(reason);
             sequence.emplace_back("session_failed");
         });
         factor_switch_judged->listen(
@@ -2732,6 +2739,7 @@ TEST_CASE("an opened attempt whose session cannot be built ends as a failure und
     // next frame to dereference.
     REQUIRE(h.failures.size() == 1);
     CHECK(h.failures[0].record_id == h.starts[0].record_id);
+    CHECK(h.failure_reasons[0] == SessionFailure::ScrapeFailed);
 
     // Later frames are inert: nothing is scraped, nothing reaches the wire, and no directory is retried.
     const std::size_t refused_before = h.recorder.refused.size();
@@ -2746,6 +2754,50 @@ TEST_CASE("an opened attempt whose session cannot be built ends as a failure und
     // And the close says nothing more: the attempt already reported its own, more specific outcome.
     h.closed->send();
     CHECK(closed_unfinished.empty());
+}
+
+TEST_CASE("a capture size change while scraping ends the attempt under its id, and the close adds nothing") {
+    // The scene context reports a size change once, on the first frame of the new size, without ending the
+    // scene: the detail screen is still open. The attempt in flight cannot become one record of one geometry any
+    // more, so it ends here with its own reason -- and the close that follows must not add a second, less
+    // specific failure on top of it.
+    ScraperHarness h;
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen([&closed_unfinished](const RecordInfo &info) {
+        closed_unfinished.push_back(info);
+    });
+
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+    h.update(solidFrameAt(0, kNoBanner), SceneState{SkillPage, record::Standard});
+    REQUIRE(h.failures.empty());
+
+    h.resized->send(Size<int>{720, 1280}, Size<int>{540, 960});
+
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.starts[0].record_id);
+    CHECK(h.failure_reasons[0] == SessionFailure::CaptureSizeChanged);
+
+    // The failed attempt ignores everything until the screen closes: further frames and further changes.
+    REQUIRE_NOTHROW(h.update(solidFrameAt(kPastDwell, kNoBanner), SceneState{SkillPage, record::Standard}));
+    h.resized->send(Size<int>{540, 960}, Size<int>{720, 1280});
+    CHECK(h.failures.size() == 1);
+    CHECK(h.starts.size() == 1);
+    CHECK(h.completed_infos.empty());
+
+    h.closed->send();
+    CHECK(closed_unfinished.empty());
+}
+
+TEST_CASE("a capture size change after the attempt completed fails nothing") {
+    // The record already went out, all of one size; a change after it is not a change during the capture.
+    ScraperHarness h;
+    h.opened->send(SceneInfo{record::Standard});
+    completeSession(h, captureFactorWithoutScrollBar);
+    REQUIRE(h.completed_infos.size() == 1);
+
+    h.resized->send(Size<int>{720, 1280}, Size<int>{540, 960});
+    CHECK(h.failures.empty());
 }
 
 TEST_CASE("a reset whose session cannot be built ends as a failure under the id the reset announced") {

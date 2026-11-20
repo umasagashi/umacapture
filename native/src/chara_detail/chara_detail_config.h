@@ -412,6 +412,20 @@ struct TraineeIconConfig {
     EXTENDED_JSON_TYPE_NDC(TraineeIconConfig, icon, rank);
 };
 
+// Where the factor tab's green banner (the "因子" header) starts on the left, and how far from that the reader
+// accepts as "not moved". All x values are normalized like any IntersectStart x (multiplied by the anchor unit and
+// offset by the intersection's left edge). FactorRowReader::findBanner measures the banner's left edge inside
+// [search_from, search_to]; FactorRowReader::alignToList compares it with nominal_left and moves the list's cells
+// by the difference unless it is within deadband.
+struct BannerEdgeConfig {
+    double nominal_left;
+    double search_from;
+    double search_to;
+    double deadband;
+
+    EXTENDED_JSON_TYPE_NDC(BannerEdgeConfig, nominal_left, search_from, search_to, deadband);
+};
+
 struct FactorTabConfig {
     std::string module_path;
     Range<Color> bg_color;
@@ -427,6 +441,8 @@ struct FactorTabConfig {
 
     TraineeIconConfig trainee_icon;
 
+    BannerEdgeConfig banner_edge;
+
     EXTENDED_JSON_TYPE_NDC(
         FactorTabConfig,
         module_path,
@@ -440,7 +456,8 @@ struct FactorTabConfig {
         vertical_factor_gap,
         vertical_chara_gap,
         factor_rank,
-        trainee_icon);
+        trainee_icon,
+        banner_edge);
 };
 
 struct SupportCardRankConfig {

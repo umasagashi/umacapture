@@ -195,6 +195,7 @@
                     },
                     "failed": {
                         "text": {
+                            "capture_size_changed": "キャプチャ中にゲーム画面の大きさが変わりました",
                             "closed_before_completed": "キャプチャ完了前に詳細画面を見失いました",
                             "generic": "キャプチャ中にエラーが発生しました"
                         },

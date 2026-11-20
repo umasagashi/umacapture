@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #pragma clang diagnostic push
@@ -496,6 +497,138 @@ TEST_CASE("the stitched recognition stops at config.area as well") {
     CHECK(idsOf(record.factors.self) == std::vector<int>{11, 12, 21, 22});
     CHECK(record.factors.parent1.empty());
     CHECK(record.factors.parent2.empty());
+}
+
+// THE LIST DRAWN AWAY FROM ITS PLACE. On a detail dialog opened from a screen without the prev/next arrows, the
+// game draws the factor tab's list, banner included, a few pixels left of where it draws it everywhere else, and
+// nothing else on the dialog moves. These cases paint that at a 540 px unit with the shipped geometry: the banner
+// starting at round(nominal_left * 540) + shift, and below it one factor row whose left column carries the
+// correct id in its first 6 px and a wrong one after them. A reader that reads the cell where the layout puts it,
+// instead of where the banner says the list is, lands 6 px right of the cell's left edge, inside the wrong id.
+// ---------------------------------------------------------------------------------------------------
+
+constexpr int kShiftedUnit = 540;
+constexpr int kListMarker = 11;  // the id painted at the cell's real left edge
+constexpr int kOffsetMarker = 99;  // the id 6 px further right, where an unshifted read lands
+
+// productionFactorConfig with the shipped anchors of the columns (IntersectStart across, like every list cell),
+// the shipped banner_edge and the shipped trainee icon. Copies of native/tool/builder/chara_detail_recognizer_builder.h
+// (factorTab / factorBannerEdge); test_config.cpp checks the shipped banner_edge against the stitcher.
+recognizer_config::FactorTabConfig shippedGeometryConfig() {
+    auto config = productionFactorConfig();
+    const auto acrossFromIntersection = [](const Rect<double> &r) {
+        return Rect<double>{
+            {r.left(), r.top(), {IntersectStart, ScreenStart}},
+            {r.right(), r.bottom(), {IntersectStart, ScreenStart}},
+        };
+    };
+    config.left_rect = acrossFromIntersection(config.left_rect);
+    config.right_rect = acrossFromIntersection(config.right_rect);
+    config.trainee_icon.icon.rect = Rect<double>{
+        {0.0481, 0.9056 - kScanTop, {IntersectStart, ScreenStart}},
+        {0.1852, 1.0426 - kScanTop, {IntersectStart, ScreenStart}},
+    };
+    config.banner_edge = {0.0426, 0.0241, 0.0620, 0.0028};
+    return config;
+}
+
+struct ShiftedTab {
+    cv::Mat mat;
+    int banner_top;
+};
+
+// A 540x960 factor tab whose banner and list are drawn `shift` px right of the layout (negative: left). The
+// banner's top row is 10 px below the scroll area's top; it spans from its left edge to x 510 and carries a
+// background-coloured block, the "因子" lettering, inside. The factor row starts 2 px below where the read begins
+// looking for it.
+ShiftedTab shiftedFactorTab(const recognizer_config::FactorTabConfig &config, int shift) {
+    const auto px = [](double v) { return static_cast<int>(std::lround(v * kShiftedUnit)); };
+    cv::Mat mat(960, kShiftedUnit, CV_8UC3, cv::Scalar(245, 245, 245));
+    const int banner_top = px(config.area.top()) + 10;
+    const int banner_left = px(config.banner_edge.nominal_left) + shift;
+    slab(mat, banner_left, 510, banner_top, banner_top + 16, 70);
+    mat(cv::Rect(banner_left + 20, banner_top + 4, 30, 8)).setTo(cv::Scalar(250, 250, 250));
+    const int row_top = banner_top + px(config.vertical_banner_bottom_delta) + 2;
+    const int column_left = px(config.left_rect.left()) + shift;
+    slab(mat, column_left, column_left + 6, row_top, row_top + 40, kListMarker);
+    slab(mat, column_left + 6, px(config.left_rect.right()) + shift, row_top, row_top + 40, kOffsetMarker);
+    return {mat, banner_top};
+}
+
+FactorTabRecognizer shiftedTabRecognizer(const recognizer_config::FactorTabConfig &config) {
+    return {
+        config,
+        std::make_shared<const FactorRowReader>(
+            config, markerFactorPredictor(), constantPredictor<int>("factor_rank", 0)),
+        constantPredictor<Chara>("character", Chara{}),
+        constantPredictor<int>("character_rank", 0),
+    };
+}
+
+TEST_CASE("a factor list drawn left of its place is read where it is drawn, on both reading paths") {
+    const auto config = shippedGeometryConfig();
+    const auto recognizer = shiftedTabRecognizer(config);
+    const FactorRowReader reader{config, markerFactorPredictor(), constantPredictor<int>("factor_rank", 0)};
+
+    // The trainee icon's left edge in the frame's pixels after a read of the tab drawn `shift` px over.
+    const auto readTab = [&](int shift) {
+        const Frame frame = Frame::fixed(shiftedFactorTab(config, shift).mat);
+        record::CharaDetailRecord record{};
+        CropInfo crop_info;
+        PredictionHistory history;
+        recognizer.recognize(frame, RecordInfo{"record", record::Standard}, record, crop_info, history);
+        const auto prefix = reader.visibleSelfPrefix(frame, boundOnly(config.area));
+        return std::make_tuple(
+            idsOf(record.factors.self), idsOf(prefix), frame.anchor().mapToFrame(crop_info.trainee_icon).left(),
+            crop_info.factor_list_alignment);
+    };
+
+    const auto [nominal_ids, nominal_prefix, nominal_icon_left, nominal_alignment] = readTab(0);
+    const auto [shifted_ids, shifted_prefix, shifted_icon_left, shifted_alignment] = readTab(-6);
+
+    // The stitched read reports the alignment it read the list with (prediction.json's factor_tab_alignment).
+    const int nominal_left = static_cast<int>(std::lround(config.banner_edge.nominal_left * kShiftedUnit));
+    REQUIRE(nominal_alignment.has_value());
+    CHECK(nominal_alignment->banner_left_edge == std::optional<int>{nominal_left});
+    CHECK(nominal_alignment->nominal_left == nominal_left);
+    CHECK(nominal_alignment->shift == 0);
+    REQUIRE(shifted_alignment.has_value());
+    CHECK(shifted_alignment->banner_left_edge == std::optional<int>{nominal_left - 6});
+    CHECK(shifted_alignment->nominal_left == nominal_left);
+    CHECK(shifted_alignment->shift == -6);
+
+    // At the layout's place the shift is 0, and so is every cell's move: each cell is read at its nominal position.
+    CHECK(nominal_ids == std::vector<int>{kListMarker});
+    CHECK(nominal_prefix == std::vector<int>{kListMarker});
+    CHECK(nominal_icon_left == static_cast<int>(std::lround(0.0481 * kShiftedUnit)));
+    // 6 px left: the stitched read and the single-frame read both read the cell where it is drawn, and the trainee
+    // icon is cut 6 px further left.
+    CHECK(shifted_ids == std::vector<int>{kListMarker});
+    CHECK(shifted_prefix == std::vector<int>{kListMarker});
+    CHECK(shifted_icon_left == nominal_icon_left - 6);
+}
+
+TEST_CASE("a banner edge that cannot be measured leaves the list at its nominal place") {
+    // Both frames hold the list at the layout's place. A measurement that took the window's end for the banner's
+    // edge would move the reading off the cell, so the ids say whether the edge was refused.
+    const auto config = shippedGeometryConfig();
+    const FactorRowReader reader{config, markerFactorPredictor(), constantPredictor<int>("factor_rank", 0)};
+    auto tab = shiftedFactorTab(config, 0);
+
+    SUBCASE("the banner reaches left of the measuring window") {
+        slab(tab.mat, 2, 30, tab.banner_top, tab.banner_top + 16, 70);
+    }
+    SUBCASE("something dark covers most of the banner's rows across the window") {
+        tab.mat(cv::Rect(8, tab.banner_top, 30, 12)).setTo(cv::Scalar(20, 20, 20));
+    }
+
+    const Frame frame = Frame::fixed(tab.mat);
+    const auto list = reader.alignToList(frame, config.area);
+    REQUIRE(list.has_value());
+    CHECK_FALSE(list->banner.left_edge.has_value());
+    CHECK(list->alignment.shift == 0);
+    CHECK_FALSE(list->alignment.banner_left_edge.has_value());
+    CHECK(idsOf(reader.visibleSelfPrefix(frame, boundOnly(config.area))) == std::vector<int>{kListMarker});
 }
 
 TEST_CASE("FactorRowReader never lets two callers into one of its models at once") {

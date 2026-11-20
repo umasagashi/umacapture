@@ -223,6 +223,63 @@ TEST_CASE("a re-recognized record is saved with the app's record format, not the
     std::filesystem::remove_all(root, ignored);
 }
 
+TEST_CASE("prediction.json copies the side JSONs' resize facts, on capture and again on re-recognition") {
+    const auto root = std::filesystem::temp_directory_path()
+                      / ("uma_recognizer_wiring_frame_resize_" + std::to_string(std::random_device{}()));
+    const auto record_dir = root / "resized_record";
+    std::filesystem::create_directories(record_dir);
+    std::filesystem::create_directories(root / "modules");
+    json_util::write(root / "modules" / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
+    const json_util::Json facts = TabFrameResize{
+        ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540},
+        {{ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540}, 7}},
+    };
+    // skill and factor carry the facts; campaign's side JSON is one written without them.
+    for (const auto *tab : {"skill", "factor", "campaign"}) {
+        Frame::fixed(factorTabFrame()).save(record_dir / (std::string(tab) + ".png"));
+        json_util::Json side{{"intersection", Rect<int>{Point<int>{0, 0}, Point<int>{kFrameWidth, kFrameHeight}}}};
+        if (std::string(tab) != "campaign") {
+            side["frame_resize"] = facts;
+        }
+        json_util::write(record_dir / (std::string(tab) + ".json"), side);
+    }
+
+    const auto copied = [&] { return json_util::read(record_dir / "prediction.json")["frame_resize"]; };
+    {
+        Wiring wiring(root);
+        wiring.recognize_ready->send(RecordInfo{"resized_record", record::RecordType::Standard});
+        REQUIRE(wiring.recognized.size() == 1);
+    }
+    const auto on_capture = copied();
+    // The factor list's alignment is written beside them. The fixture's factor tab has no banner to measure, so
+    // the alignment states the nominal left edge with no shift.
+    const auto prediction = json_util::read(record_dir / "prediction.json");
+    REQUIRE(prediction.contains("factor_tab_alignment"));
+    const auto alignment = prediction["factor_tab_alignment"];
+    CAPTURE(alignment.dump());
+    const json_util::Json unmeasured{
+        {"measured", false}, {"banner_left_edge", nullptr}, {"nominal_left", 31}, {"shift", 0}};
+    CHECK(alignment == unmeasured);
+    // Checked as an object first, so a null copy fails as a wrong value instead of throwing on the subscript.
+    CAPTURE(on_capture.dump());
+    REQUIRE(on_capture.is_object());
+    CHECK(on_capture["skill"] == facts);
+    CHECK(on_capture["factor"] == facts);
+    CHECK(on_capture["campaign"].is_null());
+
+    std::filesystem::remove(record_dir / "prediction.json");
+    {
+        Wiring wiring(root);
+        wiring.update_ready->send(RecordInfo{"resized_record"});
+        CHECK(wiring.errors.empty());
+        REQUIRE(wiring.updated.size() == 1);
+    }
+    CHECK(copied() == on_capture);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
 TEST_CASE("the capture input is subscribed once and a failed capture does not report an update error") {
     REQUIRE_FALSE(std::filesystem::exists(missingRecordRoot()));
     Wiring wiring;

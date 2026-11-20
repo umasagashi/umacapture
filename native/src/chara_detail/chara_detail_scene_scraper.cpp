@@ -1060,6 +1060,25 @@ bool PageScrapingBox::ready() const {
     return tab_button_ready && scrollAreaReady();
 }
 
+void PageScrapingBox::noteForwardedResize(const Frame &frame) {
+    const auto &resize = frame.forwardedResize();
+    if (!resize.has_value()) {
+        return;
+    }
+    const auto found = std::find_if(forwarded_resizes.begin(), forwarded_resizes.end(), [&](const auto &count) {
+        return count.resize == resize.value();
+    });
+    if (found != forwarded_resizes.end()) {
+        found->frames++;
+    } else {
+        forwarded_resizes.push_back({resize.value(), 1});
+    }
+}
+
+const std::vector<ForwardedFrameResizeCount> &PageScrapingBox::forwardedResizes() const {
+    return forwarded_resizes;
+}
+
 void PageScrapingBox::saveIncremental(const Frame &frame) {
     if (!end_green) {  // skill/campaign and setScrollArea write through: no trim can follow, nothing to stage
         frame.save(image_dir / path_config.scroll_area.withNumber(committed_count++, 5).filename());
@@ -1188,7 +1207,30 @@ std::shared_ptr<PageScrapingBox> SceneScrapingBox::resetCampaignBox() {
 void SceneScrapingBox::addBase(const Frame &frame) {
     assert_(!base_ready);
     frame.save(base_path);
+    base_resize = frame.forwardedResize();
     base_ready = true;
+}
+
+void SceneScrapingBox::noteTabFrame(TabPage tab_page, const Frame &frame) {
+    switch (tab_page) {
+        case TabPage::SkillPage: skill_box_->noteForwardedResize(frame); return;
+        case TabPage::FactorPage: factor_box_->noteForwardedResize(frame); return;
+        case TabPage::CampaignPage: campaign_box_->noteForwardedResize(frame); return;
+    }
+}
+
+void SceneScrapingBox::writeFrameResize() const {
+    const ScrapedFrameResize scraped{
+        base_resize,
+        skill_box_->forwardedResizes(),
+        factor_box_->forwardedResizes(),
+        campaign_box_->forwardedResizes(),
+    };
+    try {
+        json_util::replace(image_dir / kScrapedFrameResizeFilename, scraped, 4);
+    } catch (const std::exception &e) {
+        log_warning("failed to write the record's resize facts: {}", e.what());
+    }
 }
 
 bool SceneScrapingBox::ready() const {
@@ -1748,6 +1790,7 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Listener<SceneInfo> &on_opened,
     const event_util::Listener<Frame, SceneState> &on_updated,
     const event_util::Listener<> &on_closed,
+    const event_util::Listener<std::optional<Size<int>>, std::optional<Size<int>>> &on_resized,
     const event_util::Sender<RecordInfo> &on_closed_before_completed,
     const event_util::Sender<int> &on_scroll_ready,
     const event_util::Sender<int, double> &on_scroll_updated,
@@ -1762,13 +1805,14 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
     const event_util::Sender<RecordInfo> &on_started,
     const event_util::Sender<DiscardedSession, RecordInfo> &on_restarted,
-    const event_util::Sender<RecordInfo> &on_session_failed,
+    const event_util::Sender<RecordInfo, SessionFailure> &on_session_failed,
     const scraper_config::CharaDetailSceneScraperConfig &config,
     const std::filesystem::path &scraping_dir,
     const io_util::DirectoryHooks &directory_hooks)
     : on_opened(on_opened)
     , on_updated(on_updated)
     , on_closed(on_closed)
+    , on_resized(on_resized)
     , on_closed_before_completed(on_closed_before_completed)
     , on_scroll_ready(on_scroll_ready)
     , on_scroll_updated(on_scroll_updated)
@@ -1801,6 +1845,20 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
             this->on_closed_before_completed->send(RecordInfo(current_record_info));
         }
         release();
+    });
+    this->on_resized->listen([this](const auto &from, const auto &to) {
+        // Only an attempt still scraping can be spoiled by a size change. A completed one already sent its
+        // record, all of one size; a failed or closed one has nothing left to protect.
+        if (scraping_state != SessionState::Scraping) {
+            return;
+        }
+        const auto describe = [](const std::optional<Size<int>> &size) {
+            return size.has_value() ? std::to_string(size->width()) + "x" + std::to_string(size->height())
+                                    : std::string("unknown");
+        };
+        failSession(
+            SessionFailure::CaptureSizeChanged,
+            "capture size changed from " + describe(from) + " to " + describe(to));
     });
 }
 
@@ -1965,7 +2023,7 @@ void CharaDetailSceneScraper::constructSession() {
 
         scraping_state = SessionState::Scraping;
     } catch (...) {
-        failSession();
+        failSessionOnException();
     }
 }
 
@@ -2055,6 +2113,7 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // this record needs is missing, which no later frame re-reads.
     try {
         if (!tab_completed[tab_page]) {
+            scraping_box->noteTabFrame(tab_page, frame);
             const auto tab_scraper = tabScraper(tab_page);
             if (updateUntilReady(tab_scraper, frame)) {
                 tab_completed[tab_page] = true;
@@ -2101,7 +2160,7 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
             checkForCompleted();
         }
     } catch (const ImageIoError &) {
-        failSession();
+        failSessionOnException();
         return;
     }
 
@@ -2127,14 +2186,17 @@ DiscardedSession CharaDetailSceneScraper::release() {
     return discarded;
 }
 
-void CharaDetailSceneScraper::failSession() {
-    // Described before release(), which does not touch current_record_info: the id the attempt was announced
-    // under is the id this failure has to travel with, and it is still the one held here.
-    const auto failure = error_util::describeCurrentFailure();
-    log_error("chara detail session failed for record_id={}: {}", current_record_info.record_id, failure.message);
+void CharaDetailSceneScraper::failSession(SessionFailure reason, const std::string &detail) {
+    // release() does not touch current_record_info: the id the attempt was announced under is the id this
+    // failure has to travel with, and it is still the one held here.
+    log_error("chara detail session failed for record_id={}: {}", current_record_info.record_id, detail);
     release();
     scraping_state = SessionState::Failed;
-    on_session_failed->send(RecordInfo(current_record_info));
+    on_session_failed->send(RecordInfo(current_record_info), reason);
+}
+
+void CharaDetailSceneScraper::failSessionOnException() {
+    failSession(SessionFailure::ScrapeFailed, error_util::describeCurrentFailure().message);
 }
 
 void CharaDetailSceneScraper::resetSession(record::RecordType record_type) {
@@ -2329,7 +2391,7 @@ bool CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
             default: throw std::invalid_argument("Unknown tab page.");
         }
     } catch (...) {
-        failSession();
+        failSessionOnException();
         return false;
     }
     tab_completed[tab_page] = false;
@@ -2552,6 +2614,9 @@ bool CharaDetailSceneScraper::ready() const {
 void CharaDetailSceneScraper::checkForCompleted() {
     assert_(scraping_state == SessionState::Scraping);
     if (scraping_box->ready()) {
+        // Written last, once every tab and the base are in, so the file holds the tallies of the boxes that
+        // actually made the record.
+        scraping_box->writeFrameResize();
         on_completed->send(RecordInfo(current_record_info));
         scraping_state = SessionState::Completed;
     }

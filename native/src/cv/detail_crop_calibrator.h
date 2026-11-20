@@ -16,8 +16,9 @@
 //   result) belongs to the caller.
 //
 // CONTRACT
-//   calibrateDetailCrop() never throws and never logs. It is expected to run on every frame while the
-//   dialog is NOT open, so the common path must fail fast and cheap -- the header start-pixel check is the
+//   calibrateDetailCrop() never throws and never logs. Its caller (cv/detail_crop_tracker.h) runs it on every
+//   frame until a result is latched, except while a detail scene is running, so most of the frames it sees
+//   show no dialog at all and the common path must fail fast and cheap -- the header start-pixel check is the
 //   intended early-out, and it gives up after two of its three columns fail, so the usual cost is two
 //   single-pixel reads. Every anomaly (out-of-bounds start point, missing
 //   landmark, disagreeing columns, a landmark that fails its consistency check) degrades to a status code.

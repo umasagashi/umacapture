@@ -111,6 +111,33 @@ private:
                     Rect<double>{{00.1296, -0.0185, {IS, SS}}, {0.1833, 0.0352, {IS, SS}}},
                 },
             },
+            factorBannerEdge(),
+        };
+    }
+
+    // The factor banner's left edge (FactorRowReader::findBanner / alignToList). On a detail dialog opened from a
+    // screen without the prev/next arrows, the game draws the factor tab's list about 0.0111 * unit further left
+    // (6 px at a 540 px unit) and nothing else on the dialog; the banner moves with the list, so its measured left
+    // edge says where the list's cells are.
+    //
+    // nominal_left: measured on 35 images of the normal layout (the stitched factor image of every golden record,
+    // the ten encode/scale grid rungs and two saved records; units 540 to 810), the left edge divided by the unit
+    // spans 0.0417 to 0.0435 over 12 distinct (unit, edge) pairs. 0.0426 is the middle: every one of the 35 lands
+    // within 1 px of round(0.0426 * unit) (5 at -1, 27 at 0, 3 at +1).
+    // deadband: that 1 px is the measurement's resolution, not a shift, so a difference up to 0.0028 * unit
+    // (1.5 px at 540, 2.0 at 720) reads as none. The six shifted images measured 6 px at 540 and 568, 7 px at
+    // 705 and 8 px at 720.
+    // search_from: the stitcher cuts the leftmost 0.0222 of the scroll area off the stitched image, so the window
+    // starts 1 px (at 540) right of that cut; the saved image and the live frame then measure the same pixels. Its
+    // pixel was background on every banner row of all 41 measured images, the shifted ones included.
+    // search_to: about as far right of nominal_left as search_from is left of it; no banner row of any measured
+    // image reached it (the largest single-row value was 38 px at an 810 px unit, against a window end of 50).
+    [[nodiscard]] static BannerEdgeConfig factorBannerEdge() {
+        return {
+            0.0426,  // nominal_left
+            0.0222 + 0.0019,  // search_from
+            0.0620,  // search_to
+            0.0028,  // deadband
         };
     }
 

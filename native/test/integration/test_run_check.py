@@ -374,6 +374,52 @@ def main() -> int:
                 result,
             )
 
+    # 4. frame_resize_failure: the resize facts every record's prediction.json carries.
+    def resize_facts(**base_overrides: object) -> dict:
+        base: dict[str, object] = {
+            "band": {"min": 540, "max": 720},
+            "captured_size": {"width": 720, "height": 1280},
+            "pre_band_unit": 720,
+            "unit": 720,
+            "arm": "untouched",
+        }
+        base.update(base_overrides)
+        return {"base": base, "tab_frames": [{**base, "frames": 12}]}
+
+    def judge_facts(factor: object) -> str | None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record_dir = Path(tmp) / "storage" / "chara_detail" / "active" / "rec"
+            record_dir.mkdir(parents=True)
+            (record_dir / "record.json").write_text("{}", encoding="utf-8")
+            prediction = {"frame_resize": {"skill": None, "factor": factor, "campaign": None}}
+            (record_dir / "prediction.json").write_text(json.dumps(prediction), encoding="utf-8")
+            return run.frame_resize_failure(case(), Path(tmp))
+
+    result = judge_facts(resize_facts())
+    check(
+        "a record carrying the capture's resize facts passes",
+        result is None,
+        # Excludes: a judge that refuses every record, against which every refusal below would pass for nothing.
+        result,
+    )
+    for label, facts in [
+        ("no factor entry", None),
+        ("no base", {"base": None, "tab_frames": resize_facts()["tab_frames"]}),
+        ("an empty tab_frames", {**resize_facts(), "tab_frames": []}),
+        ("a tab_frames entry of zero frames", {**resize_facts(), "tab_frames": [{"frames": 0}]}),
+        ("a base unit other than the case's", resize_facts(unit=540)),
+        ("no band while frame_resize is true", resize_facts(band=None)),
+        ("no captured size", resize_facts(captured_size=None)),
+    ]:
+        result = judge_facts(facts)
+        check(
+            f"a record with {label} is refused",
+            result is not None,
+            # Excludes: a judge that reads only part of the facts -- in particular one that reads only `base`,
+            # which stays green when the scraper stops counting tab frames.
+            result,
+        )
+
     if FAILURES:
         print(f"\n{len(FAILURES)} check(s) failed: {', '.join(FAILURES)}")
         return 1

@@ -14,16 +14,32 @@ import 'package:umacapture/src/chara_detail/enhancement_merge.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
+import 'package:umacapture/src/core/sound_player.dart';
 
 Future<void> main() async {
   enableFlutterDriverExtension(handler: _handleRequest);
-  await app.main();
+  // Automated runs share the PC with a person, so every sound is silent from the app's first frame:
+  // the override is in the ProviderScope before anything can play a sound, including an addon task
+  // copied with the user's settings that fires when the app starts.
+  await app.main(overrides: [soundSettingProvider.overrideWith2(_SilentSoundSettingNotifier.new)]);
+}
+
+/// The saved sound setting with its volume forced to 0. Nothing is written, so the data root keeps
+/// the volumes it had.
+class _SilentSoundSettingNotifier extends SoundSettingNotifier {
+  _SilentSoundSettingNotifier(super.type);
+
+  @override
+  SoundSetting build() {
+    final saved = super.build();
+    return SoundSetting(saved.path, source: saved.source, volume: 0);
+  }
 }
 
 /// Answers the driver's `request_data`. `harness_state` reports, as data, the app state the
 /// live-capture harness judges a clip by (tool/live_capture_test/app_drive_run.py): the capture
 /// attempt and its status, the last capture event, the ids each record store holds, whether the
-/// factor table has loaded, and the pending enhancement candidates.
+/// factor table has loaded, the pending enhancement candidates, and every sound's volume.
 Future<String> _handleRequest(String? message) async {
   if (message != 'harness_state') {
     return jsonEncode({'error': 'unknown message: $message'});
@@ -87,5 +103,8 @@ Map<String, Object?> _harnessState(ProviderContainer container) {
       for (final candidate in container.read(pendingEnhancementCandidatesProvider))
         {'older': candidate.olderId, 'newer': candidate.newerId, 'enhanced': candidate.enhancedId},
     ],
+    'sound_volumes': {
+      for (final type in SoundType.values) type.name: container.read(soundSettingProvider(type)).volume,
+    },
   };
 }

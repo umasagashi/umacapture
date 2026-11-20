@@ -6,7 +6,7 @@ the record the app produces is diffed against a committed golden.
 
 > Tooling: `tool/live_capture_test/` (Python + shell) and `native/tool/mimic_player/` (the player).
 > Clips and sidecars live under the gitignored `testdata/clips/`, and every run artefact under
-> `testdata/harness/`.
+> `testdata/harness/`. The web front end has its own headless check: `tool/web_e2e/README.md`.
 
 ## The gap it fills
 
@@ -410,6 +410,11 @@ synchronisation nor slowdown**, and 0 dropped frames at the scraper against debu
 — but every Profile verdict is "a record appeared", never a comparison against record contents.
 
 ## Data isolation
+
+**Sound is silent from the app's first frame.** `test_driver/app.dart` overrides every sound's volume
+to 0 in the app's `ProviderScope`, so a startup addon task copied by `--settings copy` plays at 0 too,
+and nothing is written to the data root. Before the first capture the harness reads the volumes back
+from `harness_state`; if any is not 0 the run fails without capturing (`.claude/rules/silent-automated-runs.md`).
 
 Every app run sets **`UMACAPTURE_DATA_ROOT`** in the launched app's own environment only, pointing
 at `testdata/harness/appdrive_root`. `readDataRootOverride()` in `lib/src/core/bootstrap.dart` reads it before

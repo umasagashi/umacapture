@@ -24,6 +24,7 @@
 #include "chara_detail/chara_detail_scene_context.h"
 #include "chara_detail/factor_switch_verdict.h"
 #include "chara_detail/record_info.h"
+#include "chara_detail/scraped_frame_resize.h"
 #include "util/event_util.h"
 #include "util/logger_util.h"
 #include "util/misc.h"
@@ -735,6 +736,14 @@ public:
 
     [[nodiscard]] bool ready() const;
 
+    // Counts one frame fed to this tab's scraper under its resize facts (Frame::forwardedResize). A frame that
+    // carries none is not counted. The tally lives and dies with the box, so a tab rebuilt by recreate() starts
+    // from zero together with its fragments.
+    void noteForwardedResize(const Frame &frame);
+
+    // Every distinct set of resize facts counted so far, in first-seen order, with its frame count.
+    [[nodiscard]] const std::vector<ForwardedFrameResizeCount> &forwardedResizes() const;
+
 private:
     // Stage (factor box) or write (other boxes) one scroll-area strip. The factor box delays its commit:
     // strips are staged as owning clones in pending_strips and only flushed to disk once they can no longer
@@ -809,6 +818,8 @@ private:
     // Top y (frame pixels) of the green run that fired detectGreenTerminator, or -1 if it has not fired.
     // trimScrollAreaToFactorEnd uses it as the crop ceiling and to validate the frontier evidence.
     int green_terminator_top_pixels = -1;
+
+    std::vector<ForwardedFrameResizeCount> forwarded_resizes;
 };
 
 class SceneScrapingBox {
@@ -834,7 +845,17 @@ public:
     std::shared_ptr<PageScrapingBox> resetFactorBox();
     std::shared_ptr<PageScrapingBox> resetCampaignBox();
 
+    // Saves the base image, and keeps its resize facts (Frame::forwardedResize, which the view it is carries from
+    // the frame it was cut from) for writeFrameResize.
     void addBase(const Frame &frame);
+
+    // Counts a frame fed to the scraper of `tab_page` on that tab's current box (PageScrapingBox::noteForwardedResize).
+    void noteTabFrame(TabPage tab_page, const Frame &frame);
+
+    // Writes the record's resize facts -- the base's and every tab box's tally -- to kScrapedFrameResizeFilename
+    // beside base.png, for the stitcher. A write that fails is logged and the record goes on without them: the
+    // facts describe the capture, and losing the record over them would cost more than they are worth.
+    void writeFrameResize() const;
 
     [[nodiscard]] bool ready() const;
 
@@ -857,6 +878,7 @@ private:
     std::shared_ptr<PageScrapingBox> factor_box_;
     std::shared_ptr<PageScrapingBox> campaign_box_;
     bool base_ready = false;
+    std::optional<ForwardedFrameResize> base_resize;
 };
 
 // Latches "this region has stopped moving": a region counts as still while the fraction of its pixels that
@@ -1223,13 +1245,26 @@ private:
 //   Scraping   -- constructSession finished; the tab scrapers, the box and the base catcher all exist. THE ONLY
 //                 state in which they may be dereferenced (tabScraper asserts it).
 //   Completed  -- the session captured everything and announced its record (checkForCompleted).
-//   Failed     -- building or rebuilding the session threw; the partial state was discarded and the failure was
-//                 reported under the attempt's id. Terminal: only a close clears it (see failSession).
+//   Failed     -- the attempt ended without a record (see SessionFailure for why); the partial state was
+//                 discarded and the failure was reported under the attempt's id. Terminal: only a close clears
+//                 it (see failSession).
 enum class SessionState {
     Closed,
     Scraping,
     Completed,
     Failed,
+};
+
+// Why an attempt ended in SessionState::Failed. Carried by on_session_failed so the one failure transition
+// states its own reason, and each front end can name it.
+enum class SessionFailure {
+    // Building or rebuilding the session threw: its scraping directory could not be created, or one of its
+    // fragments could not be written.
+    ScrapeFailed,
+    // The producer's captured size changed while the attempt was still scraping (see
+    // CharaDetailSceneContext::on_scene_resized). Fragments of two sizes would not stitch into one record, and
+    // one record has to be of one capture geometry, so the attempt is refused rather than continued.
+    CaptureSizeChanged,
 };
 
 class CharaDetailSceneScraper {
@@ -1238,6 +1273,7 @@ public:
         const event_util::Listener<SceneInfo> &on_opened,
         const event_util::Listener<Frame, SceneState> &on_updated,
         const event_util::Listener<> &on_closed,
+        const event_util::Listener<std::optional<Size<int>>, std::optional<Size<int>>> &on_resized,
         const event_util::Sender<RecordInfo> &on_closed_before_completed,
         const event_util::Sender<int> &on_scroll_ready,
         const event_util::Sender<int, double> &on_scroll_updated,
@@ -1252,7 +1288,7 @@ public:
         const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
         const event_util::Sender<RecordInfo> &on_started,
         const event_util::Sender<DiscardedSession, RecordInfo> &on_restarted,
-        const event_util::Sender<RecordInfo> &on_session_failed,
+        const event_util::Sender<RecordInfo, SessionFailure> &on_session_failed,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir,
         const io_util::DirectoryHooks &directory_hooks);
@@ -1402,14 +1438,19 @@ private:
     // scrape into no longer exists -- recreate() removes the directory before it makes it again.
     [[nodiscard]] bool rebuildTab(TabPage tab_page);
 
-    // End the attempt that could not be built: log the failure being handled, discard whatever was constructed,
-    // hold SessionState::Failed and report the failure under the id the attempt was announced with. CALL ONLY
-    // FROM A CATCH BLOCK -- it describes the exception in flight (error_util::describeCurrentFailure).
+    // End the attempt without a record: discard whatever was constructed, hold SessionState::Failed and report
+    // the failure, with its reason, under the id the attempt was announced with. `detail` is what the log line
+    // says about the cause.
     //
     // Failed is cleared by release() alone, i.e. by the detail screen closing. A retry on the next frame, or on
     // the next reset, would re-run the very create_directories that just failed, and nothing about a frame or a
-    // character switch makes an unwritable directory writable.
-    void failSession();
+    // character switch makes an unwritable directory writable; a capture size that changed mid-attempt has
+    // already mixed two geometries into the attempt, and only a fresh one can avoid that.
+    void failSession(SessionFailure reason, const std::string &detail);
+
+    // failSession for a session that could not be built or rebuilt. CALL ONLY FROM A CATCH BLOCK -- it describes
+    // the exception in flight (error_util::describeCurrentFailure).
+    void failSessionOnException();
 
     // On the factor tab, diff the current top-of-page against factor_switch_reference. A large change that
     // outlasts the dwell while at the top is a CANDIDATE switch, and the rule then reads what both frames show:
@@ -1512,6 +1553,7 @@ private:
     const event_util::Listener<SceneInfo> on_opened;
     const event_util::Listener<Frame, SceneState> on_updated;
     const event_util::Listener<> on_closed;
+    const event_util::Listener<std::optional<Size<int>>, std::optional<Size<int>>> on_resized;
 
     const event_util::Sender<RecordInfo> on_closed_before_completed;
     const event_util::Sender<int> on_scroll_ready;  // When user can start scrolling.
@@ -1591,13 +1633,14 @@ private:
     // A session began for a freshly opened detail screen (build), carrying its identity. The id is the one
     // its record finishes under (on_completed), so every later outcome of this attempt can be matched to it.
     const event_util::Sender<RecordInfo> on_started;
-    // THE ATTEMPT ENDED BECAUSE ITS SESSION COULD NOT BE BUILT, carrying the id it was announced under. An error
-    // channel, and terminal for the attempt exactly as a stitch failure is for a record: the scraping directory
-    // could not be created, so there is nothing for this attempt to scrape into and nothing a later frame could
-    // retry. Scoped to the attempt for the same reason on_completed is -- a front end applies an outcome only to
-    // the attempt it was announced for. A session that failed does NOT also report closed_before_completed when
-    // the screen is closed: it already stated its own, more specific outcome (see the on_closed listener).
-    const event_util::Sender<RecordInfo> on_session_failed;
+    // THE ATTEMPT ENDED WITHOUT A RECORD, carrying the id it was announced under and the reason (SessionFailure):
+    // its session could not be built -- nothing for this attempt to scrape into and nothing a later frame could
+    // retry -- or the capture size changed while it was scraping. An error channel, and terminal for the attempt
+    // exactly as a stitch failure is for a record. Scoped to the attempt for the same reason on_completed is -- a
+    // front end applies an outcome only to the attempt it was announced for. A session that failed does NOT also
+    // report closed_before_completed when the screen is closed: it already stated its own, more specific outcome
+    // (see the on_closed listener).
+    const event_util::Sender<RecordInfo, SessionFailure> on_session_failed;
 
     // THE ONE top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or
     // below which the content counts as flush with the head of its list. Zero: any exposed track above the

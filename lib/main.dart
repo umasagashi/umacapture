@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/const.dart';
@@ -392,9 +393,10 @@ void setupWindowManager() async {
   );
 }
 
-void run() {
+void run({List<Override> overrides = const []}) {
   runApp(
     ProviderScope(
+      overrides: overrides,
       // riverpod 3 enables automatic retry (up to 10x with backoff) for any
       // provider that fails with an Exception. Our network loaders rethrow after
       // captureException(), so retrying would emit duplicate Sentry reports and
@@ -417,7 +419,10 @@ void run() {
   );
 }
 
-FutureOr<void> main() async {
+/// Starts the app. [overrides] go to the app's `ProviderScope`, so they are in force before any
+/// provider is first read. Production passes none; the driver entry point (`test_driver/app.dart`)
+/// passes the ones an automated run needs from its first frame.
+FutureOr<void> main({List<Override> overrides = const []}) async {
   // The only thing that cannot be a startup step: the refusal screen a failed step paints
   // needs the binding, so it has to exist before the first step runs.
   WidgetsFlutterBinding.ensureInitialized();
@@ -433,5 +438,5 @@ FutureOr<void> main() async {
     // saved window geometry, not the blank page the sequence exists to prevent.
     setupWindowManager();
   }
-  runWithSentry(run);
+  runWithSentry(() => run(overrides: overrides));
 }

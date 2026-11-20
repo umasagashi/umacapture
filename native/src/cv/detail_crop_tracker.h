@@ -10,15 +10,22 @@
 // THE STATE MACHINE (one step per frame, driven from CharaDetailSceneContext::update)
 //   1. Consume any pending release request; a release drops both the latch and the correction.
 //   2. If already latched, trust a shaping producer's frame and anchor unchanged; a producer that does no
-//      pane shaping (the offline CLI paths) gets the latched pane applied here as the frame's anchor.
-//   3. Otherwise evaluate both geometry-derived pane candidates against the same full frame.
+//      pane shaping (the offline paths) gets the latched pane applied here as the frame's anchor, but only to
+//      a frame of the size the pane was measured on. A snapshot-free frame of another size releases the latch
+//      here, in frame order, instead of waiting for the producer-side release to be consumed by whichever
+//      queued frame comes next.
+//   3. Otherwise, unless the caller reports a running scene, evaluate both geometry-derived pane candidates
+//      against the same full frame. A running scene adopts nothing, so a calibration can never change the
+//      anchor of a scene halfway through; it resumes once the scene has ended. (A release can still land
+//      mid-scene -- a size change does, and the scene's capture attempt is then failed by its owner.)
 //   4. Zero successful candidates -> keep the current state. Two -> warn and keep the current state.
-//   5. Exactly one successful candidate -> adopt its measured rect and latch immediately.
+//   5. Exactly one successful candidate -> adopt its measured rect, latch immediately, and tell the caller
+//      this frame latched, so it does not begin a scene on a frame whose successors carry another anchor.
 //   6. Publish the current state for the settings UI.
 //
 // WHY THE LATCH IS HARD
 //   The first unambiguous calibration is frozen immediately. It is not refined on later frames; recovery from
-//   an outlier is an explicit release (capture start, input-size change, or settings reset).
+//   an outlier is an explicit release (capture start, input-size change, or turning the calibration off).
 //
 // CONTRACT
 //   Never throws. It refuses only a producer frame whose pane snapshot became stale before consumption; using
@@ -140,11 +147,13 @@ public:
 
     // --- Release requests (any thread) ----------------------------------------------------------------
 
-    // Arms a release. One-way: the flag is only ever set here and cleared by the next per-frame step, so a
-    // request raised while no frames are flowing simply waits for the first frame of the next session.
-    // Raised at the start of a capture session, and by the settings "restore defaults" action -- which is
-    // why this stays callable mid-session: releasing the latch while a session runs is exactly when a user
-    // reaches for that button.
+    // A release in two steps. Here, at once and under release_transition_mutex: the shared pane latch is
+    // released, so producers stop shaping from their next frame, and the request flag is armed. On the
+    // distributor thread, at the next accepted frame: beginFrame consumes the flag and drops this tracker's
+    // own latch and correction. A request raised while no frames are flowing waits there for the first frame
+    // of the next session. Raised at the start of a capture session and when the calibration is turned off in
+    // the settings; that settings row is disabled while a capture runs, so in the app a release from here lands
+    // between sessions. Callable from any thread.
     void requestRelease() {
         // Generation change and request publication are one transition with respect to beginFrame. Without
         // this small mutex, either store order leaves a gap: the consumer can see a new empty latch with stale
@@ -154,10 +163,21 @@ public:
         release_requested.store(true, std::memory_order_relaxed);
     }
 
-    // Releases when the input geometry changes. The caller's `size` need not be the frame's own size -- it
-    // only has to CHANGE when the input changes (see NativeApi::updateFrame, whose reported original size
-    // means something different per producer). The first size seen is not a change.
-    void noteFrameSize(const Size<int> &size) {
+    // Releases at once when the input geometry of a SHAPING producer changes; called by the producer for each
+    // `frame` before it is queued. The caller's `size` need not be the frame's own size -- it only has to
+    // CHANGE when the input changes (see NativeApi::updateFrame, whose reported original size means something
+    // different per producer). The first size seen is not a change.
+    //
+    // A snapshot-free frame (an offline producer's full decoded frame) is ignored here. Its producer runs ahead
+    // of the queue, so a release raised now would be consumed by whichever older frame is dequeued next and
+    // strip that frame's correction; beginFrame releases for it instead, when the frame of the new size itself
+    // arrives. A shaping producer's in-flight frames carry the old snapshot, which this release makes stale,
+    // so they are refused rather than mis-anchored, and its shaping must stop from the next frame -- hence at
+    // once, on the producer side.
+    void noteFrameSize(const Frame &frame, const Size<int> &size) {
+        if (!frame.paneModeSnapshot().has_value()) {
+            return;
+        }
         const uint64_t packed = packSize(size);
         const uint64_t previous = last_frame_size.exchange(packed, std::memory_order_relaxed);
         if (previous != kUnknownSize && previous != packed) {
@@ -176,27 +196,30 @@ public:
             latch_generation = pane_mode_latch->generation();
             const bool release_consumed = release_requested.exchange(false, std::memory_order_relaxed);
             if (release_consumed) {
-                if (latched_ || correction_.has_value()) {
-                    log_debug("detail crop released (was latched={})", latched_);
-                }
-                latched_ = false;
-                correction_.reset();
-                correction_frame_size_.reset();
-                ambiguity_warned_ = false;
-                // Forget what was last reported too, so the post-release state is announced even when it
-                // happens to equal the pre-release one. Without this the settings "restore defaults" action
-                // could clear the Dart display and have an identical relatch deduped forever.
-                last_report_.reset();
+                dropLatchedState("detail crop released");
+            }
+            // A correction is a rect in the pixel grid of the frame it was measured on, so it may only be
+            // applied to a frame of that size. A snapshot-free frame (an offline producer's full decoded frame)
+            // of another size therefore releases the latch here, in frame order; this is the only size release
+            // such frames get (noteFrameSize ignores them). Live frames always carry a snapshot and are shaped
+            // smaller than the capture once latched, so their size is not compared; the snapshot check below
+            // guards them instead.
+            if (!input.paneModeSnapshot().has_value() && correction_frame_size_.has_value()
+                && !(correction_frame_size_.value() == input.size())) {
+                pane_mode_latch->release();
+                latch_generation = pane_mode_latch->generation();
+                dropLatchedState("detail crop released: frame size changed");
             }
             frame_latch_generation_ = latch_generation;
         }
         if (post_release_exchange_hook) {
             post_release_exchange_hook();
         }
-        // Freeze the pane-latch generation captured before the pending-release exchange. requestRelease()
-        // publishes its generation/flag transition under release_transition_mutex, so an earlier completed
-        // request is consumed above and this full frame may recalibrate. Any later request increments beyond
-        // the stored token and invalidates the completed scan; beginFrame never increments the generation.
+        // Freeze the pane-latch generation read under release_transition_mutex above -- after the size-triggered
+        // release when this frame caused one, so that this full frame may recalibrate. requestRelease()
+        // publishes its generation/flag transition under the same mutex, so an earlier completed request is
+        // consumed above and this full frame may recalibrate as well. Any later request increments beyond the
+        // stored token and invalidates the completed scan.
         // The two live producers, web and Windows, resolve pane geometry and then cross a queue before their
         // frame is consumed, so the decision their pixels were shaped under can be superseded in transit.
         // Validate that exact decision HERE, after the pending-release exchange and on the distributor thread.
@@ -229,21 +252,29 @@ public:
         if (latched_ && input.paneModeSnapshot().has_value()) {
             return std::optional<Frame>{input};
         }
-        if (!correction_.has_value() || input.empty() || !isCropInsideFrame(correction_.value(), input.size())) {
+        // A correction reaching here fits the input: it was validated against its measured size at adoption, and
+        // a snapshot-free input of any other size released it above.
+        if (!correction_.has_value()) {
             return std::optional<Frame>{input};
         }
         return std::optional<Frame>{input.reanchored(correction_.value())};
     }
 
-    // Steps 5-8: `frame` must be what beginFrame returned. An adopted value takes effect at the producer from
+    // Steps 3-6: `frame` must be what beginFrame returned. An adopted value takes effect at the producer from
     // the next frame; this frame has already passed the producer boundary.
+    //
+    // `scene_running` is true while the caller has a scene begun and not yet ended (its end debounce
+    // included). Nothing is adopted then: a scene's frames must not switch to a calibrated anchor halfway
+    // through. Returns true when THIS frame latched, so the caller does not begin a scene on a frame whose
+    // successors carry another anchor.
     //
     // Split from the state transition so every accepted frame funnels through one report. A stale producer
     // snapshot is the sole beginFrame exit without endFrame; the next accepted frame publishes any release
     // state that was consumed while rejecting it.
-    void endFrame(const Frame &frame) {
-        updateState(frame);
+    [[nodiscard]] bool endFrame(const Frame &frame, bool scene_running) {
+        const bool latched_now = updateState(frame, scene_running);
         publish(frame);
+        return latched_now;
     }
 
     // --- Inspection (distributor thread only) ---------------------------------------------------------
@@ -253,16 +284,34 @@ public:
     [[nodiscard]] const std::optional<Rect<int>> &correction() const { return correction_; }
 
 private:
-    void updateState(const Frame &frame) {
+    // The consumer-side half of a release: forget the latch, the correction and what was last reported. Called
+    // with release_transition_mutex held, both when a release request is consumed and when a snapshot-free
+    // frame of another size arrives.
+    void dropLatchedState(const char *reason) {
+        if (latched_ || correction_.has_value()) {
+            log_debug("{} (was latched={})", reason, latched_);
+        }
+        latched_ = false;
+        correction_.reset();
+        correction_frame_size_.reset();
+        ambiguity_warned_ = false;
+        // Forget what was last reported too, so the post-release state is announced even when it happens to
+        // equal the pre-release one. Turning the calibration off clears the Dart display at once, and without
+        // this an identical relatch in the next session would be deduped forever.
+        last_report_.reset();
+    }
+
+    // Returns true when this frame latched.
+    bool updateState(const Frame &frame, bool scene_running) {
         const auto latch_generation = std::exchange(frame_latch_generation_, std::nullopt);
         if (!latch_generation.has_value()) {
-            return;
+            return false;
         }
-        if (latched_) {
-            return;
+        if (latched_ || scene_running) {
+            return false;
         }
         if (frame.empty()) {
-            return;
+            return false;
         }
 
         std::optional<Rect<int>> accepted;
@@ -286,20 +335,20 @@ private:
 
         if (accepted_count == 0) {
             ambiguity_warned_ = false;
-            return;
+            return false;
         }
         if (accepted_count > 1) {
             if (!ambiguity_warned_) {
                 log_warning("detail crop calibration matched both pane candidates; keeping the previous state");
                 ambiguity_warned_ = true;
             }
-            return;
+            return false;
         }
         ambiguity_warned_ = false;
 
         const auto &rect = accepted.value();
         if (!pane_mode_latch->latch(rect, frame.size(), latch_generation.value())) {
-            return;
+            return false;
         }
         if (!correction_.has_value() || !(correction_.value() == rect)) {
             log_debug(
@@ -314,6 +363,7 @@ private:
             "detail crop latched: {} (the uncorrected default would be {})",
             describeCrop(rect),
             describeCrop(FrameAnchor::intersect(frame.size()).intersection()));
+        return true;
     }
 
     // Hands the current triple to the report sink, if it differs from the last one handed over. An empty
