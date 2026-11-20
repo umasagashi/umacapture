@@ -8,6 +8,8 @@ CLI golden. The Windows counterpart is `docs/live-capture-harness.md`.
 Nothing is shown on screen: Chrome runs `--headless=new` on a throwaway profile, every interaction
 is a DevTools-protocol call into the renderer, and the OS pointer, keyboard and foreground window are
 never touched. Every host other than `127.0.0.1` resolves to NOTFOUND, so nothing leaves the machine.
+Nothing is heard either: Chrome runs with `--mute-audio`, so the app's capture chimes stay off the
+speakers (`.claude/rules/silent-automated-runs.md`).
 
 ## Files
 

@@ -227,6 +227,9 @@ These stages launch the Windows app and the mimic player as visible windows. The
 `windowManager.focus()` at start-up (`lib/main.dart`), and the player is an ordinary top-level
 window, so **a run takes the keyboard focus from whoever is using the PC, repeatedly, for the
 length of the stage.** Nothing in the harness can run them without that.
+The driver entry point runs the app with every sound at volume 0 from its first frame, and the
+harness fails the run before the first capture if the volumes do not read back as 0
+(`.claude/rules/silent-automated-runs.md`).
 
 ### 5.0 Permission — before any build or launch in this section
 

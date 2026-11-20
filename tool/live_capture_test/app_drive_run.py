@@ -794,6 +794,19 @@ class Driver:
             raise RuntimeError(f"harness_state answered {state!r}")
         return state
 
+    def sound_volumes(self) -> dict:
+        """Every sound's volume, read back from `harness_state`. test_driver/app.dart overrides the
+        sound settings to 0 from the app's first frame; this is the check that the override took.
+        Raises unless the container is mounted and every volume reads 0, so a run that could play the
+        chimes never reaches its first capture. It does not wait: it is called after a tap on a
+        widget inside the ProviderScope, which cannot succeed before the scope is mounted."""
+        state = self.harness_state()
+        volumes = state.get("sound_volumes")
+        if (state.get("container") is not True or not isinstance(volumes, dict) or not volumes
+                or any(v != 0 for v in volumes.values())):
+            raise RuntimeError(f"the app's sounds are not silent, refusing to capture: {state!r}")
+        return volumes
+
     def hold(self, key: str, seconds: float) -> dict:
         """Presses the widget and keeps it pressed for [seconds]. `tap` releases at once, which a
         hold-to-confirm button ignores; the driver's `scroll` presses, moves by (dx, dy) over
@@ -1293,6 +1306,9 @@ def main() -> int:
         driver.by_key("tap", NAV_CAPTURE)
         if args.falsify is None:
             driver.by_key("waitFor", START_LABEL)
+        # Before the first capture and in every falsify mode, after the first operation so no-wait
+        # still drives the moment the socket opens: a capture fires the app's chimes.
+        summary["sound_volumes"] = driver.sound_volumes()
         for index, clip in enumerate(clips):
             obs: dict = {"index": index, "clip": clip["clip"]}
             observed.append(obs)

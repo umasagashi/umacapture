@@ -62,6 +62,20 @@ def find_chrome(explicit):
     return found
 
 
+def chrome_command(chrome, cdp_port, profile):
+    """The headless Chrome command line. `--mute-audio` keeps the app's capture chimes off the
+    speakers: headless Chrome still plays audio to the default output device, autoplay is allowed
+    here, and the machine the check runs on may be in use by a person (.claude/rules/silent-automated-runs.md)."""
+    return [
+        chrome, "--headless=new", "--mute-audio", f"--remote-debugging-port={cdp_port}", f"--user-data-dir={profile}",
+        "--no-first-run", "--no-default-browser-check", "--remote-allow-origins=*",
+        "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+        "--autoplay-policy=no-user-gesture-required", "--disable-background-networking", "--disable-component-update", "--disable-sync",
+        "--disable-domain-reliability", "--no-pings", "--metrics-recording-only",
+        "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows", "--window-size=1280,1600", "about:blank"]
+
+
 def free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -523,14 +537,7 @@ def main():
                 time.sleep(0.3)
         else:
             raise RuntimeError("server did not come up")
-        chrome = subprocess.Popen([
-            find_chrome(args.chrome), "--headless=new", f"--remote-debugging-port={cdp_port}", f"--user-data-dir={profile}",
-            "--no-first-run", "--no-default-browser-check", "--remote-allow-origins=*",
-            "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-            "--autoplay-policy=no-user-gesture-required", "--disable-background-networking", "--disable-component-update", "--disable-sync",
-            "--disable-domain-reliability", "--no-pings", "--metrics-recording-only",
-            "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows", "--window-size=1280,1600", "about:blank"],
+        chrome = subprocess.Popen(chrome_command(find_chrome(args.chrome), cdp_port, profile),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         resources["chrome_pid"] = chrome.pid
         write_resources(out, resources)
