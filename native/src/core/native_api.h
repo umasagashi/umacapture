@@ -821,9 +821,9 @@ public:
     // startLive both reach it through that one call) -- and when the calibration is turned off in the
     // settings. That row is disabled while capturing, so in the app that call lands between sessions.
     //
-    // Those explicit resets, a change of the pre-resize frame size (noteFrameSize), and a snapshot-free frame
-    // whose size differs from the one the correction was measured on (DetailCropTracker::beginFrame) are the
-    // whole release contract on DESKTOP. Web has one more, implicit one: `finishUpdate` terminates the worker, which
+    // Those explicit resets, a change of a shaping producer's pre-resize frame size (noteFrameSize), and a
+    // snapshot-free frame whose size differs from the one the correction was measured on
+    // (DetailCropTracker::beginFrame) are the whole release contract on DESKTOP. Web has one more, implicit one: `finishUpdate` terminates the worker, which
     // destroys the module and this singleton with it, so a latch does not survive a regeneration batch's
     // teardown there. That is teardown rather than a release -- nothing to wire, and nothing that can be
     // wired -- but the asymmetry is real and worth knowing before concluding the two platforms behave

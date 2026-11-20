@@ -845,9 +845,9 @@ public:
     std::shared_ptr<PageScrapingBox> resetFactorBox();
     std::shared_ptr<PageScrapingBox> resetCampaignBox();
 
-    // Saves the base image. `resize` is the resize facts of the frame the image was cut from, kept for
-    // writeFrameResize: the image itself is a view, which does not carry them.
-    void addBase(const Frame &frame, const std::optional<ForwardedFrameResize> &resize);
+    // Saves the base image, and keeps its resize facts (Frame::forwardedResize, which the view it is carries from
+    // the frame it was cut from) for writeFrameResize.
+    void addBase(const Frame &frame);
 
     // Counts a frame fed to the scraper of `tab_page` on that tab's current box (PageScrapingBox::noteForwardedResize).
     void noteTabFrame(TabPage tab_page, const Frame &frame);
@@ -1214,9 +1214,6 @@ public:
     [[nodiscard]] bool ready() const;
 
     [[nodiscard]] Frame frame() const;
-
-    // The resize facts of the full frame frame() is cut from. frame() is a view, which does not carry them.
-    [[nodiscard]] std::optional<ForwardedFrameResize> forwardedResize() const;
 
 private:
     // The snackbar is treated as cleared only once the green title-bar banner has been fully

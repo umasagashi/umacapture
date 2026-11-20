@@ -163,10 +163,21 @@ public:
         release_requested.store(true, std::memory_order_relaxed);
     }
 
-    // Releases when the input geometry changes. The caller's `size` need not be the frame's own size -- it
-    // only has to CHANGE when the input changes (see NativeApi::updateFrame, whose reported original size
-    // means something different per producer). The first size seen is not a change.
-    void noteFrameSize(const Size<int> &size) {
+    // Releases at once when the input geometry of a SHAPING producer changes; called by the producer for each
+    // `frame` before it is queued. The caller's `size` need not be the frame's own size -- it only has to
+    // CHANGE when the input changes (see NativeApi::updateFrame, whose reported original size means something
+    // different per producer). The first size seen is not a change.
+    //
+    // A snapshot-free frame (an offline producer's full decoded frame) is ignored here. Its producer runs ahead
+    // of the queue, so a release raised now would be consumed by whichever older frame is dequeued next and
+    // strip that frame's correction; beginFrame releases for it instead, when the frame of the new size itself
+    // arrives. A shaping producer's in-flight frames carry the old snapshot, which this release makes stale,
+    // so they are refused rather than mis-anchored, and its shaping must stop from the next frame -- hence at
+    // once, on the producer side.
+    void noteFrameSize(const Frame &frame, const Size<int> &size) {
+        if (!frame.paneModeSnapshot().has_value()) {
+            return;
+        }
         const uint64_t packed = packSize(size);
         const uint64_t previous = last_frame_size.exchange(packed, std::memory_order_relaxed);
         if (previous != kUnknownSize && previous != packed) {
@@ -189,10 +200,10 @@ public:
             }
             // A correction is a rect in the pixel grid of the frame it was measured on, so it may only be
             // applied to a frame of that size. A snapshot-free frame (an offline producer's full decoded frame)
-            // of another size therefore releases the latch here, in frame order, instead of relying on the
-            // producer-side release (noteFrameSize) being consumed by whichever queued frame happens to come
-            // next. Live frames always carry a snapshot and are shaped smaller than the capture once latched, so
-            // their size is not compared; the snapshot check below guards them instead.
+            // of another size therefore releases the latch here, in frame order; this is the only size release
+            // such frames get (noteFrameSize ignores them). Live frames always carry a snapshot and are shaped
+            // smaller than the capture once latched, so their size is not compared; the snapshot check below
+            // guards them instead.
             if (!input.paneModeSnapshot().has_value() && correction_frame_size_.has_value()
                 && !(correction_frame_size_.value() == input.size())) {
                 pane_mode_latch->release();
@@ -241,7 +252,9 @@ public:
         if (latched_ && input.paneModeSnapshot().has_value()) {
             return std::optional<Frame>{input};
         }
-        if (!correction_.has_value() || input.empty() || !isCropInsideFrame(correction_.value(), input.size())) {
+        // A correction reaching here fits the input: it was validated against its measured size at adoption, and
+        // a snapshot-free input of any other size released it above.
+        if (!correction_.has_value()) {
             return std::optional<Frame>{input};
         }
         return std::optional<Frame>{input.reanchored(correction_.value())};

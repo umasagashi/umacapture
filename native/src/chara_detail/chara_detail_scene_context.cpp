@@ -53,8 +53,8 @@ void CharaDetailSceneContext::update(const Frame &raw_input) {
     // full producer frame; after latching the producer is authoritative for both shaping and frame.anchor(),
     // which then reaches the scraper, stitcher and recognizer without further plumbing.
     // The size the producer captured, before any shaping: the one geometry fact that changes when -- and only
-    // when -- the game's window (or shared surface) changes size. Read off raw_input, because the tracker's
-    // re-anchored copy does not carry it.
+    // when -- the game's window (or shared surface) changes size. Read off raw_input, because the tracker may
+    // refuse the frame below, and the change still has to be reported.
     const auto &captured_size = raw_input.capturedSize();
 
     // Checked BEFORE the tracker may refuse the frame and before the condition tree's verdict. The first frame
@@ -113,10 +113,10 @@ void CharaDetailSceneContext::update(const Frame &raw_input) {
             // whenever THIS frame's unit is already inside the band -- which is the majority of frames, and is
             // why the band is evaluated per frame here instead of being resolved to one unit at construction.
             // What the band did is attached to the forwarded frame (Frame::forwardedThroughBand) together with
-            // the producer's captured size, read off raw_input: `input` may be the tracker's re-anchored copy,
-            // which does not carry it. The scraper writes these facts next to the record.
+            // the producer's captured size, which the tracker's re-anchored copy carries like any derivative of
+            // raw_input. The scraper writes these facts next to the record.
             const bool forwarded = on_scene_updated->send(
-                input.forwardedThroughBand(forwarded_frame_band, captured_size),
+                input.forwardedThroughBand(forwarded_frame_band),
                 {tab_page.value(), record_type.value()});
             // HOP 2 IN of the offline producer's brake (core/frame_flow_counters.h): the frame just entered the
             // scraper's queue. Its paired dequeue is the chara_detail_updated listener in native_api.cpp, on the

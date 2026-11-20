@@ -735,7 +735,7 @@ TEST_CASE("the forwarded frame is held inside the configured band, and only once
     CHECK(resize.captured_size == std::optional<Size<int>>{Size<int>{800, 600}});
     CHECK(resize.pre_band_unit == 270);
     CHECK(resize.unit == 540);
-    CHECK(resize.arm == ResizeArm::Enlarged);
+    CHECK(resize.arm() == ResizeArm::Enlarged);
 }
 
 TEST_CASE("a frame already inside the band is forwarded untouched") {
@@ -758,7 +758,7 @@ TEST_CASE("a frame already inside the band is forwarded untouched") {
     CHECK(cap.update_resizes[0]->band.has_value());
     CHECK(cap.update_resizes[0]->pre_band_unit == 270);
     CHECK(cap.update_resizes[0]->unit == 270);
-    CHECK(cap.update_resizes[0]->arm == ResizeArm::Untouched);
+    CHECK(cap.update_resizes[0]->arm() == ResizeArm::Untouched);
 }
 
 TEST_CASE("a frame above the band is scaled down to the upper bound") {
@@ -779,7 +779,7 @@ TEST_CASE("a frame above the band is scaled down to the upper bound") {
     REQUIRE(cap.update_resizes[0].has_value());
     CHECK(cap.update_resizes[0]->pre_band_unit == 270);
     CHECK(cap.update_resizes[0]->unit == 135);
-    CHECK(cap.update_resizes[0]->arm == ResizeArm::Shrunk);
+    CHECK(cap.update_resizes[0]->arm() == ResizeArm::Shrunk);
 }
 
 TEST_CASE("no resize is applied when the setting is off") {
@@ -799,7 +799,7 @@ TEST_CASE("no resize is applied when the setting is off") {
     REQUIRE(cap.update_resizes[0].has_value());
     CHECK_FALSE(cap.update_resizes[0]->band.has_value());
     CHECK_FALSE(cap.update_resizes[0]->captured_size.has_value());
-    CHECK(cap.update_resizes[0]->arm == ResizeArm::Untouched);
+    CHECK(cap.update_resizes[0]->arm() == ResizeArm::Untouched);
 }
 
 TEST_CASE("the crop calibration scans the raw frame, and the forwarded resize follows the resulting anchor") {

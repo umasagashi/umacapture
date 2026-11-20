@@ -65,8 +65,10 @@ uv run tool/web_e2e/run_scenario.py --name live-resize-1 \
 
 `args.json` (command lines, `HEAD`, sha256 of the build under test), `inputs.sha256` (clip, golden,
 `modules.zip`), `stdout.txt`, `compare.txt`, `e2e_checks.json`, `opfs.json`, `console.log`,
-`final.png`, `server.log`, `cleanup.json` and `result.json` (every verdict). `cleanup.json` is measured
-by `run_scenario.py` itself after the harness ended: Chrome and the server are not alive, no
+`final.png`, `server.log`, `resources.json`, `cleanup.json` and `result.json` (every verdict).
+`resources.json` is written by the harness as it starts each resource (the profile, both ports, the
+server and Chrome PIDs), so it survives a harness that dies part-way. `cleanup.json` is measured
+by `run_scenario.py` itself after the harness ended, for the resources named there: Chrome and the server are not alive, no
 process names the profile or the ports, both ports are closed, the profile directory is gone.
 
 ### Checks a run cannot pass vacuously

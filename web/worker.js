@@ -1033,15 +1033,8 @@ function startDrainLoop() {
       // until the 120 s timeout. The error still relays 1:1 below, so the Dart side moves to the failed state
       // exactly as on desktop.
       //
-      // The onError must be attributed to THIS update, not merely observed during it: a record regeneration is
-      // a passenger on a shared event loop (see handleUpdateRecord), so a live capture running alongside it
-      // emits its own onErrors into the very same message queue: the attempt-ending tags that
-      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, capture_size_changed,
-      // stitch_failed), and
-      // per-frame failures such as updateFrame failed. Counting one of those as the regeneration's failure
-      // would fail a record that never failed. This is the same coexistence the desktop implements on
-      // purpose (native_controller.h), so the
-      // attribution, not the coexistence, is what has to be fixed.
+      // Attribute onError to its updateRecord: live capture shares this queue (see handleUpdateRecord),
+      // so a capture failure such as capture_size_changed must not count as the update's failure.
       if (parsed && parsed.type === 'onError') {
         const target = updateFailureTarget(parsed.message);
         if (target !== null) {

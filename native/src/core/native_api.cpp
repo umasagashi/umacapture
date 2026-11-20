@@ -884,14 +884,15 @@ bool NativeApi::emitPreviewFrame(const Frame &frame, const LivePreviewPolicy::St
 }
 
 bool NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
-    // Release the detail-crop calibration whenever the input geometry changes, keyed on the REPORTED
-    // original size. Its exact meaning differs per producer (the pre-resize window size on Windows live
-    // capture, the frame's own size on the web path, the pre-crop decode size for CLI video), so nothing
-    // here may assume a relation to frame.size(); all that matters is that it changes when the input does.
-    // Done before the running check and before the send, so the request is armed no later than the frame
-    // that carries the new geometry. Lock-free while the size is unchanged; a change takes the tracker's small
-    // release mutex once (DetailCropTracker::requestRelease).
-    detail_crop_tracker->noteFrameSize(original_size);
+    // Release the detail-crop calibration whenever a shaping producer's input geometry changes, keyed on the
+    // REPORTED original size. Its exact meaning differs per producer (the pre-resize window size on Windows
+    // live capture, the frame's own size on the web live path), so nothing here may assume a relation to
+    // frame.size(); all that matters is that it changes when the input does. Done before the running check
+    // and before the send, so the request is armed no later than the frame that carries the new geometry.
+    // Snapshot-free frames (the offline producers) are ignored there and release in frame order on the
+    // consumer side instead (DetailCropTracker::noteFrameSize says why). Lock-free while the size is
+    // unchanged; a change takes the tracker's small release mutex once (DetailCropTracker::requestRelease).
+    detail_crop_tracker->noteFrameSize(frame, original_size);
 
     // A frame can arrive before startEventLoop or after joinEventLoop, and can race teardown() on the capture
     // thread (which is not one of the joined event runners). Copy the sender out under the lock so it stays

@@ -681,15 +681,18 @@ TEST_CASE("SceneScrapingBox writes the base's and every tab's resize facts besid
 
     const Range<int> band{540, 720};
     const Frame small =
-        Frame::fixed(testutil::solid(270, 540, Color(0, 0, 0))).forwardedThroughBand(band, Size<int>{300, 600});
+        Frame::fixed(testutil::solid(270, 540, Color(0, 0, 0))).withCapturedSize({300, 600}).forwardedThroughBand(band);
     const Frame large =
-        Frame::fixed(testutil::solid(1080, 2160, Color(0, 0, 0))).forwardedThroughBand(band, Size<int>{1080, 2160});
+        Frame::fixed(testutil::solid(1080, 2160, Color(0, 0, 0)))
+            .withCapturedSize({1080, 2160})
+            .forwardedThroughBand(band);
     box.noteTabFrame(TabPage::FactorPage, small);
     box.noteTabFrame(TabPage::FactorPage, large);
     box.noteTabFrame(TabPage::FactorPage, small);
     box.noteTabFrame(TabPage::FactorPage, Frame::fixed(testutil::solid(10, 20, Color(0, 0, 0))));  // carries no facts
     box.noteTabFrame(TabPage::SkillPage, large);
-    box.addBase(Frame::fixed(testutil::solid(10, 20, Color(0, 0, 0))), small.forwardedResize());
+    // The base image is a view of the forwarded frame (BaseFrameCatcher::frame), and carries its facts.
+    box.addBase(small.viewPixels({{0, 0}, Size<int>{10, 20}}));
     box.writeFrameResize();
 
     const auto read = [&] { return json_util::read(root / kScrapedFrameResizeFilename); };

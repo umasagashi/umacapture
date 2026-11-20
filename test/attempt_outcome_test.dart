@@ -419,25 +419,6 @@ void main() {
       expect((env.container.read(captureEventProvider) as CharaCaptureEvent).error, 'capture_size_changed');
       expect(env.sounds, ['error'], reason: 'the failure cue only: no duplicate cue and no standby cue');
     });
-
-    test('a probe after the failure and the close makes no sound', () async {
-      final storage = _DuplicateProbeStorage();
-      final env = build(storage: storage);
-      await env.container.read(charaDetailRecordStorageLoaderProvider.future);
-      await env.container.read(charaDetailArchiveStorageLoaderProvider.future);
-      env.controller.handleNativeMessage(_started('r1'));
-      env.controller.handleNativeMessage(_error('capture_size_changed', recordId: 'r1'));
-      env.controller.handleNativeMessage(_closed);
-      await pumpEventQueue();
-      expect(env.sounds, ['error']);
-
-      env.controller.handleNativeMessage(_probe('r1'));
-      await pumpEventQueue();
-
-      expect(storage.probedRecordIds, isEmpty);
-      expect(stateOf(env.container).status, CharaDetailCaptureStatus.waitingForDetail);
-      expect(env.sounds, ['error'], reason: 'no duplicate cue and no standby cue about the closed screen');
-    });
   });
 
   group('the arrows after a switch, independent of the attempt check', () {

@@ -2242,24 +2242,9 @@ class PlatformController {
             // announced just does not claim that the new character is done.
             captureState.success(id);
           } else {
-            // THE HALF OF THIS MESSAGE THAT USED TO BE PARSED AND THROWN AWAY. `success: false` is the
-            // core's single announcement that a session reached a terminal state having produced
-            // nothing, from all five of its emitters (the detail screen closed mid-capture, the input
-            // ended mid-capture, the game screen changed size mid-capture, a session whose scraping
-            // directory could not be created, a stitch that failed), and it is the only one of the five
-            // that is a fact about the SESSION rather than a string about the cause.
-            //
-            // Counted, and nothing else — deliberately. The user-facing report of these endings is the
-            // `onError` that native sends immediately after each of them, which already reaches
-            // `captureState.fail` and the failure tile; failing the capture state a second time here
-            // would either double-report or, worse, overwrite the specific error code with a generic
-            // one. What was actually missing is the accounting, because an import's completeness needs
-            // to know that a session ended empty, not what killed it.
-            //
-            // Counting HERE rather than off those `onError` tags is what makes the number right: the
-            // tags are five different strings that this side would have to keep in step with C++ by
-            // hand, `stitch_failed` is not among the two the design named, and an error tag can arrive
-            // for things that are not a session ending at all. One emitter, one count.
+            // Count the session ending without a record, independently of its cause. The cause's
+            // `onError` reaches the existing failure display; failing the capture state here would
+            // duplicate that report or overwrite its specific error code.
             videoImportSessionTally.noteSessionEndedWithoutRecord();
           }
           break;

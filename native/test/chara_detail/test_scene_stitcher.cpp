@@ -387,8 +387,8 @@ TEST_CASE("the scraper's resize facts reach every tab image's side JSON, split p
     const auto live = liveFrame(geometry.frame_size, geometry.intersection, scraper.common.scroll_area_rect);
 
     SUBCASE("written by the scraper") {
-        const ForwardedFrameResize enlarged{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540, ResizeArm::Enlarged};
-        const ForwardedFrameResize untouched{Range<int>{540, 720}, Size<int>{560, 996}, 560, 560, ResizeArm::Untouched};
+        const ForwardedFrameResize enlarged{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540};
+        const ForwardedFrameResize untouched{Range<int>{540, 720}, Size<int>{560, 996}, 560, 560};
         const ScrapedFrameResize scraped{enlarged, {{enlarged, 3}}, {{enlarged, 5}, {untouched, 2}}, {}};
         std::vector<json_util::Json> sides;
         stitchFactorTab(live, scraper.common, stitcher, "frame_resize_written", scraped, &sides);

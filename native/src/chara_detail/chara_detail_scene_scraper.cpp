@@ -1204,10 +1204,10 @@ std::shared_ptr<PageScrapingBox> SceneScrapingBox::resetCampaignBox() {
     return campaign_box_;
 }
 
-void SceneScrapingBox::addBase(const Frame &frame, const std::optional<ForwardedFrameResize> &resize) {
+void SceneScrapingBox::addBase(const Frame &frame) {
     assert_(!base_ready);
     frame.save(base_path);
-    base_resize = resize;
+    base_resize = frame.forwardedResize();
     base_ready = true;
 }
 
@@ -1768,10 +1768,6 @@ Frame BaseFrameCatcher::frame() const {
     return base_frame_catcher.fullSizeFrame().view(base_image_rect);
 }
 
-std::optional<ForwardedFrameResize> BaseFrameCatcher::forwardedResize() const {
-    return base_frame_catcher.fullSizeFrame().forwardedResize();
-}
-
 bool BaseFrameCatcher::snackbarCleared() const {
     if (!header_visible_since.has_value()) {
         return false;
@@ -2160,7 +2156,7 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
         notifyTabAwaitingHeadIfChanged();
 
         if (updateUntilReady(base_frame_catcher, frame)) {
-            scraping_box->addBase(base_frame_catcher->frame(), base_frame_catcher->forwardedResize());
+            scraping_box->addBase(base_frame_catcher->frame());
             checkForCompleted();
         }
     } catch (const ImageIoError &) {

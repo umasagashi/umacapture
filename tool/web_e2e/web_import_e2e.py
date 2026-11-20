@@ -11,14 +11,17 @@ foreground window are never touched, and Chrome runs --headless=new on a throwaw
   2. Starts headless Chrome with every non-localhost host resolved to NOTFOUND, so nothing leaves
      the machine (no module download, no Sentry, no Chrome background traffic).
   3. Boots the app on an empty OPFS. The module download fails (blocked), so the dashboard shows the
-     manual module update card; the harness opens it and "picks" a modules.zip built from
-     sandbox/modules (the file-picker <input>.click is replaced; every app line after the pick runs
+     manual module update card; the harness opens it and "picks" a modules.zip built from the
+     recognizer module set provisioned in the repository (the file-picker <input>.click is replaced; every app line after the pick runs
      as for a real pick). Bytes for the zip and the clip are served by CDP Fetch interception of
      /__e2e/* on the app's own origin, so the server is used unmodified.
   4. Opens the capture page, presses the video-import button, "picks" the clip, waits until the
      record's prediction.json has appeared in OPFS and the console has been quiet for a while.
   5. Dumps OPFS (every .json as text) and the console of the page and every worker, then kills
      Chrome and the server and confirms both are gone.
+
+From the moment the server starts, <out>/resources.json names the throwaway profile, both ports and
+both PIDs (chrome_pid stays null until Chrome starts), so a caller can check the cleanup on its own.
 
 Comparison against the golden is done by compare_record.py (separate, so it can be rerun and
 positive-controlled without a browser).
@@ -75,7 +78,6 @@ class Cdp:
         self._pending = {}
         self.child_sessions = []
         self.blobs = {}  # url suffix -> path
-        self.page_session = None
 
     def send(self, method, params=None, session=None):
         self._id += 1
@@ -181,18 +183,6 @@ class Cdp:
             "responseHeaders": [{"name": "Content-Type", "value": "application/octet-stream"},
                                 {"name": "Cross-Origin-Resource-Policy", "value": "same-origin"}],
             "body": body}, session=None if sid == "page" else sid)
-
-    def wait_for(self, pattern, timeout, note=""):
-        rx = re.compile(pattern)
-        deadline = time.time() + timeout
-        seen = 0
-        while time.time() < deadline:
-            while seen < len(self.console):
-                if rx.search(self.console[seen][3]):
-                    return self.console[seen]
-                seen += 1
-            self.poll(0.25)
-        raise TimeoutError(f"never saw /{pattern}/ {note}")
 
     def evaluate(self, expr, session=None, await_promise=False, timeout=60.0):
         r = self.call("Runtime.evaluate", {"expression": expr, "returnByValue": True, "awaitPromise": await_promise},
@@ -376,7 +366,6 @@ class Watcher:
         self.first_visible = {}  # needle -> {t, node}
         self.hidden_matches = {n: 0 for n in self.needles}  # present-but-not-visible matches, never counted
         self.visible_obs = {n: 0 for n in self.needles}
-        self.last_visible = {}
 
     def observe(self, cdp, start):
         if not self.needles:
@@ -396,7 +385,6 @@ class Watcher:
             else:
                 self.hidden_matches[m["needle"]] += 1
         for n in self.needles:
-            self.last_visible[n] = n in seen_now
             self.visible_obs[n] += n in seen_now
 
     def frequency(self):
@@ -409,14 +397,22 @@ class Watcher:
 
 OPFS_COUNT = """
 (async () => {
-  let n = 0; const names = [];
+  const names = [];
   async function walk(d, p) { for await (const [k, h] of d.entries()) {
     if (h.kind === 'directory') await walk(h, p + '/' + k);
-    else if (k === 'prediction.json') { n++; names.push(p + '/' + k); } } }
+    else if (k === 'prediction.json') names.push(p + '/' + k); } }
   await walk(await navigator.storage.getDirectory(), '');
   return JSON.stringify(names);
 })()
 """
+
+
+def write_resources(out: Path, resources):
+    """Record what this run started (profile, ports, PIDs) in <out>/resources.json, rewritten whenever a
+    resource is added, so a caller can check the cleanup itself even if this process dies mid-run."""
+    tmp = out / "resources.json.tmp"
+    tmp.write_text(json.dumps(resources, indent=1), encoding="utf-8")
+    os.replace(tmp, out / "resources.json")
 
 
 def build_modules_zip(modules_dir: Path, out: Path):
@@ -512,6 +508,9 @@ def main():
     cdp = None
     rc = 1
     watcher = Watcher(args.expect_text, args.forbid_text)
+    resources = {"profile": profile, "http_port": http_port, "cdp_port": cdp_port, "server_pid": server.pid,
+                 "chrome_pid": None}
+    write_resources(out, resources)
     print(f"PROFILE {profile}", flush=True)
     print(f"PORTS http={http_port} cdp={cdp_port}", flush=True)
     print(f"SERVER-PID {server.pid}", flush=True)
@@ -533,6 +532,8 @@ def main():
             "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
             "--disable-backgrounding-occluded-windows", "--window-size=1280,1600", "about:blank"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+        resources["chrome_pid"] = chrome.pid
+        write_resources(out, resources)
         print(f"CHROME-PID {chrome.pid}", flush=True)
         version = None
         for _ in range(100):

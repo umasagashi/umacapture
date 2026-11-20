@@ -416,11 +416,11 @@ TEST_CASE("Frame::resizedIntoBand leaves a frame just outside the band alone, wi
           == 540);
 
     // The band picks its enlarge arm for 538, but nothing is done to the frame, and the recorded arm says so.
-    const auto forwarded = Frame::fixed(solid(538, 1076, Color(0, 0, 0))).forwardedThroughBand(band, std::nullopt);
+    const auto forwarded = Frame::fixed(solid(538, 1076, Color(0, 0, 0))).forwardedThroughBand(band);
     REQUIRE(forwarded.forwardedResize().has_value());
     CHECK(forwarded.forwardedResize()->pre_band_unit == 538);
     CHECK(forwarded.forwardedResize()->unit == 538);
-    CHECK(forwarded.forwardedResize()->arm == ResizeArm::Untouched);
+    CHECK(forwarded.forwardedResize()->arm() == ResizeArm::Untouched);
 }
 
 TEST_CASE("Frame::resizedIntoBand returns the frame untouched for a degenerate frame") {

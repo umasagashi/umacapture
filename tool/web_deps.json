@@ -276,12 +276,12 @@
       "build": {
         "script": "native/wasm/build.sh",
         "git_commit": null,
-        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, with its default EMSDK_DIR, OPENCV_DIR and BUILD_DIR, from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
+        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, on 2026-11-20 with its default EMSDK_DIR and OPENCV_DIR and two independent worktree-local BUILD_DIR values (byte-identical outputs), from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "db53e0739fc1c1e39625d7c06b97f72f0afd8fad19cce93ea36b3582415bc2ef",
+          "digest": "a5645cf71182c0e96f72846bdda02334b60c2a68385d59fed7b58ce72523e828",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
@@ -303,18 +303,18 @@
       }
     },
     "wasm/umacapture_core.wasm": {
-      "sha256": "74e6c5c9dc5e2f6153d5602fc4d5eabd03083281579a592d436040e83ac363a3",
-      "bytes": 3780256,
+      "sha256": "8107f6513dfb2ca4512172c4f1f413d88a3d9c569e96c81270dd637f72b99448",
+      "bytes": 3779224,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
         "git_commit": null,
-        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, with its default EMSDK_DIR, OPENCV_DIR and BUILD_DIR, from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
+        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, on 2026-11-20 with its default EMSDK_DIR and OPENCV_DIR and two independent worktree-local BUILD_DIR values (byte-identical outputs), from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "db53e0739fc1c1e39625d7c06b97f72f0afd8fad19cce93ea36b3582415bc2ef",
+          "digest": "a5645cf71182c0e96f72846bdda02334b60c2a68385d59fed7b58ce72523e828",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [

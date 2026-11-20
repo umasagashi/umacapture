@@ -219,19 +219,6 @@ inline void to_json(json_util::Json &json, const ResizeArm &arm) {
     throw std::invalid_argument("unknown ResizeArm value");
 }
 
-inline void from_json(const json_util::Json &json, ResizeArm &arm) {
-    const auto name = json.get<std::string>();
-    if (name == "untouched") {
-        arm = ResizeArm::Untouched;
-    } else if (name == "enlarged") {
-        arm = ResizeArm::Enlarged;
-    } else if (name == "shrunk") {
-        arm = ResizeArm::Shrunk;
-    } else {
-        throw std::invalid_argument("unknown ResizeArm name: " + name);
-    }
-}
-
 // What the forwarding site (CharaDetailSceneContext::update) did to one frame's size, carried on the frame it
 // forwards so the scraper can write it next to the record it scrapes.
 // - `band`: the band the pipeline was configured with; nullopt when the frame-resize setting is off.
@@ -239,21 +226,23 @@ inline void from_json(const json_util::Json &json, ResizeArm &arm) {
 //   `original_size`); nullopt for a frame that did not enter through updateFrame.
 // - `pre_band_unit` / `unit`: the anchor unit (intersection width) before and after the band. The pre-band
 //   unit is the quantity the band decides on, after crop calibration -- not the width of the captured frame.
-// - `arm`: what the band actually did; see ResizeArm.
+// - `arm()`: what the band actually did, derived from the two units; see ResizeArm. Written as `arm` so a reader
+//   of the JSON need not derive it, and not read back: the two units already decide it.
 // Optional fields are written as an explicit null, so a reader can tell "off" from "not recorded".
 struct ForwardedFrameResize {
     std::optional<Range<int>> band;
     std::optional<Size<int>> captured_size;
     int pre_band_unit;
     int unit;
-    ResizeArm arm;
+
+    [[nodiscard]] ResizeArm arm() const { return armOf(pre_band_unit, unit); }
 
     [[nodiscard]] bool operator==(const ForwardedFrameResize &other) const {
         const bool same_band = band.has_value() == other.band.has_value()
                             && (!band.has_value()
                                 || (band->min() == other.band->min() && band->max() == other.band->max()));
         return same_band && captured_size == other.captured_size && pre_band_unit == other.pre_band_unit
-            && unit == other.unit && arm == other.arm;
+            && unit == other.unit;
     }
 
     [[nodiscard]] static ResizeArm armOf(int pre_band_unit, int unit) {
@@ -274,7 +263,7 @@ inline void to_json(json_util::Json &json, const ForwardedFrameResize &resize) {
         resize.captured_size.has_value() ? json_util::Json(resize.captured_size.value()) : json_util::Json(nullptr);
     json["pre_band_unit"] = resize.pre_band_unit;
     json["unit"] = resize.unit;
-    json["arm"] = resize.arm;
+    json["arm"] = resize.arm();
 }
 
 inline ForwardedFrameResize forwardedFrameResizeFromJson(const json_util::Json &json) {
@@ -283,7 +272,6 @@ inline ForwardedFrameResize forwardedFrameResizeFromJson(const json_util::Json &
         json_util::optional_from_json(json, "captured_size", json_util::AsType<std::optional<Size<int>>>()),
         json.at("pre_band_unit").get<int>(),
         json.at("unit").get<int>(),
-        json.at("arm").get<ResizeArm>(),
     };
 }
 
@@ -442,8 +430,8 @@ public:
 
     // Carries the size the producer captured, before any producer shaping, through the capture queue.
     // NativeApi::updateFrame stamps it from its `original_size`; a frame that did not pass through there has none.
-    // Like the pane snapshot, it belongs to the frame the producer sent: clone() keeps it, and a frame derived
-    // with another anchor (view, copy, reanchored, shiftedHorizontally, a resize) does not carry it.
+    // Unlike the pane snapshot, it is a fact about the capture the pixels came from, not about this frame's anchor
+    // or region, so every frame derived from this one carries it (see withCaptureFactsOf).
     [[nodiscard]] inline Frame withCapturedSize(const Size<int> &captured_size) const {
         Frame stamped = *this;
         stamped.captured_size_ = captured_size;
@@ -452,7 +440,8 @@ public:
 
     [[nodiscard]] inline const std::optional<Size<int>> &capturedSize() const { return captured_size_; }
 
-    // What the forwarding site did to this frame's size; set only on a frame forwardedThroughBand returned.
+    // What the forwarding site did to the capture's size; set by forwardedThroughBand, and carried by every frame
+    // derived from the one it returned (see withCaptureFactsOf).
     [[nodiscard]] inline const std::optional<ForwardedFrameResize> &forwardedResize() const {
         return forwarded_resize_;
     }
@@ -641,7 +630,7 @@ public:
     // The CALLER owns the containment check (see isCropInsideFrame in cv/detail_crop_tracker.h): an
     // intersection reaching outside the image makes the coordinate math below throw from bgrAt/view.
     [[nodiscard]] inline Frame reanchored(const Rect<int> &intersection) const {
-        return {image, timestamp_, FrameAnchor::fixed(size(), intersection)};
+        return Frame{image, timestamp_, FrameAnchor::fixed(size(), intersection)}.withCaptureFactsOf(*this);
     }
 
     // A copy of this frame whose intersection is moved `dx` pixels along x, with the same unit and the same
@@ -656,7 +645,7 @@ public:
     // frame. A shift of 0 yields an anchor identical to this frame's.
     [[nodiscard]] inline Frame shiftedHorizontally(int dx) const {
         const auto moved = anchor_.intersection() + Point<int>{dx, 0};
-        return {image, timestamp_, FrameAnchor::fixed(size(), moved)};
+        return Frame{image, timestamp_, FrameAnchor::fixed(size(), moved)}.withCaptureFactsOf(*this);
     }
 
     // How far the frame's own unit may sit from a requested one before the resize is skipped as not worth
@@ -743,7 +732,8 @@ public:
         const int height = std::clamp(static_cast<int>(std::lround(source.height() * scale)), 1, target.height());
         const int left = std::clamp(static_cast<int>(std::lround(source.left() * scale)), 0, target.width() - width);
         const int top = std::clamp(static_cast<int>(std::lround(source.top() * scale)), 0, target.height() - height);
-        return {resized, timestamp_, FrameAnchor::fixed(target, {{left, top}, Size<int>{width, height}})};
+        return Frame{resized, timestamp_, FrameAnchor::fixed(target, {{left, top}, Size<int>{width, height}})}
+            .withCaptureFactsOf(*this);
     }
 
     // The band form of the transform above, and the form the pipeline actually configures: resize this
@@ -782,16 +772,13 @@ public:
 
     // The forwarding site's whole step: apply `band` when there is one (nullopt: the setting is off, forward the
     // frame as is), and attach what happened as a ForwardedFrameResize -- the band, `captured_size`, the unit
-    // before and after, and the arm, judged here from those two units so no reader re-derives it from the bound.
-    // `captured_size` is passed in rather than read off this frame because the forwarding site holds the frame
-    // the crop tracker returned, which may be a re-anchored derivative of the one the producer stamped.
-    [[nodiscard]] inline Frame forwardedThroughBand(
-        const std::optional<Range<int>> &band, const std::optional<Size<int>> &captured_size) const {
+    // before and after, from which the arm follows. The captured size is this frame's own (capturedSize), which
+    // the crop tracker's re-anchored copy carries like any derivative.
+    [[nodiscard]] inline Frame forwardedThroughBand(const std::optional<Range<int>> &band) const {
         const int pre_band_unit = anchor_.intersection().width();
         Frame forwarded = band.has_value() ? resizedIntoBand(band.value()) : *this;
         const int unit = forwarded.anchor_.intersection().width();
-        forwarded.forwarded_resize_ = ForwardedFrameResize{
-            band, captured_size, pre_band_unit, unit, ForwardedFrameResize::armOf(pre_band_unit, unit)};
+        forwarded.forwarded_resize_ = ForwardedFrameResize{band, captured_size_, pre_band_unit, unit};
         return forwarded;
     }
 
@@ -910,7 +897,18 @@ private:
         if (x < 0 || y < 0 || width < 0 || height < 0 || (x + width) > image.cols || (y + height) > image.rows) {
             throw std::out_of_range("Frame::view out of bounds");
         }
-        return fixed(image({x, y, width, height}), timestamp_);
+        return fixed(image({x, y, width, height}), timestamp_).withCaptureFactsOf(*this);
+    }
+
+    // `derived`, a frame made from `source`'s pixels, with `source`'s capture facts (capturedSize, forwardedResize).
+    // They describe the capture the pixels came from, so neither a new anchor nor a region nor a rescale makes them
+    // false. The pane snapshot is deliberately NOT carried: it is the producer's authority over the anchor, and a
+    // derivative with another anchor no longer has the anchor that authority was given for.
+    [[nodiscard]] inline Frame withCaptureFactsOf(const Frame &source) const {
+        Frame derived = *this;
+        derived.captured_size_ = source.captured_size_;
+        derived.forwarded_resize_ = source.forwarded_resize_;
+        return derived;
     }
 
     // Maps `rect` (normalized coordinates) to frame pixels and clips it to the image bounds. An empty rect

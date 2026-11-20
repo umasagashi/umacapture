@@ -231,8 +231,8 @@ TEST_CASE("prediction.json copies the side JSONs' resize facts, on capture and a
     std::filesystem::create_directories(root / "modules");
     json_util::write(root / "modules" / "version_info.json", {{"region", "jp"}, {"recognizer_version", "test"}});
     const json_util::Json facts = TabFrameResize{
-        ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540, ResizeArm::Enlarged},
-        {{ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540, ResizeArm::Enlarged}, 7}},
+        ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540},
+        {{ForwardedFrameResize{Range<int>{540, 720}, Size<int>{404, 718}, 404, 540}, 7}},
     };
     // skill and factor carry the facts; campaign's side JSON is one written without them.
     for (const auto *tab : {"skill", "factor", "campaign"}) {

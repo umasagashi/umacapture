@@ -2,19 +2,22 @@
 # requires-python = ">=3.11"
 # ///
 """Run one web e2e scenario and leave the evidence of that run in <out-root>/<name>/
-(default out-root: testdata/harness/runs/web-e2e under the repository root).
+(default out-root: the web-e2e directory of the live-capture harness's run artefacts in the repository;
+the README names the path).
 
     uv run tool/web_e2e/run_scenario.py --name <run> [--golden G [--expect-frame-resize J] [--expect-alignment J]] \
         -- <web_import_e2e.py arguments except --repo/--out>
 
-Writes, next to web_import_e2e.py's own outputs (opfs.json, console.log, final.png, server.log, e2e_checks.json):
+Writes, next to web_import_e2e.py's own outputs (opfs.json, console.log, final.png, server.log, e2e_checks.json,
+resources.json):
   args.json      the wrapper's argv, the exact child command lines, the worktree HEAD, sha256 of the build under test
   inputs.sha256  sha256 of the clip, the golden and modules.zip (the input videos / expectations of the run)
   stdout.txt     the whole standard output (and error) of web_import_e2e.py
   compare.txt    the whole output of compare_record.py (only when --golden is given)
-  cleanup.json   after the run: Chrome/server PIDs and any process still mentioning the profile or the ports,
-                 ports closed or not, whether the throwaway profile directory still exists -- each measured by
-                 this wrapper itself, not taken from the child's own report
+  cleanup.json   after the run, for the profile, ports and PIDs the child recorded in resources.json: PIDs alive
+                 or not, any process still mentioning the profile or the ports, ports closed or not, whether the
+                 throwaway profile directory still exists -- each measured by this wrapper itself, not taken
+                 from the child's own report
   result.json    every judgement and the overall verdict; the exit code is 0 only for overall PASS
 Refuses to reuse a run directory that already holds files.
 """
@@ -145,7 +148,7 @@ def main():
         hashes.append(f"{sha256(g)}  {g}  (golden)")
 
     t0 = time.time()
-    e2e_rc, stdout = run_tee(e2e_cmd, str(repo), out / "stdout.txt")
+    e2e_rc, _ = run_tee(e2e_cmd, str(repo), out / "stdout.txt")
     zip_path = out / "modules.zip"
     if zip_path.is_file():
         hashes.append(f"{sha256(zip_path)}  {zip_path}  (modules.zip fed to the module dialog)")
@@ -156,12 +159,16 @@ def main():
         cmp_rc, cmp_out = run_tee(compare_cmd, str(repo), out / "compare.txt")
         cmp_out = cmp_out.replace("\r\n", "\n")
 
-    # Cleanup, measured here. The child's stdout uses CRLF on Windows; strip it before parsing paths and PIDs.
-    stdout = stdout.replace("\r\n", "\n")
-    profile = (re.search(r"^PROFILE (.+)$", stdout, re.M) or [None, None])[1]
-    ports = [int(x) for x in re.findall(r"\b(?:http|cdp)=(\d+)", stdout)]
-    pids = [int(x) for x in re.findall(r"^(?:SERVER|CHROME)-PID (\d+)$", stdout, re.M)]
-    needles = ["uma-e2e-chrome-"] + [f"--port {p} " for p in ports[:1]] + [f"remote-debugging-port={p}" for p in ports[1:]]
+    # Cleanup, measured here against what the child recorded it started (resources.json, written as each
+    # resource comes up, so it is there even when the child died part-way).
+    rj = out / "resources.json"
+    res = json.loads(rj.read_text(encoding="utf-8")) if rj.is_file() else {}
+    profile = res.get("profile")
+    http_port, cdp_port = res.get("http_port"), res.get("cdp_port")
+    ports = [p for p in (http_port, cdp_port) if p is not None]
+    pids = [p for p in (res.get("server_pid"), res.get("chrome_pid")) if p is not None]
+    needles = ["uma-e2e-chrome-"] + ([f"--port {http_port} "] if http_port is not None else []) \
+        + ([f"remote-debugging-port={cdp_port}"] if cdp_port is not None else [])
     try:
         left = processes_mentioning(needles)
     except Exception as e:  # a probe that cannot run must not read as "nothing left"
@@ -174,7 +181,7 @@ def main():
         "ports": {str(p): "open" if port_open(p) else "closed" for p in ports},
         "processes_mentioning_profile_or_ports": left,
     }
-    cleanup["ok"] = bool(profile) and bool(ports) and len(pids) == 2 and cleanup["profile_dir_exists"] is False and cleanup["profile_parent_exists"] is True \
+    cleanup["ok"] = bool(profile) and len(ports) == 2 and len(pids) == 2 and cleanup["profile_dir_exists"] is False and cleanup["profile_parent_exists"] is True \
         and not any(cleanup["pids_alive"].values()) and all(v == "closed" for v in cleanup["ports"].values()) \
         and not left
     (out / "cleanup.json").write_text(json.dumps(cleanup, ensure_ascii=False, indent=1), encoding="utf-8")
