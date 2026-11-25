@@ -45,7 +45,7 @@ Future<AccountPublicRead> readAccountPublic(RecordShareSession session, ShareSes
   const unread = (profile: SharerProfileUnread(), list: ListVisibilityUnread());
   final ShareAnswer answer;
   try {
-    answer = await session.send("GET", "/api/me", under: under);
+    answer = await session.readMe(under: under);
   } on DioException {
     return unread;
   } on StateError {

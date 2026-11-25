@@ -27,8 +27,14 @@ import '/src/preference/storage_box.dart';
 
 part 'record_share_session.mapper.dart';
 
-/// The key the session is kept under in the `recordShares` store; every other key there is a share note.
+/// The key the session is kept under in the `recordShares` store.
 const shareSessionKey = "session";
+
+/// The key the device's last login ([RememberedLogin]) is kept under in the `recordShares` store.
+const rememberedLoginKey = "last_login";
+
+/// The keys of the `recordShares` store that are not share notes; every other key there is one.
+const reservedShareKeys = {shareSessionKey, rememberedLoginKey};
 
 /// What `POST /api/auth/claim` answered, kept as the server named it.
 ///
@@ -41,6 +47,28 @@ class ShareSession with ShareSessionMappable {
   final bool deleting;
 
   const ShareSession({required this.token, required this.expiresAt, required this.accountId, required this.deleting});
+}
+
+/// The account this device last logged in to, and the days the server last told for it: when the account last
+/// logged in and when it is deleted unless it logs in again. Days count from the Unix epoch in UTC.
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class RememberedLogin with RememberedLoginMappable {
+  final String accountId;
+  final int lastLoginDay;
+  final int deletionDay;
+
+  const RememberedLogin({required this.accountId, required this.lastLoginDay, required this.deletionDay});
+
+  /// What [body], a 200 of the claim or of `GET /api/me` for [accountId], tells; null when it carries no days, as a
+  /// Worker older than them answers, and as a session that can only continue deleting its account is answered.
+  static RememberedLogin? of(String accountId, Map<String, Object?>? body) {
+    final lastLoginDay = body?["last_login_day"];
+    final deletionDay = body?["deletion_day"];
+    if (lastLoginDay is! int || deletionDay is! int) {
+      return null;
+    }
+    return RememberedLogin(accountId: accountId, lastLoginDay: lastLoginDay, deletionDay: deletionDay);
+  }
 }
 
 /// The server's answer: its status, the decoded JSON body when there is one, and [body] when that is an object.
@@ -408,6 +436,13 @@ class RecordShareSession extends Notifier<ShareSession?> {
         }
         await _keep(session);
         await ref.read(recordSharesProvider.notifier).keepOnlyAccount(session.accountId);
+        final remembered = ref.read(rememberedLoginProvider.notifier);
+        if (session.deleting) {
+          // The account is being deleted: there is no login left to remember.
+          await remembered._keep(null);
+        } else if (RememberedLogin.of(session.accountId, answer.body) case final login?) {
+          await remembered._keep(login);
+        }
         logger.i("Logged in to the sharing server. deleting=${session.deleting}");
         return session.deleting ? LoginOutcome.signedIn : _registerTrainer(session);
       case 409 when error == "login_incomplete":
@@ -478,6 +513,21 @@ class RecordShareSession extends Notifier<ShareSession?> {
       bearer: session.token,
     );
     await answered(session.token, answer.status, answer.body?["error"]);
+    return answer;
+  }
+
+  /// Reads the account, `GET /api/me`, under [under] (or the session held now), and remembers the days a 200 tells
+  /// only when the device still holds the session the request was sent under.
+  ///
+  /// Throws as [send] does.
+  Future<ShareAnswer> readMe({ShareSession? under}) async {
+    final sentUnder = under ?? state;
+    final answer = await send("GET", "/api/me", under: under);
+    if (answer.status == 200 && sentUnder != null && holds(sentUnder)) {
+      if (RememberedLogin.of(sentUnder.accountId, answer.body) case final login?) {
+        await ref.read(rememberedLoginProvider.notifier)._keep(login);
+      }
+    }
     return answer;
   }
 
@@ -560,17 +610,17 @@ class RecordShareSession extends Notifier<ShareSession?> {
       switch (answer.status) {
         case 204:
           logger.i("The sharing account was deleted");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.deleted;
         case 401 when session.deleting:
           logger.i("The sharing account's deleting session was lost; the deletion is left to the server");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.handedToServer;
         case 401:
           return AccountDeletionOutcome.loginRequired;
         case 429 when (answer.body?["error"]) == "sync_paused_today":
           logger.i("The sharing account's deletion is left to the server for the rest of the day");
-          await _forgetAll();
+          await _forgetAccount();
           return AccountDeletionOutcome.handedToServer;
         case 200:
           // Only the deletion's own answer carries `remaining`; anything else answering 200 is not progress.
@@ -619,17 +669,58 @@ class RecordShareSession extends Notifier<ShareSession?> {
 
   /// Drops the session and every share note: the notes index this account's shares, and another account logging
   /// in next must not see them as its own. The user ended the session, or the account; the server did not drop it.
+  /// The remembered login stays; [_forgetAccount] forgets it too.
   Future<void> _forgetAll() async {
     ref.read(recordShareSessionDroppedProvider.notifier)._set(false);
     state = null;
     for (final (:key, value: _) in _box.entries().toList()) {
-      await _box.delete(key);
+      if (key != rememberedLoginKey) await _box.delete(key);
     }
     ref.invalidate(recordSharesProvider);
+  }
+
+  /// [_forgetAll], and the remembered login too: the account is deleted, or the server is deleting it.
+  Future<void> _forgetAccount() async {
+    await _forgetAll();
+    await ref.read(rememberedLoginProvider.notifier)._keep(null);
   }
 }
 
 final recordShareSessionProvider = NotifierProvider<RecordShareSession, ShareSession?>(RecordShareSession.new);
+
+/// The device's [RememberedLogin], or null when it remembers none. It outlives a logout, a session the server dropped
+/// and a restart, and is forgotten when the account is deleted; only [RecordShareSession] writes it.
+class RememberedLoginNotifier extends Notifier<RememberedLogin?> {
+  StorageBox get _box => StorageBox(StorageBoxKey.recordShares);
+
+  @override
+  RememberedLogin? build() {
+    final stored = _box.pull<String>(rememberedLoginKey);
+    if (stored == null) {
+      return null;
+    }
+    try {
+      return RememberedLoginMapper.fromJson(stored);
+    } on Exception catch (e) {
+      // The next login or account read writes it again.
+      logger.w("The remembered login could not be read: ${e.runtimeType}");
+      return null;
+    }
+  }
+
+  Future<void> _keep(RememberedLogin? login) async {
+    state = login;
+    if (login == null) {
+      await _box.delete(rememberedLoginKey);
+    } else {
+      await _box.push(rememberedLoginKey, login.toJson());
+    }
+  }
+}
+
+final rememberedLoginProvider = NotifierProvider<RememberedLoginNotifier, RememberedLogin?>(
+  RememberedLoginNotifier.new,
+);
 
 /// What the web login this page was loaded to finish ended with ([RecordShareSession.resumeLogin]): null while its
 /// claim is out, and for good when the page was not loaded by a login. Read at start-up, so the claim does not wait

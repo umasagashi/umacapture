@@ -313,7 +313,13 @@ Map<String, Object?> _claimed() => {
   "expires_at": 1792000000,
   "account_id": _accountId,
   "deleting": false,
+  "last_login_day": _lastLoginDay,
+  "deletion_day": _deletionDay,
 };
+
+const _lastLoginDay = 20400;
+const _deletionDay = 20766;
+const _remembered = RememberedLogin(accountId: _accountId, lastLoginDay: _lastLoginDay, deletionDay: _deletionDay);
 
 class _EmptyArchive extends CharaDetailArchiveStorage {
   @override
@@ -438,6 +444,9 @@ void main() {
     shareSessionKey,
     ShareSession(token: _token, expiresAt: 1792000000, accountId: _accountId, deleting: deleting).toJson(),
   );
+
+  Future<void> storeRememberedLogin() =>
+      StorageBox(StorageBoxKey.recordShares).push(rememberedLoginKey, _remembered.toJson());
 
   Future<RecordShare> storeNote({String? recordId, RecordShareState state = RecordShareState.pending}) async {
     final shared = state == RecordShareState.shared;
@@ -2356,6 +2365,7 @@ void main() {
     testWidgets('S4b (C1 iii, iv): only the long press deletes the account, and a deletion cut short is '
         'continued, with nothing else offered meanwhile', (tester) async {
       await storeSession();
+      await storeRememberedLogin();
       container = containerFor([
         _sharesList([]),
         _json(200, {
@@ -2402,13 +2412,15 @@ void main() {
       );
       expect(sentBesidesListing(), List.filled(4, "DELETE /api/me"));
       expect(container.read(recordShareSessionProvider), isNull);
-      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty, reason: 'the remembered login goes too');
+      expect(container.read(rememberedLoginProvider), isNull);
     });
 
     testWidgets("stopped by the server's day, the deletion is left to the server and the device logs out", (
       tester,
     ) async {
       await storeSession();
+      await storeRememberedLogin();
       final note = await storeNote();
       container = containerFor([
         _sharesList([_listed("0123456789", note.keyHash)]),
@@ -2436,7 +2448,8 @@ void main() {
 
       expect(toasts, ['残りは、サーバーが自動で削除します。']);
       expect(container.read(recordShareSessionProvider), isNull);
-      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
+      expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty, reason: 'the remembered login goes too');
+      expect(container.read(rememberedLoginProvider), isNull);
     });
 
     testWidgets('a deleting session lost on the way leaves the deletion to the server and the device logs out', (
@@ -3194,6 +3207,75 @@ void main() {
       expect(bodyOf(1), {"trainer_id": record.metadata.trainerId});
       final stored = StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey);
       expect(ShareSessionMapper.fromJson(stored!).accountId, _accountId);
+      expect(
+        container.read(rememberedLoginProvider)?.toJson(),
+        _remembered.toJson(),
+        reason: 'the claim tells the days',
+      );
+    });
+
+    test('a device that holds a session but remembers no login remembers the one GET /api/me tells, and keeps it '
+        'through a logout and a restart', () async {
+      await storeSession();
+      await storeNote();
+      container = containerFor([
+        _json(200, {"account_id": _accountId, "last_login_day": _lastLoginDay, "deletion_day": _deletionDay}),
+        _empty(204),
+      ]);
+      expect(container.read(rememberedLoginProvider), isNull);
+
+      await session().readMe();
+      expect(container.read(rememberedLoginProvider)?.toJson(), _remembered.toJson());
+
+      expect(await session().logout(), isTrue);
+      final box = StorageBox(StorageBoxKey.recordShares);
+      expect(box.entries().map((e) => e.key), [rememberedLoginKey], reason: 'the logout drops all but the login');
+      expect(container.read(recordSharesProvider), isEmpty, reason: 'the remembered login is not a share note');
+      container.invalidate(rememberedLoginProvider);
+      expect(
+        container.read(rememberedLoginProvider)?.toJson(),
+        _remembered.toJson(),
+        reason: 'read back from the store',
+      );
+    });
+
+    test('a GET /api/me answered after the device moved to another session remembers nothing of the old one', () async {
+      await storeSession();
+      final heldMe = Completer<Object>();
+      const otherAccountId = "acct-0002";
+      container = containerFor([
+        heldMe.future,
+        _empty(204),
+        _json(200, {
+          ..._claimed(),
+          "token": "OTHERtokenOTHERtokenOTHERtokenOTHERtoken12",
+          "account_id": otherAccountId,
+        }),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+      ]);
+
+      final read = session().readMe();
+      await waitUntil(() => server.sent.length == 1, describe: 'the GET /api/me to reach the server');
+      expect(await session().logout(), isTrue);
+      expect(await webLogin(), LoginOutcome.signedIn);
+      final otherLogin = container.read(rememberedLoginProvider)?.toJson();
+      expect(otherLogin, isNotNull);
+      expect(
+        container.read(rememberedLoginProvider)?.accountId,
+        otherAccountId,
+        reason: 'the new claim tells its days',
+      );
+
+      heldMe.complete(_json(200, {"account_id": _accountId, "last_login_day": 20000, "deletion_day": 20365}));
+      expect((await read).status, 200);
+
+      expect(
+        container.read(rememberedLoginProvider)?.toJson(),
+        otherLogin,
+        reason: 'the old session\'s answer is not the login the device holds',
+      );
+      container.invalidate(rememberedLoginProvider);
+      expect(container.read(rememberedLoginProvider)?.toJson(), otherLogin, reason: 'nor the one stored');
     });
 
     test("the server's 401 drops the session and keeps the share notes", () async {

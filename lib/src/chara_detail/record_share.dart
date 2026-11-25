@@ -432,7 +432,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
   Map<String, RecordShare> build() {
     final entries = <String, RecordShare>{};
     for (final (:key, :value) in _box.entries()) {
-      if (key == shareSessionKey || value is! String) {
+      if (reservedShareKeys.contains(key) || value is! String) {
         continue;
       }
       try {
@@ -624,7 +624,7 @@ class RecordShares extends Notifier<Map<String, RecordShare>> {
     ({Set<String> ids, ShareOutcome? failure}) failed(ShareOutcome o) => (ids: const {}, failure: o);
     final ShareAnswer answer;
     try {
-      answer = await _session.send("GET", "/api/me", under: under);
+      answer = await _session.readMe(under: under);
     } on DioException {
       return failed(const ShareUnreachable());
     } on StateError {

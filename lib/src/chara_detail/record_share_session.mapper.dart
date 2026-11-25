@@ -84,3 +84,76 @@ mixin ShareSessionMappable {
   }
 }
 
+class RememberedLoginMapper extends ClassMapperBase<RememberedLogin> {
+  RememberedLoginMapper._();
+
+  static RememberedLoginMapper? _instance;
+  static RememberedLoginMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = RememberedLoginMapper._());
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'RememberedLogin';
+
+  static String _$accountId(RememberedLogin v) => v.accountId;
+  static const Field<RememberedLogin, String> _f$accountId = Field(
+    'accountId',
+    _$accountId,
+    key: r'account_id',
+  );
+  static int _$lastLoginDay(RememberedLogin v) => v.lastLoginDay;
+  static const Field<RememberedLogin, int> _f$lastLoginDay = Field(
+    'lastLoginDay',
+    _$lastLoginDay,
+    key: r'last_login_day',
+  );
+  static int _$deletionDay(RememberedLogin v) => v.deletionDay;
+  static const Field<RememberedLogin, int> _f$deletionDay = Field(
+    'deletionDay',
+    _$deletionDay,
+    key: r'deletion_day',
+  );
+
+  @override
+  final MappableFields<RememberedLogin> fields = const {
+    #accountId: _f$accountId,
+    #lastLoginDay: _f$lastLoginDay,
+    #deletionDay: _f$deletionDay,
+  };
+
+  static RememberedLogin _instantiate(DecodingData data) {
+    return RememberedLogin(
+      accountId: data.dec(_f$accountId),
+      lastLoginDay: data.dec(_f$lastLoginDay),
+      deletionDay: data.dec(_f$deletionDay),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static RememberedLogin fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<RememberedLogin>(map);
+  }
+
+  static RememberedLogin fromJson(String json) {
+    return ensureInitialized().decodeJson<RememberedLogin>(json);
+  }
+}
+
+mixin RememberedLoginMappable {
+  String toJson() {
+    return RememberedLoginMapper.ensureInitialized()
+        .encodeJson<RememberedLogin>(this as RememberedLogin);
+  }
+
+  Map<String, dynamic> toMap() {
+    return RememberedLoginMapper.ensureInitialized().encodeMap<RememberedLogin>(
+      this as RememberedLogin,
+    );
+  }
+}
+
