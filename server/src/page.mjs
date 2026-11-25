@@ -237,19 +237,20 @@ function stats(record) {
 
 /**
  * The line naming the sharer of a page from public JSON's `sharer` (`publicSharer` in user_text.mjs),
- * with `cls` its class, or "" when the sharer wrote no profile. The trainer id is shown grouped by
+ * with `cls` its class and a placeholder for each unwritten field. The trainer id is shown grouped by
  * three, as the game shows it, followed by a button that copies its bare digits, which is what the
  * game takes when pasted; COPY_SCRIPT shows the button. The name is self-declared and is shown as
  * written, never as verified.
  */
 export function sharerLine(sharer, cls) {
-  if (sharer === null) return "";
-  const digits = sharer.game_trainer_id;
-  const id = digits === null ? null : `ID ${esc(groupedGameTrainerId(digits))}`;
-  const named = sharer.trainer_name === null ? id : id === null ? esc(sharer.trainer_name) : `${esc(sharer.trainer_name)}（${id}）`;
+  const unset = '<span class="sharer-unset">未公開</span>';
+  const name = sharer?.trainer_name ?? null;
+  const digits = sharer?.game_trainer_id ?? null;
+  const shownName = name === null ? unset : esc(name);
+  const shownId = digits === null ? unset : esc(groupedGameTrainerId(digits));
   const copy =
     digits === null ? "" : ` <button type="button" class="sharer-copy" data-copy="${esc(digits)}" hidden>ID をコピー</button>`;
-  return `<p class="${cls}"><span class="rec-k">トレーナー</span> ${named}${copy}</p>`;
+  return `<p class="${cls}"><span class="rec-k">トレーナー</span> ${shownName}（ID ${shownId}）${copy}</p>`;
 }
 
 /** The share's tagline as a paragraph of class `cls`, or "" when none is written. Never a link. */

@@ -644,6 +644,8 @@ describe("the session's account", () => {
   const putTagline = (token, id, body) => answer(worker.putTagline(token, id, body));
   const page = async (path) => (await answer(worker.fetch(path))).text;
   const publicJson = async (path) => (await answer(worker.fetch(path))).body;
+  const trainerLine = (html) => /<p class="(?:rec|list)-sharer">([\s\S]*?)<\/p>/.exec(html)?.[1]
+    .replace(/<button\b[^>]*>[\s\S]*?<\/button>/g, "").replace(/<[^>]*>/g, "").trim() ?? null;
   const ogDescription = (html) => /<meta property="og:description" content="([^"]*)">/.exec(html)?.[1] ?? null;
   const bytes = (text) => new TextEncoder().encode(text).byteLength;
   const chargeOfShare = async (id) => (await worker.db.prepare("SELECT charge FROM records WHERE id = ?").bind(id).first()).charge;
@@ -686,12 +688,15 @@ describe("the session's account", () => {
       const html = await page(`/r/${id}`);
       assert.ok(html.includes("&lt;s&gt;&amp;&quot;&#39;"), "the name is not escaped on the page");
       assert.equal(html.includes("<s>"), false, "the name reached the page as markup");
-      assert.ok(html.includes("ID 123 456 789"), "the id is not grouped by three");
+      assert.equal(trainerLine(html), `トレーナー &lt;s&gt;&amp;&quot;&#39;${cp(0xe9)}${cp(0x1f469, 0x200d, 0x1f4bb)}（ID 123 456 789）`);
       assert.equal(ogDescription(html).includes("&lt;s&gt;"), false, "the description carries the profile");
       assert.deepEqual(Object.keys((await answer(worker.fetch(`/api/shares/${id}`))).body).sort(), ["id", "images", "record", "schema", "shared_on"]);
     }
     assert.deepEqual((await publicJson(`/u/${owner}.json`)).sharer, profile);
-    assert.ok((await page(`/u/${owner}`)).includes("ID 123 456 789"));
+    assert.equal(
+      trainerLine(await page(`/u/${owner}`)),
+      `トレーナー &lt;s&gt;&amp;&quot;&#39;${cp(0xe9)}${cp(0x1f469, 0x200d, 0x1f4bb)}（ID 123 456 789）`,
+    );
 
     // Both pages carry the id's copy button with the bare digits, and the CSP lets the page's one
     // script, the one that shows the button and copies, run by its hash.
@@ -718,24 +723,33 @@ describe("the session's account", () => {
 
     const twelve = await putProfile(token, { trainer_name: null, game_trainer_id: "1234-5678-9012", previous: profile });
     assert.deepEqual(twelve.body, { trainer_name: null, game_trainer_id: "123456789012" });
-    assert.ok((await page(`/r/${first.id}`)).includes("ID 123 456 789 012"));
-    assert.ok((await page(`/r/${first.id}`)).includes('data-copy="123456789012"'));
+    for (const path of [`/r/${first.id}`, `/u/${owner}`]) {
+      assert.deepEqual((await publicJson(`${path}.json`)).sharer, twelve.body, path);
+      const html = await page(path);
+      assert.equal(trainerLine(html), "トレーナー 未公開（ID 123 456 789 012）", path);
+      assert.ok(html.includes('data-copy="123456789012"'), path);
+    }
 
-    // A name with no id: no copy button.
+    // A name with no id: the id is shown as unwritten, with no copy button.
     const named = await putProfile(token, { trainer_name: "name", game_trainer_id: null, previous: twelve.body });
     assert.deepEqual(named.body, { trainer_name: "name", game_trainer_id: null });
     for (const path of [`/r/${first.id}`, `/u/${owner}`]) {
       const html = await page(path);
-      assert.ok(html.includes("name"), path);
+      assert.deepEqual((await publicJson(`${path}.json`)).sharer, named.body, path);
+      assert.equal(trainerLine(html), "トレーナー name（ID 未公開）", path);
       assert.equal(html.includes("data-copy="), false, `${path}: a copy button with no id`);
       assert.equal(html.includes("<script"), false, `${path}: a script with no button`);
     }
 
     const removed = await putProfile(token, { trainer_name: null, game_trainer_id: "  ", previous: named.body });
     assert.deepEqual([removed.status, removed.body], [200, NONE]);
-    assert.equal((await publicJson(`/r/${first.id}.json`)).sharer, null);
-    assert.equal((await publicJson(`/u/${owner}.json`)).sharer, null);
-    assert.equal((await page(`/r/${first.id}`)).includes("rec-sharer"), false);
+    for (const path of [`/r/${first.id}`, `/u/${owner}`]) {
+      assert.equal((await publicJson(`${path}.json`)).sharer, null, path);
+      const html = await page(path);
+      assert.equal(trainerLine(html), "トレーナー 未公開（ID 未公開）", path);
+      assert.equal(html.includes("data-copy="), false, `${path}: a copy button with no id`);
+      assert.equal(html.includes("<script"), false, `${path}: a script with no button`);
+    }
     assert.equal((await putProfile(newClientKey(), { ...NONE, previous: NONE })).status, 401);
   });
 

@@ -291,6 +291,7 @@ a { color: var(--primary); }
    sharer's line; on a phone it wraps under the id rather than widen the page. */
 .sharer-copy { margin-left: .3rem; padding: .05rem .6rem; font: inherit; font-size: .78rem; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .sharer-copy[hidden] { display: none; }
+.sharer-unset { color: var(--muted); }
 /* The kind filter: the checked radio button hides the other kind. Without :has() every card stays shown. */
 .list:has(#list-k-std:checked) .list-item[data-type="inheritance_only"],
 .list:has(#list-k-inh:checked) .list-item[data-type="standard"] { display: none; }
