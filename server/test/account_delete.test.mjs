@@ -10,7 +10,7 @@ import * as limits from "../src/limits.mjs";
 import { ROUTES } from "../src/routes.mjs";
 import { named, STATEMENT } from "../src/sync_refs.mjs";
 import { answer as answerWithHeaders, bodyOf, idIn, newImage, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
-import { CookieJar, GOOGLE, imageBundle, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
+import { CookieJar, GOOGLE, ORIGIN, TURNSTILE, imageBundle, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
 
 /** Status and parsed body of one response (null for a body that is not JSON). */
 async function answer(resPromise) {
@@ -126,12 +126,28 @@ describe("account deletion", () => {
     const profile = { trainer_name: "name", game_trainer_id: "123456789" };
     const none = { trainer_name: null, game_trainer_id: null };
     assert.equal((await answer(worker.putProfile(token, { ...profile, previous: none }))).status, 200);
+    assert.equal((await worker.putList(token, true)).status, 200);
     assert.equal((await deleteMe(token)).status, 200);
     const left = await rowsOf("records", "owner_id", owner);
-    // The profile is gone from the moment the deletion began, while the account's shares are still listed.
-    const list = await answer(worker.fetch(`/u/${owner}.json`));
-    assert.deepEqual([list.status, list.body.sharer], [200, null]);
-    assert.equal(list.body.count, left);
+    assert.ok(left > 0, "the deletion must still have shares to hide");
+    // The list is absent from the start of deletion even while its shares remain stored.
+    for (const path of [`/u/${owner}`, `/u/${owner}.json`, `/u/${owner}/report`]) {
+      const res = await worker.fetch(path);
+      assert.equal(res.status, 404, path);
+      const text = await res.text();
+      for (const hidden of ['name="id"', "list-sharer", "list-item", "この一覧は非公開です"]) assert.equal(text.includes(hidden), false, hidden);
+    }
+    worker.siteverify.answer = () => ({ success: true, hostname: TURNSTILE.HOSTNAME, action: "report" });
+    const sent = worker.sentry.calls.length;
+    const report = await worker.fetch("/api/reports", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ id: owner, reason: "personal_info", text: "", token: "turnstile-report-token" }).toString(),
+    });
+    assert.equal(report.status, 404, "deleting list report POST");
+    await report.arrayBuffer();
+    assert.equal(worker.sentry.calls.length, sent);
+    worker.siteverify.answer = () => ({ success: true, hostname: TURNSTILE.HOSTNAME, action: TURNSTILE.ACTION });
 
     for (const res of [
       await shareOnce(token),
@@ -141,6 +157,7 @@ describe("account deletion", () => {
       await answer(worker.myShares(token)),
       await answer(worker.putProfile(token, { ...profile, previous: none })),
       await answer(worker.putTagline(token, kept, { tagline: "x", previous: null })),
+      await answer(worker.putList(token, false)),
     ]) {
       assert.equal(res.status, 409, res.text);
       assert.equal(res.body.error, "account_deleting");
@@ -161,6 +178,7 @@ describe("account deletion", () => {
       await postTrainer(token, TRAINER),
       await answer(worker.putProfile(token, { trainer_name: "x", game_trainer_id: null, previous: { trainer_name: null, game_trainer_id: null } })),
       await answer(worker.putTagline(token, id, { tagline: "x", previous: null })),
+      await answer(worker.putList(token, true)),
     ]) {
       assert.equal(res.status, 409, res.text);
       assert.equal(res.body.error, "account_deleting");

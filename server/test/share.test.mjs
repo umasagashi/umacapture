@@ -518,6 +518,24 @@ describe("sharing switch", () => {
       assert.equal(await worker.count("logins"), 0);
       assert.equal(worker.siteverify.calls.length, 0);
 
+      // The stopped Worker allows keeping either visibility and making a public list private.
+      const visibility = async () => (await answer(worker.fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } }))).body.list_public;
+      assert.equal(await visibility(), false);
+      assert.deepEqual(await answer(worker.putList(token, false)).then(({ status, body }) => [status, body]), [200, { public: false }]);
+      const publish = await answer(worker.putList(token, true));
+      assert.deepEqual([publish.status, publish.body], [503, { error: "sharing_paused" }]);
+      assert.equal(await visibility(), false, "a refused transition published the list");
+      // A list already public before the switch is represented by its stored value.
+      await worker.db.prepare("UPDATE accounts SET list_public = 1 WHERE id = ?").bind(owner).run();
+      assert.deepEqual(await answer(worker.putList(token, true)).then(({ status, body }) => [status, body]), [200, { public: true }]);
+      for (const path of [`/u/${owner}`, `/u/${owner}.json`]) {
+        const res = await worker.fetch(path);
+        assert.equal(res.status, 200, "sharing paused must leave public lists readable");
+        await res.arrayBuffer();
+      }
+      assert.deepEqual(await answer(worker.putList(token, false)).then(({ status, body }) => [status, body]), [200, { public: false }]);
+      assert.equal(await visibility(), false);
+
       const shared = await answer(worker.share(token, [share()]));
       assert.equal(shared.status, 503);
       assert.equal(shared.body.error, "sharing_paused");
@@ -587,6 +605,7 @@ describe("the session's account", () => {
     assert.deepEqual(first.body, {
       account_id: owner,
       list_url: `${ORIGIN}/u/${owner}`,
+      list_public: false,
       share_count: 0,
       shares_remaining: limits.ACCOUNT_SHARE_CAP,
       trainer_ids: [],
@@ -603,6 +622,26 @@ describe("the session's account", () => {
     assert.deepEqual([after.share_count, after.shares_remaining], [1, limits.ACCOUNT_SHARE_CAP - 1]);
     assert.ok(b.id);
     assert.equal((await me(newClientKey())).status, 401);
+  });
+
+  test("list visibility accepts only a boolean, requires a session, and is read back through /api/me", async () => {
+    const token = await worker.signIn("list-setting");
+    for (const body of [{}, { public: 1 }, { public: "true" }, { public: null }, { public: [] }, { public: true, extra: 1 }]) {
+      const res = await answer(worker.fetch("/api/me/list", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }));
+      assert.deepEqual([res.status, res.body], [400, { error: "invalid_payload", field: "extra" in body ? "extra" : "public" }], JSON.stringify(body));
+    }
+    assert.equal((await me(token)).body.list_public, false, "invalid writes changed visibility");
+    for (const isPublic of [true, true, false, false]) {
+      const res = await answer(worker.putList(token, isPublic));
+      assert.deepEqual([res.status, res.body], [200, { public: isPublic }]);
+      assert.equal((await me(token)).body.list_public, isPublic);
+    }
+    const refused = await answer(worker.putList(newClientKey(), true));
+    assert.deepEqual([refused.status, refused.body], [401, { error: "session_required" }]);
   });
 
   test("trainers: a UUID registers once, a malformed one is 400, and the account's ACCOUNT_TRAINERS_CAP + 1st is 409 trainer_limit", async () => {
@@ -653,6 +692,7 @@ describe("the session's account", () => {
   test("a profile is stored in its canonical form, shown on every page of the account's shares and on its list, and a malformed one is refused", async () => {
     const token = await worker.signIn("100000000000000000041");
     const owner = await worker.accountOf(token);
+    assert.equal((await worker.putList(token, true)).status, 200);
     const [first, second] = await results(worker, token, [share(), share()]);
     assert.deepEqual((await me(token)).body.profile, NONE);
 
@@ -757,6 +797,7 @@ describe("the session's account", () => {
     const token = await worker.signIn("100000000000000000042");
     const other = await worker.signIn("100000000000000000043");
     const owner = await worker.accountOf(token);
+    assert.equal((await worker.putList(token, true)).status, 200);
     const [mine, plain] = await results(worker, token, [share(), share()]);
     const start = { charge: await chargeOfShare(mine.id), totals: (await worker.totals()).bytes };
 

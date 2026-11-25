@@ -294,8 +294,9 @@ const utf8Bytes = (text) => (text === null ? 0 : new TextEncoder().encode(text).
 
 /**
  * PUT /api/shares/<id>/tagline `{tagline, previous}`: replaces the tagline of a share the session's
- * account holds, which its page and the account's list show (never the OG card, the page's description
- * or the import). `tagline` is a string or null (null, or nothing left once trimmed, removes it), checked
+ * account holds, which its page and, while public, the account's list show (never the OG card, the
+ * page's description or the import). `tagline` is a string or null (null, or nothing left once trimmed,
+ * removes it), checked
  * by `canonicalText` up to MAX_TAGLINE code points; `previous` is the tagline the editor started from,
  * as this endpoint or GET /api/me/shares answered it. The write is made only while the share's tagline
  * is still `previous`, so a value changed elsewhere since is never overwritten.

@@ -9,11 +9,12 @@
 
 import { TooLarge, clock, isTurnstileToken, readText } from "./api.mjs";
 import * as limits from "./limits.mjs";
+import { listState } from "./list.mjs";
 import { TURNSTILE_ORIGIN } from "./login_page.mjs";
 import { PAGE_CSP, esc, renderNotFoundPage, siteHeader } from "./page.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { dayToIso } from "./public_record.mjs";
-import { accountExists, countReport, readSharedDay, Unavailable } from "./store.mjs";
+import { countReport, readListOwner, readSharedDay, Unavailable } from "./store.mjs";
 import { verifyTurnstile } from "./turnstile.mjs";
 
 /** The Turnstile action of the report page; siteverify must report it. Not a var: no environment changes it. */
@@ -30,8 +31,8 @@ export const REPORT_REASONS = {
 /**
  * What a report can be about, told apart by the id its form carries: a share (/r/<id>, 10 characters)
  * or an account's list of shares (/u/<id>, 16 characters). `read` returns the target's facts the event
- * carries, or null when there is no such target; `lead` opens the page; `event` is the part of the
- * Sentry event that names the target. The operator takes shares down one by one, so a list's report
+ * carries, or null when the target is absent or its list is private; `lead` opens the page; `event` is
+ * the part of the Sentry event that names the target. The operator takes shares down one by one, so a list's report
  * names the list and the operator picks the shares from it.
  */
 const TARGETS = {
@@ -53,7 +54,7 @@ const TARGETS = {
   },
   list: {
     id: /^[0-9a-hjkmnp-tv-z]{16}$/,
-    read: async (db, id) => ((await accountExists(db, id)) ? {} : null),
+    read: async (db, id) => (listState(await readListOwner(db, id)) === "listed" ? {} : null),
     lead: "この共有レコードの一覧について",
     // One issue a list, for the reason a share has one.
     event: (id) => ({
@@ -147,7 +148,7 @@ function outcomePage(outcome, headers = {}) {
 }
 
 /**
- * GET /r/<id>/report and /u/<id>/report: the form, for a share or a list that exists. Its
+ * GET /r/<id>/report and /u/<id>/report: the form, for a share that exists or a public list. Its
  * Referrer-Policy is same-origin for the reason the login start page's is: under no-referrer the form's POST carries `Origin: null`, which
  * the POST refuses.
  */

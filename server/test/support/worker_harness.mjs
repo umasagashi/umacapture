@@ -863,6 +863,13 @@ export async function startWorker({ ogImageMode = "static", migrate = true, test
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       }),
+    /** PUT /api/me/list `{public: isPublic}` with the session `token`. */
+    putList: (token, isPublic) =>
+      fetch("/api/me/list", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ public: isPublic }),
+      }),
     /** PUT /api/me/profile `body` with the session `token`. */
     putProfile: (token, body) =>
       fetch("/api/me/profile", {

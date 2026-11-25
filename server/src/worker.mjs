@@ -1,12 +1,12 @@
 // Request handling for the record-sharing Worker.
 
-import { getMe, getUsage, postTrainer, putProfile } from "./account.mjs";
+import { getMe, getUsage, postTrainer, putListVisibility, putProfile } from "./account.mjs";
 import { deleteAccount } from "./account_deletion.mjs";
 import { answerApi } from "./api.mjs";
 import { loginBegin, loginCallback, loginClaim, loginPage, logout } from "./auth.mjs";
 import { buildPublicList, listSort, renderListPage } from "./list.mjs";
 import { buildPublicRecord } from "./public_record.mjs";
-import { PAGE_CSP, renderNotFoundPage, renderPage, sharedPageCspOnce } from "./page.mjs";
+import { PAGE_CSP, renderListPrivatePage, renderNotFoundPage, renderPage, sharedPageCspOnce } from "./page.mjs";
 import { matchRoute, pagePathKind } from "./routes.mjs";
 import { postReport, reportPage } from "./report.mjs";
 import { runScheduled } from "./scheduled.mjs";
@@ -22,8 +22,9 @@ import { TableSource, withTables } from "./tables.mjs";
 // the share's tagline and the account's public profile shown with it; five minutes bounds how long
 // caches keep serving it after either.
 const CACHE = "public, max-age=300";
-// A list changes with every share and unshare, tagline and profile: an unshared record stays listed,
-// and a rewritten text stays as it was, for at most a minute.
+// A public list changes with shares, unshares, taglines and profiles. Visibility switches and the
+// start of deletion change the server's answer immediately, but cached pages and JSON can keep
+// their previous answer for at most a minute, including a list that has become private or absent.
 const LIST_CACHE = "public, max-age=60";
 
 const notFound = () =>
@@ -129,6 +130,8 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerApi(() => postTrainer(request, env, now));
         case "meProfile":
           return answerApi(() => putProfile(request, env, now));
+        case "meList":
+          return answerApi(() => putListVisibility(request, env, now));
         case "syncGeneration":
           return answerSync(env, now, (env) => answerApi(() => getGeneration(request, env, now)));
         case "syncGetSettings":
@@ -155,8 +158,21 @@ export function createWorker({ newId = newPublicId, now = Date.now } = {}) {
           return answerSync(env, now, (env) => answerApi(() => getRoot(request, env, route.id, now)));
         case "listJson":
         case "listPage": {
-          const list = await buildPublicList(env, tables, route.id);
-          if (list === null) return notFoundFor(request.method, url.pathname);
+          const result = await buildPublicList(env, tables, route.id);
+          if (result.state === "absent") return notFoundFor(request.method, url.pathname);
+          if (result.state === "private") {
+            const isPage = route.name === "listPage";
+            return new Response(isPage ? renderListPrivatePage() : "Forbidden\n", {
+              status: 403,
+              headers: {
+                "Content-Type": isPage ? "text/html; charset=utf-8" : "text/plain; charset=utf-8",
+                ...(isPage ? { "Content-Security-Policy": PAGE_CSP } : {}),
+                "Cache-Control": LIST_CACHE,
+                "X-Robots-Tag": "noindex",
+              },
+            });
+          }
+          const { list } = result;
           // The JSON is one document whatever the query; only the page reads `sort`.
           if (route.name === "listJson") return publicJson(list, LIST_CACHE);
           return publicPage(renderListPage(list, env, listSort(url.searchParams.get("sort"))), LIST_CACHE);

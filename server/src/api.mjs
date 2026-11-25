@@ -35,8 +35,9 @@ export const untilTomorrow = (clockNow) => (clockNow.day + 1) * DAY_SECONDS - cl
 
 /**
  * `vars.SHARING_ENABLED`: "true" or "false"; anything else is a configuration error. "false" stops
- * new shares, new logins, and writes that publish new text in a tagline or the public profile (503
- * sharing_paused); reading, unsharing, removing that text and logging out go on.
+ * new shares, new logins, writes that publish new text in a tagline or the public profile, and making
+ * a private list public (503 sharing_paused). Reading, unsharing, removing or keeping text, making a
+ * list private or keeping its visibility, and logging out go on.
  */
 export function sharingEnabled(env) {
   if (env.SHARING_ENABLED === "true") return true;

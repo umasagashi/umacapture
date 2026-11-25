@@ -126,6 +126,29 @@ ${siteHeader(kind)}
 `;
 }
 
+/** The private list's page reveals no profile, records, count or report link. */
+export function renderListPrivatePage() {
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>非公開 | umacapture</title>
+<link rel="stylesheet" href="/site/site.css">
+<link rel="icon" type="image/png" href="/favicon.png">
+</head>
+<body>
+${siteHeader("共有レコード一覧")}
+<main class="site-doc">
+<h1>この一覧は非公開です</h1>
+<p><a href="/">umacapture のトップへ</a></p>
+</main>
+</body>
+</html>
+`;
+}
+
 /** The og:image / twitter:card set for one page, chosen by `vars.OG_IMAGE_MODE`. */
 export function ogImage(env, id) {
   switch (env.OG_IMAGE_MODE) {

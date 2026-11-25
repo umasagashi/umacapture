@@ -91,13 +91,13 @@ export async function readShareImages(db, id) {
 }
 
 /**
- * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, trainerIds, profile}` (`profileOf`),
+ * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, listPublic, trainerIds, profile}` (`profileOf`),
  * or null when no such account exists. Throws Unavailable.
  */
 export async function readAccount(db, id) {
   const [account, trainers] = await query(() =>
     db.batch([
-      db.prepare("SELECT share_count, deleting_since, trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id),
+      db.prepare("SELECT share_count, deleting_since, list_public, trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id),
       db.prepare("SELECT trainer_id FROM account_trainers WHERE account_id = ?1 ORDER BY trainer_id").bind(id),
     ]),
   );
@@ -106,6 +106,7 @@ export async function readAccount(db, id) {
   return {
     shareCount: row.share_count,
     deleting: row.deleting_since !== null,
+    listPublic: row.list_public === 1,
     trainerIds: trainers.results.map((t) => t.trainer_id),
     profile: profileOf(row),
   };
@@ -116,10 +117,33 @@ export async function accountExists(db, id) {
   return (await query(() => db.prepare("SELECT 1 AS found FROM accounts WHERE id = ?1").bind(id).first())) !== null;
 }
 
-/** The public profile (`profileOf`) of account `id`, or null when no such account exists. Throws Unavailable. */
-export async function readProfile(db, id) {
-  const row = await query(() => db.prepare("SELECT trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id).first());
-  return row === null ? null : profileOf(row);
+/**
+ * The owner of a list: `{profile, listPublic, deleting}`, or null when no account holds `id`.
+ * Pages, JSON and reports use these facts to decide whether the list is public. Throws Unavailable.
+ */
+export async function readListOwner(db, id) {
+  const row = await query(() =>
+    db.prepare("SELECT trainer_name, game_trainer_id, list_public, deleting_since FROM accounts WHERE id = ?1").bind(id).first(),
+  );
+  return row === null ? null : { profile: profileOf(row), listPublic: row.list_public === 1, deleting: row.deleting_since !== null };
+}
+
+/**
+ * Sets account `id`'s list to `isPublic`, refusing deletion and a private-to-public transition while
+ * sharing is paused. The condition and write are one statement. Returns "written", "gone", "deleting"
+ * or "paused". Throws Unavailable.
+ */
+export async function writeListVisibility(db, id, isPublic, enabled) {
+  const result = await query(() =>
+    db.prepare(`UPDATE accounts SET list_public = ?2
+                WHERE id = ?1 AND deleting_since IS NULL AND (?2 = 0 OR ?3 = 1 OR list_public = 1)`)
+      .bind(id, isPublic ? 1 : 0, enabled ? 1 : 0)
+      .run(),
+  );
+  if (result.meta.changes === 1) return "written";
+  const owner = await readListOwner(db, id);
+  if (owner === null) return "gone";
+  return owner.deleting ? "deleting" : "paused";
 }
 
 /** The text writes (taglines and profiles) of the account in parameter `account` on the UTC day in parameter `day`. */

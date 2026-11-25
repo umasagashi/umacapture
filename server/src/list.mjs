@@ -1,24 +1,30 @@
-// An account's public list: /u/<id> (HTML) and /u/<id>.json, answered without a session like
-// /r/<id>. It names the account by its id and by the public profile its sharer wrote, if any: never by
-// the provider's name or e-mail address, nor its creation day.
+// An account's list: /u/<id> (HTML) and /u/<id>.json, answered without a session when its sharer
+// has made it public. It names the account by its id and by the public profile its sharer wrote, if
+// any: never by the provider's name or e-mail address, nor its creation day.
 
 import { RECORD_TYPE_LABELS, copyScriptElement, esc, num, pageFooter, sharerLine, siteHeader, splitCard, taglineText } from "./page.mjs";
 import { dayToIso, recordSummary } from "./public_record.mjs";
-import { listOwnShares, readProfile } from "./store.mjs";
+import { listOwnShares, readListOwner } from "./store.mjs";
 import { withTables } from "./tables.mjs";
 import { publicSharer } from "./user_text.mjs";
 
 const SCHEMA = 1;
 
+/** The shared visibility decision for list pages, JSON and reports; deletion hides even a public list. */
+export const listState = (owner) => (owner === null || owner.deleting ? "absent" : owner.listPublic ? "listed" : "private");
+
 /**
  * Public list JSON v1 of account `id`, `{schema, id, url, sharer, count, records}` with the records
- * newest share day first, or null when no such account exists. An account sharing nothing has an empty
- * list. `sharer` is the account's public profile (`publicSharer`), and each record's `tagline` the
- * share's, each null when not written.
+ * newest share day first, returned as `{state: "listed", list}`. A missing or deleting account yields
+ * `{state: "absent"}`, a private list `{state: "private"}`, without reading shares or name tables.
+ * A public account sharing nothing has an empty list. `sharer` is the account's public profile
+ * (`publicSharer`), and each record's `tagline` the share's, each null when not written.
  */
 export async function buildPublicList(env, tables, id) {
-  const profile = await readProfile(env.DB, id);
-  if (profile === null) return null;
+  const owner = await readListOwner(env.DB, id);
+  const state = listState(owner);
+  if (state !== "listed") return { state };
+  const { profile } = owner;
   const shares = await listOwnShares(env.DB, id);
   const records = await withTables(tables, env.DB, (t) =>
     shares.map((share) => ({
@@ -30,12 +36,15 @@ export async function buildPublicList(env, tables, id) {
     })),
   );
   return {
-    schema: SCHEMA,
-    id,
-    url: `${env.PUBLIC_ORIGIN}/u/${id}`,
-    sharer: publicSharer(profile.trainerName, profile.gameTrainerId),
-    count: shares.length,
-    records,
+    state: "listed",
+    list: {
+      schema: SCHEMA,
+      id,
+      url: `${env.PUBLIC_ORIGIN}/u/${id}`,
+      sharer: publicSharer(profile.trainerName, profile.gameTrainerId),
+      count: shares.length,
+      records,
+    },
   };
 }
 

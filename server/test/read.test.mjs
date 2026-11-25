@@ -3,11 +3,83 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { REPORT_DAILY_LIMIT } from "../src/limits.mjs";
-import { sharedPageCspOnce } from "../src/page.mjs";
-import { imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
+import { PAGE_CSP, sharedPageCspOnce } from "../src/page.mjs";
+import { appendTables, FIXTURE_TABLES, migrationStatements, imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
 
 const ID = "0123456789";
 const HOSTILE_CARD = "card <b>&\"'";
+
+/** A valid report of a list, driven through its form's real POST. */
+const listReport = (worker, id) => worker.fetch("/api/reports", {
+  method: "POST",
+  headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
+  body: new URLSearchParams({ id, reason: "personal_info", text: "list privacy", token: "turnstile-report-token" }).toString(),
+});
+
+/** Every reader entry must withhold the list, including a form opened before the switch. */
+async function assertPrivateList(worker, owner, recordId) {
+  const sent = worker.sentry.calls.length;
+  for (const method of ["GET", "HEAD"]) {
+    const page = await worker.fetch(`/u/${owner}`, { method });
+    assert.equal(page.status, 403, `${method} list page`);
+    assert.equal(page.headers.get("cache-control"), "public, max-age=60");
+    assert.equal(page.headers.get("x-robots-tag"), "noindex");
+    assert.equal(page.headers.get("content-security-policy"), PAGE_CSP);
+    const html = await page.text();
+    if (method === "GET") {
+      assert.ok(html.includes("<h1>この一覧は非公開です</h1>"));
+      for (const hidden of ["private trainer", "123456789", recordId, "list-sharer", "list-item", "rec-n", "og:", ".json", "/report"]) {
+        assert.equal(html.includes(hidden), false, `private page exposes ${hidden}`);
+      }
+    }
+    const json = await worker.fetch(`/u/${owner}.json`, { method });
+    assert.equal(json.status, 403, `${method} list JSON`);
+    assert.equal(json.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(json.headers.get("cache-control"), "public, max-age=60");
+    assert.equal(json.headers.get("x-robots-tag"), "noindex");
+    assert.equal(await json.text(), method === "GET" ? "Forbidden\n" : "");
+  }
+  const form = await worker.fetch(`/u/${owner}/report`);
+  assert.equal(form.status, 404, "private list report form");
+  assert.equal((await form.text()).includes('name="id"'), false);
+  const report = await listReport(worker, owner);
+  assert.equal(report.status, 404, "private list report POST");
+  await report.arrayBuffer();
+  assert.equal(worker.sentry.calls.length, sent, "a private list sent a report to Sentry");
+}
+
+/** The same requests test defaults for both new and migrated accounts, and both switch directions. */
+async function assertListVisibilityCycle(worker, token, owner, recordId) {
+  const previousAnswer = worker.siteverify.answer;
+  worker.siteverify.answer = () => ({ success: true, hostname: TURNSTILE.HOSTNAME, action: "report" });
+  try {
+    await assertPrivateList(worker, owner, recordId);
+    assert.equal((await worker.putList(token, true)).status, 200);
+    const page = await worker.fetch(`/u/${owner}`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.ok(html.includes("private trainer"));
+    assert.ok(html.includes(`/r/${recordId}`));
+    const json = await worker.fetch(`/u/${owner}.json`);
+    assert.equal(json.status, 200);
+    assert.deepEqual((await json.json()).records.map((r) => r.id), [recordId]);
+    const form = await worker.fetch(`/u/${owner}/report`);
+    assert.equal(form.status, 200);
+    assert.ok((await form.text()).includes(`name="id" value="${owner}"`));
+    const sent = worker.sentry.calls.length;
+    const report = await listReport(worker, owner);
+    assert.equal(report.status, 200);
+    await report.arrayBuffer();
+    assert.equal(worker.sentry.calls.length, sent + 1);
+    assert.equal((await worker.putList(token, false)).status, 200);
+    await assertPrivateList(worker, owner, recordId);
+    const shared = await worker.fetch(`/r/${recordId}`);
+    assert.equal(shared.status, 200, "a private list must leave its record pages public");
+    await shared.arrayBuffer();
+  } finally {
+    worker.siteverify.answer = previousAnswer;
+  }
+}
 
 describe("published record", () => {
   let worker;
@@ -220,6 +292,7 @@ describe("account list", () => {
     const token = await worker.signIn("100000000000000000021");
     const other = await worker.signIn("100000000000000000022");
     const owner = await worker.accountOf(token);
+    assert.equal((await worker.putList(token, true)).status, 200);
     const older = await shareOne(token);
     const theirs = await shareOne(other);
     await worker.advanceClock(86_400);
@@ -296,8 +369,19 @@ describe("account list", () => {
     }
   });
 
+  test("a new account's list stays private until published and becomes private again", async () => {
+    const token = await worker.signIn("new-private-list");
+    const owner = await worker.accountOf(token);
+    const id = await shareOne(token);
+    const profile = { trainer_name: "private trainer", game_trainer_id: "123456789", previous: { trainer_name: null, game_trainer_id: null } };
+    assert.equal((await worker.putProfile(token, profile)).status, 200);
+    await assertListVisibilityCycle(worker, token, owner, id);
+  });
+
   test("an account sharing nothing has an empty list, and an id no account holds answers 404", async () => {
-    const owner = await worker.accountOf(await worker.signIn("100000000000000000023"));
+    const token = await worker.signIn("100000000000000000023");
+    const owner = await worker.accountOf(token);
+    assert.equal((await worker.putList(token, true)).status, 200);
     const empty = await worker.fetch(`/u/${owner}.json`);
     assert.equal(empty.status, 200);
     assert.deepEqual(await empty.json(), { schema: 1, id: owner, url: `${ORIGIN}/u/${owner}`, sharer: null, count: 0, records: [] });
@@ -305,6 +389,45 @@ describe("account list", () => {
       const res = await worker.fetch(path);
       assert.equal(res.status, 404, path);
       await res.arrayBuffer();
+    }
+  });
+});
+
+describe("the private-list default across migration 0012", () => {
+  test("an account that shared before migration 0012 starts private and can switch both ways", async () => {
+    const worker = await startWorker({ migrate: false });
+    try {
+      const migration = "0012_list_visibility.sql";
+      await worker.db.batch(migrationStatements(undefined, (f) => f < migration).map((s) => worker.db.prepare(s)));
+      await appendTables(worker.db, FIXTURE_TABLES);
+      const token = await worker.signIn("before-list-visibility");
+      const owner = await worker.accountOf(token);
+      const shared = await worker.share(token, [{ client_key: newClientKey(), record: postedForm() }]);
+      assert.equal(shared.status, 200);
+      const [result] = (await shared.json()).results;
+      assert.equal(result.status, "created", JSON.stringify(result));
+      assert.equal((await worker.putProfile(token, { trainer_name: "private trainer", game_trainer_id: "123456789", previous: { trainer_name: null, game_trainer_id: null } })).status, 200);
+      await worker.db.batch(migrationStatements(undefined, (f) => f >= migration).map((s) => worker.db.prepare(s)));
+      await assertListVisibilityCycle(worker, token, owner, result.id);
+    } finally {
+      await worker.dispose();
+    }
+  });
+
+  test("a private or absent list answers before name tables are loaded", async () => {
+    const worker = await startWorker({ migrate: false });
+    try {
+      await worker.db.batch(migrationStatements().map((s) => worker.db.prepare(s)));
+      const owner = await worker.accountOf(await worker.signIn("no-name-tables"));
+      worker.siteverify.answer = () => ({ success: true, hostname: TURNSTILE.HOSTNAME, action: "report" });
+      await assertPrivateList(worker, owner, ID);
+      for (const path of [`/u/${"0".repeat(16)}`, `/u/${"0".repeat(16)}.json`]) {
+        const res = await worker.fetch(path);
+        assert.equal(res.status, 404);
+        await res.arrayBuffer();
+      }
+    } finally {
+      await worker.dispose();
     }
   });
 });
@@ -427,7 +550,9 @@ describe("share report", () => {
   test("a report of an account's list reaches Sentry naming the list, and counts toward the same day's limit", async () => {
     const worker = await startWorker();
     try {
-      const owner = await worker.accountOf(await worker.signIn("100000000000000000031"));
+      const token = await worker.signIn("100000000000000000031");
+      const owner = await worker.accountOf(token);
+      assert.equal((await worker.putList(token, true)).status, 200);
       worker.siteverify.answer = passingReport;
 
       const list = await (await worker.fetch(`/u/${owner}`)).text();
@@ -448,6 +573,12 @@ describe("share report", () => {
 
       await worker.db.prepare("UPDATE daily SET reports = ? WHERE day = ?").bind(REPORT_DAILY_LIMIT, today()).run();
       assert.equal(await outcome(await report(worker, { id: owner })), "429 limit");
+      assert.equal(worker.sentry.calls.length, 1);
+
+      // A form opened while public cannot report the list after it becomes private.
+      assert.equal((await worker.putList(token, false)).status, 200);
+      assert.equal((await worker.fetch(`/u/${owner}/report`)).status, 404);
+      assert.equal((await report(worker, { id: owner })).status, 404);
       assert.equal(worker.sentry.calls.length, 1);
     } finally {
       await worker.dispose();
