@@ -5,7 +5,8 @@ together with the **Worker** (`server/src/`, configured by `server/wrangler.json
 database. The Worker carries logins (Google, behind Turnstile), record sharing and file sync. It
 answers the record pages `/r/<id>` and their JSON `/r/<id>.json`, the report page of a record
 `/r/<id>/report`, an account's list of shared records `/u/<id>` and `/u/<id>.json` and the list's report
-page `/u/<id>/report`, and the API under
+page `/u/<id>/report`, which serve the list only while its sharer has made it public (every account
+starts private), and the API under
 `/api/` (file sync under `/api/sync/`), and answers 404 to any other path that matches no file. The
 API includes the app's import of a shared record: `GET /api/shares/<id>`, which answers the stored
 form and the state of the share's images, and `GET /api/shares/<id>/images`, the image bundle of a
@@ -514,6 +515,14 @@ Worker takes such a build's shares as before. It answers the two writes with the
 it answers every path it does not know, and its `GET /api/me` and `GET /api/me/shares` carry neither
 key; a build that meets such a Worker shows the editing as not available rather than as a failure.
 
+A build that switches the account's list between public and private (`PUT /api/me/list`) and reads
+`list_public` from `GET /api/me` is released only after the production Worker that has them ("Rolling
+out the list's visibility"). An older Worker answers the switch with the plain-text `404` and leaves
+`list_public` out of `GET /api/me`, and the list it serves is always public. The other way round, the
+Worker of that release refuses nothing an older build sends, but every list is private from its
+deployment and an older build cannot switch it: the older build's links to the account's list lead to
+the private page until the sharer switches it from the web app or a newer build.
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
@@ -578,10 +587,13 @@ The order is what keeps names answering. `deploy_web.sh` refuses a sharing-on de
 without the tables or without a load, at stage 3, with nothing deployed. A Worker of this version
 that reached such a D1 another way (a bare `wrangler deploy`, which "Deploying" rules out) would
 answer with a `500` wherever it has a name to look up: `/r/<id>` and `/r/<id>.json` of a record
-that exists, `POST /api/shares` of a record, and `/u/<id>`, `/u/<id>.json` and `GET /api/me/shares`
-of an account that shares something. Without the tables those three answer `500` for an account
-that shares nothing too; with the tables but no load they answer its empty list. A record or account that does not exist still gets its `404`, so stage 8's
-check of `/r/0000000000` would not notice. After step 3, do not roll a target back to a version
+that exists, `POST /api/shares` of a record, `/u/<id>` and `/u/<id>.json` of an account whose list
+is public and that shares something, and `GET /api/me/shares` of an account that shares something.
+Without the tables those three answer `500` for such an account that shares nothing too; with the
+tables but no load they answer its empty list. A list is decided before any name is looked up: a
+record or account that does not exist, and the list of an account being deleted, still get their
+`404`, and a private list its `403`, so neither stage 8's check of `/r/0000000000` nor opening a
+list nobody has made public would notice. After step 3, do not roll a target back to a version
 with the Worker from before it ("Restoring a version").
 
 ### Rolling out factor colours and the end of share focus
@@ -753,9 +765,10 @@ them after sharing, from the app:
   `SHARING_ENABLED` is `"false"` they take only a write that removes a value or leaves it as it is.
   The full contract is on `putTagline` (`server/src/shares.mjs`) and `putProfile`
   (`server/src/account.mjs`).
-- The profile is shown on the account's list (`/u/<id>`) and on every page of its shares (`/r/<id>`),
-  a tagline on its share's page and on its row of the list, and both in those pages' JSON (`sharer`,
-  `tagline`). Neither is on the OG card, in a page's description (`og:description`), or in the import
+- The profile is shown on every page of the account's shares (`/r/<id>`) and on its list (`/u/<id>`)
+  while the list is public ("Rolling out the list's visibility"), a tagline on its share's page and on
+  its row of the list, and both in those pages' JSON (`sharer`, `tagline`). A trainer name or game
+  trainer id not written shows as 未公開 on the pages and stays `null` in their JSON. Neither is on the OG card, in a page's description (`og:description`), or in the import
   (`GET /api/shares/<id>`). A change is seen once the pages' caches have passed: five minutes for a
   share's page and its JSON, one minute for a list.
 - A tagline's bytes are part of its share's charge against `STORAGE_BUDGET`; the profile is charged
@@ -855,6 +868,57 @@ an account with no row while the row holds `'jpeg'`, the pair above that must ne
 Worker has to run, turn sync off first (`SYNC_ENABLED` `"false"`, "Stopping file sync"), so that no
 settings are answered while it does. To give new accounts `'none'` again, a new migration remakes the
 table the same way; nothing changes it by hand.
+
+### Rolling out the list's visibility
+
+Once, for the release whose Worker serves an account's list only while its sharer has made it public,
+with the migration `0012_list_visibility.sql`. It adds `accounts.list_public` (`1` public, `0`
+private) with the default `0`, so every account starts private, the accounts that exist when it is
+applied included: by the product's decision, a sharer makes a list public, not private.
+
+- **A private list** answers `/u/<id>` with `403` and a page that says only この一覧は非公開です
+  (no profile, records, count or report link), and `/u/<id>.json` with a plain-text `403`. Its report
+  page `/u/<id>/report` and a report of it (`POST /api/reports`) answer as if there were no list
+  (`404`). The pages of its shares (`/r/<id>`) are not affected: they stay public.
+- **An account being deleted** has no list from the start of its deletion: `/u/<id>`, its JSON and
+  its report page answer `404`, as once the deletion has completed. Its shares' pages answer until the
+  deletion removes them, as before.
+- **The switch.** `GET /api/me` carries `list_public` (a boolean). `PUT /api/me/list` `{public}` sets
+  it and answers `200` `{public}`. It takes no `previous` (the last write wins) and counts against no
+  daily text limit. A `public` that is not a boolean is `400 invalid_payload`; an account being
+  deleted is `409 account_deleting`; while `SHARING_ENABLED` is `"false"`, making a private list public
+  is `503 sharing_paused`, and making a list private or writing the value it already holds is taken.
+  The full contract is on `putListVisibility` (`server/src/account.mjs`).
+- **How soon it is seen.** The Worker answers a switch, and the start of a deletion, at once. A list's
+  page and JSON, the private `403` included, are cached for a minute (`public, max-age=60`), so a
+  reader may see the previous answer for up to a minute after either.
+
+Staging first:
+
+1. **Apply `0012`** ("Checks before a production run", then "Applying a migration"). It adds a column
+   and changes none, and the live Worker never names it, so the live Worker runs unchanged on it. Then
+   confirm that this prints `0` (it fails if the column is missing):
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT count(*) AS public_lists FROM accounts WHERE list_public <> 0"
+   # staging: umacapture-share-staging --env staging
+   ```
+
+2. **Deploy** the Worker and the web app together ("Deploying"). From this deployment every list is
+   private until its sharer switches it, which the web app can do at once. On staging, open a test
+   account's list and see the private page, and its JSON and report page answer `403` and `404`; make
+   it public and see the list once a minute has passed; see a share's page open either way; begin the
+   deletion of a test account whose list is public and see its list answer `404` within a minute.
+3. **Windows release**, after the production deployment ("Ordering against a Windows release").
+
+**Do not roll the Worker back past this release** once it has been deployed to the target. An older
+Worker does not read `list_public`: every account's list, those whose sharers never made them public
+included, would be public at once, and whatever a reader saw or copied in that time cannot be taken
+back. It would also answer `PUT /api/me/list` with the plain-text `404` and `GET /api/me` without
+`list_public`. To stop instead, use "Stopping record sharing": a rollback to a version without the
+Worker answers every `/u/*` with the static 404. `SHARING_ENABLED` `"false"` does not hide a public
+list; it keeps a private one from being made public.
 
 ### Shared images: declared bytes and what B2 holds
 
@@ -1667,6 +1731,10 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   from before "Rolling out the reduced-image default": that Worker shows "画像は送らない" to an account
   whose row then syncs reduced JPEGs. That section says what to do if one has to run. A version
   deployed with sharing off has no Worker and is not ruled out by this.
+- Once a target has the Worker of "Rolling out the list's visibility", do not roll its Worker back to
+  a version from before it: that Worker does not read `accounts.list_public`, so every account's list
+  would be public at once, those never made public included, and what is read in that time cannot be
+  taken back. A version deployed with sharing off has no Worker and is not ruled out by this.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.
@@ -1693,8 +1761,17 @@ migration: it is the first means under "Stopping record sharing".
 
 A report arrives as a Sentry issue `share report` (One-time preparation, step 13), one issue a share,
 or `list report`, one issue an account's list. A list is reported as a whole, and there is no takedown
-of a list: open `https://umacapture.com/u/<list_id>`, find the shares the report is about, and handle
-each of them by its share id as below.
+of a list: find the shares the report is about and handle each of them by its share id as below. A
+list can be reported only while it is public, but its sharer may make it private afterwards, and its
+account may begin its deletion, after which `https://umacapture.com/u/<list_id>` answers that it is
+private (`403`) or nothing (`404`). Open that page while it is public; otherwise list the shares in
+the target's D1:
+
+```bash
+server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+  --command "SELECT id, shared_day FROM records WHERE owner_id = '<list_id>' ORDER BY shared_day DESC"
+# staging: umacapture-share-staging --env staging
+```
 
 1. Read the issue: `share_id`, the `reason` tag and the reporter's `text`. Open
    `https://umacapture.com/r/<share id>`; for a report about images, the share's images are what
@@ -1746,13 +1823,13 @@ by one, stop with a switch:
 |---|---|
 | One share | An order above |
 | Many images, or more than can be judged | `SHARE_IMAGES_ENABLED` `"false"` (below): no image is taken or served; shares themselves go on |
-| Many shares | `SHARING_ENABLED` `"false"` (below): new logins and shares stop; existing shares are still read |
+| Many shares | `SHARING_ENABLED` `"false"` (below): new logins, shares and making a list public stop; existing shares and public lists are still read, and a list can still be made private |
 | A flood of reports | Lower `REPORT_DAILY_LIMIT` in `server/src/limits.mjs`, commit, deploy; `0` takes none. Reports are taken while sharing and images are switched off |
 
 #### Clearing a public profile by hand
 
-The account's public profile (trainer name and the game's trainer id) is shown on its list and on
-every page of its shares, and is not a share, so no takedown order reaches it. When a report is about
+The account's public profile (trainer name and the game's trainer id) is shown on every page of its
+shares and on its list while the list is public, and is not a share, so no takedown order reaches it. When a report is about
 the profile (`reason` `personal_info` or `inappropriate` on a share or a list), clear it in the
 target's D1 by hand. `<account id>` is the list's id, or for a share the `owner_id` of
 `SELECT owner_id FROM records WHERE id = '<share id>'`:
@@ -1775,7 +1852,7 @@ In this order of preference:
 | Means | Effect | Depends on |
 |---|---|---|
 | **Roll back to the last version without the Worker** (assets only, after `TURNSTILE_SECRET` was put) | `/r/*`, `/u/*` and `/api/*` get the static 404 and run no Worker; logins, sync and account deletion stop with sharing; the assets, the notice included, return to that version's. D1 and B2 keep their data | The token and the pinned wrangler only. Use it first, whatever is broken |
-| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`), and so does writing new text into a tagline or the public profile; reading, unsharing, removing a tagline or the profile, and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
+| `SHARING_ENABLED` `"false"`, committed, then `deploy_web.sh` | New logins and shares stop (`503 sharing_paused`), and so do writing new text into a tagline or the public profile and making a private list public; reading (public lists included), unsharing, removing a tagline or the profile, making a list private, and logging out go on, and so does sync for a device already logged in | A clean tree, a build, the Sentry upload (production), a load of the name tables in the target's D1 (read back at stage 3), the pinned wrangler. Not usable while any of them is broken |
 | `deploy_web.sh --sharing off` | As the rollback, with the assets of the current `HEAD`; the hourly run goes too | As above, except D1: the name tables are not read. Use it once the version without the Worker is no longer among the last 100 |
 | `SHARE_IMAGES_ENABLED` `"false"`, committed, then `deploy_web.sh` | Shared images alone stop: shares declaring images are refused, bundles are neither stored nor served, and the import endpoint tells such shares' images as unavailable, so an import waits rather than saving a record without them. Shares without images, reads, unshares, takedowns and the hourly run's deletion of images go on. D1 and B2 keep their data; turning it back serves every bundle still stored | As `SHARING_ENABLED` |
 | `OG_IMAGE_MODE` `"static"` | Record pages stop naming images on Vercel | A rollback to a version that had it (with the conditions above), or a deployment with the dependencies above |

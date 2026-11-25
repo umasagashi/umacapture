@@ -92,8 +92,14 @@ destroys data the product does promise to keep.
   stated reason, which is the promised behaviour for it.
 - **A record imported from a link is the importer's copy**: it stays when its sharer unshares it or the
   operator takes it down.
-- **Readers' reports** of a share (`/r/<id>/report`) or of an account's whole list (`/u/<id>/report`),
-  and **the operator's takedown** of a share or of
+- **An account's list** (`/u/<id>`, its JSON and its report page) is served only while its sharer has
+  made it public; every account starts private, existing ones included. Switching it on the Windows app
+  and the normal desktop browsers is normal. A private list answers that it is private, and its report
+  page answers as if there were no list; the share pages of its records stay public. From the start of
+  an account's deletion its list answers as if there were no account. A switch or the start of a
+  deletion is answered at once, but a reader can keep seeing the previous answer for up to a minute.
+- **Readers' reports** of a share (`/r/<id>/report`) or of an account's whole list while it is public
+  (`/u/<id>/report`), and **the operator's takedown** of a share or of
   its images are normal. A report past the day's limit is refused with a stated reason, which is the
   promised behaviour for it.
 
