@@ -1474,13 +1474,12 @@ void main() {
     testWidgets('list visibility starts private, writes the switch choice and shows the server answer', (tester) async {
       await storeSession();
       final saved = Completer<Object>();
+      final tileSaved = Completer<Object>();
+      final madePrivate = Completer<Object>();
       container = containerFor(
-        [
-          _sharesList([]),
-          saved.future,
-          _json(200, {'public': true}),
-        ],
+        [_sharesList([]), saved.future, tileSaved.future, madePrivate.future],
         me: [_json(200, _me([], listPublic: false))],
+        emptied: true,
       );
       await mountAccount(tester);
       await settleUntilElapsing(tester, () => visibilitySwitch().evaluate().isNotEmpty, describe: 'the visibility');
@@ -1508,11 +1507,39 @@ void main() {
       expectListActions(findsOneWidget);
       await tester.tap(find.text('共有の一覧ページを公開する'));
       await settleUntilElapsing(tester, () => server.sent.length == 3, describe: 'the tile visibility write');
-      await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(visibilitySwitch()).onChanged, isNull);
       expect(jsonDecode(server.sent.last.body), {'public': false});
+      tileSaved.complete(_json(200, {'public': true}));
+      await settleUntilElapsing(
+        tester,
+        () => tester.widget<Switch>(visibilitySwitch()).onChanged != null,
+        describe: 'the tile visibility answer to enable the switch',
+      );
       expect(tester.widget<Switch>(visibilitySwitch()).value, isTrue, reason: 'the stored answer is authoritative');
       expectListActions(findsOneWidget);
+
+      await tester.tap(visibilitySwitch());
+      await settleUntilElapsing(
+        tester,
+        () => server.sent.length == 4,
+        describe: 'the switch visibility write to private',
+      );
+      final privateWrite = server.sent.last;
+      expect((privateWrite.method, privateWrite.uri.path), ('PUT', '/api/me/list'));
+      expect(jsonDecode(privateWrite.body), {'public': false});
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isTrue, reason: 'the server has not answered');
+      expect(tester.widget<Switch>(visibilitySwitch()).onChanged, isNull);
+      expectListActions(findsOneWidget);
+
+      madePrivate.complete(_json(200, {'public': false}));
+      await settleUntilElapsing(
+        tester,
+        () => tester.widget<Switch>(visibilitySwitch()).onChanged != null,
+        describe: 'the saved private list',
+      );
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isFalse);
+      expectListActions(findsNothing);
+      await tester.pumpAndSettle();
     });
 
     testWidgets('a refused list visibility write keeps the server value and tells why below the switch', (
