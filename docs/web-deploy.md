@@ -966,7 +966,9 @@ Staging first:
 2. **Deploy** the Worker and the web app together ("Deploying"), the same UTC day. On staging, log in
    with a test account and see the account tab show its last login; then set that account's
    `last_login_day` 366 days back with `wrangler d1 execute` and see the next hourly run begin its
-   deletion (`deleting_since` set) and later runs finish it.
+   deletion (`deleting_since` set). The `deletions` kind of that same run then continues it within the
+   run's step and B2 budgets, so a small account can be gone after that one run, and a larger one
+   finishes over later runs.
 3. **Windows release**, after the production deployment ("Ordering against a Windows release").
 
 **Do not roll the Worker back past this release** while its hourly run marks accounts. An older Worker
