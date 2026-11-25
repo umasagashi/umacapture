@@ -784,6 +784,10 @@ them after sharing, from the app:
   (`"account"` or `"service"`) and a `Retry-After` to the next UTC day, the shape sync's daily limits
   answer with. Lowering either takes a commit and a deployment, like the other limits there.
 
+> Note: The checks below record the completed `0010` rollout. From `0012` onward, lists are
+> private by default and a deleting account's list returns `404`, so these checks do not reproduce
+> as written. For current checks, see "Rolling out the list's visibility".
+
 Staging first:
 
 1. **Apply `0010`** ("Checks before a production run", then "Applying a migration"). It adds columns
