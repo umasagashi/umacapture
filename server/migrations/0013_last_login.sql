@@ -3,7 +3,8 @@
 --
 -- Every account that exists when this runs takes the day it runs: no earlier login was recorded, and
 -- this day is never earlier than the real last login, so no account becomes due for deletion earlier
--- than it really is. NULL (an account a Worker that does not write the column created) is never due.
+-- than it really is. NULL (an account a Worker that does not write the column created) counts from its
+-- created_day instead.
 --
 -- Only a column is added, so the previous Worker runs on the migrated database without naming it.
 -- It does not record logins: do not roll back to it while inactive accounts are being deleted.

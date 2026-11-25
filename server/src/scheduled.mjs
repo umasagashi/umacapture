@@ -1,11 +1,11 @@
 // The hourly run (`triggers.crons` in wrangler.jsonc): what a request leaves behind when it is cut off,
-// and no later request of the same account comes to finish, is tidied here, and the deletion of every
-// account being deleted goes on. One run is one Worker invocation, under the same limits as a request
+// and no later request of the same account comes to finish, is tidied here, the deletion of an account
+// with no login for INACTIVE_ACCOUNT_DAYS begins, and the deletion of every account being deleted goes on. One run is one Worker invocation, under the same limits as a request
 // (B2_REQUESTS_PER_INVOCATION B2 requests, and the CPU time the Workers Paid plan gives an invocation),
 // so every kind takes on a bounded amount and leaves the rest, still recorded in D1, for the next run.
 
-import { continueAccountDeletions } from "./account_deletion.mjs";
-import { clock } from "./api.mjs";
+import { beginInactiveDeletions, continueAccountDeletions } from "./account_deletion.mjs";
+import { clock, sharingEnabled } from "./api.mjs";
 import { Bucket } from "./b2.mjs";
 import { syncEnabled } from "./sync.mjs";
 import { forgetDays } from "./sync_quota.mjs";
@@ -55,6 +55,16 @@ const KINDS = [
     key: "writes",
     sync: true,
     run: (env, bucket, clk) => writeLeftovers(env.DB, bucket, "a", clk.now),
+  },
+  {
+    // Begins the deletion of the accounts with no login for INACTIVE_ACCOUNT_DAYS, as many as the
+    // deletions right after it can take on. Sends no B2 request. Not a kind of sync. Only while sharing
+    // is switched on: while it is off nobody can log in to keep an account, so no such deletion
+    // begins (one begun before goes on in the deletions). A kind of its own, so that a failing mark
+    // does not stop the deletions.
+    key: "inactive",
+    sync: false,
+    run: (env, bucket, clk) => (sharingEnabled(env) ? beginInactiveDeletions(env.DB, clk) : undefined),
   },
   {
     // Continues the deletion of the accounts being deleted, a step at a time. After the kinds of sync

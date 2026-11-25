@@ -269,7 +269,7 @@ describe("account deletion", () => {
     assert.equal(await rowsOf("records", "owner_id", owner), 0);
   });
 
-  test("records the day of each login on the claim and on /api/me, and keeps the account through its last day", async () => {
+  test("records the day of each login on the claim and on /api/me, and keeps the account through its last day and deletes it on its deletion day", async () => {
     // Noon UTC, so every claim below falls on the day read here.
     const start = await worker.now();
     await worker.advanceClock(Math.floor(start / 86_400) * 86_400 + 86_400 + 43_200 - start);
@@ -300,6 +300,52 @@ describe("account deletion", () => {
     const meAgain = await getMe(again.body.token);
     assert.equal(meAgain.body.last_login_day, second, "/api/me after the returning login");
     assert.equal(meAgain.body.deletion_day, second + limits.INACTIVE_ACCOUNT_DAYS + 1);
+
+    // 465 days after the first login, 100 after the second: kept.
+    await worker.advanceClock(100 * 86_400);
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal(await rowsOf("accounts", "id", owner), 1, "the account 100 days after the returning login");
+
+    await worker.advanceClock((limits.INACTIVE_ACCOUNT_DAYS - 100) * 86_400);
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal(await rowsOf("accounts", "id", owner), 1, "the account on the last day after the returning login");
+
+    await worker.advanceClock(86_400);
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal(await rowsOf("accounts", "id", owner), 0, "the account on its deletion day");
+    assert.equal(await rowsOf("identities", "account_id", owner), 0);
+    assert.equal(await rowsOf("sessions", "account_id", owner), 0);
+  });
+
+  /** Inserts an account by SQL, as one the Worker made on `createdDay` with last login `lastLoginDay`. */
+  const insertAccount = (id, createdDay, lastLoginDay) =>
+    worker.db.prepare("INSERT INTO accounts (id, created_day, last_login_day) VALUES (?, ?, ?)").bind(id, createdDay, lastLoginDay).run();
+  const deletingSince = async (id) =>
+    (await worker.db.prepare("SELECT deleting_since FROM accounts WHERE id = ?").bind(id).first())?.deleting_since;
+
+  test("the hourly run does not mark an account a login refreshes while its mark runs", async () => {
+    const day = await today();
+    const id = "00000000000000a1";
+    await insertAccount(id, 0, day - limits.INACTIVE_ACCOUNT_DAYS - 1);
+    // The login's write lands right before the statement that marks, after anything that chose accounts
+    // before it: only a mark whose own condition is evaluated as it writes leaves the account.
+    await worker.writeD1Before("UPDATE accounts SET deleting_since", [`UPDATE accounts SET last_login_day = ${day} WHERE id = '${id}'`]);
+    assert.equal(await worker.scheduled(), "ok");
+    const row = await worker.db.prepare("SELECT last_login_day, deleting_since FROM accounts WHERE id = ?").bind(id).first();
+    assert.equal(row?.last_login_day, day, "the injected login did not land");
+    assert.equal(row.deleting_since, null, "a refreshed account was marked");
+  });
+
+  test("an account with no last login counts from the day it was created", async () => {
+    const day = await today();
+    const due = "00000000000000b1";
+    const kept = "00000000000000b2";
+    await insertAccount(due, day - limits.INACTIVE_ACCOUNT_DAYS - 1, null);
+    await insertAccount(kept, day - limits.INACTIVE_ACCOUNT_DAYS, null);
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal(await rowsOf("accounts", "id", due), 0, "created 366 days ago");
+    assert.equal(await rowsOf("accounts", "id", kept), 1, "created 365 days ago");
+    assert.equal(await deletingSince(kept), null);
   });
 
   test("two deletions begun from two full sessions in the same second keep one session to finish it", async () => {
@@ -657,6 +703,26 @@ describe("account deletion", () => {
       assert.equal(await syncRowsOf(id), 0);
       assert.equal(await rowsOf("accounts", "id", id), 0);
       assert.equal((await getMe(token)).status, 401);
+    });
+  });
+
+  describe("with sharing switched off", () => {
+    let shared;
+    before(async () => {
+      shared = worker;
+      worker = await startWorker({ testEntry: true, vars: { SHARING_ENABLED: "false" } });
+    });
+    after(async () => {
+      await worker.dispose();
+      worker = shared;
+    });
+
+    test("the hourly run begins no deletion for inactivity", async () => {
+      const id = "00000000000000c1";
+      await insertAccount(id, 0, 0);
+      assert.equal(await worker.scheduled(), "ok");
+      assert.equal(await rowsOf("accounts", "id", id), 1);
+      assert.equal(await deletingSince(id), null);
     });
   });
 });

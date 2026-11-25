@@ -806,6 +806,13 @@ export async function withdrawShareImages(db, id, owner, by, now) {
 }
 
 /**
+ * The SET list that marks an account as being deleted since the bound parameter `since` (e.g. "?3"):
+ * from then on every write to it is refused, and its public profile is cleared, so no page shows it.
+ * Both ways a deletion begins (DELETE /api/me and the hourly mark of inactive accounts) set exactly this.
+ */
+const beginDeleting = (since) => `deleting_since = ${since}, trainer_name = NULL, game_trainer_id = NULL`;
+
+/**
  * Begins deleting account `accountId` from its full session `tokenHash` (one batch): marks the
  * account as being deleted since `now` and clears its public profile (from then on no page shows it,
  * and no write brings it back, since every write requires the mark's absence), removes every other
@@ -824,7 +831,7 @@ export async function beginAccountDeletion(db, accountId, tokenHash, now, expire
     db.batch([
       db
         .prepare(
-          `UPDATE accounts SET deleting_since = ?3, trainer_name = NULL, game_trainer_id = NULL
+          `UPDATE accounts SET ${beginDeleting("?3")}
            WHERE id = ?1 AND deleting_since IS NULL
              AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2 AND account_id = ?1 AND scope = 'full')`,
         )
@@ -870,6 +877,39 @@ export async function deleteShareChunk(db, accountId, limit) {
     ]),
   );
   return results[2].meta.changes;
+}
+
+/**
+ * Marks as being deleted since `now` up to `limit` accounts whose deletion day (`deletionDayOf`) is
+ * UTC day `day` or earlier, the longest without a login first; an account with no last login counts
+ * from its `created_day`. One statement, and its own WHERE holds the condition, so an account a login
+ * refreshed before the statement writes is not taken. Sessions are left alone: every session of such
+ * an account expired long ago, and finishing the deletion removes them. Read through the partial index
+ * of migrations/0013_last_login.sql. Returns how many it marked. Throws Unavailable.
+ */
+export async function markInactiveAccounts(db, now, day, limit) {
+  const due = day - limits.INACTIVE_ACCOUNT_DAYS - 1;
+  const eligible = "deleting_since IS NULL AND (last_login_day <= ?2 OR (last_login_day IS NULL AND created_day <= ?2))";
+  const { meta } = await query(() =>
+    db
+      .prepare(
+        `UPDATE accounts SET ${beginDeleting("?1")}
+         WHERE ${eligible}
+           AND id IN (SELECT id FROM accounts INDEXED BY accounts_inactive WHERE ${eligible}
+                      ORDER BY COALESCE(last_login_day, created_day) LIMIT ?3)`,
+      )
+      .bind(now, due, limit)
+      .run(),
+  );
+  return meta.changes;
+}
+
+/** How many accounts are being deleted, read through the partial index of migrations/0004_accounts_deleting.sql. Throws Unavailable. */
+export async function countAccountsBeingDeleted(db) {
+  const row = await query(() =>
+    db.prepare("SELECT count(*) AS n FROM accounts INDEXED BY accounts_deleting WHERE deleting_since IS NOT NULL").first(),
+  );
+  return row.n;
 }
 
 /**

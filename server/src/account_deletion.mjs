@@ -1,8 +1,10 @@
-// DELETE /api/me: deleting an account, which no request can finish at once (D1 bounds the queries
-// of one invocation, B2 the requests, and the day's sync row limit the sync rows). Two columns hold
-// its state: `accounts.deleting_since` (the account is being deleted, so every write to it is
-// refused) and `sessions.scope = 'delete'` (the one session allowed to continue). The app repeats
-// the call with that session until it answers 204. The hourly run continues every account being
+// Deleting an account, which no request can finish at once (D1 bounds the queries of one invocation,
+// B2 the requests, and the day's sync row limit the sync rows). A deletion begins at DELETE /api/me,
+// or at the hourly run's mark of an account with no login for INACTIVE_ACCOUNT_DAYS
+// (`beginInactiveDeletions`). Two columns hold its state: `accounts.deleting_since` (the account is
+// being deleted, so every write to it is refused) and `sessions.scope = 'delete'` (the one session
+// allowed to continue, which only DELETE /api/me or a later login gives). The app repeats the call
+// with that session until it answers 204. The hourly run continues every account being
 // deleted too (`continueAccountDeletions`), so a deletion the day's sync rows stopped finishes
 // without the app.
 
@@ -10,7 +12,15 @@ import { AccountDeleting, clock, fail, json, noContent, SessionRequired, untilTo
 import { requireSession } from "./auth.mjs";
 import * as limits from "./limits.mjs";
 import { Bucket, sharePrefix, StorageFailed } from "./b2.mjs";
-import { accountsBeingDeleted, beginAccountDeletion, countShares, deleteShareChunk, finishAccountDeletion } from "./store.mjs";
+import {
+  accountsBeingDeleted,
+  beginAccountDeletion,
+  countAccountsBeingDeleted,
+  countShares,
+  deleteShareChunk,
+  finishAccountDeletion,
+  markInactiveAccounts,
+} from "./store.mjs";
 import {
   chargeDeletionReads,
   countSyncRows,
@@ -143,4 +153,17 @@ export async function continueAccountDeletions(db, bucket, at) {
     }
     if (!room()) return;
   }
+}
+
+/**
+ * The hourly run's start of deletions for inactivity at clock `at` (`clock`): marks as being deleted the
+ * accounts whose deletion day has come, but no more than the run's deletions can take on
+ * (ACCOUNT_DELETE_STEPS_PER_RUN less the accounts being deleted already). A deletion begun at DELETE
+ * /api/me is therefore never queued behind these, and an account past its day stays saved by a login
+ * until it is marked. Everything after the mark is `continueAccountDeletions`.
+ */
+export async function beginInactiveDeletions(db, at) {
+  const room = limits.ACCOUNT_DELETE_STEPS_PER_RUN - (await countAccountsBeingDeleted(db));
+  if (room <= 0) return;
+  await markInactiveAccounts(db, at.now, at.day, room);
 }
