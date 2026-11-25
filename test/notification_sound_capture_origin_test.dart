@@ -52,8 +52,9 @@ void main() {
   setUpAll(initializeMappers);
   setUpAll(loadAppTranslations);
 
-  // add() reads the auto-copy setting, which is Hive-backed.
-  useHiveForTest(['settings']);
+  // add() reads the auto-copy setting, which is Hive-backed; the layer reads the remembered login at start-up from the
+  // sharing store.
+  useHiveForTest(['settings', 'record_shares']);
 
   late Directory tempRoot;
   setUp(() {

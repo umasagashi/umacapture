@@ -16,6 +16,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
+import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,7 @@ import 'package:umacapture/src/core/app_logger.dart';
 import 'package:umacapture/src/core/login_receiver.dart';
 import 'package:umacapture/src/core/video_import_ops.dart' show VideoImportPhase, VideoImportState;
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/notification_controller.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
@@ -59,6 +61,8 @@ import 'package:umacapture/src/gui/chara_detail/record_share_list_card.dart';
 import 'package:umacapture/src/gui/chara_detail/share_account_section.dart';
 import 'package:umacapture/src/gui/chara_detail/share_record_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
+import 'package:umacapture/src/gui/theme_extensions.dart';
+import 'package:umacapture/src/app/route.dart';
 import 'package:umacapture/src/preference/settings_state.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
@@ -320,6 +324,51 @@ Map<String, Object?> _claimed() => {
 const _lastLoginDay = 20400;
 const _deletionDay = 20766;
 const _remembered = RememberedLogin(accountId: _accountId, lastLoginDay: _lastLoginDay, deletionDay: _deletionDay);
+
+/// The app's tabs as far as the start-up warning needs them: a home tab holding the [NotificationLayer] as the app
+/// mounts it, and a stand-in for the account tab, drawn as [accountText], reached by the route the warning opens.
+class _AccountTabsRouter extends RootStackRouter {
+  static const accountText = 'アカウントのタブ';
+
+  @override
+  List<AutoRoute> get routes => [
+    AutoRoute(
+      path: '/',
+      page: PageInfo(
+        'Tabs',
+        builder: (_) =>
+            AutoTabsRouter(routes: const [PageRouteInfo('Home'), AccountRoute()], builder: (_, child) => child),
+      ),
+      children: [
+        AutoRoute(
+          path: 'home',
+          page: PageInfo(
+            'Home',
+            builder: (_) => Scaffold(body: NotificationLayer.asSibling(child: const SizedBox())),
+          ),
+        ),
+        AutoRoute(
+          path: 'account',
+          page: PageInfo(AccountRoute.name, builder: (_) => const Text(accountText)),
+        ),
+      ],
+    ),
+  ];
+}
+
+ThemeData _toastTheme() {
+  final base = FlexThemeData.light(scheme: FlexScheme.blue, useMaterial3: true);
+  return base.copyWith(
+    extensions: <ThemeExtension<dynamic>>[
+      AppSemanticColors.light(base.colorScheme),
+      AppChartColors.standard(),
+      CodeHighlightColors.light(),
+    ],
+  );
+}
+
+/// The UTC epoch day of the device clock, as the start-up warning counts days.
+int _today() => DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
 
 class _EmptyArchive extends CharaDetailArchiveStorage {
   @override
@@ -2249,6 +2298,41 @@ void main() {
       expect(StorageBox(StorageBoxKey.recordShares).entries(), isEmpty);
     });
 
+    testWidgets('C-a: the account tells the last login while logged in, and after a logout the last login and the day '
+        'the account is deleted from', (tester) async {
+      final listener = _FakeListener();
+      container = containerFor(
+        [
+          _json(200, _claimed()),
+          _json(200, {"trainer_id": record.metadata.trainerId}),
+          _sharesList([]),
+          _empty(204),
+        ],
+        listener: listener,
+        me: [_json(200, _me([], listPublic: false))],
+      );
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('ログインしていません。'), findsOneWidget, reason: 'nothing is remembered before the login');
+
+      await tester.tap(find.text('Google でログイン'));
+      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+      listener.callback("proof-from-the-callback");
+      await tester.pump(const Duration(seconds: 1));
+      await settleUntil(tester, () => find.text('ログアウト').evaluate().isNotEmpty, describe: 'the logged-in account');
+      final last = epochDayText(_lastLoginDay);
+      expect(find.text('Google アカウントでログインしています。\n最終ログイン: $last'), findsOneWidget);
+
+      await tester.tap(find.text('ログアウト'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the account to show logged out',
+      );
+      expect(find.text('ログインしていません。\n最終ログイン: $last（${epochDayText(_deletionDay)} 以降に削除）'), findsOneWidget);
+      expect(StorageBox(StorageBoxKey.recordShares).entries().map((e) => e.key), [rememberedLoginKey]);
+    });
+
     testWidgets('a logout from the account ends a selection the table began under the share column it filtered', (
       tester,
     ) async {
@@ -3541,6 +3625,99 @@ void main() {
           }
         }
       });
+    });
+  });
+  group('the start-up warning of an account due for deletion', () {
+    setUpAll(loadAppTranslations);
+
+    String warningText(int deletionDay) => 'アカウントは ${epochDayText(deletionDay)} 以降に削除されます。残すには、ログインしてください。';
+
+    Future<void> storeDueIn(int days) => StorageBox(StorageBoxKey.recordShares).push(
+      rememberedLoginKey,
+      RememberedLogin(
+        accountId: _accountId,
+        lastLoginDay: _today() + days - 366,
+        deletionDay: _today() + days,
+      ).toJson(),
+    );
+
+    /// Lets a warning shown run its time out, so none is left on the clock when the test ends.
+    Future<void> outlast(WidgetTester tester) async {
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+    }
+
+    /// Starts the app's tabs over [container], as the app does, and lets the first frame pass.
+    Future<void> start(WidgetTester tester) async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(theme: _toastTheme(), routerConfig: _AccountTabsRouter().config()),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Finder warning() => find.textContaining('以降に削除されます。');
+
+    testWidgets('C-c: a device not logged in that remembers a login due in 10 days warns once, with the day, and the '
+        'warning opens the account tab', (tester) async {
+      await storeDueIn(10);
+      container = containerFor([]);
+      await start(tester);
+
+      expect(find.text(warningText(_today() + 10)), findsOneWidget);
+      expect(find.byIcon(Symbols.warning_rounded), findsOneWidget, reason: 'a warning');
+      await tester.tap(warning());
+      await tester.pumpAndSettle();
+      expect(find.text(_AccountTabsRouter.accountText), findsOneWidget);
+      expect(server.sent, isEmpty, reason: 'the warning asks no server');
+    });
+
+    testWidgets('C-c: a device logged in to a session that has not expired does not warn', (tester) async {
+      await storeDueIn(10);
+      final unexpired = DateTime.now().add(const Duration(days: 1)).millisecondsSinceEpoch ~/ 1000;
+      await StorageBox(StorageBoxKey.recordShares).push(
+        shareSessionKey,
+        ShareSession(token: _token, expiresAt: unexpired, accountId: _accountId, deleting: false).toJson(),
+      );
+      container = containerFor([]);
+      await start(tester);
+
+      expect(warning(), findsNothing);
+    });
+
+    testWidgets('F2: the warning is given on the first and on the last day of the window, and not on the day before it '
+        'nor on the deletion day', (tester) async {
+      for (final (days, shown) in [(31, false), (30, true), (1, true), (0, false)]) {
+        await tester.pumpWidget(const SizedBox());
+        await storeDueIn(days);
+        container = containerFor([]);
+        await start(tester);
+        expect(warning(), shown ? findsOneWidget : findsNothing, reason: 'deleted in $days days');
+        await outlast(tester);
+      }
+    });
+
+    testWidgets('F2: a device that held a session but remembered no login, read the account, logged out and started '
+        'again, warns', (tester) async {
+      await storeSession();
+      final deletion = _today() + 10;
+      container = containerFor([
+        _json(200, {"account_id": _accountId, "last_login_day": deletion - 366, "deletion_day": deletion}),
+        _empty(204),
+      ]);
+      await tester.runAsync(() async {
+        await container.read(recordShareSessionProvider.notifier).readMe();
+        expect(await container.read(recordShareSessionProvider.notifier).logout(), isTrue);
+      });
+
+      // The restart: a new app over the stores the last one left.
+      container = containerFor([]);
+      await start(tester);
+
+      expect(find.text(warningText(deletion)), findsOneWidget);
+      await outlast(tester);
     });
   });
 }

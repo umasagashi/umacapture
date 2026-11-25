@@ -4,13 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/const.dart';
+import '/src/app/route.dart';
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/record_share_session.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/app_logger.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sound_player.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/chara_detail/export_button.dart';
+import '/src/gui/chara_detail/share_account_section.dart' show epochDayText;
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
@@ -114,6 +118,28 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
         _toaster.showToast(context, ToastData.success(description: message, onTap: onTap?.call(data)));
       });
     });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Read once per start: the warning is about the account the device remembers, told when the app starts.
+    final deletionDay = ref.read(loginDeletionNoticeProvider);
+    if (deletionDay != null) {
+      logger.i("Warning that the remembered sharing account is due for deletion");
+      // A SnackBar cannot be shown while the tree is being built.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _toaster.showToast(
+            context,
+            ToastData.warning(
+              description: "pages.account.deletion_toast".tr(namedArgs: {"deletion": epochDayText(deletionDay)}),
+              navigateOnTab: const AccountRoute(),
+            ),
+          );
+        }
+      });
+    }
   }
 
   void _listenForToastData<T>(StreamProvider<ToastData> provider) {

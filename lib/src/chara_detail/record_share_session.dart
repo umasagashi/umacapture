@@ -700,7 +700,12 @@ class RememberedLoginNotifier extends Notifier<RememberedLogin?> {
       return null;
     }
     try {
-      return RememberedLoginMapper.fromJson(stored);
+      // Decoded apart from the mapper, which lets a JSON `null` through as a TypeError rather than an exception.
+      final decoded = jsonDecode(stored);
+      if (decoded is! Map<String, dynamic>) {
+        throw FormatException("not a JSON object: ${decoded.runtimeType}");
+      }
+      return RememberedLoginMapper.fromMap(decoded);
     } on Exception catch (e) {
       // The next login or account read writes it again.
       logger.w("The remembered login could not be read: ${e.runtimeType}");
@@ -721,6 +726,29 @@ class RememberedLoginNotifier extends Notifier<RememberedLogin?> {
 final rememberedLoginProvider = NotifierProvider<RememberedLoginNotifier, RememberedLogin?>(
   RememberedLoginNotifier.new,
 );
+
+/// How many days before its deletion day an account the device remembers is warned about at start-up.
+const loginDeletionNoticeDays = 30;
+
+/// The deletion day the device warns about at start-up, or null when it warns about none: it warns while it remembers
+/// a login and is not logged in, from [loginDeletionNoticeDays] days before the remembered deletion day until the day
+/// before it, today being the UTC epoch day of the device clock.
+/// Not logged in means no session, or a session whose expiry has passed by the device clock (the server refuses it,
+/// though the device has not been told so yet); a session that can only continue deleting its account is logged in.
+final loginDeletionNoticeProvider = Provider<int?>((ref) {
+  final remembered = ref.watch(rememberedLoginProvider);
+  if (remembered == null) {
+    return null;
+  }
+  final session = ref.watch(recordShareSessionProvider);
+  final now = DateTime.now();
+  if (session != null && (session.deleting || session.expiresAt * 1000 > now.millisecondsSinceEpoch)) {
+    return null;
+  }
+  final today = now.millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
+  final deletion = remembered.deletionDay;
+  return deletion - loginDeletionNoticeDays <= today && today < deletion ? deletion : null;
+});
 
 /// What the web login this page was loaded to finish ended with ([RecordShareSession.resumeLogin]): null while its
 /// claim is out, and for good when the page was not loaded by a login. Read at start-up, so the claim does not wait

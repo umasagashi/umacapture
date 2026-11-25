@@ -7,6 +7,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' as intl;
 import 'package:material_symbols_icons/symbols.dart';
 
 import '/const.dart';
@@ -22,6 +23,31 @@ const tr_share_account = "pages.account";
 
 /// The page that lists the shares of the account [accountId], as the server serves it.
 String accountListUrl(String accountId) => "${Const.sharingOrigin}/u/$accountId";
+
+/// The server's epoch day [day] as the device's local date of its first instant (UTC midnight), as `yyyy/MM/dd`.
+String epochDayText(int day) => intl.DateFormat(
+  'yyyy/MM/dd',
+).format(DateTime.fromMillisecondsSinceEpoch(day * Duration.millisecondsPerDay, isUtc: true).toLocal());
+
+/// The account's state, with the last login the device remembers: logged in to that account, the day; logged out, the
+/// day and the day the account is deleted from. An account being deleted tells nothing more.
+String accountStateText(ShareSession? session, RememberedLogin? remembered) => switch ((session, remembered)) {
+  (null, RememberedLogin(:final lastLoginDay, :final deletionDay)) => [
+    "$tr_share_account.logged_out".tr(),
+    "$tr_share_account.last_login_with_deletion".tr(
+      namedArgs: {"last": epochDayText(lastLoginDay), "deletion": epochDayText(deletionDay)},
+    ),
+  ].join("\n"),
+  (null, _) => "$tr_share_account.logged_out".tr(),
+  (ShareSession(deleting: true), _) => "$tr_share_account.deleting".tr(),
+  (ShareSession(:final accountId), RememberedLogin(accountId: final remembers, :final lastLoginDay))
+      when remembers == accountId =>
+    [
+      "$tr_share_account.logged_in".tr(),
+      "$tr_share_account.last_login".tr(namedArgs: {"last": epochDayText(lastLoginDay)}),
+    ].join("\n"),
+  (ShareSession(), _) => "$tr_share_account.logged_in".tr(),
+};
 
 /// The account card: logged out, a login; logged in, logging out (a public list page leads the shares' card); an
 /// account being deleted, only that it is — continuing the deletion is [AccountDeletionCard]'s.
@@ -79,16 +105,13 @@ class _AccountCardState extends ConsumerState<AccountCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final session = ref.watch(recordShareSessionProvider);
-    final (String stateText, List<Widget> actions) = switch (session) {
-      null => (
-        "$tr_share_account.logged_out".tr(),
-        [_button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press)],
-      ),
-      ShareSession(deleting: true) => ("$tr_share_account.deleting".tr(), const <Widget>[]),
-      ShareSession() => (
-        "$tr_share_account.logged_in".tr(),
-        [_button("$tr_share_account.logout".tr(), Symbols.logout_rounded, _loggingOut ? null : _logout)],
-      ),
+    final stateText = accountStateText(session, ref.watch(rememberedLoginProvider));
+    final actions = switch (session) {
+      null => [_button("$tr_record_share.log_in".tr(), Symbols.login_rounded, _login.press)],
+      ShareSession(deleting: true) => const <Widget>[],
+      ShareSession() => [
+        _button("$tr_share_account.logout".tr(), Symbols.logout_rounded, _loggingOut ? null : _logout),
+      ],
     };
     final note = _note;
     // The card's title names the account, so the account's state leads the card as its first line.
