@@ -103,6 +103,16 @@ destroys data the product does promise to keep.
   its images are normal. A report past the day's limit is refused with a stated reason, which is the
   promised behaviour for it.
 
+## Accounts
+
+- **An account no device has completed a login to for 365 days is deleted by the server**, with the
+  reach of a deletion its owner starts. A login means a completed login; using a session is not one
+  (a session lasts 180 days from its login and is not extended by use).
+- **Nothing is sent beforehand** (no contact is kept). A device that is not logged in and remembers the
+  account warns at start-up from 30 days before the deletion day until the day before it.
+- **A login that lands after the deletion began continues it**; it does not stop it.
+- **No such deletion begins while sharing is switched off** (`SHARING_ENABLED` `"false"`).
+
 ## User-authored content
 
 - Add-on tasks (external programs, webhooks) and script columns are user-authored. The runtime semantics

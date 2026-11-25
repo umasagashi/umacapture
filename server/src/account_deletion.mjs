@@ -157,9 +157,11 @@ export async function continueAccountDeletions(db, bucket, at) {
 
 /**
  * The hourly run's start of deletions for inactivity at clock `at` (`clock`): marks as being deleted the
- * accounts whose deletion day has come, but no more than the run's deletions can take on
- * (ACCOUNT_DELETE_STEPS_PER_RUN less the accounts being deleted already). A deletion begun at DELETE
- * /api/me is therefore never queued behind these, and an account past its day stays saved by a login
+ * accounts whose deletion day has come, but no more than
+ * ACCOUNT_DELETE_STEPS_PER_RUN less the accounts being deleted already; the mark does not promise the
+ * account a step in the same run. A deletion begun at DELETE
+ * /api/me can therefore wait behind an older automatic deletion, since `continueAccountDeletions` takes
+ * marked accounts oldest first within its budgets, and an account past its day stays saved by a login
  * until it is marked. Everything after the mark is `continueAccountDeletions`.
  */
 export async function beginInactiveDeletions(db, at) {

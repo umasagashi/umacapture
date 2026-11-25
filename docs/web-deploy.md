@@ -523,6 +523,11 @@ Worker of that release refuses nothing an older build sends, but every list is p
 deployment and an older build cannot switch it: the older build's links to the account's list lead to
 the private page until the sharer switches it from the web app or a newer build.
 
+A build that shows the last login and warns before an account is deleted for inactivity reads
+`last_login_day` and `deletion_day` from the claim and `GET /api/me`, and is released only after the
+production Worker that has them ("Rolling out deletion for inactivity"). An older Worker leaves both
+out, and such a build then has no last login to remember, show or warn about.
+
 ### Applying a migration
 
 `deploy_web.sh` never applies migrations. A migration in `server/migrations/` that a new Worker
@@ -923,6 +928,59 @@ back. It would also answer `PUT /api/me/list` with the plain-text `404` and `GET
 `list_public`. To stop instead, use "Stopping record sharing": a rollback to a version without the
 Worker answers every `/u/*` with the static 404. `SHARING_ENABLED` `"false"` does not hide a public
 list; it keeps a private one from being made public.
+
+### Rolling out deletion for inactivity
+
+Once, for the release whose Worker deletes an account no device has completed a login to for
+`INACTIVE_ACCOUNT_DAYS` (365) days, with the migration `0013_last_login.sql`. It adds
+`accounts.last_login_day` (a UTC epoch day) and the partial index `accounts_inactive`, and sets every
+existing account's `last_login_day` to the day it is applied. That day is never earlier than an
+account's real last login, so the day an account becomes due is never earlier than its real last
+login allows; for an account whose last login was on an earlier UTC day, it postpones the deletion day.
+
+- **The Worker** writes `last_login_day` at the claim of a full session and at an account's creation,
+  and `GET /api/me` and the claim's `200` carry `last_login_day` and `deletion_day`. The hourly run's
+  `inactive` kind marks due accounts as being deleted, and `deletions` deletes them as it deletes one
+  its owner began ([`sync-server.md`](sync-server.md#the-hourly-run)). It marks none while
+  `SHARING_ENABLED` is `"false"`.
+- **Apply and deploy on the same UTC day.** Between the two, the live Worker records no login, and an
+  account it creates has a null `last_login_day` and counts from its `created_day`; a login it takes
+  on a later day than the apply would leave the stored day earlier than the real one.
+
+Staging first:
+
+1. **Apply `0013`** ("Checks before a production run", then "Applying a migration"). It adds a column
+   and an index and changes no other, and the live Worker never names them, so it runs unchanged on
+   them. Then confirm that the first prints `0` and that `min`, `max` and `today` of the second are
+   one value (it catches a remote `strftime` that evaluates differently). When no account exists,
+   `min` and `max` are `NULL`, which is acceptable:
+
+   ```bash
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT count(*) AS unset FROM accounts WHERE last_login_day IS NULL"
+   server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+     --command "SELECT min(last_login_day) AS min, max(last_login_day) AS max, CAST(strftime('%s', 'now') AS INTEGER) / 86400 AS today FROM accounts"
+   # staging: umacapture-share-staging --env staging
+   ```
+
+2. **Deploy** the Worker and the web app together ("Deploying"), the same UTC day. On staging, log in
+   with a test account and see the account tab show its last login; then set that account's
+   `last_login_day` 366 days back with `wrangler d1 execute` and see the next hourly run begin its
+   deletion (`deleting_since` set) and later runs finish it.
+3. **Windows release**, after the production deployment ("Ordering against a Windows release").
+
+**Do not roll the Worker back past this release** while its hourly run marks accounts. An older Worker
+records no login, so the logins of the rollback's time are lost and an account could become due
+earlier than its real last login allows once this release runs again. To stop the deletions for
+inactivity instead, set `SHARING_ENABLED` to `"false"` (it also stops new logins and shares). If the
+Worker was rolled back anyway, then on the UTC day of the redeploy, right before it, raise every
+account's `last_login_day` to that day, and only then deploy:
+
+```bash
+server/node_modules/.bin/wrangler d1 execute umacapture-share --remote -c server/wrangler.jsonc --json \
+  --command "UPDATE accounts SET last_login_day = MAX(COALESCE(last_login_day, 0), CAST(strftime('%s', 'now') AS INTEGER) / 86400)"
+# staging: umacapture-share-staging --env staging
+```
 
 ### Shared images: declared bytes and what B2 holds
 
@@ -1739,6 +1797,9 @@ server/node_modules/.bin/wrangler rollback <version-id> --name umacapture-web -c
   a version from before it: that Worker does not read `accounts.list_public`, so every account's list
   would be public at once, those never made public included, and what is read in that time cannot be
   taken back. A version deployed with sharing off has no Worker and is not ruled out by this.
+- Once a target has the Worker of "Rolling out deletion for inactivity", do not roll its Worker back
+  to a version from before it: that Worker records no login, so an account could later become due
+  earlier than its real last login allows. That section says what to do before redeploying if one ran.
 - When secrets have changed since the version, wrangler asks to confirm. Without a terminal (stdin
   or stdout not a terminal, or a CI environment) every prompt of `rollback` takes its default, and
   that confirmation's is yes.

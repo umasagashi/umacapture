@@ -364,7 +364,8 @@ it ([what no row accounts for](#references-and-retention)).
   deletion finishes without the app. After `429 sync_paused_today` the app leaves the rest to the
   server and drops its session; a run that meets the share with no room removes nothing, and a run of
   a later UTC day goes on. Once a run has removed the account, its deletion-only session is gone with
-  it, and a call with that session answers `401`.
+  it, and a call with that session answers `401`. The hourly run (`inactive`) also begins the deletion
+  of an account no device has completed a login to for 365 days, which then takes the same steps.
 
 ## References and retention
 

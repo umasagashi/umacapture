@@ -29,7 +29,7 @@ kinds and account deletion.
 - **`SYNC_ENABLED`** is `"true"` or `"false"`; any other value throws, as a configuration error.
   `"false"` answers every endpoint under `/api/sync/` `503 sync_paused` before it reads anything, and
   the hourly run runs none of sync's kinds. Sharing, logins and account deletion go on, the hourly
-  run's `deletions` included.
+  run's `inactive` and `deletions` included.
 - **`server/wrangler.assets-only.jsonc`** has no script and sets `triggers.crons` to `[]`, so a deploy
   of it removes the hourly run that a deploy of `wrangler.jsonc` set.
 
@@ -259,15 +259,18 @@ run's one `Bucket`, each after the one before has finished or failed:
 | `shows` | `showLeftovers` | yes | Shows what cut-off requests left referenced and hidden, up to `SYNC_LEFTOVER_SHOWS` |
 | `hides` | `hideLeftovers` | yes | Hides what nothing references and no request is hiding, up to `SYNC_LEFTOVER_HIDES` |
 | `writes` | `writeLeftovers(…, "a", …)` | yes | Deletes what requests wrote under an account's prefix `a/` and no row accounts for, up to `SYNC_LEFTOVER_WRITES` names |
+| `inactive` | `beginInactiveDeletions` (`server/src/account_deletion.mjs`) | no | Begins the deletion of the accounts with no login for `INACTIVE_ACCOUNT_DAYS`, up to `ACCOUNT_DELETE_STEPS_PER_RUN` less those already being deleted. Only while `SHARING_ENABLED` is `"true"` |
 | `deletions` | `continueAccountDeletions` | no | Continues the deletion of the accounts being deleted, up to `ACCOUNT_DELETE_STEPS_PER_RUN` steps |
 | `share_writes` | `writeLeftovers(…, "s", …)` | no | Deletes what requests wrote under an account's shared images `s/` and no share accounts for — a bundle put after its share was unshared or its account deleted, one an unshare or a takedown failed to delete — up to `SYNC_LEFTOVER_WRITES` names. A name is held while its share records that bundle as stored |
 | `forgets` | `forgetLeftovers` | yes | Deletes gone rows nothing references, up to `SYNC_FORGETS_PER_RUN` |
 | `days` | `forgetDays` | yes | Deletes the `sync_daily` rows before yesterday |
 
 A kind that fails does not stop the ones after it; the run then fails with the first failure. While
-`SYNC_ENABLED` is `"false"` only the kinds that are not sync's run (`takedowns`, `deletions`,
-`share_writes`): account deletion goes on while sync is off, and the other two remove what must stop
-being served or what a sharer withdrew. `SHARE_IMAGES_ENABLED` stops none of them.
+`SYNC_ENABLED` is `"false"` only the kinds that are not sync's run (`takedowns`, `inactive`,
+`deletions`, `share_writes`): account deletion goes on while sync is off, and the other two remove what
+must stop being served or what a sharer withdrew. `SHARE_IMAGES_ENABLED` stops none of them. While
+`SHARING_ENABLED` is `"false"` `inactive` begins no deletion, since nobody can log in to keep an
+account; a deletion begun before goes on in `deletions`.
 
 A record of the ledger in space `"s"` is taken, as one in `"a"`, once it is `SYNC_ABANDONED_AFTER` and
 twice `RESTORE_MARGIN_SECONDS` old (2 hours and a quarter), so what an unshare or an account deletion
@@ -290,6 +293,23 @@ whole step (`2 * ACCOUNT_DELETE_B2_PAGES + 1` = 9 under `a/` and
 requests. A step removing a chunk of
 the sync rows writes within the same day's share as `DELETE /api/me`, so the runs and the app's calls
 of one day write no more than that share between them.
+
+`inactive` begins a deletion the way `DELETE /api/me` does (`markInactiveAccounts`): it sets
+`deleting_since` and clears the public profile, and `deletions` does the rest. An account is due from
+its deletion day (`deletionDayOf`), the UTC day `last_login_day + INACTIVE_ACCOUNT_DAYS + 1`, so a
+login at any hour of a day is 365 whole days before it; the claim of a full session writes
+`last_login_day`, and the creation of an account writes its `created_day` there. An account whose
+`last_login_day` is null, which a Worker older than migration `0013_last_login.sql` created, counts
+from its `created_day`. One statement marks, through the partial index `accounts_inactive`
+(`server/migrations/0013_last_login.sql`), the longest without a login first, and its own `WHERE` holds
+the condition, so an account a login refreshed first is not taken. A run marks no more accounts than
+`ACCOUNT_DELETE_STEPS_PER_RUN` less those being deleted already. The `deletions` kind takes marked
+accounts oldest first within its step and B2 budgets, so an older automatic deletion can precede a
+later manual deletion. An account past its deletion day stays saved by a login until a run marks it.
+It sends no B2 request. No session is touched: every session of a due
+account expired long before (`SESSION_TTL_SECONDS`), and the deletion's end removes them. A login
+onto a marked account gets a deletion-only session, as one onto an account its owner is deleting does,
+so it continues the deletion.
 
 ## Daily limits and the reserve
 
