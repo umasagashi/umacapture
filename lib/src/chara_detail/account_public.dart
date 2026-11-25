@@ -34,6 +34,12 @@ typedef AccountPublicRead = ({SharerProfileRead profile, ListVisibilityRead list
 /// Null parts have not yet been answered. Each part otherwise keeps its last usable answer independently.
 typedef AccountPublicState = ({SharerProfileRead? profile, ListVisibilityRead? list});
 
+/// Older Workers always serve the list; an unanswered or unread value offers no list URL.
+bool canOpenAccountList(ListVisibilityRead? read) => switch (read) {
+  ListVisibilityHeld(public: true) || ListVisibilityUnsupported() => true,
+  _ => false,
+};
+
 /// Reads both public settings in one request under [under].
 Future<AccountPublicRead> readAccountPublic(RecordShareSession session, ShareSession under) async {
   const unread = (profile: SharerProfileUnread(), list: ListVisibilityUnread());
@@ -132,4 +138,4 @@ class AccountPublic extends Notifier<AccountPublicState> {
   }
 }
 
-final accountPublicProvider = NotifierProvider<AccountPublic, AccountPublicState>(AccountPublic.new);
+final accountPublicProvider = NotifierProvider.autoDispose<AccountPublic, AccountPublicState>(AccountPublic.new);

@@ -12,6 +12,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/const.dart';
+import '/src/chara_detail/account_public.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_share.dart';
 import '/src/chara_detail/record_share_session.dart';
@@ -551,6 +552,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
     }
     if (mounted) {
       setState(() => _outcomes.addAll(answered));
+      ref.read(accountPublicProvider.notifier).refresh();
     }
   }
 
@@ -570,7 +572,7 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
     return lines.isEmpty ? null : lines.join("\n");
   }
 
-  Widget _results(ThemeData theme) {
+  Widget _results(ThemeData theme, ListVisibilityRead? visibility) {
     String line(String key, int count) => "$tr_share_record.bulk.$key".tr(namedArgs: {"count": "$count"});
     final shared = _count((o) => o is Shared);
     final already = _count((o) => o is AlreadyShared);
@@ -583,8 +585,10 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
     final failures = _outcomes.values.where((o) => o is! Shared && o is! AlreadyShared && o is! NotShareable).toList();
     final needsLogin = failures.any((o) => o is LoginRequired) && !_signedIn;
     final session = ref.watch(recordShareSessionProvider);
-    // Told once every checked record is on the account's list, which is what the list's page then shows.
-    final listUrl = failures.isEmpty && excluded == 0 && session != null ? accountListUrl(session.accountId) : null;
+    // Offered once every checked record is on the account's list and the list is public.
+    final listUrl = failures.isEmpty && excluded == 0 && session != null && canOpenAccountList(visibility)
+        ? accountListUrl(session.accountId)
+        : null;
     final style = theme.textTheme.bodyMedium;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -649,10 +653,11 @@ class _BulkShareRecordDialogState extends ConsumerState<BulkShareRecordDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final visibility = ref.watch(accountPublicProvider.select((state) => state.list));
     final sent = _outcomes.isNotEmpty;
     final withdrawn = _selection.withdrawn(ref);
     final body = sent
-        ? _results(theme)
+        ? _results(theme, visibility)
         : Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

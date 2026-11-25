@@ -23,8 +23,8 @@ const tr_share_account = "pages.account";
 /// The page that lists the shares of the account [accountId], as the server serves it.
 String accountListUrl(String accountId) => "${Const.sharingOrigin}/u/$accountId";
 
-/// The account card: logged out, a login; logged in, logging out (the list page leads the shares' card); an account being deleted, only
-/// that it is — continuing the deletion is [AccountDeletionCard]'s.
+/// The account card: logged out, a login; logged in, logging out (a public list page leads the shares' card); an
+/// account being deleted, only that it is — continuing the deletion is [AccountDeletionCard]'s.
 class AccountCard extends ConsumerStatefulWidget {
   const AccountCard({super.key});
 

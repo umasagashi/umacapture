@@ -52,6 +52,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 import 'package:umacapture/src/gui/account.dart';
 import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
+import 'package:umacapture/src/gui/chara_detail/common.dart';
 import 'package:umacapture/src/gui/chara_detail/data_table_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/record_share_list_card.dart';
@@ -81,8 +82,8 @@ typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String b
 /// apart from them: with the next of [usage], or once that is empty with the bare 404 of a Worker older than the
 /// route. Those requests go to [usageSent], not [sent].
 ///
-/// With [me] given, `GET /api/me` — which the account's public-settings notifier asks for with each share listing —
-/// is answered apart the same way: with the next of [me], or once that is empty with a 200 that carries no profile.
+/// With [me] given, `GET /api/me` — read with each share listing and bulk result — is answered apart the same way:
+/// with the next of [me], or once that is empty with a 200 that carries no profile or list visibility.
 /// Those requests go to [meSent].
 class _FakeServer implements HttpClientAdapter {
   final List<Object> answers;
@@ -109,7 +110,10 @@ class _FakeServer implements HttpClientAdapter {
     }
     if (me case final me? when options.method == "GET" && options.uri.path == "/api/me") {
       meSent.add(options.uri);
-      return meSent.length <= me.length ? me[meSent.length - 1] as ResponseBody : _json(200, _me([]));
+      var answer = meSent.length <= me.length ? me[meSent.length - 1] : _json(200, _me([]));
+      if (answer is Future<Object>) answer = await answer;
+      if (answer is Exception) throw answer;
+      return answer as ResponseBody;
     }
     sent.add((
       method: options.method,
@@ -181,7 +185,11 @@ Map<String, Object?> _listed(String id, String clientKeyHash, {String? cardName,
 /// A card's name as the server's name tables label it, which is not the form the app's own rows use.
 const _serverCardName = "[スペシャルドリーマー]スペシャルウィーク";
 
-Map<String, Object?> _me(List<String> trainerIds) => {"account_id": _accountId, "trainer_ids": trainerIds};
+Map<String, Object?> _me(List<String> trainerIds, {bool? listPublic}) => {
+  "account_id": _accountId,
+  "trainer_ids": trainerIds,
+  "list_public": ?listPublic,
+};
 
 /// A record id distinct for each [i].
 String _uuid(int i) => "9a1e0d66-0654-4416-aa11-${i.toString().padLeft(12, '0')}";
@@ -334,8 +342,8 @@ void main() {
   /// The web login's handover of the latest container; one without a listener logs in through it.
   late _FakeHandover handover;
 
-  /// Whether `GET /api/me` is answered apart from the other requests ([_FakeServer.me]): on the account tab, where
-  /// the account's public-settings notifier asks for it beside the shares' list.
+  /// Whether `GET /api/me` is answered apart from the other requests ([_FakeServer.me]): on the account tab and
+  /// in bulk results, where the account's public-settings notifier reads it.
   var meApart = false;
 
   ProviderContainer containerFor(
@@ -1111,6 +1119,8 @@ void main() {
   // S4c: sharing the checked records (N2), from the table toolbar's share button through the selection scrim.
   group('from the table toolbar', () {
     setUpAll(loadAppTranslations);
+    setUp(() => meApart = true);
+    tearDown(() => meApart = false);
 
     /// Mounts the real toolbar under the selection scrim over [container], enters share selection from its button
     /// (or the selection the button [select] names), checks [ids] as the grid's checkboxes would, and opens the
@@ -1160,11 +1170,15 @@ void main() {
       (tester) async {
         await storeSession();
         final records = ownRecords(9);
-        container = containerFor([
-          _results([for (var i = 0; i < 8; i++) _created("id-$i")]),
-          _lostConnection,
-          _results([_created("id-8")]),
-        ], held: records);
+        container = containerFor(
+          [
+            _results([for (var i = 0; i < 8; i++) _created("id-$i")]),
+            _lostConnection,
+            _results([_created("id-8")]),
+          ],
+          held: records,
+          me: [_json(200, _me([], listPublic: true)), _json(200, _me([], listPublic: true))],
+        );
 
         await openBulk(tester, [for (final r in records) r.id]);
         expect(find.text('9 件のレコードを共有します。'), findsOneWidget);
@@ -1193,6 +1207,38 @@ void main() {
         expect(find.text('残りを再試行'), findsNothing);
       },
     );
+
+    testWidgets('bulk results offer the list URL only after a public or older Worker answer', (tester) async {
+      for (final (visibility, status) in [(false, 200), (true, 200), (null, 200), (null, 503)]) {
+        await storeSession();
+        final records = ownRecords(1);
+        final answer = Completer<Object>();
+        container = containerFor(
+          [
+            _results([_created('id-bulk')]),
+          ],
+          held: records,
+          me: [answer.future],
+        );
+        await openBulk(tester, [records.single.id]);
+        await tester.longPress(find.text('長押しで共有'));
+        await settleUntilElapsing(tester, () => server.meSent.isNotEmpty, describe: 'the result visibility request');
+        expect(find.text('1 件を共有しました。'), findsOneWidget);
+        expect(find.text('共有したレコードの一覧:'), findsNothing, reason: 'no answer yet');
+        expect(find.text(accountListUrl(_accountId)), findsNothing, reason: 'no answer yet');
+        answer.complete(_json(status, status == 200 ? _me([], listPublic: visibility) : {'error': 'unavailable'}));
+        await settleUntilElapsing(
+          tester,
+          () => container.read(accountPublicProvider).list != null,
+          describe: 'the result visibility read to finish',
+        );
+        final offered = status == 200 && visibility != false;
+        expect(find.text(accountListUrl(_accountId)), offered ? findsOneWidget : findsNothing);
+        expect(find.text('共有したレコードの一覧:'), offered ? findsOneWidget : findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await Hive.box(storageBoxNameOf(StorageBoxKey.recordShares)).clear();
+      }
+    });
 
     testWidgets('S4d (C1): a share begun under one account sends nothing more once another account has logged in', (
       tester,
@@ -1417,16 +1463,130 @@ void main() {
 
     const loggedInActions = ['共有の一覧ページを開く', 'ログアウト', 'アカウントを削除…', '共有したレコード'];
 
+    Finder visibilityTile() => find.widgetWithText(ListTile, '共有の一覧ページを公開する');
+    Finder visibilitySwitch() => find.descendant(of: visibilityTile(), matching: find.byType(Switch));
+
+    void expectListActions(Matcher matcher) {
+      expect(find.text('共有の一覧ページを開く'), matcher);
+      expect(find.text('URL をコピー'), matcher);
+    }
+
+    testWidgets('list visibility starts private, writes the switch choice and shows the server answer', (tester) async {
+      await storeSession();
+      final saved = Completer<Object>();
+      container = containerFor(
+        [
+          _sharesList([]),
+          saved.future,
+          _json(200, {'public': true}),
+        ],
+        me: [_json(200, _me([], listPublic: false))],
+      );
+      await mountAccount(tester);
+      await settleUntilElapsing(tester, () => visibilitySwitch().evaluate().isNotEmpty, describe: 'the visibility');
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isFalse);
+      expect(find.text('共有したレコードのページは、オフでも公開されたままです。'), findsOneWidget);
+      expectListActions(findsNothing);
+
+      await tester.tap(visibilitySwitch());
+      await settleUntilElapsing(tester, () => server.sent.length == 2, describe: 'the visibility write');
+      final sent = server.sent.last;
+      expect((sent.method, sent.uri.path), ('PUT', '/api/me/list'));
+      expect(jsonDecode(sent.body), {'public': true});
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isFalse, reason: 'the server has not answered');
+      expect(tester.widget<Switch>(visibilitySwitch()).onChanged, isNull);
+      expect(tester.widget<ListTile>(visibilityTile()).onTap, isNull);
+      expectListActions(findsNothing);
+
+      saved.complete(_json(200, {'public': true}));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有の一覧ページを開く').evaluate().isNotEmpty,
+        describe: 'the saved public list',
+      );
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isTrue);
+      expectListActions(findsOneWidget);
+      await tester.tap(find.text('共有の一覧ページを公開する'));
+      await settleUntilElapsing(tester, () => server.sent.length == 3, describe: 'the tile visibility write');
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(jsonDecode(server.sent.last.body), {'public': false});
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isTrue, reason: 'the stored answer is authoritative');
+      expectListActions(findsOneWidget);
+    });
+
+    testWidgets('a refused list visibility write keeps the server value and tells why below the switch', (
+      tester,
+    ) async {
+      await storeSession();
+      container = containerFor(
+        [
+          _sharesList([]),
+          _json(503, {'error': 'sharing_paused'}),
+          _json(200, {'public': true}),
+        ],
+        me: [_json(200, _me([], listPublic: false))],
+      );
+      await mountAccount(tester);
+      await settleUntilElapsing(tester, () => visibilitySwitch().evaluate().isNotEmpty, describe: 'the visibility');
+      await tester.tap(visibilitySwitch());
+      final note = find.text('現在、共有はサーバー側で一時的に停止されているため、保存できません。');
+      await settleUntilElapsing(tester, () => note.evaluate().isNotEmpty, describe: 'the visibility refusal');
+      expect(find.ancestor(of: note, matching: find.byType(NoteCard)), findsOneWidget);
+      expect(tester.widget<Switch>(visibilitySwitch()).value, isFalse);
+      expect(tester.widget<Switch>(visibilitySwitch()).onChanged, isNotNull);
+      expectListActions(findsNothing);
+      await tester.tap(visibilitySwitch());
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有の一覧ページを開く').evaluate().isNotEmpty,
+        describe: 'the retry to save',
+      );
+      expect(note, findsNothing, reason: 'a successful save clears the refusal');
+    });
+
+    testWidgets('unanswered and unread list visibility hide its controls; an older Worker offers the list', (
+      tester,
+    ) async {
+      await storeSession();
+      final answer = Completer<Object>();
+      container = containerFor([_sharesList([]), _sharesList([])], me: [answer.future, _json(200, _me([]))]);
+      await mountAccount(tester);
+      await settleUntilElapsing(tester, () => server.meSent.isNotEmpty, describe: 'the visibility read to start');
+      expect(visibilityTile(), findsNothing);
+      expectListActions(findsNothing);
+      answer.complete(_json(503, {'error': 'unavailable'}));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('公開プロフィール').evaluate().isNotEmpty,
+        describe: 'the unread settings',
+      );
+      expect(visibilityTile(), findsNothing);
+      expectListActions(findsNothing);
+      await tester.tap(find.byTooltip('もう一度確かめる'));
+      await settleUntilElapsing(
+        tester,
+        () => find.text('共有の一覧ページを開く').evaluate().isNotEmpty,
+        describe: 'the older Worker answer',
+      );
+      expect(visibilityTile(), findsNothing);
+      expectListActions(findsOneWidget);
+    });
+
     testWidgets(
       'S4b (C1 i): logged out, the account offers a login; logged in, its list, logout, deletion and shares',
       (tester) async {
         final listener = _FakeListener();
-        container = containerFor([
-          _json(200, _claimed()),
-          _json(200, {"trainer_id": record.metadata.trainerId}),
-          // The shares' card asks for the account's list as it appears with the login.
-          _sharesList([]),
-        ], listener: listener);
+        container = containerFor(
+          [
+            _json(200, _claimed()),
+            _json(200, {"trainer_id": record.metadata.trainerId}),
+            // The shares' card asks for the account's list as it appears with the login.
+            _sharesList([]),
+          ],
+          listener: listener,
+          me: [_json(200, _me([], listPublic: true))],
+        );
         await mountAccount(tester);
         await tester.pumpAndSettle();
 
@@ -1443,6 +1603,11 @@ void main() {
         await settleUntil(tester, () => server.sent.length == 2, describe: 'the trainer registration');
         await tester.pump(const Duration(seconds: 1));
         await settleUntil(tester, () => find.text('ログアウト').evaluate().isNotEmpty, describe: 'the logged-in account');
+        await settleUntilElapsing(
+          tester,
+          () => find.text('共有の一覧ページを開く').evaluate().isNotEmpty,
+          describe: 'the public list actions',
+        );
 
         for (final action in loggedInActions) {
           expect(find.text(action), findsOneWidget, reason: action);

@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/app/route.dart';
+import '/src/chara_detail/account_public.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_share.dart';
 import '/src/chara_detail/record_share_session.dart';
+import '/src/chara_detail/sharer_text.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
@@ -23,7 +25,7 @@ import '/src/gui/common.dart';
 const tr_record_share_list = "pages.account.shared_records";
 
 /// The account tab's card of the shares, while logged in to an account that is not being deleted; otherwise no card.
-/// It leads with the account's list page, then lists the shares as the server answers.
+/// It offers the account's list page while public, then lists the shares as the server answers.
 class RecordShareListCard extends ConsumerWidget {
   /// Whether the card's tab is the one shown. Each time it turns true the account's list is asked for again.
   final bool inView;
@@ -63,6 +65,9 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
   /// Counts the requests, so that only the latest one's answer is shown.
   int _request = 0;
 
+  bool _savingVisibility = false;
+  SharerTextRefusal? _visibilityRefusal;
+
   // Kept alive while the page is, so that scrolling the card out of a long page does not ask the server again.
   @override
   bool get wantKeepAlive => true;
@@ -88,6 +93,25 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
     setState(() {});
   }
 
+  Future<void> _setListPublic(bool public) async {
+    if (_savingVisibility) return;
+    setState(() => _savingVisibility = true);
+    final outcome = await writeListVisibility(ref.read(recordShareSessionProvider.notifier), public: public);
+    if (!mounted) return;
+    setState(() {
+      _savingVisibility = false;
+      switch (outcome) {
+        case SharerTextSaved(:final value):
+          ref.read(accountPublicProvider.notifier).listSaved(value);
+          _visibilityRefusal = null;
+        case SharerTextRefused(:final reason):
+          _visibilityRefusal = reason;
+        case SharerTextChanged():
+          _visibilityRefusal = SharerTextRefusal.failed;
+      }
+    });
+  }
+
   /// Sends the request and marks it out; the build that follows shows that, so [initState] and [didUpdateWidget]
   /// call this directly.
   Future<void> _ask() async {
@@ -106,6 +130,7 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
+    final visibility = ref.watch(accountPublicProvider.select((state) => state.list));
     final notes = ref.watch(recordSharesProvider);
     final active = ref.watch(charaDetailRecordStorageLoaderProvider).value;
     final archived = ref.watch(charaDetailArchiveStorageLoaderProvider).value;
@@ -148,6 +173,15 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
       children: [
         Text("$tr_record_share_list.description".tr(), style: theme.textTheme.bodyMedium),
         const SizedBox(height: 8),
+        if (visibility case ListVisibilityHeld(:final public))
+          FormTile(
+            divider: false,
+            title: Text("$tr_record_share_list.list_public".tr()),
+            description: Text("$tr_record_share_list.list_public_description".tr()),
+            trailing: Switch(value: public, onChanged: _savingVisibility ? null : _setListPublic),
+            onTap: _savingVisibility ? null : () => _setListPublic(!public),
+          ),
+        if (_visibilityRefusal case final refusal?) NoteCard(description: Text(sharerTextRefusalText(refusal))),
         Row(
           children: [
             Expanded(
@@ -155,12 +189,18 @@ class _RecordShareListState extends ConsumerState<_RecordShareList> with Automat
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _button(
-                    "$tr_share_account.open_list".tr(),
-                    Symbols.open_in_new_rounded,
-                    () => openSharedPage(listUrl),
-                  ),
-                  _button("$tr_record_share.copy_url".tr(), Symbols.content_copy_rounded, () => copySharedUrl(listUrl)),
+                  if (canOpenAccountList(visibility)) ...[
+                    _button(
+                      "$tr_share_account.open_list".tr(),
+                      Symbols.open_in_new_rounded,
+                      () => openSharedPage(listUrl),
+                    ),
+                    _button(
+                      "$tr_record_share.copy_url".tr(),
+                      Symbols.content_copy_rounded,
+                      () => copySharedUrl(listUrl),
+                    ),
+                  ],
                 ],
               ),
             ),

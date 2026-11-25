@@ -646,6 +646,7 @@ void main() {
       var c = sharing(
         [
           _results([_created("id-own")]),
+          _json(200, {"list_public": true}),
         ],
         shown: [own, shared, friend],
       );
@@ -668,7 +669,9 @@ void main() {
       c = sharing([
         _results([for (var i = 0; i < 8; i++) _created("id-$i")]),
         _lostConnection,
+        _json(200, {"list_public": true}),
         _results([_created("id-8")]),
+        _json(200, {"list_public": true}),
       ], shown: nine);
       await openBulk(tester, c, [for (final r in nine) r.id]);
       await tester.longPress(find.text(ok));
