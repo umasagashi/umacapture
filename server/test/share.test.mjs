@@ -611,6 +611,9 @@ describe("the session's account", () => {
       trainer_ids: [],
       deleting: false,
       profile: { trainer_name: null, game_trainer_id: null },
+      // The login's day and deletion day are asserted in account_delete.test.mjs.
+      last_login_day: first.body.last_login_day,
+      deletion_day: first.body.deletion_day,
     });
     const [a, b] = await results(worker, token, [share(), share()]);
     assert.deepEqual(

@@ -94,6 +94,12 @@ export const ACCOUNT_CREATE_LIMIT = 500;
 export const SESSION_TTL_SECONDS = 180 * 86_400;
 
 /**
+ * How many whole days an account may go with no login before it is deleted. A session lives
+ * SESSION_TTL_SECONDS from its claim, so an account in use logs in again well within this.
+ */
+export const INACTIVE_ACCOUNT_DAYS = 365;
+
+/**
  * How long the session that began an account's deletion may continue it, counted from the begin (or
  * from a claim onto an account being deleted). Past it, logging in again continues the deletion.
  */

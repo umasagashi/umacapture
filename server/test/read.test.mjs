@@ -4,7 +4,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { REPORT_DAILY_LIMIT } from "../src/limits.mjs";
 import { PAGE_CSP, sharedPageCspOnce } from "../src/page.mjs";
-import { appendTables, FIXTURE_TABLES, migrationStatements, imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
+import { appendTables, FIXTURE_TABLES, migrationStatements, SIGN_IN_MIGRATIONS, imageBundle, newClientKey, OG_ORIGIN, ORIGIN, postedForm, SENTRY, startWorker, TURNSTILE } from "./support/worker_harness.mjs";
 
 const ID = "0123456789";
 const HOSTILE_CARD = "card <b>&\"'";
@@ -398,7 +398,8 @@ describe("the private-list default across migration 0012", () => {
     const worker = await startWorker({ migrate: false });
     try {
       const migration = "0012_list_visibility.sql";
-      await worker.db.batch(migrationStatements(undefined, (f) => f < migration).map((s) => worker.db.prepare(s)));
+      const early = (f) => f < migration || SIGN_IN_MIGRATIONS.includes(f);
+      await worker.db.batch(migrationStatements(undefined, early).map((s) => worker.db.prepare(s)));
       await appendTables(worker.db, FIXTURE_TABLES);
       const token = await worker.signIn("before-list-visibility");
       const owner = await worker.accountOf(token);
@@ -407,7 +408,7 @@ describe("the private-list default across migration 0012", () => {
       const [result] = (await shared.json()).results;
       assert.equal(result.status, "created", JSON.stringify(result));
       assert.equal((await worker.putProfile(token, { trainer_name: "private trainer", game_trainer_id: "123456789", previous: { trainer_name: null, game_trainer_id: null } })).status, 200);
-      await worker.db.batch(migrationStatements(undefined, (f) => f >= migration).map((s) => worker.db.prepare(s)));
+      await worker.db.batch(migrationStatements(undefined, (f) => !early(f)).map((s) => worker.db.prepare(s)));
       await assertListVisibilityCycle(worker, token, owner, result.id);
     } finally {
       await worker.dispose();

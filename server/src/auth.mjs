@@ -29,6 +29,7 @@ import {
   claimLogin,
   completeLogin,
   deleteSession,
+  deletionDayOf,
   findLogin,
   findSession,
   findStartedLogin,
@@ -360,16 +361,25 @@ export async function loginClaim(request, env, ctx, now) {
     proofHash,
     tokenHash: await sha256(token),
     now: at.now,
+    day: at.day,
     expiresAt: at.now + limits.SESSION_TTL_SECONDS,
     deleteExpiresAt: at.now + limits.ACCOUNT_DELETE_SESSION_TTL_SECONDS,
   });
   if (session === null) return fail(410, "login_expired");
   ctx.waitUntil(sweepLogins(env.DB, at.now, limits.SWEEP_LIMIT).catch(() => {}));
   // A login onto an account being deleted gets a session that can only continue the deletion, and
-  // `deleting` tells the app to continue it.
+  // `deleting` tells the app to continue it. `last_login_day` and `deletion_day` (UTC days, as on
+  // GET /api/me) are null for that session.
   return json(
     200,
-    { token, expires_at: session.expiresAt, account_id: session.accountId, deleting: session.scope === "delete" },
+    {
+      token,
+      expires_at: session.expiresAt,
+      account_id: session.accountId,
+      deleting: session.scope === "delete",
+      last_login_day: session.lastLoginDay,
+      deletion_day: deletionDayOf(session.lastLoginDay),
+    },
     // Only this login's handover cookie: another login of the same browser may still be in flight.
     { "Set-Cookie": removal(loginCookie(h)) },
   );

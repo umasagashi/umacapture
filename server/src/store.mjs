@@ -8,6 +8,8 @@
 // The outcome is then read from the first statement's `meta.changes` (the deciding statement's, for
 // an unshare), never inferred from how far the code got.
 
+import * as limits from "./limits.mjs";
+
 /** D1 answered with an error (overload, daily quota): nothing was committed and a retry is safe. */
 export class Unavailable extends Error {}
 
@@ -91,13 +93,20 @@ export async function readShareImages(db, id) {
 }
 
 /**
- * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, listPublic, trainerIds, profile}` (`profileOf`),
- * or null when no such account exists. Throws Unavailable.
+ * The UTC day from which an account whose last login was on UTC day `lastLoginDay` is deleted, or null
+ * for null. A login at any hour of that day is then INACTIVE_ACCOUNT_DAYS whole days before it.
+ */
+export const deletionDayOf = (lastLoginDay) =>
+  lastLoginDay === null ? null : lastLoginDay + limits.INACTIVE_ACCOUNT_DAYS + 1;
+
+/**
+ * Account `id` as `GET /api/me` reads it: `{shareCount, deleting, listPublic, trainerIds, profile,
+ * lastLoginDay}` (`profileOf`), or null when no such account exists. Throws Unavailable.
  */
 export async function readAccount(db, id) {
   const [account, trainers] = await query(() =>
     db.batch([
-      db.prepare("SELECT share_count, deleting_since, list_public, trainer_name, game_trainer_id FROM accounts WHERE id = ?1").bind(id),
+      db.prepare("SELECT share_count, deleting_since, list_public, trainer_name, game_trainer_id, last_login_day FROM accounts WHERE id = ?1").bind(id),
       db.prepare("SELECT trainer_id FROM account_trainers WHERE account_id = ?1 ORDER BY trainer_id").bind(id),
     ]),
   );
@@ -109,6 +118,7 @@ export async function readAccount(db, id) {
     listPublic: row.list_public === 1,
     trainerIds: trainers.results.map((t) => t.trainer_id),
     profile: profileOf(row),
+    lastLoginDay: row.last_login_day,
   };
 }
 
@@ -585,8 +595,8 @@ export async function completeLogin(db, c) {
   const statements = [
     db
       .prepare(
-        `INSERT INTO accounts (id, created_day)
-         SELECT ?3, ?4 WHERE NOT EXISTS (${identity})
+        `INSERT INTO accounts (id, created_day, last_login_day)
+         SELECT ?3, ?4, ?4 WHERE NOT EXISTS (${identity})
            AND COALESCE((SELECT accounts_created FROM daily WHERE day = ?4), 0) < ?5`,
       )
       .bind(c.provider, c.subjectHmac, c.newAccountId, c.day, c.limit),
@@ -634,9 +644,13 @@ export async function findLogin(db, h, now) {
  * can only continue the deletion (scope "delete") expiring at `deleteExpiresAt`: an account being
  * deleted is never given a full session again.
  *
- * `s`: `{h, proofHash, tokenHash, now, expiresAt, deleteExpiresAt}`. Returns `{accountId, scope,
- * expiresAt}` of the session, or null when the login was replaced, claimed or expired in between.
- * Throws Unavailable.
+ * A full session also records `day` as the account's last login day, never moving it back, so two
+ * claims that straddle midnight and commit out of order keep the later day. A deletion-only one
+ * records nothing.
+ *
+ * `s`: `{h, proofHash, tokenHash, now, day, expiresAt, deleteExpiresAt}`. Returns `{accountId, scope,
+ * expiresAt, lastLoginDay}` of the session (`lastLoginDay` null for a deletion-only one), or null when
+ * the login was replaced, claimed or expired in between. Throws Unavailable.
  */
 export async function claimLogin(db, s) {
   const statements = [
@@ -651,13 +665,30 @@ export async function claimLogin(db, s) {
       )
       .bind(s.h, s.proofHash, s.tokenHash, s.now, s.expiresAt, s.deleteExpiresAt),
     db
+      .prepare(
+        `UPDATE accounts SET last_login_day = MAX(COALESCE(last_login_day, ?2), ?2)
+         WHERE id = (SELECT account_id FROM sessions WHERE token_hash = ?1 AND scope = 'full')`,
+      )
+      .bind(s.tokenHash, s.day),
+    db
       .prepare("DELETE FROM logins WHERE h = ?1 AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?2)")
       .bind(s.h, s.tokenHash),
-    db.prepare("SELECT account_id, scope, expires_at FROM sessions WHERE token_hash = ?1").bind(s.tokenHash),
+    db
+      .prepare(
+        `SELECT sessions.account_id, sessions.scope, sessions.expires_at, accounts.last_login_day
+         FROM sessions JOIN accounts ON accounts.id = sessions.account_id WHERE sessions.token_hash = ?1`,
+      )
+      .bind(s.tokenHash),
   ];
   const results = await query(() => db.batch(statements));
-  const row = results[2].results[0];
-  return row === undefined ? null : { accountId: row.account_id, scope: row.scope, expiresAt: row.expires_at };
+  const row = results[3].results[0];
+  if (row === undefined) return null;
+  return {
+    accountId: row.account_id,
+    scope: row.scope,
+    expiresAt: row.expires_at,
+    lastLoginDay: row.scope === "full" ? row.last_login_day : null,
+  };
 }
 
 /** `{account_id, scope}` of the session `tokenHash` unexpired at `now`, or null. Throws Unavailable. */

@@ -10,7 +10,7 @@ import * as limits from "../src/limits.mjs";
 import { ROUTES } from "../src/routes.mjs";
 import { named, STATEMENT } from "../src/sync_refs.mjs";
 import { answer as answerWithHeaders, bodyOf, idIn, newImage, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
-import { CookieJar, GOOGLE, ORIGIN, TURNSTILE, imageBundle, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
+import { CookieJar, GOOGLE, ORIGIN, TURNSTILE, imageBundle, migrationStatements, newClientKey, newLoginSecret, postedForm, secretHash, startWorker } from "./support/worker_harness.mjs";
 
 /** Status and parsed body of one response (null for a body that is not JSON). */
 async function answer(resPromise) {
@@ -253,6 +253,8 @@ describe("account deletion", () => {
     assert.equal(claimed.status, 200, claimed.text);
     assert.equal(claimed.body.account_id, owner);
     assert.equal(claimed.body.deleting, true);
+    assert.equal(claimed.body.last_login_day, null, "a deletion-only session records no login");
+    assert.equal(claimed.body.deletion_day, null);
     const ttl = limits.ACCOUNT_DELETE_SESSION_TTL_SECONDS;
     assert.ok(
       claimed.body.expires_at >= before + ttl && claimed.body.expires_at <= after + ttl,
@@ -265,6 +267,39 @@ describe("account deletion", () => {
     assert.equal((await deleteMe(again)).status, 204);
     assert.equal(await rowsOf("accounts", "id", owner), 0);
     assert.equal(await rowsOf("records", "owner_id", owner), 0);
+  });
+
+  test("records the day of each login on the claim and on /api/me, and keeps the account through its last day", async () => {
+    // Noon UTC, so every claim below falls on the day read here.
+    const start = await worker.now();
+    await worker.advanceClock(Math.floor(start / 86_400) * 86_400 + 86_400 + 43_200 - start);
+    const first = Math.floor((await worker.now()) / 86_400);
+
+    const claimed = await finishLogin(await loginToCallback());
+    assert.equal(claimed.status, 200, claimed.text);
+    const owner = claimed.body.account_id;
+    const deletionDay = first + limits.INACTIVE_ACCOUNT_DAYS + 1;
+    assert.equal(claimed.body.last_login_day, first, "the claim of a new account");
+    assert.equal(claimed.body.deletion_day, deletionDay);
+    const me = await getMe(claimed.body.token);
+    assert.equal(me.status, 200, me.text);
+    assert.equal(me.body.last_login_day, first, "/api/me");
+    assert.equal(me.body.deletion_day, deletionDay);
+
+    await worker.advanceClock(limits.INACTIVE_ACCOUNT_DAYS * 86_400);
+    assert.equal(await worker.scheduled(), "ok");
+    assert.equal(await rowsOf("accounts", "id", owner), 1, "the account on its last day");
+    assert.equal((await worker.db.prepare("SELECT deleting_since FROM accounts WHERE id = ?").bind(owner).first()).deleting_since, null);
+
+    const second = first + limits.INACTIVE_ACCOUNT_DAYS;
+    const again = await finishLogin(await loginToCallback());
+    assert.equal(again.status, 200, again.text);
+    assert.equal(again.body.account_id, owner);
+    assert.equal(again.body.last_login_day, second, "the claim of a returning login");
+    assert.equal(again.body.deletion_day, second + limits.INACTIVE_ACCOUNT_DAYS + 1);
+    const meAgain = await getMe(again.body.token);
+    assert.equal(meAgain.body.last_login_day, second, "/api/me after the returning login");
+    assert.equal(meAgain.body.deletion_day, second + limits.INACTIVE_ACCOUNT_DAYS + 1);
   });
 
   test("two deletions begun from two full sessions in the same second keep one session to finish it", async () => {
@@ -623,5 +658,26 @@ describe("account deletion", () => {
       assert.equal(await rowsOf("accounts", "id", id), 0);
       assert.equal((await getMe(token)).status, 401);
     });
+  });
+});
+
+describe("the last login across migration 0013", () => {
+  test("an account from before the migration takes the day it is applied, and the Worker reads it", async () => {
+    const worker = await startWorker({ migrate: false });
+    try {
+      const migration = "0013_last_login.sql";
+      await worker.db.batch(migrationStatements(undefined, (f) => f < migration).map((s) => worker.db.prepare(s)));
+      await worker.db.prepare("INSERT INTO accounts (id, created_day) VALUES ('0123456789abcdef', 0)").run();
+      // SQLite's own clock dates the migration, so the day is read around it from the same clock.
+      const before = Math.floor(Date.now() / 86_400_000);
+      await worker.db.batch(migrationStatements(undefined, (f) => f >= migration).map((s) => worker.db.prepare(s)));
+      const after = Math.floor(Date.now() / 86_400_000);
+      const { last_login_day: day } = await worker.db.prepare("SELECT last_login_day FROM accounts WHERE id = '0123456789abcdef'").first();
+      assert.ok(day >= before && day <= after, `${day} not in [${before}, ${after}]: not the day the migration was applied`);
+      assert.equal(await worker.scheduled(), "ok");
+      assert.equal((await worker.db.prepare("SELECT count(*) AS n FROM accounts").first()).n, 1, "the account is kept");
+    } finally {
+      await worker.dispose();
+    }
   });
 });

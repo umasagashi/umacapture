@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import * as limits from "../src/limits.mjs";
 import { answer, archived, bodyOf, idIn, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
-import { migrationStatements, startWorker } from "./support/worker_harness.mjs";
+import { migrationStatements, SIGN_IN_MIGRATIONS, startWorker } from "./support/worker_harness.mjs";
 
 /** A fresh body text carrying an image binding (by default to a fresh PNG name), and its name. */
 const newBody = (skillPng = sha256(randomBytes(8))) => bodyOf({ skill_png: skillPng, skill_jpeg: null });
@@ -401,10 +401,11 @@ describe("the reduced-JPEG default across its migration", () => {
   // has a row before it keeps the form the row holds, the old default 'none' included: it cannot be
   // told apart from a 'none' chosen.
   const MIGRATION = "0011_sync_image_form_default.sql";
+  const early = (f) => f < MIGRATION || SIGN_IN_MIGRATIONS.includes(f);
   let worker;
   before(async () => {
     worker = await startWorker({ migrate: false });
-    await worker.db.batch(migrationStatements(undefined, (f) => f < MIGRATION).map((s) => worker.db.prepare(s)));
+    await worker.db.batch(migrationStatements(undefined, early).map((s) => worker.db.prepare(s)));
   });
   after(() => worker.dispose());
 
@@ -435,7 +436,7 @@ describe("the reduced-JPEG default across its migration", () => {
     const table = async () => (await worker.db.prepare("SELECT * FROM sync_accounts ORDER BY account_id").all()).results;
     const before = await table();
 
-    await worker.db.batch(migrationStatements(undefined, (f) => f >= MIGRATION).map((s) => worker.db.prepare(s)));
+    await worker.db.batch(migrationStatements(undefined, (f) => !early(f)).map((s) => worker.db.prepare(s)));
     assert.deepEqual(await table(), before, "every row keeps every column, the nullable ones included");
 
     // The usage triggers of 0003_sync.sql add to and take off the migrated table.

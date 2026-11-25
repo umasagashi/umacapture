@@ -4,7 +4,7 @@ import { AccountDeleting, clock, envelope, fail, json, readJson, SessionRequired
 import { requireSession } from "./auth.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
-import { readAccount, registerTrainer, writeListVisibility, writeProfile } from "./store.mjs";
+import { deletionDayOf, readAccount, registerTrainer, writeListVisibility, writeProfile } from "./store.mjs";
 import { d1 } from "./sync.mjs";
 import { usage } from "./sync_quota.mjs";
 import { canonicalGameTrainerId, canonicalText, textWriteQuota, textWriteRefused } from "./user_text.mjs";
@@ -19,7 +19,9 @@ const profileJson = (profile) => ({ trainer_name: profile.trainerName, game_trai
  * GET /api/me: `{account_id, list_url, list_public, share_count, shares_remaining, trainer_ids, deleting, profile}` of
  * the session's account. `shares_remaining` is what ACCOUNT_SHARE_CAP still allows. `profile` is the
  * account's public profile `{trainer_name, game_trainer_id}` (PUT /api/me/profile), each null when not
- * written. `list_public` says whether the account's list is public (PUT /api/me/list).
+ * written. `list_public` says whether the account's list is public (PUT /api/me/list). `last_login_day`
+ * is the UTC day of the account's last login and `deletion_day` the UTC day from which the account is
+ * deleted unless it logs in again (`deletionDayOf`); both are null when no login day is recorded.
  */
 export async function getMe(request, env, now) {
   const session = await requireSession(request, env, clock(now).now);
@@ -35,6 +37,8 @@ export async function getMe(request, env, now) {
     trainer_ids: account.trainerIds,
     deleting: account.deleting,
     profile: profileJson(account.profile),
+    last_login_day: account.lastLoginDay,
+    deletion_day: deletionDayOf(account.lastLoginDay),
   });
 }
 

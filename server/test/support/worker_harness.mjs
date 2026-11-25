@@ -511,6 +511,12 @@ function modules(testEntry) {
 }
 
 /**
+ * Migrations the current Worker's sign-in writes columns of. A test that signs in on a schema before
+ * a later migration applies these with the migrations before that one, and leaves them out of the rest.
+ */
+export const SIGN_IN_MIGRATIONS = ["0013_last_login.sql"];
+
+/**
  * The statements of every migration, files in name order (the order wrangler applies them in).
  * Each file is cut at every ";" after dropping "--" comments, except that a CREATE TRIGGER runs on
  * to the ";" after its END, so a migration must not hold either inside a string literal;
