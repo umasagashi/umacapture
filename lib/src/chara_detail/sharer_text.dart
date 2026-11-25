@@ -5,7 +5,6 @@
 import 'package:dio/dio.dart';
 
 import '/src/chara_detail/record_share_session.dart';
-import '/src/core/utils.dart';
 
 /// How many code points a tagline may hold, as the server counts them.
 const taglineMaxLength = 80;
@@ -35,7 +34,7 @@ String formatGameTrainerId(String digits) => [
   for (var i = 0; i < digits.length; i += 3) digits.substring(i, i + 3 > digits.length ? digits.length : i + 3),
 ].join(" ");
 
-/// Why the server did not store a text.
+/// Why the server did not store a sharer's text or list visibility.
 enum SharerTextRefusal {
   /// The account's writes of today are used up.
   accountDailyLimit,
@@ -43,7 +42,7 @@ enum SharerTextRefusal {
   /// Every account's writes of today are used up.
   serviceDailyLimit,
 
-  /// Sharing is paused; only clearing a text goes through.
+  /// Sharing is paused; only clearing a text or keeping or hiding a list goes through.
   sharingPaused,
 
   /// The account's sharing storage is full.
@@ -65,7 +64,7 @@ enum SharerTextRefusal {
   failed,
 }
 
-/// What writing a text ended with: [T] is the text's value as the server holds it.
+/// What writing a sharer's text or list visibility ended with: [T] is the value as the server holds it.
 sealed class SharerTextOutcome<T> {
   const SharerTextOutcome();
 }
@@ -129,22 +128,9 @@ final class SharerProfileUnread extends SharerProfileRead {
   const SharerProfileUnread();
 }
 
-/// The account's public profile as `GET /api/me` answers under [under].
-Future<SharerProfileRead> readSharerProfile(RecordShareSession session, ShareSession under) async {
-  final ShareAnswer answer;
-  try {
-    answer = await session.send("GET", "/api/me", under: under);
-  } on DioException {
-    return const SharerProfileUnread();
-  } on StateError {
-    return const SharerProfileUnread();
-  }
-  final body = answer.body;
-  if (answer.status != 200 || body == null) {
-    return const SharerProfileUnread();
-  }
+/// The public profile in a successful `GET /api/me` body, read together with the account's list visibility.
+SharerProfileRead sharerProfileReadOf(Map<String, Object?> body) {
   if (!body.containsKey("profile")) {
-    logger.i("The sharing server has no public profile");
     return const SharerProfileUnsupported();
   }
   return switch (_profileOf(body["profile"])) {
@@ -223,11 +209,18 @@ Future<SharerTextOutcome<T>> _write<T extends Object>(
     }
     return refused(SharerTextRefusal.failed);
   }
+  return refused(sharerTextRefusalOf(answer));
+}
+
+/// The common refusal of a sharer's text or list-visibility write.
+SharerTextRefusal sharerTextRefusalOf(ShareAnswer answer) {
+  final body = answer.body;
+  final error = body?["error"];
   // The route's own 404 is JSON; a Worker that has no such route answers plain text.
   if (answer.status == 404) {
-    return refused(error == "not_found" ? SharerTextRefusal.shareGone : SharerTextRefusal.unsupported);
+    return error == "not_found" ? SharerTextRefusal.shareGone : SharerTextRefusal.unsupported;
   }
-  return refused(switch ((answer.status, error)) {
+  return switch ((answer.status, error)) {
     (401, _) => SharerTextRefusal.loginRequired,
     (429, "daily_limit") when body?["scope"] == "service" => SharerTextRefusal.serviceDailyLimit,
     (429, "daily_limit") => SharerTextRefusal.accountDailyLimit,
@@ -236,5 +229,5 @@ Future<SharerTextOutcome<T>> _write<T extends Object>(
     (_, "invalid_payload") => SharerTextRefusal.invalid,
     (_, "account_deleting") => SharerTextRefusal.accountDeleting,
     _ => SharerTextRefusal.failed,
-  });
+  };
 }

@@ -28,10 +28,12 @@ import 'package:image/image.dart' as img;
 import 'package:logger/logger.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/const.dart';
+import 'package:umacapture/src/chara_detail/account_public.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/image_converter.dart';
 import 'package:umacapture/src/chara_detail/record_share.dart';
 import 'package:umacapture/src/chara_detail/record_share_session.dart';
+import 'package:umacapture/src/chara_detail/sharer_text.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/share_state.dart';
@@ -79,7 +81,7 @@ typedef _Sent = ({String method, Uri uri, Map<String, dynamic> headers, String b
 /// apart from them: with the next of [usage], or once that is empty with the bare 404 of a Worker older than the
 /// route. Those requests go to [usageSent], not [sent].
 ///
-/// With [me] given, `GET /api/me` — which the account tab's public profile asks for with each listing of the shares —
+/// With [me] given, `GET /api/me` — which the account's public-settings notifier asks for with each share listing —
 /// is answered apart the same way: with the next of [me], or once that is empty with a 200 that carries no profile.
 /// Those requests go to [meSent].
 class _FakeServer implements HttpClientAdapter {
@@ -333,7 +335,7 @@ void main() {
   late _FakeHandover handover;
 
   /// Whether `GET /api/me` is answered apart from the other requests ([_FakeServer.me]): on the account tab, where
-  /// the public profile asks for it beside the shares' list.
+  /// the account's public-settings notifier asks for it beside the shares' list.
   var meApart = false;
 
   ProviderContainer containerFor(
@@ -1195,7 +1197,7 @@ void main() {
     testWidgets('S4d (C1): a share begun under one account sends nothing more once another account has logged in', (
       tester,
     ) async {
-      // The account tab is mounted below, and its public profile asks for `GET /api/me` beside the lists.
+      // The account tab is mounted below, and its public-settings notifier asks for `GET /api/me` beside the lists.
       meApart = true;
       addTearDown(() => meApart = false);
       await storeSession();
@@ -2917,6 +2919,57 @@ void main() {
 
   group('the sharing session', () {
     RecordShareSession session() => container.read(recordShareSessionProvider.notifier);
+
+    test('the public settings read distinguishes a private list, an older server and an unread visibility', () async {
+      await storeSession();
+      container = containerFor([
+        _json(200, {
+          ..._me([]),
+          "list_public": false,
+          "profile": {"trainer_name": "たづな", "game_trainer_id": null},
+        }),
+        _json(200, _me([])),
+        _json(200, {
+          ..._me([]),
+          "list_public": "false",
+          "profile": {"trainer_name": null, "game_trainer_id": null},
+        }),
+      ]);
+      final under = container.read(recordShareSessionProvider) ?? (throw StateError('the stored session is missing'));
+      final private = await readAccountPublic(session(), under);
+      expect(private.list, isA<ListVisibilityHeld>().having((held) => held.public, 'public', isFalse));
+      expect(private.profile, isA<SharerProfileHeld>().having((held) => held.profile.trainerName, 'name', 'たづな'));
+      final older = await readAccountPublic(session(), under);
+      expect(older.list, isA<ListVisibilityUnsupported>());
+      expect(older.profile, isA<SharerProfileUnsupported>());
+      final malformed = await readAccountPublic(session(), under);
+      expect(malformed.list, isA<ListVisibilityUnread>());
+      expect(malformed.profile, isA<SharerProfileHeld>());
+    });
+
+    test('a list visibility write uses the stored boolean and shares the text-write refusal mapping', () async {
+      await storeSession();
+      container = containerFor([
+        _json(200, {"public": false}),
+        _json(503, {"error": "sharing_paused"}),
+        _empty(404),
+      ]);
+      expect(
+        await writeListVisibility(session(), public: false),
+        isA<SharerTextSaved<bool>>().having((saved) => saved.value, 'stored visibility', isFalse),
+      );
+      expect(server.sent.single.method, 'PUT');
+      expect(server.sent.single.uri.path, '/api/me/list');
+      expect(jsonDecode(server.sent.single.body), {"public": false});
+      expect(
+        await writeListVisibility(session(), public: true),
+        isA<SharerTextRefused<bool>>().having((refused) => refused.reason, 'reason', SharerTextRefusal.sharingPaused),
+      );
+      expect(
+        await writeListVisibility(session(), public: true),
+        isA<SharerTextRefused<bool>>().having((refused) => refused.reason, 'reason', SharerTextRefusal.unsupported),
+      );
+    });
     Map<String, dynamic> bodyOf(int i) => jsonDecode(server.sent[i].body) as Map<String, dynamic>;
 
     test('building the session reads the store and calls no server', () async {

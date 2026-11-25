@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/src/chara_detail/account_public.dart';
 import '/src/chara_detail/record_share.dart';
 import '/src/chara_detail/record_share_session.dart';
 import '/src/chara_detail/sharer_text.dart';
@@ -28,71 +29,20 @@ const tr_sharer_text = "pages.account.text_edit";
 
 /// The account's public profile, while logged in to an account that is not being deleted, once the server has been
 /// asked — a failed read keeps the profile last read, or shows it unread — and unless the server has no profile.
+/// The account's public-settings notifier holds the answer and refreshes it with each share listing.
 class SharerProfileCard extends ConsumerWidget {
   const SharerProfileCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(recordShareSessionProvider);
+    final read = ref.watch(accountPublicProvider.select((state) => state.profile));
     if (session == null || session.deleting) {
       return const SizedBox.shrink();
     }
-    // Keyed by the account, so another account's login never shows the last one's profile.
-    return _SharerProfile(key: ValueKey(session.accountId), session: session);
-  }
-}
-
-class _SharerProfile extends ConsumerStatefulWidget {
-  final ShareSession session;
-
-  const _SharerProfile({super.key, required this.session});
-
-  @override
-  ConsumerState<_SharerProfile> createState() => _SharerProfileState();
-}
-
-class _SharerProfileState extends ConsumerState<_SharerProfile> with AutomaticKeepAliveClientMixin {
-  /// What the card shows: the server's last answer, the value the last save stored, or — when no read has succeeded —
-  /// the last failure. Null until the first answer, and while the server has no profile; either shows no card.
-  SharerProfileRead? _read;
-
-  /// Counts the requests, so that only the latest one's answer is shown.
-  int _request = 0;
-
-  // Kept alive while the page is, so that scrolling the card out of a long page does not ask the server again.
-  @override
-  bool get wantKeepAlive => true;
-
-  Future<void> _ask() async {
-    final request = ++_request;
-    final read = await readSharerProfile(ref.read(recordShareSessionProvider.notifier), widget.session);
-    if (mounted && request == _request) {
-      setState(
-        () => _read = switch ((read, _read)) {
-          // A failed read says nothing about the profile, so the one already read stays, and with it the edit.
-          (SharerProfileUnread(), final SharerProfileHeld held) => held,
-          (SharerProfileUnsupported(), _) => null,
-          _ => read,
-        },
-      );
-    }
-  }
-
-  void _saved(SharerProfile profile) {
-    // An answer asked for before the save is older than it.
-    _request++;
-    setState(() => _read = SharerProfileHeld(profile));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    // Asked with every listing of the account's shares — the tab shown, an unshare, the shares' reload button — the
-    // moments the account's holdings are read anew.
-    ref.listen(shareListingsProvider, (_, _) => _ask());
     final SharerProfile profile;
     final String unset;
-    switch (_read) {
+    switch (read) {
       case null || SharerProfileUnsupported():
         return const SizedBox.shrink();
       case SharerProfileHeld(profile: final held):
@@ -102,8 +52,12 @@ class _SharerProfileState extends ConsumerState<_SharerProfile> with AutomaticKe
         // refused as changed and shows it, so the card still offers the edit.
         (profile, unset) = ((trainerName: null, gameTrainerId: null), "$tr_sharer_profile.unknown".tr());
     }
-    void edit(SharerProfileField field) =>
-        SharerProfileDialog.show(ref.base, field: field, profile: profile, onSaved: _saved);
+    void edit(SharerProfileField field) => SharerProfileDialog.show(
+      ref.base,
+      field: field,
+      profile: profile,
+      onSaved: ref.read(accountPublicProvider.notifier).profileSaved,
+    );
     return ListCard(
       title: "$tr_sharer_profile.title".tr(),
       padding: const EdgeInsets.all(16),
