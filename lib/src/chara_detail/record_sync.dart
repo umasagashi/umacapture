@@ -35,6 +35,7 @@ import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_round.dart';
 import '/src/chara_detail/record_sync_server.dart';
 import '/src/core/app_logger.dart';
+import '/src/core/device_time.dart';
 import '/src/core/providers.dart';
 import '/src/gui/chara_detail/import_button.dart' show recordImportEffects;
 import '/src/gui/toast.dart';
@@ -54,16 +55,9 @@ const syncForegroundInterval = Duration(minutes: 10);
 bool syncForegroundDue(DateTime? lastAsked, DateTime now) =>
     lastAsked == null || !now.isBefore(lastAsked.add(syncForegroundInterval));
 
-/// How the moments of a round tell time: the clock the time since the last round was asked for is read by ([now]),
-/// and the timer the quiet after the user's last edit is waited for by ([timer]). A provider so tests can hold both.
-class SyncMomentTime {
-  const SyncMomentTime({this.now = DateTime.now, this.timer = Timer.new});
-
-  final DateTime Function() now;
-  final Timer Function(Duration duration, void Function() callback) timer;
-}
-
-final syncMomentTimeProvider = Provider<SyncMomentTime>((_) => const SyncMomentTime());
+/// How the moments of a round tell time: the clock the time since the last round was asked for is read by
+/// ([DeviceTime.now]), and the timer the quiet after the user's last edit is waited for by ([DeviceTime.timer]).
+final syncMomentTimeProvider = Provider<DeviceTime>((_) => const DeviceTime());
 
 /// The counts a round told of what it kept on the side that keeps more ([R3-5]), and the account it ran as.
 class SyncToldCounts {

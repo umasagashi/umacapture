@@ -52,11 +52,21 @@ class ShareSession with ShareSessionMappable {
 
   /// Whether the server still accepts the session at [now] by the device clock: it accepts while `expires_at >= now`
   /// in whole seconds, so the first instant it refuses is `expiresAt + 1` seconds.
-  bool isValidAt(DateTime now) => now.millisecondsSinceEpoch < (expiresAt + 1) * Duration.millisecondsPerSecond;
+  bool isValidAt(DateTime now) => now.isBefore(invalidFrom);
+
+  /// The first instant the server refuses the session: `expiresAt + 1` seconds.
+  DateTime get invalidFrom => DateTime.fromMillisecondsSinceEpoch((expiresAt + 1) * Duration.millisecondsPerSecond);
 }
 
-/// The clock [RecordShareSession] judges its session's expiry by. A provider so tests can hold it.
+/// The clock and timer [RecordShareSession] judges its session's expiry by. A provider so tests can hold both.
 final shareSessionTimeProvider = Provider<DeviceTime>((_) => const DeviceTime());
+
+/// The longest wait [RecordShareSession] asks its timer for before it reads the clock again on a session not yet
+/// expired. A wait to the expiry itself can be up to the session's 180 days, and on web a Dart `Timer` hands its
+/// milliseconds straight to the browser's `setTimeout`, which is not asked to hold a wait that long here. This bounds
+/// only the wait requested: while the device sleeps or the tab is in the background no callback runs at all, and the
+/// session is judged again when one next runs.
+const shareSessionExpiryCheckInterval = Duration(hours: 1);
 
 /// The account this device last logged in to, and the days the server last told for it: when the account last
 /// logged in and when it is deleted unless it logs in again. Days count from the Unix epoch in UTC.
@@ -339,9 +349,18 @@ class RecordShareSession extends Notifier<ShareSession?> {
   /// another provider's state while it builds.
   bool _droppedOnLoad = false;
 
+  /// The timer that judges the held session's expiry again ([_watchExpiry]); null while none is held.
+  Timer? _expiryTimer;
+
   @override
   ShareSession? build() {
     _droppedOnLoad = false;
+    // Every state the notifier takes, the one built here included, is watched for its expiry.
+    listenSelf((_, session) => _watchExpiry(session));
+    ref.onDispose(() {
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
+    });
     final stored = _box.pull<String>(shareSessionKey);
     if (stored == null) {
       return null;
@@ -364,6 +383,33 @@ class RecordShareSession extends Notifier<ShareSession?> {
       return null;
     }
     return session;
+  }
+
+  /// Waits for [session] to expire while it is held: a session not deleting is judged again at its first invalid
+  /// instant, or after [shareSessionExpiryCheckInterval] when that is sooner, and is dropped once the clock has
+  /// reached that instant, or else waited for again. Every state the notifier takes calls this and cancels the wait
+  /// before, so a session that changes or goes ends the wait for the one it replaced.
+  void _watchExpiry(ShareSession? session) {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    if (session == null || session.deleting) {
+      return;
+    }
+    final time = ref.read(shareSessionTimeProvider);
+    // Rounded up to a whole millisecond, which is all a timer waits by, so a session still valid is never waited
+    // for with a zero wait; one already expired is dropped from the timer, not while its state is being told.
+    final left = session.invalidFrom.difference(time.now());
+    final wait = left <= Duration.zero
+        ? Duration.zero
+        : Duration(milliseconds: (left.inMicroseconds + Duration.microsecondsPerMillisecond - 1) ~/ 1000);
+    _expiryTimer = time.timer(wait < shareSessionExpiryCheckInterval ? wait : shareSessionExpiryCheckInterval, () {
+      _expiryTimer = null;
+      if (session.isValidAt(time.now())) {
+        _watchExpiry(session);
+      } else {
+        unawaited(_drop(_DropReason.expired));
+      }
+    });
   }
 
   /// Drops the session the server no longer accepts: only the session goes, and the share notes, the remembered login
@@ -716,7 +762,8 @@ class RecordShareSession extends Notifier<ShareSession?> {
       await answered(session.token, answer.status, answer.body?["error"]);
       return false;
     }
-    await _forgetAll();
+    // A login made while the logout was on its way, as after the session expired meanwhile, is not the one ended.
+    if (holds(session) || state == null) await _forgetAll();
     return true;
   }
 

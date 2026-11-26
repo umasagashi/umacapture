@@ -71,6 +71,7 @@ import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/long_read_declarations.dart';
 import 'support/record_binding_seed.dart' show expectedBinding, setReadOnly, windowsOnlyReadOnly;
+import 'support/held_device_time.dart';
 import 'support/record_sync_harness.dart';
 import 'support/record_write_effects_fixture.dart';
 import 'support/records.dart';
@@ -5484,7 +5485,7 @@ void main() {
     // and when the device last synced (N8).
     test('T3a1 (C1 iii, iv): the device shows a round running from when it is asked for until the one asked for '
         'behind it ends, and its last sync moves with a round that synced alone', () async {
-      final time = HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9);
+      final time = HeldDeviceTime()..now = DateTime.utc(2030, 1, 1, 9);
       a.syncTime = time.time;
       seedUmas(a, ['R1']);
       await a.setSyncOn(true);
@@ -5529,11 +5530,11 @@ void main() {
     // T2b-7a: the moments a round runs at (U5), each from the entry the app has for it: the app's start reads the
     // moments as the app does ([SyncTestDevice.startTriggers]), the user turns sync on, rates and syncs now, and the
     // platform says the app came back to the foreground. Each round goes over HTTP ([SyncHttpFace]), so a round asked
-    // for with no session or deleting has no server. The clock and the timer are the test's ([HeldSyncTime]): what is
+    // for with no session or deleting has no server. The clock and the timer are the test's ([HeldDeviceTime]): what is
     // asserted is which moment asks, and that the quiet after an edit is five seconds — not how long a test waits.
     group('T2b-7a: the moments a round runs at', () {
       late SyncHttpFace face;
-      late HeldSyncTime time;
+      late HeldDeviceTime time;
       // The rounds the server was asked for: each asks the generation first.
       late int asked;
 
@@ -5544,7 +5545,7 @@ void main() {
           ..beforeAnswer = (request) async {
             if (request.uri.path == '/api/sync/generation') asked++;
           };
-        time = HeldSyncTime();
+        time = HeldDeviceTime();
         a
           ..syncHttp = face
           ..syncTime = time.time;
@@ -6012,7 +6013,7 @@ void main() {
         final face = SyncHttpFace(server, token: 'token-$syncTestAccount');
         a
           ..syncHttp = face
-          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+          ..syncTime = (HeldDeviceTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
         seedUmas(a, ['R1']);
         a.seedColumn('memo', 'm1', title: 'Note', data: {'R1': 'あ' * 201}, writtenAt: {'R1': 1767225600800});
         final app = await mountAccount(tester, triggers: true);
@@ -6136,7 +6137,7 @@ void main() {
           'else', (tester) async {
         a
           ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
-          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+          ..syncTime = (HeldDeviceTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
         seedUmas(a, ['R1']);
         a.seedColumn('memo', 'm1', title: 'Note');
         loadAppTranslations();
@@ -6272,7 +6273,7 @@ void main() {
           'the later parts reach, each share goes up alone, and the round ending ends them', (tester) async {
         a
           ..syncHttp = SyncHttpFace(server, token: 'token-$syncTestAccount')
-          ..syncTime = (HeldSyncTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
+          ..syncTime = (HeldDeviceTime()..now = DateTime.utc(2030, 1, 1, 9)).time;
         final ids = [for (var i = 1; i <= 100; i++) 'L${'$i'.padLeft(4, '0')}'];
         for (final (i, id) in ids.indexed) {
           final dir = a.seedRecord(id, bodyWrittenAt: 1767225600100 + i, fans: 1000 + i);

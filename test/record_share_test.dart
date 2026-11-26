@@ -69,6 +69,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 import 'support/file_picker.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
+import 'support/held_device_time.dart';
 import 'support/record_table_tabs_router.dart';
 import 'support/settling.dart';
 
@@ -408,6 +409,10 @@ void main() {
   /// in bulk results, where the account's public-settings notifier reads it.
   var meApart = false;
 
+  /// The clock and timers the session judges its expiry by ([shareSessionTimeProvider]): held, so a session's expiry
+  /// timer is never left pending at a test's end, and fired by the test that crosses an expiry. Set by [containerFor].
+  late HeldDeviceTime time;
+
   ProviderContainer containerFor(
     List<Object> answers, {
     String? trainerId,
@@ -430,8 +435,10 @@ void main() {
     server = _FakeServer(answers, usage: usage, me: meApart ? me : null);
     opened = [];
     handover = tab ?? _FakeHandover();
+    time = HeldDeviceTime()..now = DateTime.now();
     final c = ProviderContainer(
       overrides: [
+        shareSessionTimeProvider.overrideWithValue(time.time),
         loginPageOpenerProvider.overrideWithValue((uri) async {
           opened.add(uri);
           return true;
@@ -2346,6 +2353,7 @@ void main() {
         'session left in the store, asking no server', (tester) async {
       await storeSession(expiresAt: _pastExpiry);
       await storeRememberedLogin();
+      final note = await storeNote(state: RecordShareState.shared);
       container = containerFor([]);
       await mountAccount(tester);
       await tester.pumpAndSettle();
@@ -2359,7 +2367,45 @@ void main() {
       expect(find.text('サーバーとのログインが切れたため、ログアウトしました。もう一度ログインすると、共有と同期を続けられます。'), findsOneWidget);
       expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNull);
       expect(StorageBox(StorageBoxKey.recordShares).pull<String>(rememberedLoginKey), isNotNull);
+      expect(
+        StorageBox(StorageBoxKey.recordShares).pull<String>(note.keyHash),
+        isNotNull,
+        reason: 'the share note stays',
+      );
       expect(server.sent, isEmpty);
+    });
+
+    testWidgets('ISS-0108: a session that expires while the app runs is judged again before its expiry and kept, and '
+        'at its expiry the account turns logged out as a session the server dropped', (tester) async {
+      final expiry = DateTime.now().add(const Duration(minutes: 90)).millisecondsSinceEpoch ~/ 1000;
+      await storeSession(expiresAt: expiry);
+      container = containerFor([]);
+      await mountAccount(tester);
+      await settleUntilElapsing(
+        tester,
+        () => find.text('ログアウト').evaluate().isNotEmpty,
+        describe: 'the logged-in account',
+      );
+
+      // The first wait ends before the expiry: the session is still valid and is waited for again.
+      expect(time.timers, hasLength(1));
+      time.now = time.now.add(time.timers.single.duration);
+      time.timers.single.fire();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Google アカウントでログインしています。'), findsOneWidget);
+      expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNotNull);
+
+      // The wait asked for again reaches the expiry.
+      expect(time.timers, hasLength(2));
+      time.now = time.now.add(time.timers.last.duration);
+      time.timers.last.fire();
+      await settleUntilElapsing(
+        tester,
+        () => find.text('Google でログイン').evaluate().isNotEmpty,
+        describe: 'the logged-out account',
+      );
+      expect(find.text('サーバーとのログインが切れたため、ログアウトしました。もう一度ログインすると、共有と同期を続けられます。'), findsOneWidget);
+      expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNull);
     });
 
     testWidgets('ISS-0108: a stored deleting session whose expiry has passed is kept, and the account still tells the '

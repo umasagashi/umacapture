@@ -45,6 +45,7 @@ import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/chara_detail/value_write_time.dart';
+import 'package:umacapture/src/core/device_time.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/fs_backend_io.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
@@ -62,6 +63,7 @@ import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 
 import 'enhancement_merge_scratch.dart';
+import 'held_device_time.dart';
 import 'long_read_declarations.dart';
 import 'record_write_effects_fixture.dart';
 import 'records.dart';
@@ -129,7 +131,7 @@ class SyncTestDevice {
   Duration? syncRequestTimeout;
 
   /// The time the moments of a round tell ([syncMomentTimeProvider]) where it is not the app's; set before [open].
-  SyncMomentTime? syncTime;
+  DeviceTime? syncTime;
 
   /// The device's own sync server ([syncServerProvider]), under its session, speaking to [syncHttp].
   Future<SyncServer> overHttp() async =>
@@ -143,6 +145,8 @@ class SyncTestDevice {
     if (syncTime case final time?) syncMomentTimeProvider.overrideWithValue(time),
     if (auth case final auth?) ...[
       recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = auth),
+      // The session a login holds waits for its expiry on a timer; a held one is never left pending.
+      shareSessionTimeProvider.overrideWithValue(HeldDeviceTime().time),
       loginReturnProvider.overrideWithValue(SameTabLoginReturn(_handover)),
     ] else
       recordShareSessionProvider.overrideWith(_LoggedIn.new),
@@ -483,50 +487,6 @@ class _NoNetwork implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
-}
-
-/// The time the moments of a round tell ([SyncMomentTime]), held by the test: the clock it sets ([now]), and each
-/// timer started ([timers]), which it fires ([HeldTimer.fire]).
-class HeldSyncTime {
-  DateTime now = DateTime.utc(2030);
-
-  /// Every timer started, the first first.
-  final timers = <HeldTimer>[];
-
-  SyncMomentTime get time => SyncMomentTime(
-    now: () => now,
-    timer: (duration, callback) {
-      final timer = HeldTimer(duration, callback);
-      timers.add(timer);
-      return timer;
-    },
-  );
-}
-
-/// A timer of [HeldSyncTime]: it runs [_callback] when the test fires it, where it was not cancelled.
-class HeldTimer implements Timer {
-  HeldTimer(this.duration, this._callback);
-
-  /// The time it was started for.
-  final Duration duration;
-  final void Function() _callback;
-  var _active = true;
-
-  /// Runs it, as its time coming does.
-  void fire() {
-    expect(_active, isTrue, reason: 'a timer that was cancelled, or has run, does not run');
-    _active = false;
-    _callback();
-  }
-
-  @override
-  void cancel() => _active = false;
-
-  @override
-  bool get isActive => _active;
-
-  @override
-  int get tick => _active ? 0 : 1;
 }
 
 /// The sharing server's answers to a device's logins and logouts, as the Worker gives them: a claim signs in to

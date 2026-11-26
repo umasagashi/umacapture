@@ -41,6 +41,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/storage_settings.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/held_device_time.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
@@ -129,7 +130,11 @@ void main() {
       addTearDown(tester.view.reset);
       // The shares' card asks for the account's list as the page shows it; the server lists none.
       final container = ProviderContainer(
-        overrides: [recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = _NoShares())],
+        overrides: [
+          recordShareDioProvider.overrideWithValue(Dio()..httpClientAdapter = _NoShares()),
+          // The session waits for its expiry on a timer; a held one is never left pending at the test's end.
+          shareSessionTimeProvider.overrideWithValue(HeldDeviceTime().time),
+        ],
       );
       await pumpWithContainer(
         tester,
