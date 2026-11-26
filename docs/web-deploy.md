@@ -36,7 +36,7 @@ migrations, which are applied by hand ("Applying a migration").
 | Response headers | `web/_headers` (copied into `build/web/`): `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `X-Content-Type-Options: nosniff` on every file |
 | Caching | The platform default, `Cache-Control: public, max-age=0, must-revalidate` with an `ETag`, except `/og/fonts/*` (one day, see the Vercel section) and `/site/fonts/*` (one day; the public pages' font subsets, whose names carry no content hash either, and a stale one only sends a few new characters to a system font). Not overridden: `main.dart.js`, `worker.js`, `*.mjs` and `wasm/*` have fixed names, so every visit revalidates and an old script never runs against a new wasm module. Revalidations of static assets are free |
 | CanvasKit | Served from the bundle's own `canvaskit/`. `tool/build_web.sh` always passes `--no-web-resources-cdn`, so nothing is loaded from `www.gstatic.com` |
-| Fonts | The app still fetches its fonts at runtime from `fonts.gstatic.com` (not bundled). The public pages (`/notice/`, `/privacy/`, and the Worker's pages) read M PLUS Rounded 1c from this origin: `build/web/site/fonts/`, woff2 subsets the run cuts out of the pinned TTFs in `web/og/fonts/` ("Page fonts" below) |
+| Fonts | The app still fetches its fonts at runtime from `fonts.gstatic.com` (not bundled). The public pages (`/notice/`, `/terms/`, `/privacy/`, and the Worker's pages) read M PLUS Rounded 1c from this origin: `build/web/site/fonts/`, woff2 subsets the run cuts out of the pinned TTFs in `web/og/fonts/` ("Page fonts" below) |
 | Record pages, lists and API | `/r/*`, `/u/*` and `/api/*` run the Worker first (`assets.run_worker_first`), so a static file can never shadow an endpoint |
 | Unknown paths | `not_found_handling: "none"`: no SPA fallback. With `--sharing on`, the Worker's 404, which carries `X-Robots-Tag: noindex`; with `--sharing off`, the static 404. The app uses hash routing and needs no server-side path but `/` |
 | Build marker | `build/web/deploy.json`: `git_sha`, `built_at`, `wasm_sha256` of what was deployed, and `"name_tables": "d1"`, which says that a Worker of this version reads its name tables from its D1 (written with either `--sharing` choice) |
@@ -1051,7 +1051,7 @@ In a desktop Chromium-based browser and in Firefox, and in Android Chrome for vi
 3. The network log shows CanvasKit (`canvaskit.js`, `canvaskit.wasm`) from `umacapture.com` and no
    request to `www.gstatic.com`.
 4. Capture (screen share) and video import both work.
-5. The dashboard's "このサイトについて" card links to `/notice/`.
+5. The dashboard's "このサイトについて" card links to `/notice/`, `/terms/`, and `/privacy/`.
 
 ## The pinned wrangler
 

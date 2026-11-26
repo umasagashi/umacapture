@@ -53,6 +53,9 @@ describe("login start page", () => {
   test("asks for a press on the Google button, and does not submit when Turnstile passes", async () => {
     const res = await worker.fetch(`/api/auth/start?p=google&h=${newLoginHash()}`);
     const html = await res.text();
+    const consent = '<p>ログインすると、<a href="/terms/" target="_blank" rel="noopener">利用規約</a>に同意したものとみなします。</p>';
+    assert.ok(html.includes(consent), "the login page is missing consent with a terms link opening a new tab");
+    assert.ok(html.indexOf(consent) < html.indexOf('<form id="begin"'), "consent must precede the Google button");
     const form = html.slice(html.indexOf('<form id="begin"'), html.indexOf("</form>"));
     assert.match(form, /<button type="submit"[^>]*>.*Google でログイン<\/span><\/button>/);
     // The widget stays outside the form, whose fields the begin checks.

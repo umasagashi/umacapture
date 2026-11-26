@@ -1,5 +1,5 @@
 // The dashboard's "about this site" card (web only), mounted on its own: the notice sentence carries
-// two inline links, and each one has to open its own page next to the app.
+// inline links, and each one has to open its own page next to the app.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,7 +12,7 @@ import 'support/localization.dart';
 void main() {
   setUpAll(loadAppTranslations);
 
-  testWidgets("the notice sentence links the trial-release notice and the privacy policy", (tester) async {
+  testWidgets("the notice sentence links the trial-release notice, terms and privacy policy", (tester) async {
     const channel = MethodChannel('plugins.flutter.io/url_launcher');
     final opened = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
@@ -33,10 +33,16 @@ void main() {
     expect(find.textContaining('試験公開中です。利用上の注意は', findRichText: true), findsOneWidget);
     await tester.tap(find.text('試験公開について'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('利用規約'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('プライバシーポリシー'));
     await tester.pumpAndSettle();
 
     // The sharing origin's pages, not ones resolved against the app's own location, which on Windows is a file URL.
-    expect(opened, ['${Const.sharingOrigin}/notice/', '${Const.sharingOrigin}/privacy/']);
+    expect(opened, [
+      '${Const.sharingOrigin}/notice/',
+      '${Const.sharingOrigin}/terms/',
+      '${Const.sharingOrigin}/privacy/',
+    ]);
   });
 }

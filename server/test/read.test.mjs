@@ -178,6 +178,7 @@ describe("published record", () => {
     assert.ok(html.includes("<dt>共有日</dt><dd>2026-09-29</dd>"), "share day row missing");
     assert.equal(html.includes("公開日"), false, "the share day is still labelled 公開日");
     assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
+    assert.ok(html.includes('<a href="/terms/">利用規約</a>'), "the footer does not link the terms");
   });
 
   test("page of an inheritance-only record is served and names both parents", async () => {
@@ -351,6 +352,7 @@ describe("account list", () => {
     assert.ok(html.includes(`<a href="${ORIGIN}/r/${older}">`), "a listed record links to its page");
     assert.equal(html.includes("<b>"), false, "a raw table name reached the markup");
     assert.ok(html.includes('<a href="/privacy/">'), "the footer does not link the privacy policy");
+    assert.ok(html.includes('<a href="/terms/">利用規約</a>'), "the footer does not link the terms");
 
     // The sort query reorders the same records, and an unknown value falls back to the default.
     for (const query of ["?sort=evaluation", "?sort=bogus"]) {

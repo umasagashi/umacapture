@@ -73,7 +73,7 @@ export const copyScriptElement = (sharer) => (sharer?.game_trainer_id == null ? 
 
 /**
  * The site header of a page the Worker builds: the mark and name linking to the app, the name of
- * this kind of page, and the colour switch. web/notice and web/privacy carry the same markup.
+ * this kind of page, and the colour switch. The static document pages carry the same markup.
  */
 export function siteHeader(kind) {
   return `<header class="site-header"><div class="site-header-inner">
@@ -88,12 +88,12 @@ export function siteHeader(kind) {
 }
 
 /**
- * The footer of every shared page (/r/<id> and /u/<id>): its own JSON, the notice and the privacy
- * policy, then at the right end the link to that page's report page (<url>/report).
+ * The footer of every shared page (/r/<id> and /u/<id>): its own JSON, the notice, terms and
+ * privacy policy, then at the right end the link to that page's report page (<url>/report).
  */
 export function pageFooter(url) {
   return `<footer class="site-footer">
-<span class="site-footer-links"><a href="${esc(url)}.json">JSON</a> · <a href="/notice/">試験公開について</a> · <a href="/privacy/">プライバシーポリシー</a></span>
+<span class="site-footer-links"><a href="${esc(url)}.json">JSON</a> · <a href="/notice/">試験公開について</a> · <a href="/terms/">利用規約</a> · <a href="/privacy/">プライバシーポリシー</a></span>
 <a class="site-footer-report" href="${esc(url)}/report" rel="nofollow">問題を報告</a>
 </footer>`;
 }

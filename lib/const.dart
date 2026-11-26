@@ -84,6 +84,9 @@ class Const {
   /// The trial-release notice, served next to [privacyUrl] and built the same way.
   static Uri get noticeUrl => Uri.parse("$sharingOrigin/notice/");
 
+  /// The terms of service, served next to [privacyUrl] and built the same way.
+  static Uri get termsUrl => Uri.parse("$sharingOrigin/terms/");
+
   static RegExp get uninstallerPattern => RegExp(r"unins[0-9]+\.exe");
 
   static Uri get sentrySampleUrl => Uri.parse("$moduleUrlRoot/sentry_sample.json");

@@ -443,15 +443,15 @@ class ModuleUpdaterGroup extends ConsumerWidget {
 class AboutGroup extends StatelessWidget {
   const AboutGroup({super.key});
 
-  /// The notice paragraph: a translated sentence with the notice's and the privacy policy's titles inline
-  /// as links.
+  /// The notice paragraph: a translated sentence linking the trial-release notice, terms and privacy policy.
   ///
-  /// The sentence carries a `{notice}` and a `{privacy}` marker where the titles go.
+  /// The sentence carries `{notice}`, `{terms}` and `{privacy}` markers where the titles go.
   Widget _notice() {
     return LinkedText(
       "$tr_dashboard.about.notice.text".tr(),
       links: {
         "notice": (label: "$tr_dashboard.about.notice.notice_link".tr(), url: Const.noticeUrl),
+        "terms": (label: "$tr_dashboard.about.notice.terms_link".tr(), url: Const.termsUrl),
         "privacy": (label: "$tr_dashboard.about.notice.privacy_link".tr(), url: Const.privacyUrl),
       },
     );
@@ -667,8 +667,8 @@ class DashboardPage extends ConsumerWidget {
         // unavailable until it is dealt with — while this card says the same thing whenever it is
         // read. So on the rare launch where a notice is up, the notice keeps the top.
         //
-        // Gated here rather than inside [AboutGroup] so that the card, which is a fixed sentence
-        // and three links, stays renderable by a widget test on the VM; `CurrentPlatform.isWeb()`
+        // Gated here rather than inside [AboutGroup] so that the card's text and links
+        // stay renderable by a widget test on the VM; `CurrentPlatform.isWeb()`
         // is const false there, and a self-gating widget would answer an empty box to every test.
         if (CurrentPlatform.isWeb()) const AboutGroup(),
         const NewsGroup(),

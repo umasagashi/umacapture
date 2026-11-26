@@ -76,6 +76,7 @@ export function loginPageResponse({ h, p, port }, env) {
   const html = `${PAGE_HEAD("ログイン")}
 ${PAGE_BODY(`<p>アプリでログインを押した覚えが無ければ、このページを閉じてください。</p>
 <div class="cf-turnstile" data-sitekey="${esc(env.TURNSTILE_SITEKEY)}" data-action="${esc(env.TURNSTILE_ACTION)}" data-callback="onTurnstile" data-expired-callback="onTurnstileLost" data-error-callback="onTurnstileLost" data-theme="auto"></div>
+<p>ログインすると、<a href="/terms/" target="_blank" rel="noopener">利用規約</a>に同意したものとみなします。</p>
 <form id="begin" method="POST" action="/api/auth/begin">
 <input type="hidden" name="h" value="${esc(h)}">
 <input type="hidden" name="p" value="${esc(p)}">${portField}

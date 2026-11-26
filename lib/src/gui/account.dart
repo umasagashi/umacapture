@@ -40,8 +40,8 @@ class AccountPage extends StatelessWidget {
   }
 }
 
-/// What the account is for and what it keeps, with the privacy policy and the trial-release notice inline. Shown in
-/// every login state, since it is what a reader weighs before logging in.
+/// What the account is for and what it keeps, with the terms, privacy policy and trial-release notice inline.
+/// Shown in every login state, since it is what a reader weighs before logging in.
 class AccountIntroCard extends StatelessWidget {
   const AccountIntroCard({super.key});
 
@@ -54,6 +54,7 @@ class AccountIntroCard extends StatelessWidget {
         LinkedText(
           "$tr_share_account.intro.text".tr(),
           links: {
+            "terms": (label: "$tr_share_account.intro.terms_link".tr(), url: Const.termsUrl),
             "privacy": (label: "$tr_share_account.intro.privacy_link".tr(), url: Const.privacyUrl),
             "notice": (label: "$tr_share_account.intro.notice_link".tr(), url: Const.noticeUrl),
           },
