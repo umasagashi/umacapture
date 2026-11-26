@@ -64,8 +64,8 @@ final shareSessionTimeProvider = Provider<DeviceTime>((_) => const DeviceTime())
 /// The longest wait [RecordShareSession] asks its timer for before it reads the clock again on a session not yet
 /// expired. A wait to the expiry itself can be up to the session's 180 days, and on web a Dart `Timer` hands its
 /// milliseconds straight to the browser's `setTimeout`, which is not asked to hold a wait that long here. This bounds
-/// only the wait requested: while the device sleeps or the tab is in the background no callback runs at all, and the
-/// session is judged again when one next runs.
+/// only the wait requested: while the device sleeps, or a browser throttles or suspends a background tab, a callback can
+/// run late, and the session is judged again when one next runs.
 const shareSessionExpiryCheckInterval = Duration(hours: 1);
 
 /// The account this device last logged in to, and the days the server last told for it: when the account last

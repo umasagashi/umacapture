@@ -123,23 +123,46 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
   @override
   void initState() {
     super.initState();
-    // Read once per start: the warning is about the account the device remembers, told when the app starts.
-    final deletionDay = ref.read(loginDeletionNoticeProvider);
-    if (deletionDay != null) {
-      logger.i("Warning that the remembered sharing account is due for deletion");
+    // Given at most once per start: the warning is about the account the device remembers, told when the app starts.
+    // One that becomes due while the app runs is not given; one no longer due is withdrawn ([_withdrawDeletionWarning]).
+    if (ref.read(loginDeletionNoticeProvider) != null) {
       // A SnackBar cannot be shown while the tree is being built.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _toaster.showToast(
-            context,
-            ToastData.warning(
-              description: "pages.account.deletion_toast".tr(namedArgs: {"deletion": epochDayText(deletionDay)}),
-              navigateOnTab: const AccountRoute(),
-            ),
-          );
+        // Read again: a login completed since the first read leaves nothing to warn about.
+        final deletionDay = ref.read(loginDeletionNoticeProvider);
+        if (!mounted || deletionDay == null) {
+          return;
         }
+        logger.i("Warning that the remembered sharing account is due for deletion");
+        final warning = _toaster.showToast(
+          context,
+          ToastData.warning(
+            description: "pages.account.deletion_toast".tr(namedArgs: {"deletion": epochDayText(deletionDay)}),
+            navigateOnTab: const AccountRoute(),
+          ),
+        );
+        _deletionWarning = warning;
+        warning.closed.then((_) {
+          if (identical(_deletionWarning, warning)) {
+            _deletionWarning = null;
+          }
+        });
       });
     }
+  }
+
+  /// The start-up deletion warning while it is on screen.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _deletionWarning;
+
+  /// Withdraws the start-up deletion warning once it no longer holds, as when a login completes while it is shown.
+  void _withdrawDeletionWarning() {
+    ref.listen<int?>(loginDeletionNoticeProvider, (_, deletionDay) {
+      final warning = _deletionWarning;
+      if (deletionDay == null && warning != null) {
+        _deletionWarning = null;
+        warning.close();
+      }
+    });
   }
 
   void _listenForToastData<T>(StreamProvider<ToastData> provider) {
@@ -161,6 +184,7 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     // and nobody is watching it.
     _listenForPlaySound(tabRefusedEventProvider, SoundType.error);
 
+    _withdrawDeletionWarning();
     _listenForToastData(plainToastEventProvider);
     _listenForToast<ExportResult>(
       recordExportEventProvider,

@@ -3504,6 +3504,69 @@ void main() {
       expect(container.read(recordSharesProvider), isEmpty);
     });
 
+    test('ISS-0108: a logout and a new login end the expiry wait of the session they replace, so the old wait passing '
+        'leaves the new login held and stored', () async {
+      const tokenB = 'second-login-token';
+      await storeSession(expiresAt: DateTime.now().add(const Duration(minutes: 90)).millisecondsSinceEpoch ~/ 1000);
+      final listener = _FakeListener();
+      container = containerFor([
+        _empty(204),
+        _json(200, {..._claimed(), 'token': tokenB}),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+      ], listener: listener);
+      expect(container.read(recordShareSessionProvider)?.token, _token);
+      final oldWait = time.timers.single;
+
+      expect(await session().logout(), isTrue);
+      final attempt = (await session().beginLogin() as LoginInBrowser).attempt;
+      listener.callback("proof-from-the-callback");
+      expect(await attempt.completion, LoginOutcome.signedIn);
+
+      // The old session's expiry passes; its wait, were it still running, would drop the session held then.
+      time.now = time.now.add(const Duration(hours: 2));
+      if (oldWait.isActive) oldWait.fire();
+      await pumpEventQueue();
+
+      expect(container.read(recordShareSessionProvider)?.token, tokenB);
+      final stored = StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey);
+      expect(stored, isNotNull);
+      expect(ShareSessionMapper.fromJson(stored ?? '').token, tokenB);
+    });
+
+    test('ISS-0108: a logout whose answer arrives after its session expired and a new login completed leaves the new '
+        'login held and stored', () async {
+      const tokenB = 'second-login-token';
+      await storeSession(expiresAt: DateTime.now().add(const Duration(minutes: 90)).millisecondsSinceEpoch ~/ 1000);
+      final logoutAnswer = Completer<Object>();
+      final listener = _FakeListener();
+      container = containerFor([
+        logoutAnswer.future,
+        _json(200, {..._claimed(), 'token': tokenB}),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+      ], listener: listener);
+      expect(container.read(recordShareSessionProvider)?.token, _token);
+
+      final loggingOut = session().logout();
+      // The session expires while the logout is on its way.
+      time.now = time.now.add(const Duration(hours: 2));
+      time.timers.single.fire();
+      await pumpEventQueue();
+      expect(container.read(recordShareSessionProvider), isNull);
+
+      final attempt = (await session().beginLogin() as LoginInBrowser).attempt;
+      listener.callback("proof-from-the-callback");
+      expect(await attempt.completion, LoginOutcome.signedIn);
+
+      logoutAnswer.complete(_empty(204));
+      expect(await loggingOut, isTrue);
+      await pumpEventQueue();
+
+      expect(container.read(recordShareSessionProvider)?.token, tokenB);
+      final stored = StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey);
+      expect(stored, isNotNull);
+      expect(ShareSessionMapper.fromJson(stored ?? '').token, tokenB);
+    });
+
     test('a login with a listener names its port on the start page and claims with exactly s and code', () async {
       final listener = _FakeListener();
       container = containerFor([
@@ -3759,6 +3822,31 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(_AccountTabsRouter.accountText), findsOneWidget);
       expect(server.sent, isEmpty, reason: 'the warning asks no server');
+    });
+
+    testWidgets('F2: a login completed while the warning is shown withdraws it', (tester) async {
+      await storeDueIn(10);
+      final listener = _FakeListener();
+      container = containerFor([
+        _json(200, _claimed()),
+        _json(200, {"trainer_id": record.metadata.trainerId}),
+      ], listener: listener);
+      await start(tester);
+      expect(warning(), findsOneWidget);
+
+      final starting = container.read(recordShareSessionProvider.notifier).beginLogin();
+      await settleUntil(tester, () => opened.isNotEmpty, describe: 'the login page to open');
+      final completion = ((await starting) as LoginInBrowser).attempt.completion;
+      listener.callback("proof-from-the-callback");
+      await settleUntilElapsing(
+        tester,
+        () => container.read(recordShareSessionProvider) != null,
+        describe: 'the login to complete',
+      );
+      expect(await completion, LoginOutcome.signedIn);
+      await tester.pumpAndSettle();
+
+      expect(warning(), findsNothing);
     });
 
     testWidgets('C-c: a device logged in to a session that has not expired does not warn', (tester) async {

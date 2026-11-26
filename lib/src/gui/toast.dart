@@ -64,7 +64,8 @@ class Toaster {
     ToastType.error => semantic.danger,
   };
 
-  void showToast(BuildContext context, ToastData data) {
+  /// Shows [data] and returns the toast's controller, through which a caller can withdraw it before its time.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showToast(BuildContext context, ToastData data) {
     final messenger = ScaffoldMessenger.of(context);
     final semantic = Theme.of(context).semantic;
     final onAccent = semantic.onAccent;
@@ -123,5 +124,6 @@ class Toaster {
       }
     });
     controller.closed.then((_) => autoDismiss?.cancel());
+    return controller;
   }
 }
