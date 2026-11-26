@@ -9,11 +9,12 @@
 
 import { after, before, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import * as limits from "../src/limits.mjs";
 import { Unavailable } from "../src/store.mjs";
-import { admitDatabase } from "../src/sync_quota.mjs";
+import { admitDatabase, roomOf, statedRoom } from "../src/sync_quota.mjs";
 import { named, STATEMENT } from "../src/sync_refs.mjs";
-import { answer, archived, bodyOf, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
+import { answer, archived, bodyOf, head, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
 import { newClientKey, postedForm, startWorker } from "./support/worker_harness.mjs";
 
 const DAY = 86_400;
@@ -130,7 +131,7 @@ describe("sync daily limits and capacity", () => {
         }
         const full = root(Object.fromEntries(records.map(({ slot, part }) => [String(slot), part.name])));
         const res = await client.replace(0, full);
-        assert.deepEqual([res.status, res.body], [200, { generation: 1, root: full.name }], res.text);
+        assert.deepEqual([res.status, head(res.body)], [200, { generation: 1, root: full.name }], res.text);
       });
     }
   }
@@ -143,8 +144,15 @@ describe("sync daily limits and capacity", () => {
     isDailyLimit(await client.putPart(part), "account");
     isDailyLimit(await client.replace(0, root({ 0: part.name })), "account");
     isDailyLimit(await client.settings(), "account");
+    const requests = async () =>
+      (await worker.db.prepare("SELECT daily_requests FROM sync_accounts WHERE account_id = ?").bind(id).first()).daily_requests;
+    const counted = await requests();
     const generation = await client.generation();
-    assert.deepEqual([generation.status, generation.body], [200, { generation: 0, root: null }]);
+    assert.equal(generation.status, 200, generation.text);
+    assert.equal(generation.body.generation, 0);
+    assert.equal(generation.body.root, null);
+    assert.equal(generation.body.room.account, limits.ACCOUNT_SYNC_BYTES_CAP, "an account that stores nothing has the whole cap");
+    assert.equal(await requests(), counted, "the generation, room and all, is charged to no daily limit");
   });
 
   test("GET /api/me/usage answers the shares, stored bytes and records the caps are held against, beside the caps, and is charged to no daily limit", async () => {
@@ -232,7 +240,7 @@ describe("sync daily limits and capacity", () => {
     const adding = root({ 0: records[0].part.name, 1: records[1].part.name });
     const refused = await client.replace(1, adding);
     assert.deepEqual([refused.status, refused.body], [507, { error: "account_limit", limit: "records" }]);
-    assert.deepEqual((await client.generation()).body, { generation: 1, root: root({ 0: records[0].part.name }).name });
+    assert.deepEqual(head((await client.generation()).body), { generation: 1, root: root({ 0: records[0].part.name }).name });
 
     const rated = recordPart(0, [{ ...records[0].record.row, ratings: { a: 1 } }]);
     assert.equal((await client.putPart(rated)).status, 200);
@@ -255,7 +263,26 @@ describe("sync daily limits and capacity", () => {
 
     const refused = await client.replace(2, root({ 0: records[0].part.name, 1: records[1].part.name, 2: records[2].part.name }));
     assert.deepEqual([refused.status, refused.body], [507, { error: "account_limit", limit: "records" }]);
-    assert.deepEqual((await client.generation()).body, { generation: 2, root: two.name });
+    assert.deepEqual(head((await client.generation()).body), { generation: 2, root: two.name });
+  });
+
+  test("a put exactly filling the account's stated room is accepted", async () => {
+    const { id, client } = await account("bytes-cap-exact-fit");
+    const fresh = bodyOf({ skill_png: sha256("bytes-cap-exact-fit") });
+    const size = Buffer.byteLength(fresh.body, "utf8");
+    const { stored_bytes: stored } = await accountRow(id);
+    await addStored(id, limits.ACCOUNT_SYNC_BYTES_CAP - stored - size);
+
+    const generation = await client.generation();
+    assert.equal(generation.status, 200, generation.text);
+    assert.equal(generation.body.room.account, size, "the account's stated room equals the fresh body's size");
+    assert.ok(generation.body.room.service > size, "the service has room beyond the fresh body's size");
+    const res = await client.putBodies([fresh]);
+    assert.deepEqual(
+      [res.status, res.body],
+      [200, { results: [{ name: fresh.name, status: "stored" }] }],
+      "a fresh body exactly filling the account's stated room is stored",
+    );
   });
 
   test("an account whose referenced bytes are exactly at the cap may change and delete records, is refused new bytes, and gets them back by deleting", async () => {
@@ -271,6 +298,7 @@ describe("sync daily limits and capacity", () => {
     const { stored_bytes: stored } = await accountRow(id);
     await addStored(id, limits.ACCOUNT_SYNC_BYTES_CAP - stored);
     assert.equal((await accountRow(id)).stored_bytes, limits.ACCOUNT_SYNC_BYTES_CAP);
+    assert.equal((await client.generation()).body.room.account, 0, "at the cap, the account's room is 0");
 
     // Changing a rating stores a new part and a new root: neither is checked against the cap.
     const rated = recordPart(0, [{ ...records[0].row, ratings: { a: 1 } }]);
@@ -286,8 +314,13 @@ describe("sync daily limits and capacity", () => {
     assert.deepEqual([fullImage.status, fullImage.body], [507, { error: "account_limit", limit: "bytes" }]);
     assert.equal(worker.b2.count("PUT"), puts, "nothing refused reached B2");
 
-    // Deleting a record frees its bytes at once, though B2 keeps them hidden for six days.
-    assert.equal((await client.replace(2, root({ 0: rated.name }))).status, 200);
+    // Deleting a record frees its bytes at once, though B2 keeps them hidden for six days, and the
+    // replacement's answer states the room it freed.
+    const deleted = await client.replace(2, root({ 0: rated.name }));
+    assert.equal(deleted.status, 200, deleted.text);
+    const left = limits.ACCOUNT_SYNC_BYTES_CAP - (await accountRow(id)).stored_bytes;
+    assert.ok(left > 0, String(left));
+    assert.equal(deleted.body.room.account, left, "the room is read after the replacement's commit");
     const freed = await client.putBodies([fresh]);
     assert.deepEqual([freed.status, freed.body], [200, { results: [{ name: fresh.name, status: "stored" }] }]);
   });
@@ -322,6 +355,34 @@ describe("sync daily limits and capacity", () => {
     }
   });
 
+  test("the room the generation states is what a put is checked against, the account's and the service's each on its own", async () => {
+    const { id, client } = await account("room-stated");
+    await client.setImageForm("png");
+    const { stored_bytes: stored } = await accountRow(id);
+    await addStored(id, limits.ACCOUNT_SYNC_BYTES_CAP - stored - 1000);
+    // The service's room set to 400, wherever the other tests left the totals.
+    const totals = await worker.db.prepare("SELECT stored_bytes, hidden_bytes FROM sync_totals WHERE id = 1").first();
+    const goneBy = (await worker.now()) - (limits.B2_DAYS_FROM_HIDING_TO_DELETING * DAY - limits.RESTORE_MARGIN_SECONDS);
+    const hidden = Object.entries(JSON.parse(totals.hidden_bytes))
+      .filter(([day]) => Number(day) >= Math.floor(goneBy / DAY))
+      .reduce((sum, [, bytes]) => sum + bytes, 0);
+    const added = limits.SYNC_BUDGET - totals.stored_bytes - hidden - 400;
+    await worker.db.prepare("UPDATE sync_totals SET stored_bytes = stored_bytes + ? WHERE id = 1").bind(added).run();
+    try {
+      assert.deepEqual((await client.generation()).body.room, { account: 1000, service: 400 });
+      const put = async (length) => {
+        const bytes = randomBytes(length);
+        const res = await client.putImage(sha256(bytes), bytes);
+        return [res.status, res.body];
+      };
+      assert.deepEqual(await put(700), [507, { error: "storage_full" }], "within the account's room, past the service's");
+      assert.deepEqual(await put(1500), [507, { error: "account_limit", limit: "bytes" }], "past both: the account's is checked first");
+      assert.equal((await put(400))[0], 200, "within both");
+    } finally {
+      await worker.db.prepare("UPDATE sync_totals SET stored_bytes = stored_bytes - ? WHERE id = 1").bind(added).run();
+    }
+  });
+
   test("past the hidden cap, new bytes wait for B2 to delete what was hidden while deletions and archives go on", async () => {
     const { id, client } = await account("hidden-cap");
     const records = await prepared(client, 3);
@@ -340,6 +401,7 @@ describe("sync daily limits and capacity", () => {
     const retryAfter = Number(waiting.headers.get("Retry-After"));
     assert.ok(retryAfter > (limits.B2_DAYS_FROM_HIDING_TO_DELETING - 1) * DAY && retryAfter <= (limits.B2_DAYS_FROM_HIDING_TO_DELETING + 1) * DAY, String(retryAfter));
     assert.equal(worker.b2.count("PUT"), puts);
+    assert.equal((await client.generation()).body.room.account, 0, "past the hidden cap, the account's room is 0");
 
     // An archive (the row keeps no image) and a deletion change nothing the cap guards.
     const archivedPart = recordPart(0, [archived(records[0].record.row, "none")]);
@@ -349,6 +411,7 @@ describe("sync daily limits and capacity", () => {
     assert.equal((await client.putBodies([fresh])).status, 507);
 
     await worker.advanceClock(retryAfter);
+    assert.ok((await client.generation()).body.room.account > 0, "the room comes back as the hidden bytes stop counting");
     const resumed = await client.putBodies([fresh]);
     assert.deepEqual([resumed.status, resumed.body], [200, { results: [{ name: fresh.name, status: "stored" }] }]);
   });
@@ -430,12 +493,14 @@ describe("sync daily limits and capacity", () => {
     const { client } = await account("database-normal");
     try {
       await leaveDatabaseRoom(R.database_bytes + 1);
+      assert.ok((await client.generation()).body.room.service > 0, "above the reserve, the service has room");
       const before = bodyOf({ skill_png: sha256("database-normal-before") });
       const stored = await client.putBodies([before]);
       assert.deepEqual([stored.status, stored.body], [200, { results: [{ name: before.name, status: "stored" }] }], stored.text);
 
       for (const room of [R.database_bytes, -1]) {
         await leaveDatabaseRoom(room);
+        assert.equal((await client.generation()).body.room.service, 0, `room ${room}: the service's room is 0`);
         const puts = worker.b2.count("PUT");
         isDatabaseFull(await client.putBodies([bodyOf({ skill_png: sha256(`database-normal-${room}`) })]));
         assert.equal(worker.b2.count("PUT"), puts, `room ${room}: a refused body reaches no B2`);
@@ -466,12 +531,12 @@ describe("sync daily limits and capacity", () => {
       isDatabaseFull(await client.putPart(records[2].part));
       await leaveDatabaseRoom(-1);
       isDatabaseFull(await client.replace(1, root({ 0: records[0].part.name, 1: records[1].part.name })));
-      assert.deepEqual((await client.generation()).body, { generation: 1, root: one.name }, "a refused replacement changed nothing");
+      assert.deepEqual(head((await client.generation()).body), { generation: 1, root: one.name }, "a refused replacement changed nothing");
 
       await leaveDatabaseRoom(1);
       const two = root({ 0: records[0].part.name, 1: records[1].part.name });
       const res = await client.replace(1, two);
-      assert.deepEqual([res.status, res.body], [200, { generation: 2, root: two.name }], res.text);
+      assert.deepEqual([res.status, head(res.body)], [200, { generation: 2, root: two.name }], res.text);
     } finally {
       await worker.addToDatabaseSize(0);
     }
@@ -548,10 +613,27 @@ describe("sync daily limits and capacity", () => {
   });
 
   // Called directly: the harness's D1 always reports a size, so no request can reach a D1 that does not.
-  test("a D1 that reports no database size refuses every write the database's room checks, rather than admitting it", async () => {
-    const db = { prepare: () => ({ all: async () => ({ results: [{ bytes: 0 }], meta: {} }) }) };
+  test("a D1 that reports no database size refuses every write the database's room checks, rather than admitting it, and states no room", async () => {
+    const usageRow = { stored_bytes: 0, hidden_bytes: "{}", record_count: 0, total_stored: 0, total_hidden: "{}" };
+    const db = {
+      prepare: () => ({ all: async () => ({ results: [{ bytes: 0 }], meta: {} }), bind: () => ({ first: async () => usageRow }) }),
+    };
     for (const use of ["normal", "reserve"]) {
       await assert.rejects(admitDatabase(db, use), (error) => error instanceof Unavailable, use);
+    }
+    await assert.rejects(roomOf(db, "a", 0), (error) => error instanceof Unavailable);
+    assert.equal(await statedRoom(db, "a", 0), undefined);
+  });
+
+  test("a room the generation cannot read is left out of its answer, which still answers", async () => {
+    const { client } = await account("room-unread");
+    await worker.failD1At("SELECT bytes FROM totals WHERE id = 1");
+    try {
+      const res = await client.generation();
+      assert.equal(await worker.d1FaultLeft(), null, "the fault reached the room's read");
+      assert.deepEqual([res.status, res.body], [200, { generation: 0, root: null }], res.text);
+    } finally {
+      await worker.restoreD1();
     }
   });
 

@@ -6,7 +6,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
-import { bodyOf, newRecord, part, PARTS, recordPart, root, sha256, syncClient as listClient } from "./support/sync_fixtures.mjs";
+import { bodyOf, head, newRecord, part, PARTS, recordPart, root, sha256, syncClient as listClient } from "./support/sync_fixtures.mjs";
 import { startWorker } from "./support/worker_harness.mjs";
 
 describe("sync list", () => {
@@ -63,11 +63,11 @@ describe("sync list", () => {
       for (const [slot, p] of entries.slice(i, i + limits.SYNC_PARTS_PER_REPLACE)) current[slot] = p.name;
       last = root(current);
       const res = await client.replace(generation, last);
-      assert.deepEqual([res.status, res.body], [200, { generation: generation + 1, root: last.name }], res.text);
+      assert.deepEqual([res.status, head(res.body)], [200, { generation: generation + 1, root: last.name }], res.text);
       generation++;
     }
     assert.equal(generation, Math.ceil((PARTS + 2) / limits.SYNC_PARTS_PER_REPLACE));
-    assert.deepEqual((await client.generation()).body, { generation, root: last.name });
+    assert.deepEqual(head((await client.generation()).body), { generation, root: last.name });
     assert.deepEqual(await syncRow(accountId), { generation, root_name: last.name, record_count: PARTS });
 
     const fetchedRoot = await client.getRoot(last.name);

@@ -319,7 +319,8 @@ so it continues the deletion.
   `meta.rows_read` and `meta.rows_written` D1 reports for its statements, the triggers' rows included.
   When the request ends, `chargeRequest` charges one request and those rows, plus 2 read and 2 written
   for the charge itself, to the account's day and to `sync_daily`. The generation's request is neither
-  admitted nor charged. A request refused by a daily limit is charged to nobody.
+  admitted nor charged; it reads the account's row and the room it states (`usage` and the
+  database's size). A request refused by a daily limit is charged to nobody.
 - **Admission.** `admit` checks the six limits (`DAILY_LIMITS`: requests, rows read, rows written, per
   account and over every account) before a request's work. A request of use `"normal"` (a put of
   bodies or an image, a fetch, `held`, the settings) is refused when what is left of a limit is not
@@ -363,6 +364,16 @@ so it continues the deletion.
   and a replacement when none is left. A D1 that reports no size refuses the write as
   `503 temporarily_unavailable`. What takes rows away (account deletion, hides and shows, the hourly
   run) and what only reads is not checked.
+- **The room stated.** `roomOf` answers `{account, service}` for the generation's answer and a
+  replacement's ([The room the server states](sync-protocol.md#the-room-the-server-states)). It works
+  them out from the same expressions `admitGrowth` and `admitDatabase` check with — the account's
+  bytes left under its cap, whether its hidden bytes pass theirs, the service's bytes left under
+  `SYNC_BUDGET`, and whether the database's room takes a `"normal"` write — so at one state the room
+  stated and a put's refusal agree on whose room is lacking. `statedRoom` wraps it for the answers:
+  when it cannot be read (a D1 failure, a D1 that reports no size) the answer leaves `room` out
+  rather than failing. A replacement reads it after its commit and what follows it, so it counts the
+  bytes the replacement freed and those it referenced (bodies put and not yet referenced count as
+  hidden until then).
 
 ## What the server relies on clients to do
 

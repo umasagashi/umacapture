@@ -56,6 +56,9 @@ export function newImage() {
   return { name: sha256(bytes), bytes };
 }
 
+/** `{generation, root}` of an answer of the generation or of a replacement, without the room it states beside them. */
+export const head = ({ generation, root }) => ({ generation, root });
+
 /** Status and parsed body of one response (null for a body that is not JSON). */
 export async function answer(resPromise) {
   const res = await resPromise;

@@ -37,9 +37,11 @@ server is made of — its configuration, bucket, schema and limits — is [`sync
 
 ## Generation
 
-`GET /api/sync/generation` → `200 {generation, root}`: the account's generation and the name of
-its current root; `0` and `null` before its first replacement. Every replacement of the root
-advances the generation by one. No daily limit stops it, and it counts against none.
+`GET /api/sync/generation` → `200 {generation, root, room}`: the account's generation and the name
+of its current root; `0` and `null` before its first replacement. Every replacement of the root
+advances the generation by one. `room` is the room the server has for new bytes now (see
+[The room the server states](#the-room-the-server-states)). No daily limit stops it, and it counts
+against none.
 
 ## Settings
 
@@ -234,7 +236,9 @@ another text; a client leaves it in its slot under the name it has until it chan
     [Daily limits and capacity](#daily-limits-and-capacity)).
 - `POST /api/sync/root` `{generation, name, root}`: `root` is the root's text, at most 16 KiB of
   UTF-8, `name` its SHA-256, and `generation` the generation the client read →
-  `200 {generation, root}` with the new generation (the old one plus one) and root name. The
+  `200 {generation, root, room}` with the new generation (the old one plus one) and root name, and
+  the room for new bytes after the replacement committed, what it freed and referenced counted (see
+  [The room the server states](#the-room-the-server-states)). The
   replacement commits only if the account is still at `generation`; of two replacements made from
   the same generation, exactly one goes through. Refusals change nothing:
   - `409 stale_generation {generation}`: another replacement came first; `generation` is the
@@ -309,6 +313,7 @@ account or the database hold more:
 - **The account's bytes** are those of the stored objects its current root references: bodies,
   images, parts and the root. An account exactly at its cap may still change ratings and delete or
   archive records; deleting frees the deleted bytes at once, so new bytes can be put right after.
+  The `room` of the replacement's answer counts the bytes it freed.
 - **Hidden bytes** are those of stored objects nothing references: what was deleted, replaced, or put
   and not yet referenced. B2 keeps them six to seven days after they were hidden, so they count
   against the hidden cap, not the account's cap, until the UTC day they were hidden on is past the
@@ -329,6 +334,35 @@ account or the database hold more:
   (`SYNC_REPLACE_RESERVE`): once puts of bodies and images are refused `database_full`, a client can
   still put the parts it changed and commit them, and should. Past that, every write that stores
   something is refused until the operator makes room; fetches and account deletion go on.
+
+### The room the server states
+
+The answers of the generation and of a replacement carry `room: {account, service}`, the most new
+bytes a put of bodies or an image with names the account does not hold would be taken with now:
+
+- `account` is the room the account's own caps leave: `0` while its hidden bytes pass
+  `ACCOUNT_SYNC_HIDDEN_BYTES_CAP`, else `ACCOUNT_SYNC_BYTES_CAP` less its referenced bytes, and never
+  less than `0`.
+- `service` is the room the service leaves: `0` while the database's room is not more than the
+  reserve, else `SYNC_BUDGET` less the service's bytes, and never less than `0`.
+- Both are whole bytes. At the state they were read in, a put of `b` > 0 new bytes is refused
+  `account_limit` `"bytes"` or `hidden_limit` exactly when `b > account`, else `storage_full` or
+  `database_full` exactly when `b > service`, and taken otherwise. For a put of bodies, `b` is the sum
+  of the UTF-8 bytes of the bodies with new names; for an image, its `Content-Length`. The order of
+  the checks and the errors of the table above are as they are; `room` tells only whose room a put
+  lacks, the account's or the service's.
+- It is a reading, not a reservation. Another device, or the same device's own puts, can use the
+  room before the put arrives, and the answer of the put, `507` included, is what counts. A client
+  refused for room stops its puts of new bytes for that sync, still sends the changes that need no
+  room (deletions, archives, ratings, memos), and reads the room again the next time it syncs.
+- A put of a name the account holds answers `"exists"` whatever the room (Held names, above). A
+  client that cannot tell that it holds a name counts it against the room, and may hold back a put
+  the server would have taken.
+- `room` may be missing: a Worker older than it states none, and neither does one that could not
+  read it. A missing `room` means the server stated no room, not that there is none; the client then
+  puts and lets the answers of the puts tell it.
+- Reading it on the generation's request charges nothing, as the generation's request does not. On
+  a replacement it is part of that request and charged with it.
 
 ## Account deletion
 

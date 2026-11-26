@@ -27,7 +27,7 @@ import { Bucket, objectKey, sha256Hex, StorageFailed } from "./b2.mjs";
 import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { Unavailable } from "./store.mjs";
-import { admit, admitGrowth, chargeRequest, countWithin, MeteredD1, Refused } from "./sync_quota.mjs";
+import { admit, admitGrowth, chargeRequest, countWithin, MeteredD1, Refused, statedRoom } from "./sync_quota.mjs";
 import { distinctJson, goneBy, HELD, named, namesJoined, pendingMove, putWritten, settle, STATEMENT, tidyLeftoversOf, writing, written } from "./sync_refs.mjs";
 
 /** An object name: the SHA-256 of its bytes as 64 lowercase hex digits. */
@@ -149,16 +149,19 @@ export async function syncWrite(request, env, now, handler) {
 }
 
 /**
- * GET /api/sync/generation: `{generation, root}` of the session's account; 0 and null before its first
- * sync. It is admitted against no daily limit and charged to none: it reads one row, and counting it
- * would write two.
+ * GET /api/sync/generation: `{generation, root, room}` of the session's account; 0 and null before its
+ * first sync. `room` is the room for new bytes the account has now (`roomOf`), left out when it cannot
+ * be read. It is admitted against no daily limit and charged to none: it reads three statements (the
+ * account's row, its usage and the database's size), and counting it would write two.
  */
 export async function getGeneration(request, env, now) {
-  const session = await requireSession(request, env, clock(now).now);
+  const at = clock(now).now;
+  const session = await requireSession(request, env, at);
   const row = await d1(() =>
     env.DB.prepare("SELECT generation, root_name FROM sync_accounts WHERE account_id = ?1").bind(session.accountId).first(),
   );
-  return json(200, { generation: row?.generation ?? 0, root: row?.root_name ?? null });
+  const room = await statedRoom(env.DB, session.accountId, at);
+  return json(200, { generation: row?.generation ?? 0, root: row?.root_name ?? null, room });
 }
 
 /**

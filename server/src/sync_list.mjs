@@ -21,7 +21,7 @@ import * as limits from "./limits.mjs";
 import { InvalidPayload } from "./posted_form.mjs";
 import { Unavailable } from "./store.mjs";
 import { canonicalImages, d1, heldNames, insertObjects, NAME, putAll, storeObjects, syncWrite } from "./sync.mjs";
-import { admit, admitDatabase, countWithin, recordsRefusal } from "./sync_quota.mjs";
+import { admit, admitDatabase, countWithin, recordsRefusal, statedRoom } from "./sync_quota.mjs";
 import {
   claimHidden,
   clearUnreferenced,
@@ -193,7 +193,8 @@ async function generationOf(db, accountId) {
 /**
  * POST /api/sync/root `{generation, name, root}`: makes root text `root`, stored under `name` (the
  * SHA-256 of its UTF-8 bytes), the account's root, when the account is still at `generation`, and
- * advances the generation by one. 200 `{generation, root}` with the new generation and root name.
+ * advances the generation by one. 200 `{generation, root, room}` with the new generation and root name,
+ * and the account's room for new bytes after the commit (`roomOf`), left out when it cannot be read.
  *
  * Refusals change nothing: 409 stale_generation `{generation}` (the account's current one) when
  * another replacement came first, 409 missing_objects `{names}` when the root names a part the
@@ -395,7 +396,8 @@ export const replaceRoot = (request, env, now) =>
     // A hide that began before the commit may have hidden what it now references.
     await showReferenced(db, bucket, accountId, change.rising());
     await settle(db, bucket, accountId, [...change.falling(), ...rehide], at);
-    return json(200, { generation: generation + 1, root: name });
+    // Read after the commit, so the room counts what it freed and what it referenced.
+    return json(200, { generation: generation + 1, root: name, room: await statedRoom(db, accountId, at) });
   });
 
 /**

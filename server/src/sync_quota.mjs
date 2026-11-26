@@ -257,13 +257,54 @@ export async function usage(db, accountId, at) {
  */
 export async function admitGrowth(db, accountId, at, bytes) {
   const u = await usage(db, accountId, at);
-  if (u.stored + bytes > limits.ACCOUNT_SYNC_BYTES_CAP) throw new Refused(fail(507, "account_limit", { limit: "bytes" }));
-  if (u.hidden > limits.ACCOUNT_SYNC_HIDDEN_BYTES_CAP) {
+  if (bytes > accountBytesLeft(u)) throw new Refused(fail(507, "account_limit", { limit: "bytes" }));
+  if (hiddenPastCap(u)) {
     const lapses = (u.hiddenSince + 1) * DAY + (limits.B2_DAYS_FROM_HIDING_TO_DELETING * DAY - limits.RESTORE_MARGIN_SECONDS);
     throw new Refused(fail(507, "hidden_limit", {}, { "Retry-After": String(Math.max(1, lapses - at)) }));
   }
-  if (u.total + bytes > limits.SYNC_BUDGET) throw new Refused(fail(507, "storage_full"));
+  if (bytes > serviceBytesLeft(u)) throw new Refused(fail(507, "storage_full"));
   await admitDatabase(db, "normal");
+}
+
+/** New bytes the account's stored bytes `u.stored` may still grow by before `account_limit`; negative past the cap. */
+const accountBytesLeft = (u) => limits.ACCOUNT_SYNC_BYTES_CAP - u.stored;
+
+/** Whether the account's hidden bytes `u.hidden` are past their cap, which refuses every put with `hidden_limit`. */
+const hiddenPastCap = (u) => u.hidden > limits.ACCOUNT_SYNC_HIDDEN_BYTES_CAP;
+
+/** New bytes the bytes over every account `u.total` may still grow by before `storage_full`; negative past the budget. */
+const serviceBytesLeft = (u) => limits.SYNC_BUDGET - u.total;
+
+/**
+ * The room for new bytes account `accountId` has at clock `at`: `{account, service}`, both whole bytes
+ * of 0 or more. `account` is the most new bytes the account's own caps take (`account_limit`,
+ * `hidden_limit`): 0 while its hidden bytes are past their cap, else ACCOUNT_SYNC_BYTES_CAP less its
+ * stored bytes. `service` is the most the service's take (`storage_full`, `database_full`): 0 while
+ * `admitDatabase` "normal" refuses, else SYNC_BUDGET less the bytes over every account. Both are worked
+ * out by the expressions `admitGrowth` checks with, so at one state a put of `bytes` > 0 new bytes is
+ * refused for the account (account_limit or hidden_limit) exactly when `bytes > account`, else for the
+ * service (storage_full or database_full) exactly when `bytes > service`, and taken otherwise. It is a
+ * reading, not a reservation: what a later put is answered is what counts. Throws as `usage` and
+ * `databaseRoom` do.
+ */
+export async function roomOf(db, accountId, at) {
+  const u = await usage(db, accountId, at);
+  return {
+    account: hiddenPastCap(u) ? 0 : Math.max(0, accountBytesLeft(u)),
+    service: databaseTakes(await databaseRoom(db), "normal") ? Math.max(0, serviceBytesLeft(u)) : 0,
+  };
+}
+
+/**
+ * `roomOf`, or undefined when it cannot be read: the room is stated beside another answer and never
+ * fails it, and an answer without it says that the server stated none.
+ */
+export async function statedRoom(db, accountId, at) {
+  try {
+    return await roomOf(db, accountId, at);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -277,15 +318,23 @@ export async function admitGrowth(db, accountId, at, bytes) {
  * bounds the database.
  */
 export async function admitDatabase(db, use) {
+  if (!databaseTakes(await databaseRoom(db), use)) throw new Refused(fail(507, "database_full"));
+}
+
+/**
+ * The room DATABASE_BUDGET leaves sync on `db`, in bytes, as `admitDatabase` states it. Throws
+ * Unavailable when D1 reports no size.
+ */
+async function databaseRoom(db) {
   const result = await db.prepare("SELECT bytes FROM totals WHERE id = 1").all();
   const size = result.meta?.size_after;
   if (!Number.isFinite(size)) throw new Unavailable("D1 reported no database size");
   const sharingRoom = Math.max(0, limits.STORAGE_BUDGET - result.results[0].bytes);
-  const room = limits.DATABASE_BUDGET - size - sharingRoom;
-  if (room <= (use === "normal" ? limits.SYNC_REPLACE_RESERVE.database_bytes : 0)) {
-    throw new Refused(fail(507, "database_full"));
-  }
+  return limits.DATABASE_BUDGET - size - sharingRoom;
 }
+
+/** Whether a sync write of `use` ("normal" or "reserve") is taken while the database's room is `room`. */
+const databaseTakes = (room, use) => room > (use === "normal" ? limits.SYNC_REPLACE_RESERVE.database_bytes : 0);
 
 /**
  * The refusal of a replacement that makes the account list `records` records where its current root

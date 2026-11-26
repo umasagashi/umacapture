@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import * as limits from "../src/limits.mjs";
 import { usage } from "../src/sync_quota.mjs";
 import { named, STATEMENT, tidyLeftoversOf } from "../src/sync_refs.mjs";
-import { archived, newImage, newRecord, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
+import { archived, head, newImage, newRecord, recordPart, root, syncClient } from "./support/sync_fixtures.mjs";
 import { startWorker } from "./support/worker_harness.mjs";
 
 /** A hide's first statement (`settle`'s intent), by its name: failing it cuts a request off before it hides. */
@@ -319,7 +319,7 @@ describe("sync retention", () => {
       worker.b2.requests.slice(sent).every((q) => q.method === "GET" && "versions" in q.query),
       "no B2 request but the listing",
     );
-    assert.deepEqual((await a.client.generation()).body, { generation: 0, root: null });
+    assert.deepEqual(head((await a.client.generation()).body), { generation: 0, root: null });
     assert.deepEqual(a.versions(r.name), []);
     assert.deepEqual(a.versions(p0.name), ["v"]);
 
@@ -345,7 +345,7 @@ describe("sync retention", () => {
     assert.equal((await a.client.putPart(p0)).status, 200);
     const res = await a.client.replace(0, root({ 0: p0.name }));
     assert.deepEqual([res.status, res.body], [400, { error: "too_many_pngs_per_jpeg", limit: limits.SYNC_PNGS_PER_JPEG }]);
-    assert.deepEqual((await a.client.generation()).body, { generation: 0, root: null });
+    assert.deepEqual(head((await a.client.generation()).body), { generation: 0, root: null });
   });
 
   test("a replacement cut off after its commit leaves what it stopped referencing recorded to hide, and the account's next write once it is SYNC_ABANDONED_AFTER old hides it, apart from what that write references again", async () => {
@@ -361,7 +361,7 @@ describe("sync retention", () => {
     const cut = await a.client.replace(1, empty);
     assert.deepEqual([cut.status, cut.body], [503, { error: "temporarily_unavailable" }]);
     assert.equal(await worker.d1FaultLeft(), null);
-    assert.deepEqual((await a.client.generation()).body, { generation: 2, root: empty.name }, "the replacement committed");
+    assert.deepEqual(head((await a.client.generation()).body), { generation: 2, root: empty.name }, "the replacement committed");
     const left = [kept.body.name, dropped.body.name, p0.name, p1.name, first.name];
     assert.deepEqual(await toHide(worker, a.id), [...left].sort());
     assert.ok(left.every(a.shown), "nothing was hidden");
@@ -683,7 +683,7 @@ describe("sync hides and shows a cut-off request left mid-way", () => {
     assert.equal(await worker.scheduled(), "ok");
     held.release();
     assert.equal((await replaced).status, 503);
-    const current = (await a.client.generation()).body;
+    const current = head((await a.client.generation()).body);
     assert.deepEqual(current, { generation: 2, root: empty.name });
     for (const name of [record.body.name, p0.name, first.name]) assert.equal(a.latest(name), "m", name);
     assert.equal((await a.client.getRoot(empty.name)).status, 200, "the current root stays fetchable");
@@ -1283,7 +1283,7 @@ describe("sync six-day boundary", () => {
     const refused = await a.client.replace(4, first);
     assert.deepEqual([refused.status, refused.body], [409, { error: "missing_objects", names: [p0.name] }]);
     assert.equal(a.latest(p0.name), "m", "not shown");
-    assert.deepEqual((await a.client.generation()).body, { generation: 4, root: empty.name });
+    assert.deepEqual(head((await a.client.generation()).body), { generation: 4, root: empty.name });
 
     // A part of a new record naming the gone image: the replacement takes the image as never put.
     const other = newRecord(1, { binding: { skill_png: png.name } });
@@ -1421,7 +1421,7 @@ describe("sync six-day boundary", () => {
     show.release();
     const res = await replaced;
 
-    const current = (await a.client.generation()).body;
+    const current = head((await a.client.generation()).body);
     if (res.status === 200) {
       assert.ok(await currentAllFetchable(a), "committed, every name the root references is fetchable");
     } else {
@@ -1457,10 +1457,10 @@ describe("sync six-day boundary", () => {
     const res = await replaced;
 
     if (res.status === 200) {
-      assert.deepEqual((await a.client.generation()).body, { generation: 3, root: first.name });
+      assert.deepEqual(head((await a.client.generation()).body), { generation: 3, root: first.name });
     } else {
       assert.equal(res.status, 409, res.text);
-      assert.deepEqual((await a.client.generation()).body, { generation: 2, root: empty.name });
+      assert.deepEqual(head((await a.client.generation()).body), { generation: 2, root: empty.name });
     }
     assert.ok(await currentAllFetchable(a));
   });

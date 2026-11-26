@@ -8,7 +8,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import * as limits from "../src/limits.mjs";
-import { answer, archived, bodyOf, idIn, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
+import { answer, archived, bodyOf, head, idIn, newImage, newRecord, recordPart, root, sha256, syncClient } from "./support/sync_fixtures.mjs";
 import { migrationStatements, SIGN_IN_MIGRATIONS, startWorker } from "./support/worker_harness.mjs";
 
 /** A fresh body text carrying an image binding (by default to a fresh PNG name), and its name. */
@@ -55,7 +55,7 @@ describe("sync objects", () => {
   test("an account that never synced is at generation 0 with no root", async () => {
     const res = await client.generation();
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { generation: 0, root: null });
+    assert.deepEqual(head(res.body), { generation: 0, root: null });
   });
 
   test("ten bodies are put and fetched in one request each, and eleven are refused either way", async () => {
@@ -457,7 +457,7 @@ describe("the reduced-JPEG default across its migration", () => {
 
     assert.deepEqual((await defaulted.settings()).body, { image_form: "none" });
     assert.deepEqual((await chose.settings()).body, { image_form: "png" });
-    assert.deepEqual((await chose.generation()).body, { generation: 1, root: root({ 0: p.name }).name });
+    assert.deepEqual(head((await chose.generation()).body), { generation: 1, root: root({ 0: p.name }).name });
     const image = newImage();
     assert.equal((await chose.putImage(image.name, image.bytes)).body.status, "stored", "the usage triggers reach the new table");
 
