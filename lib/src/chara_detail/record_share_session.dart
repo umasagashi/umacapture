@@ -19,6 +19,7 @@ import '/const.dart';
 import '/src/chara_detail/record_share.dart' show newLoginSecret, recordSharesProvider, secretHash;
 import '/src/core/login_receiver.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/device_time.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/storage/long_read_registry.dart' show LongReadClaim, LongReadKind, longReadRegistryProvider;
 import '/src/core/utils.dart';
@@ -38,7 +39,8 @@ const reservedShareKeys = {shareSessionKey, rememberedLoginKey};
 
 /// What `POST /api/auth/claim` answered, kept as the server named it.
 ///
-/// [deleting] marks a session that can only continue deleting its account.
+/// [deleting] marks a session that can only continue deleting its account. [expiresAt] is the last second, in Unix
+/// epoch seconds, at which the server still accepts the session ([ShareSession.isValidAt]).
 @MappableClass(caseStyle: CaseStyle.snakeCase)
 class ShareSession with ShareSessionMappable {
   final String token;
@@ -47,7 +49,14 @@ class ShareSession with ShareSessionMappable {
   final bool deleting;
 
   const ShareSession({required this.token, required this.expiresAt, required this.accountId, required this.deleting});
+
+  /// Whether the server still accepts the session at [now] by the device clock: it accepts while `expires_at >= now`
+  /// in whole seconds, so the first instant it refuses is `expiresAt + 1` seconds.
+  bool isValidAt(DateTime now) => now.millisecondsSinceEpoch < (expiresAt + 1) * Duration.millisecondsPerSecond;
 }
+
+/// The clock [RecordShareSession] judges its session's expiry by. A provider so tests can hold it.
+final shareSessionTimeProvider = Provider<DeviceTime>((_) => const DeviceTime());
 
 /// The account this device last logged in to, and the days the server last told for it: when the account last
 /// logged in and when it is deleted unless it logs in again. Days count from the Unix epoch in UTC.
@@ -311,23 +320,69 @@ class LoginAttempt {
   }
 }
 
-/// The device's session with the sharing server, or null when it holds none.
+/// Why the device stopped holding a session the user did not end: either way the server no longer accepts it.
+enum _DropReason {
+  /// The server answered 401.
+  unknownToServer,
+
+  /// Its expiry passed by the device clock ([ShareSession.isValidAt]).
+  expired,
+}
+
+/// The device's session with the sharing server, or null when it holds none. It holds only a session the server
+/// still accepts as far as the device knows: one the server answered 401 to, or whose expiry has passed by the device
+/// clock, is dropped, except a session that can only continue deleting its account ([build]).
 class RecordShareSession extends Notifier<ShareSession?> {
   StorageBox get _box => StorageBox(StorageBoxKey.recordShares);
 
+  /// Whether [build] dropped the stored session, which [RecordShareSessionDropped] starts from: a provider cannot set
+  /// another provider's state while it builds.
+  bool _droppedOnLoad = false;
+
   @override
   ShareSession? build() {
+    _droppedOnLoad = false;
     final stored = _box.pull<String>(shareSessionKey);
     if (stored == null) {
       return null;
     }
+    final ShareSession session;
     try {
-      return ShareSessionMapper.fromJson(stored);
+      session = ShareSessionMapper.fromJson(stored);
     } on Exception catch (e) {
       // An unreadable session is one the user logs in again for; nothing else depends on it.
       logger.w("The stored sharing session could not be read: ${e.runtimeType}");
       return null;
     }
+    // A deleting session is kept past its expiry: the account stays marked and the server finishes deleting it, so
+    // the account is still being deleted, and the session's own 401 is what [deleteAccount] hears to tell the user so
+    // and forget the remembered login. Dropping it here would lose that notice and leave a remembered login that
+    // warns to log in to keep an account already being deleted.
+    if (!session.deleting && !session.isValidAt(ref.read(shareSessionTimeProvider).now())) {
+      _droppedOnLoad = true;
+      unawaited(_dropStored(_DropReason.expired));
+      return null;
+    }
+    return session;
+  }
+
+  /// Drops the session the server no longer accepts: only the session goes, and the share notes, the remembered login
+  /// and the sync settings stay, since each names its account and a later login decides whether they still apply.
+  /// The device is marked as dropped ([recordShareSessionDroppedProvider]) until the user logs in again.
+  Future<void> _drop(_DropReason reason) async {
+    ref.read(recordShareSessionDroppedProvider.notifier)._set(true);
+    state = null;
+    await _dropStored(reason);
+  }
+
+  /// The part of [_drop] that touches the store; [build] marks the device as dropped through [_droppedOnLoad]
+  /// instead, and holds no state to clear.
+  Future<void> _dropStored(_DropReason reason) {
+    logger.i(switch (reason) {
+      _DropReason.unknownToServer => "The sharing server no longer knows the session; it is dropped",
+      _DropReason.expired => "The sharing session has expired by the device clock; it is dropped",
+    });
+    return _box.delete(shareSessionKey);
   }
 
   Future<void> _keep(ShareSession? session) async {
@@ -544,9 +599,7 @@ class RecordShareSession extends Notifier<ShareSession?> {
       return;
     }
     if (status == 401) {
-      logger.i("The sharing server no longer knows the session; it is dropped");
-      ref.read(recordShareSessionDroppedProvider.notifier)._set(true);
-      await _keep(null);
+      await _drop(_DropReason.unknownToServer);
     } else if (status == 409 && error == "account_deleting") {
       await _markDeleting(current);
     }
@@ -733,19 +786,17 @@ const loginDeletionNoticeDays = 30;
 /// The deletion day the device warns about at start-up, or null when it warns about none: it warns while it remembers
 /// a login and is not logged in, from [loginDeletionNoticeDays] days before the remembered deletion day until the day
 /// before it, today being the UTC epoch day of the device clock.
-/// Not logged in means no session, or a session whose expiry has passed by the device clock (the server refuses it,
-/// though the device has not been told so yet); a session that can only continue deleting its account is logged in.
+/// Not logged in means the device holds no session; [RecordShareSession] holds none the server refuses by its expiry,
+/// and one that can only continue deleting its account counts as logged in.
 final loginDeletionNoticeProvider = Provider<int?>((ref) {
   final remembered = ref.watch(rememberedLoginProvider);
   if (remembered == null) {
     return null;
   }
-  final session = ref.watch(recordShareSessionProvider);
-  final now = DateTime.now();
-  if (session != null && (session.deleting || session.expiresAt * 1000 > now.millisecondsSinceEpoch)) {
+  if (ref.watch(recordShareSessionProvider) != null) {
     return null;
   }
-  final today = now.millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
+  final today = DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
   final deletion = remembered.deletionDay;
   return deletion - loginDeletionNoticeDays <= today && today < deletion ? deletion : null;
 });
@@ -757,13 +808,18 @@ final returnedLoginProvider = FutureProvider<LoginOutcome?>(
   (ref) => ref.read(recordShareSessionProvider.notifier).resumeLogin(),
 );
 
-/// Whether the device holds no session because the server dropped it: a sharing or a sync request answered 401
-/// ([RecordShareSession.answered]), and the user has not logged in since. False where the user logged out, deleted the
+/// Whether the device holds no session because the server no longer accepts it: a sharing or a sync request answered
+/// 401 ([RecordShareSession.answered]), or the session's expiry passed by the device clock, and the user has not
+/// logged in since. False where the user logged out, deleted the
 /// account, or never logged in, so the screen tells the two apart. Only [RecordShareSession] sets it, and it is kept in
 /// memory and not on disk: starting the app again shows the device logged out.
 class RecordShareSessionDropped extends Notifier<bool> {
   @override
-  bool build() => false;
+  bool build() {
+    // Read, not watched: the flag starts from the load and later changes only through [_set].
+    ref.read(recordShareSessionProvider);
+    return ref.read(recordShareSessionProvider.notifier)._droppedOnLoad;
+  }
 
   void _set(bool dropped) => state = dropped;
 }

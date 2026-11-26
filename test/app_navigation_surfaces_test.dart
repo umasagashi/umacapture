@@ -121,7 +121,7 @@ void main() {
 
       await StorageBox(StorageBoxKey.recordShares).push(
         shareSessionKey,
-        const ShareSession(token: 'token', expiresAt: 1792000000, accountId: 'acct-0001', deleting: false).toJson(),
+        const ShareSession(token: 'token', expiresAt: 4102444800, accountId: 'acct-0001', deleting: false).toJson(),
       );
       // Tall enough for every card at once: the page lists its cards lazily.
       tester.view.physicalSize = const Size(1200, 1600);

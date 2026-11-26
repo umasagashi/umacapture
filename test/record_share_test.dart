@@ -312,9 +312,16 @@ class _FakeHandover implements LoginHandover {
 const _token = "TOKENtokenTOKENtokenTOKENtokenTOKENtoken123";
 const _accountId = "acct-0001";
 
+/// The expiry the sessions of these tests carry unless a test says otherwise: 2100-01-01 UTC, fixed so no run day
+/// finds it passed.
+const _farExpiry = 4102444800;
+
+/// An expiry already passed: 2026-10-14 UTC.
+const _pastExpiry = 1792000000;
+
 Map<String, Object?> _claimed() => {
   "token": _token,
-  "expires_at": 1792000000,
+  "expires_at": _farExpiry,
   "account_id": _accountId,
   "deleting": false,
   "last_login_day": _lastLoginDay,
@@ -489,10 +496,11 @@ void main() {
     return session.resumeLogin();
   }
 
-  Future<void> storeSession({bool deleting = false}) => StorageBox(StorageBoxKey.recordShares).push(
-    shareSessionKey,
-    ShareSession(token: _token, expiresAt: 1792000000, accountId: _accountId, deleting: deleting).toJson(),
-  );
+  Future<void> storeSession({bool deleting = false, int expiresAt = _farExpiry}) =>
+      StorageBox(StorageBoxKey.recordShares).push(
+        shareSessionKey,
+        ShareSession(token: _token, expiresAt: expiresAt, accountId: _accountId, deleting: deleting).toJson(),
+      );
 
   Future<void> storeRememberedLogin() =>
       StorageBox(StorageBoxKey.recordShares).push(rememberedLoginKey, _remembered.toJson());
@@ -2333,6 +2341,39 @@ void main() {
       expect(StorageBox(StorageBoxKey.recordShares).entries().map((e) => e.key), [rememberedLoginKey]);
     });
 
+    testWidgets('ISS-0108: a stored session whose expiry has passed opens the account logged out, as a session the '
+        'server dropped: the last login and its deletion day, the login action, the sync card telling the drop, and no '
+        'session left in the store, asking no server', (tester) async {
+      await storeSession(expiresAt: _pastExpiry);
+      await storeRememberedLogin();
+      container = containerFor([]);
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      final last = epochDayText(_lastLoginDay);
+      expect(find.text('ログインしていません。\n最終ログイン: $last（${epochDayText(_deletionDay)} 以降に削除）'), findsOneWidget);
+      expect(find.text('Google でログイン'), findsOneWidget);
+      for (final action in loggedInActions) {
+        expect(find.text(action), findsNothing, reason: action);
+      }
+      expect(find.text('サーバーとのログインが切れたため、ログアウトしました。もう一度ログインすると、共有と同期を続けられます。'), findsOneWidget);
+      expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNull);
+      expect(StorageBox(StorageBoxKey.recordShares).pull<String>(rememberedLoginKey), isNotNull);
+      expect(server.sent, isEmpty);
+    });
+
+    testWidgets('ISS-0108: a stored deleting session whose expiry has passed is kept, and the account still tells the '
+        'deletion and offers to resume it', (tester) async {
+      await storeSession(deleting: true, expiresAt: _pastExpiry);
+      container = containerFor([]);
+      await mountAccount(tester);
+      await tester.pumpAndSettle();
+
+      expect(find.text('アカウントを削除しています。'), findsOneWidget);
+      expect(find.text('削除を再開'), findsOneWidget);
+      expect(StorageBox(StorageBoxKey.recordShares).pull<String>(shareSessionKey), isNotNull);
+    });
+
     testWidgets('a logout from the account ends a selection the table began under the share column it filtered', (
       tester,
     ) async {
@@ -3685,6 +3726,16 @@ void main() {
       await start(tester);
 
       expect(warning(), findsNothing);
+    });
+
+    testWidgets('ISS-0108: a device whose stored session has expired is not logged in, and warns', (tester) async {
+      await storeDueIn(10);
+      await storeSession(expiresAt: _pastExpiry);
+      container = containerFor([]);
+      await start(tester);
+
+      expect(find.text(warningText(_today() + 10)), findsOneWidget);
+      await outlast(tester);
     });
 
     testWidgets('F2: the warning is given on the first and on the last day of the window, and not on the day before it '
