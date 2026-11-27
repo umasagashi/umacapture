@@ -14,6 +14,7 @@ import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -66,6 +67,23 @@ bool commitStorageChange(void Function() change) {
   }
 }
 
+/// Whether a delete holds the record [recordId] now (in either store), announcing the refusal of a rating or memo
+/// save where it does. A save is refused before it touches its controller: once the delete's claim holds the record,
+/// the cleanup that follows the erase removes every cell of it, so a value saved then would be accepted only to be
+/// erased without anyone approving that — by a sync round's delete or by the user's own.
+bool cellSaveRefusedWhileDeleting(RefBase ref, String recordId) {
+  final info = ref.read(pathInfoProvider);
+  final holder = ref.read(longReadRegistryProvider.notifier).heldBy([
+    for (final source in RecordSource.values) recordDirOfId(info, source, recordId),
+  ], disregarding: {...LongReadKind.values}..remove(LongReadKind.delete));
+  if (holder == null) return false;
+  announceLongReadNotStarted(
+    LongReadNotStartedException.busy(holder),
+    operation: "Saving a rating or memo of the record $recordId",
+  );
+  return true;
+}
+
 /// Persists [rating] for [recordId], announcing a refusal. Answers whether it was saved.
 ///
 /// [notify] is what separates the two ways a rating is entered: a drag on a cell
@@ -79,6 +97,7 @@ bool saveRating(
   required double rating,
   required bool notify,
 }) {
+  if (cellSaveRefusedWhileDeleting(ref, recordId)) return false;
   final controller = ref.read(charaDetailRecordRatingProvider(storageKey).notifier);
   return commitStorageChange(() {
     final changed = notify

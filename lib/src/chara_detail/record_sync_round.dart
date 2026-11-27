@@ -109,6 +109,7 @@ import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/record_binding.dart';
 import '/src/chara_detail/record_operation.dart';
 import '/src/chara_detail/record_sync_app_place.dart';
+import '/src/chara_detail/record_sync_confirm.dart';
 import '/src/chara_detail/record_sync_list.dart';
 import '/src/chara_detail/record_sync_merge.dart';
 import '/src/chara_detail/record_sync_place.dart';
@@ -598,6 +599,10 @@ enum SyncRoundEnd {
 
   /// The desktop app closes ([SyncPlacing]): the round put nothing in place, and the base did not move.
   closing,
+
+  /// The user declined what an attempt would change on the device ([syncConfirmItemsOf]): that attempt put nothing in
+  /// place, and the base did not move. What an earlier attempt of the round put in place, approved, stays.
+  declined,
 }
 
 /// What a round did, and what the device that ran it tells the user ([R3-5]).
@@ -883,6 +888,7 @@ Future<SyncRoundOutcome> runSyncRound(
     place,
     server,
     account: account,
+    approve: ref.read(syncApproveProvider),
     bindingChunk: bindingChunk,
     imageForm: ref.read(syncImageFormSettingProvider),
     roomStop: ref.read(syncRoomStopProvider),
@@ -909,11 +915,13 @@ Future<SyncRoundOutcome> runSyncRound(
 /// room, which the round reads and raises ([SyncRoomStop]); none, and the round keeps no mark from one round to the next.
 /// [placing]: what the close of the desktop app waits for ([SyncPlacing]); none, and nothing waits for the round.
 /// [progress]: where the round tells how far it has got with its long steps, and that it ended ([SyncProgress]); none,
-/// and it tells nothing.
+/// and it tells nothing. [approve]: asks the user to approve what an attempt would change on the device
+/// ([syncConfirmItemsOf]) before it puts anything in place; declined, the round ends [SyncRoundEnd.declined].
 Future<SyncRoundOutcome> runSyncRoundOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
+  required SyncApprove approve,
   int bindingChunk = syncBindingChunk,
   SyncImageFormSetting? imageForm,
   SyncRoomStop? roomStop,
@@ -925,6 +933,7 @@ Future<SyncRoundOutcome> runSyncRoundOn<C>(
       place,
       server,
       account: account,
+      approve: approve,
       bindingChunk: bindingChunk,
       imageForm: imageForm,
       roomStop: roomStop,
@@ -940,6 +949,7 @@ Future<SyncRoundOutcome> _runSyncRoundOn<C>(
   SyncPlace<C> place,
   SyncServer server, {
   required String account,
+  required SyncApprove approve,
   required int bindingChunk,
   required SyncImageFormSetting? imageForm,
   required SyncRoomStop? roomStop,
@@ -949,6 +959,9 @@ Future<SyncRoundOutcome> _runSyncRoundOn<C>(
   var (replacements, restored, splitOff, added) = (0, 0, 0, 0);
   // The records the round has tried to work out the binding of: one it could not is not tried again in this round.
   final tried = <String>{};
+  // The confirmation items the user approved in this round: an attempt that applies only these asks nothing. Kept for
+  // the round alone, so the next round asks again of the same.
+  final approved = <SyncConfirmItem>{};
   // What the image steps of the round's attempts share: one form read, and one end of the puts.
   final images = _RoundImages(imageForm, roomStop ?? SyncRoomStop());
   final placed = placing ?? SyncPlacing();
@@ -960,6 +973,8 @@ Future<SyncRoundOutcome> _runSyncRoundOn<C>(
       account: account,
       bindingChunk: bindingChunk,
       tried: tried,
+      approve: approve,
+      approved: approved,
       images: images,
       placing: placed,
       progress: progress,
@@ -1061,6 +1076,8 @@ Future<_Attempt> _attempt<C>(
   required String account,
   required int bindingChunk,
   required Set<String> tried,
+  required SyncApprove approve,
+  required Set<SyncConfirmItem> approved,
   required _RoundImages images,
   required SyncPlacing placing,
   required SyncProgress? progress,
@@ -1225,6 +1242,20 @@ Future<_Attempt> _attempt<C>(
         serverStop: syncServerStopOf(error),
       ),
     );
+  }
+
+  // The user approves what the attempt changes on the device before any of it is in place: asked where it applies an
+  // item not approved in this round yet — of the records held back for want of their bindings, those the round may
+  // still work out too, which a later attempt of the round applies, and asks again of where it applies another value.
+  final applies = syncConfirmItemsOf(merged, local.list, kept);
+  if (!approved.containsAll(applies)) {
+    final askKept = {...unreadHeld, ..._heldBack(unbound.intersection(tried), merged, local.list, there)};
+    final asked = syncConfirmItemsOf(merged, local.list, askKept);
+    if (!await approve(SyncConfirmRequest(account: account, items: asked))) {
+      logger.i('Sync applies nothing: the user declined what the round would change on the device.');
+      return _ended(_told(SyncRoundEnd.declined, counts, local.list, placed: const {}, withheld: withheld));
+    }
+    approved.addAll(asked);
   }
 
   // 4. The result in place, then the base at the server's list: the span the close of the desktop app waits for.
@@ -2309,8 +2340,15 @@ Future<({Map<String, String> written, SyncWriteStop? stop})> _apply<C>(
       // off, so the id takes the result's cells and pairs.
       if (!await take(result, {id}, _pairsSplitOff(before, pairs, id, to, splitting))) return stopped;
     }
-    if (await place.remove({for (final MapEntry(key: id, value: row) in removed.entries) id: row.record})
-        case final stop?) {
+    // Each removed record goes with the cells the round read of it: those the confirmation showed.
+    final removals = {
+      for (final MapEntry(key: id, value: row) in removed.entries)
+        id: (record: row.record, cells: <String, SyncValue<String?>>{}),
+    };
+    for (final MapEntry(key: (column, id), :value) in local.list.cells.entries) {
+      removals[id]?.cells[column] = value;
+    }
+    if (await place.remove(removals) case final stop?) {
       return stoppedBy(stop);
     }
   } finally {

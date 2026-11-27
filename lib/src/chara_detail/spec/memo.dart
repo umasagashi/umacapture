@@ -35,6 +35,7 @@ const _unset = Object();
 
 /// Persists [memo] for [recordId], announcing a refusal. Answers whether it was saved.
 bool saveMemo(RefBase ref, {required String storageKey, required String recordId, required String? memo}) {
+  if (cellSaveRefusedWhileDeleting(ref, recordId)) return false;
   final controller = ref.read(charaDetailRecordMemoProvider(storageKey).notifier);
   return commitStorageChange(() => controller.updateMemo(recordId: recordId, memo: memo));
 }

@@ -547,6 +547,12 @@ class _FilePlace implements SyncPlace<_Carried> {
     return true;
   }
 
+  /// Whether the device holds the cells of the record [id] now as the round read them ([read]: column → cell).
+  bool _cellsHeldAsRead(String id, Map<String, SyncValue<String?>> read) => mapEquals({
+    for (final MapEntry(key: (column, of), :value) in d.store.cells.entries)
+      if (of == id) column: _listCellOf(value),
+  }, read);
+
   /// Whether the device holds the record [id] now as the round read it ([read]; none where null), or as [orAs].
   bool _heldAsRead(String id, SyncRecord? read, {SyncRecord? orAs}) {
     final now = switch (d.store.records[id]) {
@@ -601,13 +607,13 @@ class _FilePlace implements SyncPlace<_Carried> {
   }
 
   @override
-  Future<SyncWriteStop?> remove(Map<String, SyncRecord> asRead) async {
+  Future<SyncWriteStop?> remove(Map<String, SyncRemoval> asRead) async {
     if (!_lands()) return SyncWriteStop.failed;
     for (final archiveStore in [false, true]) {
       var left = false;
-      for (final MapEntry(key: id, value: read) in asRead.entries) {
+      for (final MapEntry(key: id, value: (record: read, :cells)) in asRead.entries) {
         if ((read.stage.value != null) != archiveStore) continue;
-        if (!_heldAsRead(id, read)) {
+        if (!_heldAsRead(id, read) || !_cellsHeldAsRead(id, cells)) {
           left = true;
           continue;
         }

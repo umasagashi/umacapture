@@ -86,6 +86,10 @@ class SyncPublication<C> {
   final List<String>? imageSources;
 }
 
+/// A record a round removes ([SyncPlace.remove]), as the round read it: its [record], and its [cells] — column
+/// ([syncColumnOf]) → the cell, as the round's list read it, the values the user approved removing with it.
+typedef SyncRemoval = ({SyncRecord record, Map<String, SyncValue<String?>> cells});
+
 /// Why a write of a record a round makes ([SyncPlace.publish], [SyncPlace.remove]) wrote nothing.
 enum SyncWriteStop {
   /// The device holds the record not as the round read it: an operation of this device changed it since — the user's,
@@ -242,8 +246,10 @@ abstract interface class SyncPlace<C> {
   /// (by the stage each was read in), each only where the device holds it then as [asRead] has it, asked under its
   /// lock. Answers null where every one went; else it stops there, and answers why: a record left because the device
   /// holds it not as [asRead] has it ([SyncWriteStop.changed]), or a delete that failed or a record that could not be
-  /// read ([SyncWriteStop.failed]), which outweighs the first.
-  Future<SyncWriteStop?> remove(Map<String, SyncRecord> asRead);
+  /// read ([SyncWriteStop.failed]), which outweighs the first. A record whose cells the device holds then not as
+  /// [SyncRemoval.cells] has them is left as well ([SyncWriteStop.changed]): a value saved since the round read it is
+  /// not one the user approved removing.
+  Future<SyncWriteStop?> remove(Map<String, SyncRemoval> asRead);
 
   /// The stores read again what the round published, as after an import: the records [ids] whose publication
   /// committed. Called once the round stops placing records, whether or not it went on.

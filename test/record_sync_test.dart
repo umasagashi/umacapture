@@ -29,6 +29,7 @@ import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/record_quarantine_ledger.dart';
 import 'package:umacapture/src/chara_detail/record_share_session.dart';
 import 'package:umacapture/src/chara_detail/record_sync.dart';
+import 'package:umacapture/src/chara_detail/record_sync_confirm.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_merge.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
@@ -59,7 +60,7 @@ import 'package:umacapture/src/gui/chara_detail/column_spec_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart' show ImageSizeContainer;
 import 'package:umacapture/src/gui/common.dart' show DialogLayer;
-import 'package:umacapture/src/gui/toast.dart' show plainToastEventProvider;
+import 'package:umacapture/src/gui/toast.dart' show ToastData, plainToastEventProvider;
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart' show AppSemanticColors;
 import 'package:umacapture/src/preference/storage_box.dart';
@@ -119,6 +120,19 @@ class _Dropped implements Exception {
   const _Dropped();
 }
 
+/// What [request] asks of, an item each: a record's change as its kind and id, a rating's or memo's as its column and id.
+Set<(String, String)> _askedOf(SyncConfirmRequest request) => {
+  for (final item in request.items)
+    switch (item) {
+      SyncRecordChange(:final kind, :final id) => (kind.name, id),
+      SyncCellChange(:final column, :final id) => (column, id),
+    },
+};
+
+/// The item of [request] that changes the record [id].
+SyncRecordChange _changeOf(SyncConfirmRequest request, String id) =>
+    request.items.whereType<SyncRecordChange>().singleWhere((item) => item.id == id);
+
 /// [server], counting every request a round makes of it; [beforeGeneration], where given, is awaited before the first.
 class _CountedServer implements SyncServer {
   _CountedServer(this.server, {this.beforeGeneration});
@@ -126,6 +140,9 @@ class _CountedServer implements SyncServer {
   final SyncServer server;
   final Future<void> Function()? beforeGeneration;
   var calls = 0;
+
+  /// The requests that write on the server: a body, a part, the root, an image or the image form.
+  var writes = 0;
 
   @override
   Future<({int generation, String? root})> readGeneration() async {
@@ -155,18 +172,21 @@ class _CountedServer implements SyncServer {
   @override
   Future<void> putBodies(List<({String name, String body})> bodies) {
     calls++;
+    writes++;
     return server.putBodies(bodies);
   }
 
   @override
   Future<void> putPart(String name, String text) {
     calls++;
+    writes++;
     return server.putPart(name, text);
   }
 
   @override
   Future<int> replaceRoot(int generation, String name, String text) {
     calls++;
+    writes++;
     return server.replaceRoot(generation, name, text);
   }
 
@@ -179,6 +199,7 @@ class _CountedServer implements SyncServer {
   @override
   Future<void> putImageForm(String form) {
     calls++;
+    writes++;
     return server.putImageForm(form);
   }
 
@@ -191,6 +212,7 @@ class _CountedServer implements SyncServer {
   @override
   Future<void> putImage(String name, Uint8List bytes, {required bool jpeg}) {
     calls++;
+    writes++;
     return server.putImage(name, bytes, jpeg: jpeg);
   }
 
@@ -852,6 +874,30 @@ void main() {
       expect(SyncKeptList.decode(File(syncBaseFile(a.info).path).readAsBytesSync()).generation, server.generation);
     });
 
+    test('approval is of what an attempt applies: a retry refused as stale asks again for what the other device '
+        'removed meanwhile, and declined there leaves it', () async {
+      seed(a);
+      await a.round(server);
+      await b.round(server);
+      await deleteRecords(a, {'R2'});
+      await a.round(server);
+      // B has a change of its own to send: its replacement is refused as stale once A removed R3 meanwhile.
+      await rate(b, 'R1', 5);
+      final approval = b.approval = ScriptedApproval((request, index) async {
+        if (index > 0) return false;
+        await deleteRecords(a, {'R3'});
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+        return true;
+      });
+
+      final outcome = await b.round(server);
+      expect((outcome.end, outcome.replacements), (SyncRoundEnd.declined, 1), reason: 'the first was refused as stale');
+      expect(approval.asked, hasLength(2), reason: 'the retry asked again');
+      expect(_askedOf(approval.asked[0]), {('deleted', 'R2')});
+      expect(_askedOf(approval.asked[1]), {('deleted', 'R3')});
+      expect((await listOf(b)).rows.keys.toSet(), {'R1', 'R3'}, reason: 'the approved removal stays, the other not');
+    });
+
     test('refused as stale twice, the round stops: the device and its base stay as they were', () async {
       seed(a);
       await a.round(server);
@@ -1295,6 +1341,38 @@ void main() {
         onServer().rows['R1']!.bodyName,
         reason: 'the id B\'s record is split off holds the server\'s body',
       );
+    });
+
+    test("rule 3, check 1 (S7): a record the round places nowhere is asked for as a replacement, and declined, the "
+        "device's version stays", () async {
+      seedUmas(a, ['R1', 'R2', 'R3']);
+      await a.round(server);
+      await b.round(server);
+      clockAt(hour(9));
+      // B meets the server with no base and splits its merge off R1; both devices then hold the record split off.
+      await b.merge('R1', 'R2', keep: 'R2');
+      File(syncBaseFile(b.info).path).deleteSync();
+      expect((await b.round(server)).splitOff, 1);
+      await a.round(server);
+      final splitId = onServer().rows.keys.singleWhere((id) => id.startsWith('R1$recordSyncSplitSeparator'));
+      // B changes R1 and removes the record split off; A's merge makes its R1 of what the record split off is made of.
+      b.close();
+      await b.merge('R1', 'R3', keep: 'R3');
+      await deleteRecords(b, {splitId});
+      await a.merge('R1', 'R2', keep: 'R1');
+      expect((await b.round(server)).end, SyncRoundEnd.done);
+      final mine = (await listOf(a)).rows['R1']?.record;
+      if (mine == null) fail('R1 is missing before the round');
+      expect(mine.absorbed, {'R2'});
+
+      final approval = a.approval = ScriptedApproval((_, _) async => false);
+      expect((await a.round(server)).end, SyncRoundEnd.declined);
+      final replaced = _changeOf(approval.asked.single, 'R1');
+      expect((replaced.kind, replaced.to), (SyncConfirmKind.replaced, null), reason: 'placed nowhere');
+      final kept = (await listOf(a)).rows['R1']?.record;
+      if (kept == null) fail('R1 is missing after the declined round');
+      expect(kept.absorbed, mine.absorbed, reason: "A's version stays");
+      expect(kept.body.content, mine.body.content);
     });
 
     test(
@@ -1939,6 +2017,93 @@ void main() {
         expect(list.rows.keys.toSet(), {'R1', 'R3'});
         expect(list.rows['R1']!.record.absorbed, {'R2'});
       }
+    });
+
+    test('a memo saved while a round waits for approval of its record\'s deletion keeps the record and the memo: the '
+        'round leaves it, and the next asks with the memo', () async {
+      seedUmas(a, ['R1', 'R2']);
+      a.seedColumn('memo', 'm1', title: 'Note');
+      await a.round(server);
+      await b.round(server);
+      await deleteRecords(a, {'R1'});
+      await a.round(server);
+      final approval = b.approval = ScriptedApproval((request, index) async {
+        if (index > 0) return false;
+        await writeMemo(b, 'R1', 'new');
+        return true;
+      });
+
+      expect((await b.round(server)).end, SyncRoundEnd.changedMeanwhile, reason: 'the round leaves R1 to the next');
+      expect(_askedOf(approval.asked.single), {('deleted', 'R1')}, reason: 'the approval was of R1 with no memo');
+      expect((await listOf(b)).rows.keys, contains('R1'));
+      expect(memosOnDisk(b)['R1'], 'new');
+      final container = await b.open();
+      expect(container.read(charaDetailRecordMemoProvider('m1')).value?.data['R1'], 'new');
+
+      expect((await b.round(server)).end, SyncRoundEnd.declined);
+      expect(_askedOf(approval.asked[1]), {('deleted', 'R1'), ('memo/m1', 'R1')}, reason: 'asked again, with the memo');
+      final cleared = approval.asked[1].items.whereType<SyncCellChange>().single;
+      expect((cleared.was.value, cleared.clears), (jsonEncode('new'), true));
+      expect((await listOf(b)).rows.keys, contains('R1'));
+      expect(memosOnDisk(b)['R1'], 'new');
+    });
+
+    test('a record the other device removed goes, though a column storage the user removed still holds its cell: the '
+        'removed storage is compared as the round read it', () async {
+      seedUmas(a, ['R1', 'R2']);
+      a.seedColumn('rating', 'gone', title: 'Old', titleCleared: true, writtenAt: {'R1': 1767225600500});
+      await a.round(server);
+      await b.round(server);
+      await deleteRecords(b, {'R1'});
+      await b.round(server);
+      expect((await listOf(a)).cells[('rating/gone', 'R1')], isNotNull, reason: 'the round reads the removed storage');
+
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+      expect((await listOf(a)).rows.keys.toSet(), {'R2'});
+    });
+
+    test('a rating or memo saved while a delete holds its record is refused, and announced: the delete leaves no value '
+        'of it', () async {
+      seedUmas(b, ['R1', 'R2']);
+      b.seedColumn('rating', 'r1', title: 'Score');
+      b.seedColumn('memo', 'm1', title: 'Note');
+      final container = await b.open();
+      final toasts = <ToastData>[];
+      final subscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
+      addTearDown(subscription.close);
+      await container.read(charaDetailRecordRatingProvider('r1').future);
+      await container.read(charaDetailRecordMemoProvider('m1').future);
+      final ref = container.read(containerRefProvider);
+      final entered = Completer<void>();
+      final go = Completer<void>();
+      final delete = container
+          .read(charaDetailRecordStorageLoaderProvider.notifier)
+          .deleteAllAsync(
+            {'R1'},
+            effects: recordDeleteEffects(container),
+            onlyIf: (_) async {
+              entered.complete();
+              await go.future;
+              return true;
+            },
+          );
+      await entered.future;
+
+      expect(saveMemo(ref, storageKey: 'm1', recordId: 'R1', memo: 'late'), isFalse);
+      expect(saveRating(ref, storageKey: 'r1', recordId: 'R1', rating: 4, notify: true), isFalse);
+      expect(
+        saveMemo(ref, storageKey: 'm1', recordId: 'R2', memo: 'kept'),
+        isTrue,
+        reason: 'only R1 is held',
+      );
+      go.complete();
+      expect((await delete).isSuccess, isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(toasts.map((toast) => toast.description), [longReadBusyMessage(), longReadBusyMessage()]);
+      expect(container.read(charaDetailRecordMemoProvider('m1')).value?.data, {'R2': 'kept'});
+      expect(container.read(charaDetailRecordRatingProvider('r1')).value?.data.containsKey('R1'), isFalse);
+      expect(await container.read(charaDetailRecordMemoProvider('m1').notifier).flush(), isTrue);
+      expect(memosOnDisk(b), {'R2': 'kept'});
     });
 
     test('a pair this device dismisses after a round read it, and before the round puts the pairs in place, stays: '
@@ -5331,6 +5496,67 @@ void main() {
     });
 
     // [R6-1], [R6-4] and R1: the switch of sync, through the entry the app asks for a round with ([RecordSync.round]).
+    test('a round that would delete, archive, replace or overwrite asks first; declined, it puts nothing in place and '
+        'writes nothing on the server', () async {
+      seedUmas(a, ['R1', 'R2', 'R3', 'R4']);
+      a.seedColumn('memo', 'm1', title: 'Note', data: {'R4': 'kept'}, writtenAt: {'R4': 1767225600500});
+      await a.round(server);
+      await b.round(server);
+      final r2 = b.charaDetail / 'active' / 'R2';
+      File(r2.filePath('skill.png').path).writeAsStringSync('the skills R2 was read from');
+      final r3 = (await listOf(b)).rows['R3']!.record.body;
+      // B has a change of its own to send, which a round it lets apply sends.
+      await writeMemo(b, 'R2', 'from B');
+
+      // A deletes R1, archives R2 without images, takes R3 again from another body's zip, and clears R4's memo.
+      await deleteRecords(a, {'R1'});
+      final container = await a.open();
+      await container
+          .read(charaArchiveControllerProvider.notifier)
+          .archive(['R2'], ArchiveImageOption.none, effects: archiveEffects(container));
+      final c = SyncTestDevice('c');
+      addTearDown(c.dispose);
+      c.seedRecord('R3', binding: own('R3'), fans: 4242);
+      final zip = await c.exportZip('R3');
+      clockAt(hour(9));
+      await a.importZip(zip);
+      await container.read(charaDetailRecordMemoProvider('m1').future);
+      expect(saveMemo(container.read(containerRefProvider), storageKey: 'm1', recordId: 'R4', memo: null), isTrue);
+      expect(await container.read(charaDetailRecordMemoProvider('m1').notifier).flush(), isTrue);
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+
+      final approval = b.approval = ScriptedApproval((_, _) async => false);
+      await b.setSyncOn(true);
+      final counted = _CountedServer(server);
+      final outcome = await b.roundAsAsked(counted);
+
+      expect(outcome?.end, SyncRoundEnd.declined);
+      expect(approval.asked, hasLength(1));
+      expect(_askedOf(approval.asked.single), {
+        ('deleted', 'R1'),
+        ('archived', 'R2'),
+        ('replaced', 'R3'),
+        ('memo/m1', 'R4'),
+      });
+      expect(
+        approval.asked.single.items.whereType<SyncCellChange>().single.clears,
+        isTrue,
+        reason: 'the memo is cleared',
+      );
+      final list = await listOf(b);
+      expect(list.rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4'}, reason: 'nothing is deleted');
+      expect(list.rows['R2']!.record.stage.value, isNull, reason: 'R2 is not archived');
+      expect(File(r2.filePath('skill.png').path).readAsStringSync(), 'the skills R2 was read from');
+      expect(
+        (list.rows['R3']!.record.body.content, list.rows['R3']!.record.body.time),
+        (r3.content, r3.time),
+        reason: 'R3 keeps its body',
+      );
+      expect(list.cells[('memo/m1', 'R4')]?.value, '"kept"');
+      expect(counted.writes, 0, reason: 'nothing is written on the server: no body, part, root or image');
+      expect(counted.calls, greaterThan(0), reason: 'positive control: the round read the server');
+    });
+
     test('[R6-1] (R1): with sync off, a round asked for asks the server nothing and writes nothing of the device\'s; '
         'turned on, it runs, and the app keeps what it told', () async {
       seedUmas(a, ['R1']);
@@ -6735,6 +6961,73 @@ void main() {
           told: told,
         );
       }
+
+      test('approval is of the value applied: a record held back for its binding, whose change the other device alters '
+          'meanwhile, is asked again', () async {
+        final (x, y, there) = (SyncTestDevice('x'), SyncTestDevice('y'), FakeSyncServer());
+        addTearDown(x.dispose);
+        addTearDown(y.dispose);
+        // By record part, L0002 is worked out first and L0001 is held back for the next part ([syncRecordPartOf]).
+        const first = 'L0002';
+        const held = 'L0001';
+        expect(syncRecordPartOf(first), lessThan(syncRecordPartOf(held)));
+        // Each device holds both from before the binding, with a skill image of its own.
+        for (final device in [x, y]) {
+          for (final (i, id) in [held, first].indexed) {
+            final dir = device.seedRecord(id, bodyWrittenAt: 1767225600100 + i, fans: 1000 + i);
+            File(dir.filePath('skill.png').path).writeAsBytesSync(
+              img.encodePng(img.Image(width: 900, height: 10)..clear(img.ColorRgb8(40, 80 + 40 * i, 200))),
+            );
+          }
+        }
+        Future<void> archive(String id, ArchiveImageOption option) async {
+          final container = await y.open();
+          await container
+              .read(charaArchiveControllerProvider.notifier)
+              .archive([id], option, effects: archiveEffects(container));
+          expect((await y.round(there)).end, SyncRoundEnd.done);
+        }
+
+        Future<void> recognizeAgain(int fans) async {
+          await y.recognizeAgain(held, (result) => result['fans'] = fans);
+          expect((await y.round(there)).end, SyncRoundEnd.done);
+        }
+
+        expect((await y.round(there)).end, SyncRoundEnd.done);
+        await archive(first, ArchiveImageOption.none);
+        await recognizeAgain(8);
+        final image = File((x.charaDetail / 'active' / held).filePath('skill.png').path);
+        final images = image.readAsBytesSync();
+        final body = (await x.read()).list.rows[held]?.record.body;
+        if (body == null) fail('the record held back is missing before the round');
+        final approval = x.approval = ScriptedApproval((request, index) async {
+          if (index > 0) return false;
+          // Y recognizes the record held back once more: the body the round would apply to it is another one now.
+          await recognizeAgain(9);
+          return true;
+        });
+
+        expect((await x.round(there, bindingChunk: 1)).end, SyncRoundEnd.declined);
+        expect(approval.asked, hasLength(2), reason: 'the value the other device applies now was not approved');
+        expect(_askedOf(approval.asked[0]), {('archived', first), ('replaced', held)});
+        expect(_askedOf(approval.asked[1]), {('replaced', held)});
+        final (asked, again) = (_changeOf(approval.asked[0], held), _changeOf(approval.asked[1], held));
+        expect(
+          (again.kind, again.id, again.was),
+          (asked.kind, asked.id, asked.was),
+          reason: 'one change of one record',
+        );
+        expect(asked.to?.content, isNot(again.to?.content), reason: 'the body applied is another one');
+        expect(again.to, isNot(asked.to), reason: 'of another value applied');
+        final list = (await x.read()).list;
+        final approved = list.rows[first];
+        if (approved == null) fail('the approved record is missing');
+        expect(approved.record.stage.value, ArchiveImageOption.none, reason: 'the approved part is in place');
+        final kept = list.rows[held]?.record.body;
+        if (kept == null) fail('the record held back is missing after the declined round');
+        expect((kept.content, kept.time), (body.content, body.time), reason: 'the record held back keeps its body');
+        expect(image.readAsBytesSync(), images, reason: 'its image stays');
+      });
 
       test('G134: a first round that works the bindings out in parts ends as one that works them all out first: the '
           'records, the base and what it tells', () async {

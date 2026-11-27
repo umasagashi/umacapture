@@ -6,7 +6,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, mapEquals;
 
 import '/src/chara_detail/archive_executor_shared.dart';
 import '/src/chara_detail/chara_detail_record.dart';
@@ -414,12 +414,12 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
   ];
 
   @override
-  Future<SyncWriteStop?> remove(Map<String, SyncRecord> asRead) async {
+  Future<SyncWriteStop?> remove(Map<String, SyncRemoval> asRead) async {
     final active = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final archive = ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
     for (final (store, archived) in [(active as CharaDetailRecordMutator, false), (archive, true)]) {
       final ids = {
-        for (final MapEntry(key: id, value: record) in asRead.entries)
+        for (final MapEntry(key: id, value: (:record, cells: _)) in asRead.entries)
           if ((record.stage.value != null) == archived) id,
       };
       if (ids.isEmpty) continue;
@@ -429,7 +429,8 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
         ids,
         effects: effects,
         onlyIf: (id) async {
-          final stop = await _leftSinceRead(id, asRead[id]);
+          final read = asRead[id];
+          final stop = await _leftSinceRead(id, read?.record) ?? await _cellsLeftSinceRead(id, read?.cells ?? const {});
           if (stop != null) left[id] = stop;
           return stop == null;
         },
@@ -439,6 +440,61 @@ class AppSyncPlace implements SyncPlace<AppSyncCarried> {
       if (deleted.left.isNotEmpty) return SyncWriteStop.changed;
     }
     return null;
+  }
+
+  /// Null where the device holds the cells of the record [id] now as the round read them ([read]: column → cell); else
+  /// why the round leaves the record. A value the user saved since — a rating or a memo, one where none was read
+  /// included, or one cleared — is not one the user approved removing ([SyncWriteStop.changed]); a column storage that
+  /// cannot be read is [SyncWriteStop.failed].
+  ///
+  /// The cells are read from the column controllers, not from the files: a save changes a controller's state at once
+  /// and its file after, and no lock is held over a cell. Every controller is loaded first, and then all of them are
+  /// compared with no await between, so no save lands between the comparison and its answer.
+  Future<SyncWriteStop?> _cellsLeftSinceRead(String id, Map<String, SyncValue<String?>> read) async {
+    // The keys of [storage] compared: those listed, and those the round read a cell of the record in — a storage the
+    // user removed is listed no more, but its file keeps the record's cell with its removal time, and the round reads
+    // every file ([readLocalSyncList]).
+    Set<String> keysOf(String storage, Iterable<String> listed) => {
+      ...listed,
+      for (final column in read.keys)
+        if (column.split('/') case [final s, final key] when s == storage) key,
+    };
+    Set<String> ratingKeys() =>
+        keysOf('rating', ref.read(charaDetailRecordRatingStorageDataProvider).map((storage) => storage.key));
+    Set<String> memoKeys() =>
+        keysOf('memo', ref.read(charaDetailRecordMemoStorageDataProvider).map((storage) => storage.key));
+    try {
+      await ref.read(charaDetailRecordRatingStorageDataLoader.future);
+      await ref.read(charaDetailRecordMemoStorageDataLoader.future);
+      for (final key in ratingKeys()) {
+        await ref.read(charaDetailRecordRatingProvider(key).future);
+      }
+      for (final key in memoKeys()) {
+        await ref.read(charaDetailRecordMemoProvider(key).future);
+      }
+    } catch (error, stackTrace) {
+      logger.w('Sync leaves the record $id to the next round: a column storage cannot be read.', error, stackTrace);
+      return SyncWriteStop.failed;
+    }
+    // No await from here on.
+    SyncValue<String?>? cellOf<V>(Map<String, V> data, Map<String, int> writtenAt) =>
+        data.containsKey(id) || writtenAt.containsKey(id)
+        ? SyncValue<String?>(data.containsKey(id) ? syncCellText(data[id]) : null, writtenAt[id] ?? 0)
+        : null;
+    final now = <String, SyncValue<String?>>{};
+    for (final key in ratingKeys()) {
+      final held = ref.read(charaDetailRecordRatingProvider(key)).value;
+      if (held == null) return SyncWriteStop.failed;
+      if (cellOf(held.data, held.writtenAt) case final cell?) now[syncColumnOf('rating', key)] = cell;
+    }
+    for (final key in memoKeys()) {
+      final held = ref.read(charaDetailRecordMemoProvider(key)).value;
+      if (held == null) return SyncWriteStop.failed;
+      if (cellOf(held.data, held.writtenAt) case final cell?) now[syncColumnOf('memo', key)] = cell;
+    }
+    if (mapEquals(now, read)) return null;
+    logger.i('Sync leaves the record $id to the next round: its ratings or memos changed since the round read them.');
+    return SyncWriteStop.changed;
   }
 
   /// Null where the device holds the record [id] now, asked under its lock, as the round read it ([read]) — or as

@@ -38,6 +38,7 @@ import 'package:umacapture/src/chara_detail/record_binding.dart';
 import 'package:umacapture/src/chara_detail/record_notes.dart';
 import 'package:umacapture/src/chara_detail/record_share_session.dart';
 import 'package:umacapture/src/chara_detail/record_sync.dart';
+import 'package:umacapture/src/chara_detail/record_sync_confirm.dart';
 import 'package:umacapture/src/chara_detail/record_sync_list.dart';
 import 'package:umacapture/src/chara_detail/record_sync_round.dart';
 import 'package:umacapture/src/chara_detail/record_sync_server.dart';
@@ -137,8 +138,13 @@ class SyncTestDevice {
   Future<SyncServer> overHttp() async =>
       (await open()).read<SyncServer?>(syncServerProvider) ?? fail('the device holds no session');
 
+  /// How the device's rounds are answered where they ask the user to approve what they would change
+  /// ([syncApproveProvider]), as it is set when a round asks; where unset, every request is approved.
+  ScriptedApproval? approval;
+
   /// The device is logged in to [syncTestAccount], or as [auth] says.
   List<Override> get _overrides => [
+    syncApproveProvider.overrideWithValue((request) async => await approval?.call(request) ?? true),
     pathLayoutLoader.overrideWith((ref) async => info),
     recordSyncDioProvider.overrideWithValue(Dio()..httpClientAdapter = syncHttp ?? const _NoNetwork()),
     if (syncRequestTimeout case final timeout?) syncRequestTimeoutProvider.overrideWithValue(timeout),
@@ -1186,4 +1192,21 @@ Future<void> putDeviceList(SyncTestDevice device, FakeSyncServer server) async {
   }
   final root = jsonEncode({'format': 1, 'parts': names});
   await server.replaceRoot(server.generation, syncObjectName(utf8.encode(root)), root);
+}
+
+/// Answers the requests a device's rounds make for the user's approval ([SyncTestDevice.approval]) as [answer] says,
+/// given each request and how many came before it, and keeps every request it was asked, in order ([asked]). [answer]
+/// may wait — on a gate the test opens, or on a round of another device — before it answers.
+class ScriptedApproval {
+  ScriptedApproval(this.answer);
+
+  final Future<bool> Function(SyncConfirmRequest request, int index) answer;
+
+  /// The requests asked so far.
+  final asked = <SyncConfirmRequest>[];
+
+  Future<bool> call(SyncConfirmRequest request) {
+    asked.add(request);
+    return answer(request, asked.length - 1);
+  }
 }

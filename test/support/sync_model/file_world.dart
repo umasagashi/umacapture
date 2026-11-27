@@ -24,6 +24,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:fake_async/fake_async.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:image/image.dart' as img;
 import 'package:umacapture/src/chara_detail/archive_executor_shared.dart';
 import 'package:umacapture/src/chara_detail/archive_executor_types.dart';
@@ -1509,6 +1510,8 @@ class FDevice {
         _FilePlace(this, server, writesLanding: placeWrites),
         endpoints,
         account: '${server.account}',
+        // The model's devices approve every change a round would make: what the user answers is no part of the world.
+        approve: (_) async => true,
         roomStop: roomStop,
       ).then((o) => outcome = o, onError: (Object e, StackTrace _) => failure = e);
       async.flushMicrotasks();

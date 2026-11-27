@@ -398,7 +398,11 @@ bool syncRoundFailed(SyncRoundEnd end) => switch (end) {
   SyncRoundEnd.bodiesMissing ||
   SyncRoundEnd.failed ||
   SyncRoundEnd.operationTooLarge => true,
-  SyncRoundEnd.done || SyncRoundEnd.changedMeanwhile || SyncRoundEnd.heldByLongMemos || SyncRoundEnd.closing => false,
+  SyncRoundEnd.done ||
+  SyncRoundEnd.changedMeanwhile ||
+  SyncRoundEnd.heldByLongMemos ||
+  SyncRoundEnd.closing ||
+  SyncRoundEnd.declined => false,
 };
 
 /// [syncHaltOf] for the session the device is logged in to: what the sync card (N8) and the sync icon of the table's
