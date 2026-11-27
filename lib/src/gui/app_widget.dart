@@ -20,6 +20,7 @@ import '/src/core/utils.dart';
 import '/src/gui/addon.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
+import '/src/gui/chara_detail/sync_confirm_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/feedback_drawer.dart';
 import '/src/gui/theme_extensions.dart';
@@ -414,6 +415,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
     // The toasts of a stop of the rounds (N10), heard wherever the user is.
     ref.read(syncHaltToastsProvider);
+
+    // The confirmation a round asks before it changes the device's records, shown once no other dialog is open.
+    ref.read(syncConfirmDialogsProvider);
 
     // The claim of a web login this page was loaded to finish; the account tab, where the login lands, tells it.
     ref.read(returnedLoginProvider);

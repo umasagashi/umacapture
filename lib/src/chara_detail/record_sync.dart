@@ -12,6 +12,11 @@
 // alone; logged in to another, the device runs none until the user turns sync on for it there. Logging out and in writes
 // no switch: logged in to the account again, its rounds run with the base the device kept of it.
 //
+// A round asks the user before it puts in place what would lose what the device holds — a record deleted, absorbed by
+// a merge, archived or replaced, a rating or memo overwritten or cleared ([syncApproveProvider]; the confirmation
+// dialog answers it). Declined, the round puts nothing of that attempt in place and sync turns off, so no moment runs
+// another round until the user turns it on again — and that round asks again.
+//
 // A round runs against the server this device syncs with ([syncServerProvider]) — none while it is logged out, or
 // deleting its account — at five moments, and at no other: the app's start, the user syncing now ([RecordSync.syncNow]),
 // sync turned on, five seconds after the user's last edit of what sync carries ([syncLocalEditsProvider]), and the app

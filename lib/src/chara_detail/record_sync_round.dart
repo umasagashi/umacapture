@@ -1251,7 +1251,11 @@ Future<_Attempt> _attempt<C>(
   if (!approved.containsAll(applies)) {
     final askKept = {...unreadHeld, ..._heldBack(unbound.intersection(tried), merged, local.list, there)};
     final asked = syncConfirmItemsOf(merged, local.list, askKept);
-    if (!await approve(SyncConfirmRequest(account: account, items: asked))) {
+    final titles = {
+      for (final item in asked)
+        if (item case SyncCellChange(:final column)) column: local.list.titles[column]?.value,
+    };
+    if (!await approve(SyncConfirmRequest(account: account, items: asked, titles: titles))) {
       logger.i('Sync applies nothing: the user declined what the round would change on the device.');
       return _ended(_told(SyncRoundEnd.declined, counts, local.list, placed: const {}, withheld: withheld));
     }

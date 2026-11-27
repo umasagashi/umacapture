@@ -59,7 +59,8 @@ import 'package:umacapture/src/gui/chara_detail/column_preset_bar_widget.dart';
 import 'package:umacapture/src/gui/chara_detail/column_spec_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/import_button.dart';
 import 'package:umacapture/src/gui/chara_detail/preview_dialog.dart' show ImageSizeContainer;
-import 'package:umacapture/src/gui/common.dart' show DialogLayer;
+import 'package:umacapture/src/gui/chara_detail/sync_confirm_dialog.dart';
+import 'package:umacapture/src/gui/common.dart' show ContactLinks, DialogLayer, dialogBuilderProvider;
 import 'package:umacapture/src/gui/toast.dart' show ToastData, plainToastEventProvider;
 import 'package:umacapture/src/gui/storage_delete_action.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart' show AppSemanticColors;
@@ -5590,6 +5591,34 @@ void main() {
       },
     );
 
+    test('the app approves a round as it is built: the round asks through the confirmation request, and puts nothing '
+        'in place and sends nothing until the user answers', () async {
+      b.asksThroughConfirm = true;
+      seedUmas(a, ['R1', 'R2']);
+      await a.round(server);
+      expect((await b.round(server)).end, SyncRoundEnd.done);
+      await deleteRecords(a, {'R1'});
+      expect((await a.round(server)).end, SyncRoundEnd.done);
+
+      await b.setSyncOn(true);
+      final container = await b.open();
+      final asked = Completer<SyncConfirmWaiting>();
+      final sub = container.listen(syncConfirmProvider, (_, now) {
+        if (now != null && !asked.isCompleted) asked.complete(now);
+      });
+      addTearDown(sub.close);
+      final counted = _CountedServer(server);
+      final round = b.roundAsAsked(counted);
+      final waiting = await asked.future;
+      expect(_askedOf(waiting.request), {('deleted', 'R1')});
+      expect((await listOf(b)).rows.keys.toSet(), {'R1', 'R2'}, reason: 'nothing is put in place before the answer');
+      expect(counted.writes, 0, reason: 'nothing is sent before the answer');
+
+      container.read(syncConfirmProvider.notifier).answer(waiting, true);
+      expect((await round)?.end, SyncRoundEnd.done);
+      expect((await listOf(b)).rows.keys.toSet(), {'R2'}, reason: 'approved, the deletion is put in place');
+    });
+
     test('a request for approval the user can no longer answer for the round — sync turned off while it waits — ends '
         'the round with nothing put in place and nothing sent', () async {
       b.asksThroughConfirm = true;
@@ -6551,6 +6580,175 @@ void main() {
         await tester.pump();
         expect(icon, findsNothing, reason: 'logged out');
         expect(toasts, hasLength(2), reason: 'a round that fails or syncs, and the logout, tell nothing in a toast');
+      });
+
+      // T5: the confirmation dialog a round asks through (S3), as the app puts it on screen.
+      testWidgets('the confirmation waits for an open dialog to close; approved, the round applies; declined, it tells '
+          'how to keep the records and where to ask, and sync is off', (tester) async {
+        loadAppTranslations();
+        tester.view.physicalSize = const Size(1600, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        a.asksThroughConfirm = true;
+        final app = await tester.runAsync(() async {
+          seedUmas(b, ['R1', 'R2', 'R3']);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          await a.login(syncTestAccount);
+          await a.setSyncOn(true);
+          expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done, reason: 'nothing of A is lost: not asked');
+          await deleteRecords(b, {'R1'});
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          return a.open();
+        });
+        if (app == null) fail('the app did not open');
+        // The app's entry of the confirmation, read as the app reads it at its start.
+        app.read(syncConfirmDialogsProvider);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: app,
+            child: const MaterialApp(
+              home: DialogLayer(child: Scaffold(body: SizedBox.shrink())),
+            ),
+          ),
+        );
+        // A dialog of the user's, open as the round asks.
+        late final int other;
+        other = app
+            .read(dialogBuilderProvider.notifier)
+            .show(
+              (_) => TextButton(
+                onPressed: () => app.read(dialogBuilderProvider.notifier).dismiss(other),
+                child: const Text('the dialog the user is in'),
+              ),
+            );
+        await tester.pump();
+        // The round asked for, once it waits on the user: a record, so the async return does not wait for the round.
+        Future<(Future<SyncRoundOutcome?>,)> asked() async {
+          late final Future<SyncRoundOutcome?> round;
+          await tester.runAsync(() async {
+            round = a.roundAsAsked(server);
+            await waitUntil(() => app.read(syncConfirmProvider) != null, describe: 'the round to ask for confirmation');
+          });
+          await tester.pump();
+          return (round,);
+        }
+
+        const title = '同期でこの端末のレコードが変わります';
+        final (declined,) = await asked();
+        expect(find.text('the dialog the user is in'), findsOneWidget, reason: "the user's dialog is not replaced");
+        expect(find.text(title), findsNothing, reason: 'the confirmation waits for it to close');
+
+        await tester.tap(find.text('the dialog the user is in'));
+        await tester.pump();
+        expect(find.text(title), findsOneWidget, reason: 'closed, the confirmation follows');
+        expect(find.text('削除 1 件'), findsOneWidget);
+        expect(find.byKey(const Key('sync_confirm_row_R1')), findsOneWidget);
+        expect(find.text('見送ると、この端末の同期をオフにします。'), findsOneWidget);
+
+        await tester.tap(find.text('見送る'));
+        expect((await tester.runAsync(() => declined))?.end, SyncRoundEnd.declined);
+        await tester.pump();
+        expect(find.text('反映を見送り、同期をオフにしました'), findsOneWidget);
+        for (final link in ContactLinks.links) {
+          expect(
+            find.textContaining(link.url, findRichText: true),
+            findsOneWidget,
+            reason: 'where to ask: ${link.label}',
+          );
+        }
+        expect(app.read(syncOnProvider), isFalse, reason: 'declined, sync is off');
+        final afterDecline = await tester.runAsync(() => listOf(a));
+        if (afterDecline == null) fail('the device list was not read after declining');
+        expect(afterDecline.rows.keys.toSet(), {'R1', 'R2', 'R3'});
+        await tester.tap(find.text('閉じる'));
+        await tester.pump();
+        expect(find.text('反映を見送り、同期をオフにしました'), findsNothing);
+
+        await tester.runAsync(() => a.setSyncOn(true));
+        final (approved,) = await asked();
+        expect(find.text(title), findsOneWidget, reason: 'turned on again, it asks again');
+        await tester.tap(find.text('反映する'));
+        expect((await tester.runAsync(() => approved))?.end, SyncRoundEnd.done);
+        await tester.pump();
+        expect(find.text(title), findsNothing, reason: 'approved, the confirmation closes');
+        final afterApproval = await tester.runAsync(() => listOf(a));
+        if (afterApproval == null) fail('the device list was not read after approval');
+        expect(afterApproval.rows.keys.toSet(), {'R2', 'R3'}, reason: 'R1 is deleted');
+      });
+
+      // F1: a round whose approved attempt is refused as stale asks again before the screen builds a frame without
+      // the confirmation; the second confirmation is a dialog of its own, and closes once approved.
+      testWidgets('a second confirmation of the round, asked before a frame without the first, closes once approved', (
+        tester,
+      ) async {
+        loadAppTranslations();
+        tester.view.physicalSize = const Size(1600, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        a.asksThroughConfirm = true;
+        final app = await tester.runAsync(() async {
+          seed(b);
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          await a.login(syncTestAccount);
+          await a.setSyncOn(true);
+          expect((await a.roundAsAsked(server))?.end, SyncRoundEnd.done);
+          await deleteRecords(b, {'R2'});
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+          // A has a change of its own to send: its replacement is refused as stale once B removed R3 meanwhile.
+          await rate(a, 'R1', 5);
+          return a.open();
+        });
+        if (app == null) fail('the app did not open');
+        app.read(syncConfirmDialogsProvider);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: app,
+            child: const MaterialApp(
+              home: DialogLayer(child: Scaffold(body: SizedBox.shrink())),
+            ),
+          ),
+        );
+        Future<SyncConfirmWaiting> askedOtherThan(SyncConfirmWaiting? before) async {
+          late SyncConfirmWaiting now;
+          await tester.runAsync(
+            () => waitUntil(() {
+              final waiting = app.read(syncConfirmProvider);
+              if (waiting == null || identical(waiting, before)) return false;
+              now = waiting;
+              return true;
+            }, describe: 'the round to ask for a confirmation other than the one before'),
+          );
+          return now;
+        }
+
+        const title = '同期でこの端末のレコードが変わります';
+        late final Future<SyncRoundOutcome?> round;
+        await tester.runAsync(() async {
+          round = a.roundAsAsked(server);
+        });
+        final first = await askedOtherThan(null);
+        await tester.pump();
+        expect(find.byKey(const Key('sync_confirm_row_R2')), findsOneWidget);
+        await tester.runAsync(() async {
+          await deleteRecords(b, {'R3'});
+          expect((await b.round(server)).end, SyncRoundEnd.done);
+        });
+
+        await tester.tap(find.text('反映する'));
+        // No frame is built until the round asks again.
+        final second = await askedOtherThan(first);
+        expect(_askedOf(second.request), {('deleted', 'R3')});
+        await tester.pump();
+        expect(find.text(title), findsOneWidget);
+        expect(find.byKey(const Key('sync_confirm_row_R3')), findsOneWidget);
+
+        await tester.tap(find.text('反映する'));
+        final outcome = await tester.runAsync(() => round);
+        if (outcome == null) fail('the approved round returned no outcome');
+        expect((outcome.end, outcome.replacements), (SyncRoundEnd.done, 2));
+        await tester.pump();
+        expect(find.text(title), findsNothing, reason: 'approved, the second confirmation closes');
+        expect(app.read(dialogBuilderProvider), isNull, reason: 'no dialog is left open');
       });
 
       // The progress of a long step of the round running (N8, N9): a first round of a device holding records from

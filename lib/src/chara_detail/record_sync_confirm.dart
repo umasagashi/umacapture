@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/archive_executor_types.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/record_sync_list.dart';
+import '/src/chara_detail/record_sync.dart' show syncConfirmApprove;
 import '/src/chara_detail/record_sync_merge.dart';
 
 /// What a confirmation item does to a record of the device.
@@ -147,25 +148,29 @@ final class SyncCellChange extends SyncConfirmItem {
   String toString() => 'SyncCellChange($column, $id)';
 }
 
-/// What a round asks the user to approve: of the round of [account], the items [items].
+/// What a round asks the user to approve: of the round of [account], the items [items]; and, for the screen that asks,
+/// the title of each column of a [SyncCellChange] of them as the device held it when the round read it ([titles]).
 class SyncConfirmRequest {
-  SyncConfirmRequest({required this.account, required Set<SyncConfirmItem> items}) : items = Set.unmodifiable(items);
+  SyncConfirmRequest({
+    required this.account,
+    required Set<SyncConfirmItem> items,
+    Map<String, String?> titles = const {},
+  }) : items = Set.unmodifiable(items),
+       titles = Map.unmodifiable(titles);
 
   final String account;
   final Set<SyncConfirmItem> items;
+
+  /// Column ([syncColumnOf]) → the device's title of it; null where the device held none.
+  final Map<String, String?> titles;
 }
 
 /// Asks the user to approve [SyncConfirmRequest]: true where they approve it, false where they decline.
 typedef SyncApprove = Future<bool> Function(SyncConfirmRequest request);
 
-/// How every round of the app's asks the user to approve what it would change ([runSyncRound]).
-///
-/// It approves every request: no dialog answers the user's requests yet (`syncConfirmApprove` asks them), and the
-/// rounds put their results in place as before.
-final syncApproveProvider = Provider<SyncApprove>(
-  (ref) =>
-      (_) async => true,
-);
+/// How every round of the app's asks the user to approve what it would change ([runSyncRound]): through the request
+/// the confirmation dialog answers ([syncConfirmApprove]).
+final syncApproveProvider = Provider<SyncApprove>(syncConfirmApprove);
 
 int _strength(ArchiveImageOption? stage) => switch (stage) {
   null => 0,

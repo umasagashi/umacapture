@@ -5,14 +5,12 @@ import 'package:auto_route/auto_route.dart';
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:percent_indicator/percent_indicator.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
@@ -437,81 +435,13 @@ class ModuleUpdaterGroup extends ConsumerWidget {
 /// wherever they downloaded it, so there the card would be a permanent restatement of what they
 /// already know. The gate is at the mount site in [DashboardPage] for the reason stated there.
 ///
-/// The three link labels are brand names and are deliberately **not** translated; only the sentences
-/// above them are. The URLs are [Const]'s, which are the ones the README publishes.
+/// The contact lines are [ContactLinks], shared with the sync confirmation's declined face.
 ///
 /// The trial-release notice is a paragraph of its own between the description and the contact
 /// sentence, not a fourth bullet: the bullets are what the contact sentence introduces, and the
 /// notice is not a way to reach the project.
 class AboutGroup extends StatelessWidget {
   const AboutGroup({super.key});
-
-  /// The three destinations, in the order they are listed.
-  static final links = <({String label, String url})>[
-    (label: "GitHub", url: Const.githubUrl),
-    (label: "Discord", url: Const.discordUrl),
-    (label: "X", url: Const.xUrl),
-  ];
-
-  /// One bullet: the service's name, then its address as an ordinary web link.
-  ///
-  /// **The URL itself is the link text**, rather than a labelled button, so the reader sees where
-  /// they are going before they go — the same thing a browser's status bar would tell them, which an
-  /// app has no equivalent of. Underlined and in the primary colour, which is how the app's other
-  /// two text links are drawn.
-  ///
-  /// One paragraph per line (a rich [Text], not a Row of two Texts): a long address then wraps
-  /// inside the line instead of overflowing the card on a narrow window.
-  ///
-  /// **The tap lives on an [InkWell], not on a [TapGestureRecognizer] inside the span.** A span
-  /// takes no part in focus traversal, so a recognizer-only link is unreachable for anyone driving
-  /// the web build from the keyboard — and this card is the first-time visitor's only route to the
-  /// project. The ink covers the whole bullet line rather than just the address, which also gives
-  /// the pointer a target that does not require hitting the text exactly; the [Semantics] link flag
-  /// and the [MergeSemantics] around it are what make the line arrive at assistive technology as one
-  /// focusable link carrying its own address, instead of a button beside a separate run of text.
-  Widget _link(BuildContext context, ({String label, String url}) link) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("•"),
-          const SizedBox(width: 8),
-          Expanded(
-            child: MergeSemantics(
-              child: Semantics(
-                link: true,
-                child: InkWell(
-                  onTap: () => launchUrl(Uri.parse(link.url)),
-                  borderRadius: BorderRadius.circular(4),
-                  // Spelled out rather than left to the ink's default, which is
-                  // `WidgetStateMouseCursor.adaptiveClickable` — the hand on web and the plain arrow
-                  // everywhere else, because a desktop *button* does not show a hand. This is a link,
-                  // not a button: the hand is how a reader is told the address is live, and the span
-                  // this replaced set it unconditionally for that reason.
-                  mouseCursor: SystemMouseCursors.click,
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: "${link.label}: "),
-                        TextSpan(
-                          text: link.url,
-                          style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
-                        ),
-                      ],
-                    ),
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// The notice paragraph: a translated sentence with the notice's and the privacy policy's titles inline
   /// as links.
@@ -543,7 +473,7 @@ class AboutGroup extends StatelessWidget {
         _notice(),
         const SizedBox(height: 16),
         Text("$tr_dashboard.about.contact".tr()),
-        for (final link in AboutGroup.links) _link(context, link),
+        const ContactLinks(),
       ],
     );
   }

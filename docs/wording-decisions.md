@@ -81,3 +81,22 @@ two paragraphs and still carries no jargon. That is why the clauses are written 
   user's side, from scrolling once the cue has sounded, so there is no passive way to describe "not
   yet" that is not also a command. The two lines were therefore approved together, as one two-line
   instruction, rather than as a description plus a remedy.
+
+## Sync — the confirmation before a round changes the device
+
+The keys are under `pages.account.sync.confirm`.
+
+- **`decline_note`** ("見送ると、この端末の同期をオフにします。") is the only record of the decision that declining
+  the confirmation turns sync off on the device, rather than skipping one round and asking again at the next moment.
+  It sits on the confirmation face, not on a button, because it is a consequence the user needs before choosing.
+- **`declined.body`** says "見送った変更は、この端末に反映していません", not "nothing was applied". A round can try more
+  than once; changes the user approved in an earlier attempt of the same round stay applied when a later attempt is
+  declined. The sentence is worded to be true in that case too, without explaining it.
+- **`declined.steps`** promises a way to keep "この端末にあるレコード" only. A record whose surviving record is not on
+  this device, or an import the app refuses, is left to the contact lines (`declined.contact`); no special rescue
+  exists, and the steps must not be widened to imply one.
+- **The contact lines are listed, not pointed at.** The declined face shows the same lines as the "このサイトについて"
+  card (`ContactLinks`), rather than saying where that card is: the card is on the web dashboard only (the Windows
+settings page's about card carries no contact lines), a
+  sentence naming its place goes stale when it moves, and listed lines can be pressed in the dialog. The lines come
+  from one list, so both places change together.
