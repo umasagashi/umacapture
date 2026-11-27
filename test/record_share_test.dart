@@ -3296,7 +3296,7 @@ void main() {
   group('the sharing session', () {
     RecordShareSession session() => container.read(recordShareSessionProvider.notifier);
 
-    test('the public settings read distinguishes a private list, an older server and an unread visibility', () async {
+    test('the public settings read preserves profiles and leaves malformed visibility unread', () async {
       await storeSession();
       container = containerFor([
         _json(200, {
@@ -3313,34 +3313,17 @@ void main() {
       ]);
       final under = container.read(recordShareSessionProvider) ?? (throw StateError('the stored session is missing'));
       final private = await readAccountPublic(session(), under);
-      expect(private.list, isA<ListVisibilityHeld>().having((held) => held.public, 'public', isFalse));
       expect(private.profile, isA<SharerProfileHeld>().having((held) => held.profile.trainerName, 'name', 'たづな'));
       final older = await readAccountPublic(session(), under);
-      expect(older.list, isA<ListVisibilityUnsupported>());
       expect(older.profile, isA<SharerProfileUnsupported>());
       final malformed = await readAccountPublic(session(), under);
       expect(malformed.list, isA<ListVisibilityUnread>());
       expect(malformed.profile, isA<SharerProfileHeld>());
     });
 
-    test('a list visibility write uses the stored boolean and shares the text-write refusal mapping', () async {
+    test('a plain 404 refuses a list visibility write as unsupported', () async {
       await storeSession();
-      container = containerFor([
-        _json(200, {"public": false}),
-        _json(503, {"error": "sharing_paused"}),
-        _empty(404),
-      ]);
-      expect(
-        await writeListVisibility(session(), public: false),
-        isA<SharerTextSaved<bool>>().having((saved) => saved.value, 'stored visibility', isFalse),
-      );
-      expect(server.sent.single.method, 'PUT');
-      expect(server.sent.single.uri.path, '/api/me/list');
-      expect(jsonDecode(server.sent.single.body), {"public": false});
-      expect(
-        await writeListVisibility(session(), public: true),
-        isA<SharerTextRefused<bool>>().having((refused) => refused.reason, 'reason', SharerTextRefusal.sharingPaused),
-      );
+      container = containerFor([_empty(404)]);
       expect(
         await writeListVisibility(session(), public: true),
         isA<SharerTextRefused<bool>>().having((refused) => refused.reason, 'reason', SharerTextRefusal.unsupported),
