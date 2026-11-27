@@ -160,7 +160,8 @@ typedef SyncApprove = Future<bool> Function(SyncConfirmRequest request);
 
 /// How every round of the app's asks the user to approve what it would change ([runSyncRound]).
 ///
-/// It approves every request: no dialog asks the user yet, and the rounds put their results in place as before.
+/// It approves every request: no dialog answers the user's requests yet (`syncConfirmApprove` asks them), and the
+/// rounds put their results in place as before.
 final syncApproveProvider = Provider<SyncApprove>(
   (ref) =>
       (_) async => true,

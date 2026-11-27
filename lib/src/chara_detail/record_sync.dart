@@ -31,6 +31,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/record_share_session.dart';
 import '/src/chara_detail/record_sync_app_place.dart';
+import '/src/chara_detail/record_sync_confirm.dart';
 import '/src/chara_detail/record_sync_edits.dart';
 import '/src/chara_detail/record_sync_round.dart';
 import '/src/chara_detail/record_sync_server.dart';
@@ -297,10 +298,15 @@ class RecordSync extends Notifier<RecordSyncState> {
     }
     final base = ref.read(containerRefProvider);
     final running = _running = runSyncRound(base, server, account: account, effects: recordImportEffects(base))
-        .then((told) {
+        .then((told) async {
           if (ref.mounted) {
             final synced = told.end == SyncRoundEnd.done ? ref.read(syncMomentTimeProvider).now() : null;
             state = state._withRound(told: told, ranAs: account, lastSynced: synced);
+            // The user declined what the round would change: sync turns off, before the round asked for meanwhile
+            // ([_next]) reads the switch. A request withdrawn because the session or the switch moved off the round's
+            // account ([SyncConfirm]) leaves the switch as the user left it.
+            final session = ref.read(recordShareSessionProvider)?.accountId;
+            if (told.end == SyncRoundEnd.declined && state.roundAccount(session) == account) await setOn(false);
           }
           return told;
         })
@@ -388,6 +394,67 @@ enum SyncHalt {
     accountRoomWaits || accountRoomStopped || serviceRoomWaits || serviceStopped || accountDay || serviceDay => true,
   };
 }
+
+/// A round's request for the user's approval ([SyncConfirmRequest]) that waits for its answer ([SyncConfirm.answer]).
+class SyncConfirmWaiting {
+  SyncConfirmWaiting._(this.request);
+
+  final SyncConfirmRequest request;
+  final _answer = Completer<bool>();
+}
+
+/// The request for the user's approval a round waits on, where one does: the one request the screen answers. A request
+/// no one can answer for the round any more ends declined, so the round puts nothing in place: one the session or the
+/// switch of sync moved off the round's account ([RecordSyncState.roundAccount]) — a logout, another account, sync
+/// turned off —, one a later request takes the place of, and one waiting as the app ends.
+class SyncConfirm extends Notifier<SyncConfirmWaiting?> {
+  SyncConfirmWaiting? _waiting;
+
+  @override
+  SyncConfirmWaiting? build() {
+    ref.listen(recordShareSessionProvider, (_, _) => _withdrawOffAccount());
+    ref.listen(recordSyncProvider.select((s) => s.account), (_, _) => _withdrawOffAccount());
+    ref.onDispose(() => _end(false, clear: false));
+    return null;
+  }
+
+  /// Asks the user to approve [request], and waits for the answer: true where they approve it.
+  Future<bool> ask(SyncConfirmRequest request) {
+    _end(false);
+    final waiting = _waiting = SyncConfirmWaiting._(request);
+    state = waiting;
+    _withdrawOffAccount();
+    return waiting._answer.future;
+  }
+
+  /// The user answers [waiting]: [approve] where they approve it. An answer to a request no longer waited on does
+  /// nothing.
+  void answer(SyncConfirmWaiting waiting, bool approve) {
+    if (identical(waiting, _waiting)) _end(approve);
+  }
+
+  void _withdrawOffAccount() {
+    final waiting = _waiting;
+    if (waiting == null) return;
+    final session = ref.read(recordShareSessionProvider)?.accountId;
+    if (ref.read(recordSyncProvider).roundAccount(session) != waiting.request.account) _end(false);
+  }
+
+  void _end(bool approved, {bool clear = true}) {
+    final waiting = _waiting;
+    if (waiting == null) return;
+    _waiting = null;
+    if (clear) state = null;
+    waiting._answer.complete(approved);
+  }
+}
+
+/// The request for the user's approval a round waits on ([SyncConfirm]).
+final syncConfirmProvider = NotifierProvider<SyncConfirm, SyncConfirmWaiting?>(SyncConfirm.new);
+
+/// Approves a round's request ([syncApproveProvider]) by asking the user through [syncConfirmProvider].
+SyncApprove syncConfirmApprove(Ref ref) =>
+    (request) => ref.read(syncConfirmProvider.notifier).ask(request);
 
 /// Whether a round that ended [end] did not sync for a failure — the server refused what it sent, an operation of it
 /// was more than one replacement takes, or a request failed or got no answer, the device's writes included —, where

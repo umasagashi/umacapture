@@ -142,9 +142,16 @@ class SyncTestDevice {
   /// ([syncApproveProvider]), as it is set when a round asks; where unset, every request is approved.
   ScriptedApproval? approval;
 
+  /// Whether the device's rounds ask the user through the app's request for approval ([syncConfirmApprove]), which
+  /// the test answers ([syncConfirmProvider]), rather than through [approval]; set before [open].
+  bool asksThroughConfirm = false;
+
   /// The device is logged in to [syncTestAccount], or as [auth] says.
   List<Override> get _overrides => [
-    syncApproveProvider.overrideWithValue((request) async => await approval?.call(request) ?? true),
+    if (asksThroughConfirm)
+      syncApproveProvider.overrideWith(syncConfirmApprove)
+    else
+      syncApproveProvider.overrideWithValue((request) async => await approval?.call(request) ?? true),
     pathLayoutLoader.overrideWith((ref) async => info),
     recordSyncDioProvider.overrideWithValue(Dio()..httpClientAdapter = syncHttp ?? const _NoNetwork()),
     if (syncRequestTimeout case final timeout?) syncRequestTimeoutProvider.overrideWithValue(timeout),

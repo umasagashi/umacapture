@@ -5496,65 +5496,126 @@ void main() {
     });
 
     // [R6-1], [R6-4] and R1: the switch of sync, through the entry the app asks for a round with ([RecordSync.round]).
-    test('a round that would delete, archive, replace or overwrite asks first; declined, it puts nothing in place and '
-        'writes nothing on the server', () async {
-      seedUmas(a, ['R1', 'R2', 'R3', 'R4']);
-      a.seedColumn('memo', 'm1', title: 'Note', data: {'R4': 'kept'}, writtenAt: {'R4': 1767225600500});
-      await a.round(server);
-      await b.round(server);
-      final r2 = b.charaDetail / 'active' / 'R2';
-      File(r2.filePath('skill.png').path).writeAsStringSync('the skills R2 was read from');
-      final r3 = (await listOf(b)).rows['R3']!.record.body;
-      // B has a change of its own to send, which a round it lets apply sends.
-      await writeMemo(b, 'R2', 'from B');
+    test(
+      'a round that would delete, archive, replace or overwrite asks first; declined, it puts nothing in place and '
+      'sends nothing, sync turns off and the round asked for meanwhile runs not; turned on again, it asks the same',
+      () async {
+        seedUmas(a, ['R1', 'R2', 'R3', 'R4']);
+        a.seedColumn('memo', 'm1', title: 'Note', data: {'R4': 'kept'}, writtenAt: {'R4': 1767225600500});
+        await a.round(server);
+        await b.round(server);
+        final r2 = b.charaDetail / 'active' / 'R2';
+        File(r2.filePath('skill.png').path).writeAsStringSync('the skills R2 was read from');
+        final r3 = (await listOf(b)).rows['R3']?.record.body;
+        if (r3 == null) fail('R3 is missing before the round');
+        // B has a change of its own to send, which a round it lets apply sends.
+        await writeMemo(b, 'R2', 'from B');
 
-      // A deletes R1, archives R2 without images, takes R3 again from another body's zip, and clears R4's memo.
+        // A deletes R1, archives R2 without images, takes R3 again from another body's zip, and clears R4's memo.
+        await deleteRecords(a, {'R1'});
+        final container = await a.open();
+        await container
+            .read(charaArchiveControllerProvider.notifier)
+            .archive(['R2'], ArchiveImageOption.none, effects: archiveEffects(container));
+        final c = SyncTestDevice('c');
+        addTearDown(c.dispose);
+        c.seedRecord('R3', binding: own('R3'), fans: 4242);
+        final zip = await c.exportZip('R3');
+        clockAt(hour(9));
+        await a.importZip(zip);
+        await container.read(charaDetailRecordMemoProvider('m1').future);
+        expect(saveMemo(container.read(containerRefProvider), storageKey: 'm1', recordId: 'R4', memo: null), isTrue);
+        expect(await container.read(charaDetailRecordMemoProvider('m1').notifier).flush(), isTrue);
+        expect((await a.round(server)).end, SyncRoundEnd.done);
+
+        final entered = Completer<void>();
+        final decide = Completer<bool>();
+        final approval = b.approval = ScriptedApproval((_, index) {
+          if (index > 0) return Future.value(false);
+          entered.complete();
+          return decide.future;
+        });
+        await b.setSyncOn(true);
+        final counted = _CountedServer(server);
+        final first = b.roundAsAsked(counted);
+        await entered.future;
+        // A round asked for while the user is asked waits behind the round that asks.
+        final meanwhile = b.roundAsAsked(counted);
+        final callsAsked = counted.calls;
+        decide.complete(false);
+        final outcome = await first;
+
+        expect(outcome?.end, SyncRoundEnd.declined);
+        expect(await meanwhile, isNull, reason: 'the round asked for meanwhile reads the switch off, and runs not');
+        expect(counted.calls, callsAsked, reason: 'nothing is asked of the server after the user declined');
+        expect(approval.asked, hasLength(1));
+        expect(_askedOf(approval.asked.single), {
+          ('deleted', 'R1'),
+          ('archived', 'R2'),
+          ('replaced', 'R3'),
+          ('memo/m1', 'R4'),
+        });
+        expect(
+          approval.asked.single.items.whereType<SyncCellChange>().single.clears,
+          isTrue,
+          reason: 'the memo is cleared',
+        );
+        final list = await listOf(b);
+        expect(list.rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4'}, reason: 'nothing is deleted');
+        final keptR2 = list.rows['R2'];
+        if (keptR2 == null) fail('R2 is missing after the declined round');
+        expect(keptR2.record.stage.value, isNull, reason: 'R2 is not archived');
+        expect(File(r2.filePath('skill.png').path).readAsStringSync(), 'the skills R2 was read from');
+        final keptR3 = list.rows['R3']?.record.body;
+        if (keptR3 == null) fail('R3 is missing after the declined round');
+        expect((keptR3.content, keptR3.time), (r3.content, r3.time), reason: 'R3 keeps its body');
+        expect(list.cells[('memo/m1', 'R4')]?.value, '"kept"');
+        expect(counted.writes, 0, reason: 'nothing is written on the server: no body, part, root or image');
+        expect(counted.calls, greaterThan(0), reason: 'positive control: the round read the server');
+
+        expect((await b.open()).read(syncOnProvider), isFalse, reason: 'sync turned off');
+        b.close();
+        expect(
+          (await b.open()).read(syncOnProvider),
+          isFalse,
+          reason: 'the switch is kept: off as the app starts again',
+        );
+        expect(await b.roundAsAsked(counted), isNull, reason: 'with sync off, no round runs');
+        expect(counted.calls, callsAsked);
+
+        await b.setSyncOn(true);
+        expect((await b.roundAsAsked(counted))?.end, SyncRoundEnd.declined);
+        expect(approval.asked, hasLength(2), reason: 'turned on again, the round asks again');
+        expect(_askedOf(approval.asked[1]), _askedOf(approval.asked[0]));
+      },
+    );
+
+    test('a request for approval the user can no longer answer for the round — sync turned off while it waits — ends '
+        'the round with nothing put in place and nothing sent', () async {
+      b.asksThroughConfirm = true;
+      seedUmas(a, ['R1', 'R2']);
+      await a.round(server);
+      expect((await b.round(server)).end, SyncRoundEnd.done, reason: 'nothing of B is lost: it is not asked');
       await deleteRecords(a, {'R1'});
-      final container = await a.open();
-      await container
-          .read(charaArchiveControllerProvider.notifier)
-          .archive(['R2'], ArchiveImageOption.none, effects: archiveEffects(container));
-      final c = SyncTestDevice('c');
-      addTearDown(c.dispose);
-      c.seedRecord('R3', binding: own('R3'), fans: 4242);
-      final zip = await c.exportZip('R3');
-      clockAt(hour(9));
-      await a.importZip(zip);
-      await container.read(charaDetailRecordMemoProvider('m1').future);
-      expect(saveMemo(container.read(containerRefProvider), storageKey: 'm1', recordId: 'R4', memo: null), isTrue);
-      expect(await container.read(charaDetailRecordMemoProvider('m1').notifier).flush(), isTrue);
       expect((await a.round(server)).end, SyncRoundEnd.done);
 
-      final approval = b.approval = ScriptedApproval((_, _) async => false);
       await b.setSyncOn(true);
-      final counted = _CountedServer(server);
-      final outcome = await b.roundAsAsked(counted);
-
-      expect(outcome?.end, SyncRoundEnd.declined);
-      expect(approval.asked, hasLength(1));
-      expect(_askedOf(approval.asked.single), {
-        ('deleted', 'R1'),
-        ('archived', 'R2'),
-        ('replaced', 'R3'),
-        ('memo/m1', 'R4'),
+      final container = await b.open();
+      final asked = Completer<SyncConfirmWaiting>();
+      final sub = container.listen(syncConfirmProvider, (_, now) {
+        if (now != null && !asked.isCompleted) asked.complete(now);
       });
-      expect(
-        approval.asked.single.items.whereType<SyncCellChange>().single.clears,
-        isTrue,
-        reason: 'the memo is cleared',
-      );
-      final list = await listOf(b);
-      expect(list.rows.keys.toSet(), {'R1', 'R2', 'R3', 'R4'}, reason: 'nothing is deleted');
-      expect(list.rows['R2']!.record.stage.value, isNull, reason: 'R2 is not archived');
-      expect(File(r2.filePath('skill.png').path).readAsStringSync(), 'the skills R2 was read from');
-      expect(
-        (list.rows['R3']!.record.body.content, list.rows['R3']!.record.body.time),
-        (r3.content, r3.time),
-        reason: 'R3 keeps its body',
-      );
-      expect(list.cells[('memo/m1', 'R4')]?.value, '"kept"');
-      expect(counted.writes, 0, reason: 'nothing is written on the server: no body, part, root or image');
-      expect(counted.calls, greaterThan(0), reason: 'positive control: the round read the server');
+      addTearDown(sub.close);
+      final counted = _CountedServer(server);
+      final round = b.roundAsAsked(counted);
+      final waiting = await asked.future;
+      expect(_askedOf(waiting.request), {('deleted', 'R1')});
+
+      await b.setSyncOn(false);
+      expect((await round)?.end, SyncRoundEnd.declined, reason: 'the round ends, and puts nothing in place');
+      expect(container.read(syncConfirmProvider), isNull, reason: 'no request is left for the screen to answer');
+      expect((await listOf(b)).rows.keys.toSet(), {'R1', 'R2'});
+      expect(counted.writes, 0);
     });
 
     test('[R6-1] (R1): with sync off, a round asked for asks the server nothing and writes nothing of the device\'s; '
