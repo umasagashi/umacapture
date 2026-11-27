@@ -1655,9 +1655,9 @@ final _onBMergeInProgress = OneOf([
 
 /// A universe of the room ([R7-4], L319): from [attachedStart], the server's room used up as [noRoom] says; A does one
 /// of [a] (else of [_onR1R2WithoutRoom]) and B one of [b] (else of [_onR3WithoutRoom]), either first; two passes of A's round and B's — or of B's
-/// and A's, of [rounds] — while the room stays used up; then [roomBack] gives it back, the user of each device syncs now
-/// ([Resume] — a device stopped for room stays so until the user lowers the mark, [N1-22]), and the world is driven to
-/// rest. Every round is the app's, which waits for room ([syncWaitingForRoom]).
+/// and A's, of [rounds] — while the room stays used up; then [roomBack] gives it back, each device's rounds send what
+/// waited for room, and the world is driven to rest. Every round is the app's, which waits for room
+/// ([syncWaitingForRoom]).
 ///
 /// Outside every universe of it: the two devices changing one record, or records one merge joins (each changes records
 /// the other does not, so that no merge of the two sides decides an end); a memo, an archive or another change to a
@@ -1681,7 +1681,7 @@ RunUniverse _roomUniverse(
   a: a ?? _onR1R2WithoutRoom,
   b: b ?? _onR3WithoutRoom,
   rounds: [
-    for (final passes in rounds) [...passes, roomBack, const Resume('A'), const Resume('B')],
+    for (final passes in rounds) [...passes, roomBack],
   ],
   properties: properties ?? _room,
 );

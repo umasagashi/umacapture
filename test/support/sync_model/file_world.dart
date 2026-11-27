@@ -131,8 +131,8 @@ class FServer {
   DatabaseRoom database = DatabaseRoom.room;
 
   /// A control of the properties breaks the room the endpoints keep: where true, once they refused a put of new bytes
-  /// for room in a round — or the device is stopped for room by an earlier one ([FDevice.roomStop]), and asks for no
-  /// room —, they refuse every write after it in that round as a database with no room does ([DatabaseRoom.none]).
+  /// for room in a round — or stated no room beside its generation, and the device asks for none —, they refuse every
+  /// write after it in that round as a database with no room does ([DatabaseRoom.none]).
   bool roomRefusalEndsTheRound = false;
   int? dailyRows;
   int? dailyReads;
@@ -417,15 +417,6 @@ class FDevice {
 
   /// Whether a round of this device runs against [server]: as the app's switch says, for the server's account.
   bool syncRuns(FServer server) => sync.roundAccount('${server.account}') != null;
-
-  /// The device's mark of being stopped for room, the app's ([SyncRoomStop]): raised by a refusal for room in either
-  /// round, and lowered as the app lowers it ([N1-22]) — by [Resume], the user syncing now; by [restart], starting
-  /// the app; by [delete] and [archive]; and by a round with no base of its account ([loseStateFile], another
-  /// account's base), which the app's round lowers it at itself.
-  final roomStop = SyncRoomStop();
-
-  /// Whether the device is stopped for room ([roomStop]).
-  bool get paused => roomStop.up;
 
   /// The device runs the app of these rules: it ran an operation of it ([FileWorld.execute]). Until then it
   /// runs the app from before the upgrade, and only that app's operations reach it; none does since.
@@ -878,7 +869,6 @@ class FDevice {
       };
     }
     _letGo(id);
-    roomStop.lower();
   }
 
   /// What a delete of today does to the record [id]: its directory goes, and its annotations and dismissals with it
@@ -918,7 +908,6 @@ class FDevice {
         ..stageTime = written.time;
     }
     _shape(id);
-    roomStop.lower();
   }
 
   /// The image files of [id]'s record in the form its stage holds them in, as an archive leaves them: the app's plan
@@ -1275,8 +1264,6 @@ class FDevice {
   /// unreadable, one whose id a store holds again, or one with no note, which names no id to put it back as, stays on
   /// the shelf.
   void restart() {
-    // The app keeps the mark of being stopped for room in memory: starting it lowers the mark ([N1-22]).
-    roomStop.lower();
     for (final MapEntry(key: id, value: s) in [...shelf.entries]) {
       if (!s.noted || !s.readable || store.records.containsKey(id)) continue;
       shelf.remove(id);
@@ -1294,7 +1281,6 @@ class FDevice {
     keptBase = null;
     keptSent = null;
     keptImages = null;
-    roomStop.lower();
   }
 
   // --- one round of sync ---------------------------------------------------------------------------
@@ -1320,7 +1306,6 @@ class FDevice {
       baseGap = Unbased.accountRemade;
       base = null;
       _sent = null;
-      roomStop.lower();
       resets++;
       onReset?.call();
     }
@@ -1501,7 +1486,7 @@ class FDevice {
     _beginTold();
     final listedBefore = {...server.list.records.keys};
     final based = _basedForAppRound(server);
-    final endpoints = _FileSyncServer(server, name, cut: swapCut, stopped: roomStop);
+    final endpoints = _FileSyncServer(server, name, cut: swapCut);
     SyncRoundOutcome? outcome;
     Object? failure;
     // Neither the place nor the server waits on anything: the round ends once its microtasks have run.
@@ -1512,7 +1497,6 @@ class FDevice {
         account: '${server.account}',
         // The model's devices approve every change a round would make: what the user answers is no part of the world.
         approve: (_) async => true,
-        roomStop: roomStop,
       ).then((o) => outcome = o, onError: (Object e, StackTrace _) => failure = e);
       async.flushMicrotasks();
     });
@@ -1917,11 +1901,13 @@ class FDevice {
     // The day's rows are used up: what is not placed yet waits for another day, and the list is sent
     // for the rest, as with a full storage — so what was placed is listed before its retention ends.
     var busy = false;
+    // C1: the room the server states as the round begins — none where the storage is full — holds the device back,
+    // and so does a refusal for room in the round: it asks for no room it was told there is none of.
+    var noRoom = server.full;
     final waits = <String>{};
     for (final r in store.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
       if (server.bodies.contains(r.body)) continue;
-      // C1: a device a full storage holds back asks for no room.
-      if (paused || busy) {
+      if (noRoom || busy) {
         waits.add(r.id);
         continue;
       }
@@ -1929,7 +1915,7 @@ class FDevice {
       switch (server.putBody(name, r.body)) {
         case FAnswer.noRoom:
           // A full storage is the account's cap, as the server of the app's round refuses it ([_FileSyncServer]).
-          roomStop.raise(SyncServerStop.accountRoom);
+          noRoom = true;
           waits.add(r.id);
         case FAnswer.busy:
           if (mutation == FileMutation.rowLimitEndsTheRound) return true;
@@ -1940,14 +1926,14 @@ class FDevice {
       }
     }
     for (final r in store.records.values.toList()..sort((a, b) => a.id.compareTo(b.id))) {
-      if (paused || busy || server.imageForm == 'none') break;
+      if (noRoom || busy || server.imageForm == 'none') break;
       if (waits.contains(r.id) || r.stage == FStage.none) continue;
       final image = images[r.id]?.capture;
       if (image == null || image != r.img || server.images.contains(image)) continue;
       if (lost(() => server.putImage(name, image))) return false;
       switch (server.putImage(name, image)) {
         case FAnswer.noRoom:
-          roomStop.raise(SyncServerStop.accountRoom);
+          noRoom = true;
         case FAnswer.busy:
           if (mutation == FileMutation.rowLimitEndsTheRound) return true;
           busy = true;
@@ -2381,8 +2367,9 @@ class FileWorld extends SyncWorld {
         server.dailyRows = rows;
       case SetDailyReads(:final reads):
         server.dailyReads = reads;
+      // The user syncing now asks for a round as any moment does; the device keeps no mark it lowers.
       case Resume():
-        d.roomStop.lower();
+        break;
       case Quarantine() when round == FileRound.model:
         throw UnsupportedError('the model\'s round reads no quarantine shelf: $op');
       case Quarantine(:final id, :final noted):
@@ -2422,7 +2409,6 @@ class FileWorld extends SyncWorld {
         apply(Elapse(first, 1));
         final before = observe().fingerprint;
         for (final d in devices.values) {
-          if (d.paused) apply(Resume(d.name));
           apply(SyncRound(d.name));
         }
         if (observe().fingerprint == before) break;
@@ -2435,9 +2421,6 @@ class FileWorld extends SyncWorld {
       if (server.full) apply(SetStorageFull(first, full: false));
       if (server.dailyRows != null) apply(SetDailyRows(first, null));
       if (server.dailyReads != null) apply(SetDailyReads(first, null));
-    }
-    for (final d in devices.values.where((d) => d.paused).toList()) {
-      apply(Resume(d.name));
     }
     settle();
     apply(Elapse(first, retentionDays));
@@ -2517,7 +2500,6 @@ class FileWorld extends SyncWorld {
       },
       // A pair has no time: every one is shown as made at 0.
       dismissed: {for (final q in d.store.dismissed) q: const ObservedValue('dismissed', 0)},
-      held: d.paused,
       roomRefusals: server.roomRefusals[d.name] ?? 0,
       baseGap: d.baseGap,
       confirmedBodies: {for (final r in d.base?.list.records.values ?? const <FRec>[]) r.body},
@@ -2565,7 +2547,7 @@ class FileWorld extends SyncWorld {
     for (final d in devices.values) {
       b.write(
         '|${d.name}:${d.store}/${d.images}/${d.bonus}/${d.base?.account}'
-        '/${d.base?.generation}/${d.base?.list}/${d.paused}/${d.bodies.toList()..sort()}',
+        '/${d.base?.generation}/${d.base?.list}/${d.bodies.toList()..sort()}',
       );
     }
     return b.toString();

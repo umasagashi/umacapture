@@ -62,6 +62,11 @@ class SyncHttpFace implements HttpClientAdapter {
     }
   }
 
+  /// The `room` of an answer, as the Worker states it; nothing where the server states none.
+  static Map<String, Object?> _room(SyncRoom? room) => {
+    if (room != null) 'room': {'account': room.account, 'service': room.service},
+  };
+
   Future<ResponseBody> _answer(String method, String path, Uint8List bytes, String? Function(String) header) async {
     final name = RegExp(r'^/api/sync/(roots|parts|images)/([0-9a-f]{64})$').firstMatch(path);
     final route = name == null ? '$method $path' : '$method /api/sync/${name[1]}/<name>';
@@ -70,7 +75,7 @@ class SyncHttpFace implements HttpClientAdapter {
     switch (route) {
       case 'GET /api/sync/generation':
         final head = await server.readGeneration();
-        return _json({'generation': head.generation, 'root': head.root});
+        return _json({'generation': head.generation, 'root': head.root, ..._room(head.room)});
       case 'GET /api/sync/roots/<name>':
         return _text(await server.root(name![2]!));
       case 'GET /api/sync/parts/<name>':
@@ -107,7 +112,8 @@ class SyncHttpFace implements HttpClientAdapter {
       case 'POST /api/sync/root':
         final root = body(['generation', 'name', 'root']);
         if (root case {'generation': int generation, 'name': String name, 'root': String text}) {
-          return _json({'generation': await server.replaceRoot(generation, name, text), 'root': name});
+          final answer = await server.replaceRoot(generation, name, text);
+          return _json({'generation': answer.generation, 'root': name, ..._room(answer.room)});
         }
         throw const _Malformed('root');
       case 'GET /api/sync/settings':

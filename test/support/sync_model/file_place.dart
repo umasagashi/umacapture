@@ -708,14 +708,10 @@ class _FilePlace implements SyncPlace<_Carried> {
 /// all, as the Worker does, the database's room ([_admitWrite]). [cut]: the swap
 /// past the ones it answers gets no answer, as a connection that drops ([SwapCut]).
 class _FileSyncServer implements SyncServer {
-  _FileSyncServer(this.s, this.device, {this.cut, this.stopped});
+  _FileSyncServer(this.s, this.device, {this.cut});
   final FServer s;
   final String device;
   final SwapCut? cut;
-
-  /// The device's mark of being stopped for room ([FDevice.roomStop]), which a control reads
-  /// ([FServer.roomRefusalEndsTheRound]).
-  final SyncRoomStop? stopped;
 
   /// Thrown where a swap gets no answer: not a refusal of the server's, so the app's round reads it as no answer
   /// ([SyncRoundEnd.answerLost]).
@@ -740,10 +736,16 @@ class _FileSyncServer implements SyncServer {
     throw refusal;
   }
 
+  /// The room the server states, as the Worker states it: none of the account's where it is [FServer.full], none of the
+  /// service's where the database has no room past the reserve, and far more than a universe puts otherwise.
+  SyncRoom get _room => (account: s.full ? 0 : 1 << 40, service: s.database != DatabaseRoom.room ? 0 : 1 << 40);
+
   @override
-  Future<({int generation, String? root})> readGeneration() async {
+  Future<({int generation, String? root, SyncRoom? room})> readGeneration() async {
     _attemptBegins = true;
-    return (generation: s.generation, root: s.rootName);
+    final room = _room;
+    _statedNoRoom |= room.account == 0 || room.service == 0;
+    return (generation: s.generation, root: s.rootName, room: room);
   }
 
   @override
@@ -785,10 +787,14 @@ class _FileSyncServer implements SyncServer {
   /// Whether a put of new bytes was refused for room in this round ([FServer.roomRefusalEndsTheRound]).
   var _refusedForRoom = false;
 
+  /// Whether the server stated no room of a kind beside a generation of this round ([FServer.roomRefusalEndsTheRound]):
+  /// a device told so asks for no new bytes, so a refusal for room is not what tells the control the round met none.
+  var _statedNoRoom = false;
+
   /// The room a write that stores a part or replaces the root needs: the database's, the reserve included. The account's
   /// cap weighs no part ([SetStorageFull]).
   void _admitWrite() {
-    final refusedForRoom = _refusedForRoom || (stopped?.up ?? false);
+    final refusedForRoom = _refusedForRoom || _statedNoRoom;
     if (s.database == DatabaseRoom.none || (s.roomRefusalEndsTheRound && refusedForRoom)) {
       _refuse(const SyncRefusal(507, 'database_full'));
     }
@@ -888,7 +894,7 @@ class _FileSyncServer implements SyncServer {
   };
 
   @override
-  Future<int> replaceRoot(int generation, String name, String text) async {
+  Future<({int generation, SyncRoom? room})> replaceRoot(int generation, String name, String text) async {
     s.beforeSwap?.call(device);
     if (cut case SwapCut(stored: false, :final answered) when _calls++ == answered) throw dropped;
     // As the Worker, the database's room before anything of the root is read.
@@ -937,6 +943,6 @@ class _FileSyncServer implements SyncServer {
     final swap = _made++;
     s.afterSwap?.call(device, swap);
     if (cut case SwapCut(stored: true, :final answered) when swap == answered) throw dropped;
-    return made;
+    return (generation: made, room: _room);
   }
 }

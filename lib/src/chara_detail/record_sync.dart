@@ -18,7 +18,7 @@
 // another round until the user turns it on again — and that round asks again.
 //
 // A round runs against the server this device syncs with ([syncServerProvider]) — none while it is logged out, or
-// deleting its account — at five moments, and at no other: the app's start, the user syncing now ([RecordSync.syncNow]),
+// deleting its account — at five moments, and at no other: the app's start, the user syncing now ([RecordSync.round]),
 // sync turned on, five seconds after the user's last edit of what sync carries ([syncLocalEditsProvider]), and the app
 // coming back to the foreground ten minutes or more after the last round was asked for. Nothing asks at an interval
 // while the app is in front: every round merges the three lists again, so a device that waits loses nothing, and a
@@ -288,13 +288,6 @@ class RecordSync extends Notifier<RecordSyncState> {
     );
   }
 
-  /// The user syncs now: the device's mark of being stopped for room comes down ([SyncRoomStop.lower], [N1-22]), and
-  /// a round runs as [round] runs one.
-  Future<SyncRoundOutcome?> syncNow([SyncServer? server]) {
-    ref.read(syncRoomStopProvider).lower();
-    return round(server);
-  }
-
   Future<SyncRoundOutcome?> _start(SyncServer server) {
     final account = state.roundAccount(ref.read(recordShareSessionProvider)?.accountId);
     if (account == null) {
@@ -524,7 +517,7 @@ SyncHalt? syncHaltOf(RecordSyncState state, ShareSession? session) {
 
 /// The moments the app runs a round at, each through [RecordSync.round]: the app's start, sync turned on, five seconds
 /// after the user's last edit ([syncLocalEditsProvider], [syncEditQuiet]) and the app coming back to the foreground
-/// once [syncForegroundDue]; the user syncing now is the user's own ([RecordSync.syncNow]). Read once as the app starts,
+/// once [syncForegroundDue]; the user syncing now is the user's own, through the same [RecordSync.round]. Read once as the app starts,
 /// and alive for the whole session; the round at the start is asked for once the build that read it has ended.
 final recordSyncTriggersProvider = Provider<void>((ref) {
   final time = ref.watch(syncMomentTimeProvider);

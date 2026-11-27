@@ -146,7 +146,7 @@ class _CountedServer implements SyncServer {
   var writes = 0;
 
   @override
-  Future<({int generation, String? root})> readGeneration() async {
+  Future<({int generation, String? root, SyncRoom? room})> readGeneration() async {
     calls++;
     await beforeGeneration?.call();
     return server.readGeneration();
@@ -185,7 +185,7 @@ class _CountedServer implements SyncServer {
   }
 
   @override
-  Future<int> replaceRoot(int generation, String name, String text) {
+  Future<({int generation, SyncRoom? room})> replaceRoot(int generation, String name, String text) {
     calls++;
     writes++;
     return server.replaceRoot(generation, name, text);
@@ -597,7 +597,7 @@ void main() {
       final deleted = await container
           .read(charaDetailRecordStorageLoaderProvider.notifier)
           .deleteAllAsync(ids, effects: recordDeleteEffects(container));
-      expect(deleted.isSuccess, isTrue);
+      expect(deleted.isSuccess, isTrue, reason: '$deleted');
     }
 
     Future<void> retitle(SyncTestDevice device, String title) async {
@@ -2183,7 +2183,7 @@ void main() {
           device.recognizeAgain(id, (result) => result['fans'] = 7);
 
       test('check 2: a merge whose end the server has no room for waits with the record it absorbed, the other device '
-          'sees both as they were, and both go once there is room and the user syncs now', () async {
+          'sees both as they were, and both go in the first round once there is room', () async {
         seedUmas(a, ['R1', 'R2', 'R3']);
         await a.setSyncOn(true);
         await a.round(server);
@@ -2205,9 +2205,7 @@ void main() {
         expect((await listOf(a)).rows['R1']?.record.absorbed, {'R2'}, reason: 'A holds its merge');
 
         server.noRoom = null;
-        final stopped = await a.round(server);
-        expect((stopped.end, stopped.waitingForRoom), (SyncRoundEnd.done, 2), reason: 'A is stopped for room');
-        final sent = await a.syncNow(server);
+        final sent = await a.round(server);
         expect((sent.end, sent.waitingForRoom), (SyncRoundEnd.done, 0));
         await b.round(server);
         for (final list in await allLists()) {
@@ -2218,7 +2216,8 @@ void main() {
       });
 
       test(
-        'what needs no room goes in the round a body waits for room: the delete and the archive of other records',
+        'what needs no room goes in the round a body waits for room: the delete and the archive of other records; and '
+        'a delete that frees room has the body go in the round that carries it',
         () async {
           seedUmas(a, ['R1', 'R2', 'R3']);
           await a.setSyncOn(true);
@@ -2243,16 +2242,110 @@ void main() {
             expect(list.rows['R2']!.bodyName, r2, reason: 'R2 waits');
           }
 
-          server.noRoom = null;
-          await a.syncNow(server);
+          // A delete of this device's — of R3, archived —, whose replacement the server answers with the room it freed.
+          final deleted = await container.read(charaDetailArchiveStorageLoaderProvider.notifier).deleteAllAsync({
+            'R3',
+          }, effects: recordDeleteEffects(container));
+          expect(deleted.succeeded, {'R3'});
+          final before = (
+            replacements: server.replacementsAsked,
+            bodies: server.bodiesAsked.length,
+            refused: server.refusedForRoom,
+          );
+          server.beforeReplace = () async {
+            server.beforeReplace = null;
+            server.noRoom = null;
+          };
+          final freed = await a.round(server);
+          expect(
+            (freed.end, freed.waitingForRoom),
+            (SyncRoundEnd.done, 0),
+            reason: 'R2 went in the round of the delete',
+          );
+          expect(
+            (
+              server.replacementsAsked - before.replacements,
+              server.bodiesAsked.length - before.bodies,
+              server.refusedForRoom - before.refused,
+            ),
+            (2, 1, 0),
+            reason: 'the replacement of the delete, then once more with R2\'s body, asked once and not refused',
+          );
           await b.round(server);
           final recognized = (await listOf(a)).rows['R2']!.bodyName;
           expect(recognized, isNot(r2));
           for (final list in await allLists()) {
+            expect(list.rows.keys.toSet(), {'R2'});
             expect(list.rows['R2']!.bodyName, recognized);
           }
         },
       );
+
+      /// Eleven records only the device holds, R02 to R12, beside R1 that the server lists: more bodies than one put.
+      Future<List<String>> elevenUnsent() async {
+        seedUmas(a, ['R1']);
+        await a.setSyncOn(true);
+        await a.round(server);
+        a.close();
+        final ids = [for (var i = 2; i <= 12; i++) 'R${'$i'.padLeft(2, '0')}'];
+        for (final (i, id) in ids.indexed) {
+          a.seedRecord(id, binding: _binding, bodyWrittenAt: 1767225600200 + i, fans: 2000 + i);
+        }
+        return ids;
+      }
+
+      test('while the room the server states takes no body, a round asks for none; a server that states no room is '
+          'asked once a round', () async {
+        await elevenUnsent();
+        final asked = server.bodiesAsked.length;
+        server.noRoom = 'hidden_limit';
+        for (var i = 0; i < 3; i++) {
+          final held = await a.roundAsAsked(server);
+          expect(
+            (held?.end, held?.waitingForRoom, held?.serverStop),
+            (SyncRoundEnd.done, 11, SyncServerStop.accountRoom),
+            reason: 'round $i: the eleven wait, for the account\'s room',
+          );
+        }
+        expect(
+          (server.bodiesAsked.length - asked, server.refusedForRoom),
+          (0, 0),
+          reason: 'no body is asked for while the server states no room',
+        );
+
+        server.statesRoom = false;
+        expect((await a.roundAsAsked(server))?.waitingForRoom, 11);
+        expect(
+          (server.bodiesAsked.length - asked, server.refusedForRoom),
+          (1, 1),
+          reason: 'ten bodies in one put, refused, and the eleventh not asked after it',
+        );
+        expect((await a.roundAsAsked(server))?.waitingForRoom, 11);
+        expect(
+          (server.bodiesAsked.length - asked, server.refusedForRoom),
+          (2, 2),
+          reason: 'the next round asks once again',
+        );
+      });
+
+      test('ISS-0113: a room one body fits in puts that body, and once the server has room the next round puts the '
+          'rest, with nothing of the user\'s', () async {
+        final ids = await elevenUnsent();
+        final least = [for (final id in ids) utf8.encode(a.bodyOf(id)).length].reduce(min);
+        final asked = server.bodiesAsked.length;
+        server.accountRoom = least;
+        final one = await a.roundAsAsked(server);
+        expect((one?.end, one?.waitingForRoom), (SyncRoundEnd.done, 10));
+        expect([for (final put in server.bodiesAsked.skip(asked)) put.length], [1], reason: 'one put of one body');
+        expect(server.refusedForRoom, 0);
+        expect(onServer().rows.length, 2, reason: 'R1 and the body that fit');
+
+        server.accountRoom = null;
+        final rest = await a.roundAsAsked(server);
+        expect((rest?.end, rest?.waitingForRoom), (SyncRoundEnd.done, 0));
+        expect(onServer().rows.length, 12);
+        expect([for (final put in server.bodiesAsked.skip(asked + 1)) put.length], [10]);
+      });
 
       test('[N1-15]: a body the server refused for the day waits, the delete of another record goes that day, and a '
           'round of the next day sends the body with nothing on the device changed', () async {
@@ -2300,7 +2393,7 @@ void main() {
           }
 
           server.noRoom = null;
-          await a.syncNow(server);
+          await a.round(server);
           await b.round(server);
           for (final list in await allLists()) {
             expect(list.cells[('memo/m1', 'R2')]?.value, jsonEncode('waits'));
@@ -4267,10 +4360,15 @@ void main() {
 
                 a.close();
                 seedShot(a, 'R3', 3);
-                server.noRoom = 'database_full';
+                // A Worker that states no room: the body is asked, and the refusal is the answer.
+                server
+                  ..statesRoom = false
+                  ..noRoom = 'database_full';
                 final room = await a.round(await to(a));
                 expect((room.end, room.waitingForRoom, server.refusedForRoom), (SyncRoundEnd.done, 1, 1));
-                server.noRoom = null;
+                server
+                  ..statesRoom = true
+                  ..noRoom = null;
                 server.limitTheDay(0);
                 await a.setSyncOn(true);
                 final day = await a.syncNow(await to(a));
@@ -4298,8 +4396,8 @@ void main() {
             // T3a1, D2-5: what the device tells its user stopped sync — the account's room, or the service's stop —
             // is the round's to say, through the same refusals over HTTP as from the fake.
             test(
-              'T3a1 (C1 i, ii): a round tells a refusal for the account\'s room apart from one for the service\'s, a '
-              'round the mark holds back tells the room that raised it, and sync switched off is the service\'s stop '
+              'T3a1 (C1 i, ii): a round tells the account\'s room apart from the service\'s, a round the stated room '
+              'holds back tells whose room it lacks, and sync switched off is the service\'s stop '
               '${overHttp ? 'over HTTP' : 'from the fake'}',
               () async {
                 if (overHttp) a.syncHttp = SyncHttpFace(server);
@@ -4316,8 +4414,8 @@ void main() {
                 final held = await a.roundAsAsked(await to());
                 expect(
                   (held?.waitingForRoom, held?.serverStop, server.refusedForRoom),
-                  (1, SyncServerStop.accountRoom, 1),
-                  reason: 'the mark the refusal raised asks for no room, and says whose room it was',
+                  (1, SyncServerStop.accountRoom, 0),
+                  reason: 'the room the server stated holds the put back, and says whose it is',
                 );
 
                 server.noRoom = 'storage_full';
@@ -4608,7 +4706,7 @@ void main() {
           });
 
           test(
-            'S-09: a replacement the server refused while the form is none is put again once the user syncs now',
+            'S-09: a replacement the server refused while the form is none is put again by the next round',
             () async {
               await a.setSyncOn(true);
               server.form = 'png';
@@ -4619,7 +4717,7 @@ void main() {
               server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit');
               expect((await a.round(server)).imagesUndone?.records, 1);
               server.beforeImagePut = null;
-              expect((await a.syncNow(server)).end, SyncRoundEnd.done);
+              expect((await a.round(server)).end, SyncRoundEnd.done);
               expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1), ...jpegNames(1)});
             },
           );
@@ -4781,7 +4879,8 @@ void main() {
           );
 
           test('[R7-1] (vi): a round whose image puts the server has no room for ends telling the images it left '
-              'undone, the device stops for room, and the user syncing now with room puts them', () async {
+              'undone, a round while the server states no room asks for none, and the first round once it has room '
+              'puts them', () async {
             await a.setSyncOn(true);
             server.form = 'png';
             seedShot(a, 'R1', 1);
@@ -4794,12 +4893,86 @@ void main() {
             server.beforeImagePut = null;
             final asked = <String>[];
             server.beforeImagePut = (name) async => asked.add(name);
-            final stopped = await a.round(server);
-            expect(asked, isEmpty, reason: 'a round of a device stopped for room asks to put no image ([N1-15])');
-            expect(stopped.imagesUndone?.stops, {SyncImagesStop.room});
-            final next = await a.syncNow(server);
+            server.noRoom = 'account_limit';
+            final held = await a.round(server);
+            expect(asked, isEmpty, reason: 'the room the server states takes no image, and none is asked ([N1-15])');
+            expect(held.imagesUndone?.stops, {SyncImagesStop.room});
+            expect(held.serverStop, SyncServerStop.accountRoom);
+            server.noRoom = null;
+            final next = await a.round(server);
+            expect(asked, isNotEmpty, reason: 'a round, not the user, puts them once there is room');
             expect(next.imagesUndone, isNull);
             expect(server.images.keys.toSet(), {...pngNames(1), iconOfShot(1)});
+          });
+
+          test('ISS-0113, [R7-1]: a body the stated room holds back ends no image put: the delete whose replacement '
+              'frees room has the round go once more, and the body and its images go in it', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            seedUmas(a, ['R2']);
+            await a.setSyncOn(true);
+            server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit', 'bytes');
+            expect((await a.round(server)).imagesUndone?.records, 1);
+            server.beforeImagePut = null;
+            expect(server.images.keys.toSet().intersection(pngNames(1)), isEmpty, reason: 'R1\'s images are not there');
+
+            server.noRoom = 'account_limit';
+            final was = onServer().rows['R1']?.bodyName;
+            if (was == null) fail('the server holds no body for R1 before the change');
+            await a.recognizeAgain('R1', (result) => result['fans'] = 7);
+            await deleteRecords(a, {'R2'});
+            server.beforeReplace = () async {
+              server.beforeReplace = null;
+              server.noRoom = null;
+            };
+            final freed = await a.round(server);
+            expect((freed.end, freed.waitingForRoom), (SyncRoundEnd.done, 0));
+            expect(freed.imagesUndone, isNull);
+            expect(server.images.keys.toSet(), containsAll({...pngNames(1), iconOfShot(1)}));
+            final now = onServer().rows['R1']?.bodyName;
+            if (now == null) fail('the server holds no body for R1 after room is freed');
+            expect(now, isNot(was));
+            expect(now, (await listOf(a)).rows['R1']?.bodyName);
+          });
+
+          test('[N1-15]: a round whose body the server refused for room asks for no body in the attempt after, nor '
+              'for an image of a record the server lists', () async {
+            server.form = 'png';
+            seedShot(a, 'R1', 1);
+            seedUmas(a, ['R3']);
+            await a.setSyncOn(true);
+            server.beforeImagePut = (_) async => throw const SyncRefusal(507, 'account_limit', 'bytes');
+            expect((await a.round(server)).imagesUndone?.records, 1, reason: 'R1, listed, with its images left');
+            server.beforeImagePut = null;
+            a.close();
+            a.seedRecord('R2', binding: _binding, bodyWrittenAt: 1767225600200, fans: 2000);
+            await deleteRecords(a, {'R3'});
+
+            server
+              ..statesRoom = false
+              ..noRoom = 'account_limit'
+              ..refuseAsStale = 1;
+            final imagesAsked = <String>[];
+            server.beforeImagePut = (name) async => imagesAsked.add(name);
+            final before = (
+              replacements: server.replacementsAsked,
+              bodies: server.bodiesAsked.length,
+              refused: server.refusedForRoom,
+            );
+            final refused = await a.round(server);
+            expect(
+              server.replacementsAsked - before.replacements,
+              2,
+              reason: 'the replacement refused as stale, and the one of the attempt after it',
+            );
+            expect(
+              (server.bodiesAsked.length - before.bodies, server.refusedForRoom - before.refused),
+              (1, 1),
+              reason: 'R2\'s body, refused once, and not asked again in the attempt after',
+            );
+            expect(imagesAsked, isEmpty, reason: 'the refusal ends the round\'s image puts too');
+            expect(refused.imagesUndone?.records, 1);
+            expect(onServer().rows.keys, isNot(contains('R3')), reason: 'the delete needs no room');
           });
 
           test(
@@ -5909,7 +6082,7 @@ void main() {
       test('T2b-7a (C1 i): the user syncing now runs a round', () async {
         seedUmas(a, ['R1']);
         await a.setSyncOn(true);
-        expect((await (await a.open()).read(recordSyncProvider.notifier).syncNow())?.end, SyncRoundEnd.done);
+        expect((await (await a.open()).read(recordSyncProvider.notifier).round())?.end, SyncRoundEnd.done);
         expect(asked, 1);
         expect(onServer().rows.keys.toSet(), {'R1'});
       });
@@ -5962,7 +6135,7 @@ void main() {
         time.now = start.add(const Duration(minutes: 9, seconds: 59));
         cameToTheForeground();
         // Rounds run one after another: one the foreground had started would run before this one, and be asked.
-        expect((await sync.syncNow())?.end, SyncRoundEnd.done);
+        expect((await sync.round())?.end, SyncRoundEnd.done);
         expect(asked, 2, reason: 'the start and syncing now; not the foreground before ten minutes');
         time.now = time.now.add(const Duration(minutes: 10));
         ran = told(app);
@@ -6007,7 +6180,7 @@ void main() {
           time.now = time.now.add(syncForegroundInterval);
           cameToTheForeground();
           // Asked last, and run after any round asked before it.
-          expect(await sync.syncNow(), isNull);
+          expect(await sync.round(), isNull);
           expect(asked, 0);
         },
       );
@@ -6020,7 +6193,7 @@ void main() {
         time.timers.single.fire();
         time.now = time.now.add(syncForegroundInterval);
         cameToTheForeground();
-        expect(await sync.syncNow(), isNull);
+        expect(await sync.round(), isNull);
         expect(asked, 0);
       });
     });
@@ -6119,7 +6292,8 @@ void main() {
       expect((await listOf(a)).rows, isEmpty);
     });
 
-    test('a waiting record whose body the server holds unlisted is not listed with its waiting memo', () async {
+    test('a waiting record whose body the server holds unlisted goes with its memo in the first round once there '
+        'is room', () async {
       seedUmas(a, ['R1']);
       await a.round(server);
       a.close();
@@ -6132,9 +6306,9 @@ void main() {
       await server.putBodies([(name: syncObjectName(utf8.encode(body)), body: body)]);
       final outcome = await a.round(server);
       expect(outcome.end, SyncRoundEnd.done);
-      expect(outcome.waitingForRoom, 1);
-      expect(onServer().rows.keys, isNot(contains('R2')));
-      expect(onServer().cells[('memo/m1', 'R2')], isNull);
+      expect(outcome.waitingForRoom, 0);
+      expect(onServer().rows.keys, contains('R2'));
+      expect(onServer().cells[('memo/m1', 'R2')]?.value, jsonEncode('waits'));
     });
 
     // T2b-7b: what a round of the device keeps is of the account it ran as, and the switch of sync is turned on for one
@@ -6148,7 +6322,7 @@ void main() {
       });
 
       test('[N1-22] (D-30): logged out and in to another account, the device meets it as an account it holds no base '
-          'of — the base of the account before is not read, and its mark of being stopped for room is down', () async {
+          'of — the base of the account before is not read', () async {
         await a.login(syncTestAccount);
         seedUmas(a, ['R1']);
         await a.setSyncOn(true);
@@ -6156,7 +6330,7 @@ void main() {
         a.close();
         a.seedRecord('R2', binding: own('R2'), bodyWrittenAt: 1767225600200, fans: 2000);
         server.noRoom = 'account_limit';
-        expect((await a.roundAsAsked(server))?.waitingForRoom, 1, reason: 'R2 waits for room, and the mark is up');
+        expect((await a.roundAsAsked(server))?.waitingForRoom, 1, reason: 'R2 waits for room');
 
         await a.logout();
         await a.login('account-2');
@@ -6532,9 +6706,9 @@ void main() {
           '提供元が同期を止めています。',
         ], reason: 'one toast per stop as it began, though each stop held two rounds, and no other sentence');
 
-        // The user syncs now, which lowers the mark of the room's stop; the server has room and runs again.
+        // The user syncs now; the server has room and runs again.
         server.paused = false;
-        await tester.runAsync(() => app.read(recordSyncProvider.notifier).syncNow(server));
+        await tester.runAsync(() => app.read(recordSyncProvider.notifier).round(server));
         await tester.pump();
         expect(tester.widget<Icon>(icon).icon, Symbols.sync_rounded, reason: 'the rounds sync again');
         expect(

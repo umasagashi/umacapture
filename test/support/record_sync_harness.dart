@@ -208,10 +208,10 @@ class SyncTestDevice {
   Future<SyncRoundOutcome?> roundAsAsked(SyncServer server) async =>
       (await open()).read(recordSyncProvider.notifier).round(server);
 
-  /// The user syncs now against [server] ([RecordSync.syncNow]): the device's mark of being stopped for room comes
-  /// down, and a round runs as [roundAsAsked] runs one; with sync on ([setSyncOn]) it is the round's outcome.
+  /// A round against [server] asked for as the app asks for one ([RecordSync.round]) — the user syncing now, or any
+  /// moment —, which runs: with sync on ([setSyncOn]) it is the round's outcome.
   Future<SyncRoundOutcome> syncNow(SyncServer server) async =>
-      (await (await open()).read(recordSyncProvider.notifier).syncNow(server)) ??
+      (await (await open()).read(recordSyncProvider.notifier).round(server)) ??
       (fail('no round ran: is sync on on this device?'));
 
   /// The user logs in to [account] through the app's web login ([RecordShareSession.beginLogin], then
@@ -580,11 +580,47 @@ class FakeSyncServer implements SyncServer {
   final slotsChanged = <int>[];
 
   /// The `error` the server refuses a put of new bytes with for want of room (`507`), as the Worker refuses it: a put of
-  /// bodies that names one the server does not hold is refused whole, and stores none of them. Null where it has room.
+  /// bodies that names one the server does not hold is refused whole, and stores none of them, and so is a put of an
+  /// image it does not hold. Null where it has room. The room the server states is 0 of the kind it names
+  /// ([statedRoom]).
   String? noRoom;
 
-  /// How many puts of bodies the server refused for room ([noRoom]).
+  /// The new bytes the account's caps take still, as the Worker's `account_limit` counts them: a put of new bytes
+  /// past them is refused `507 account_limit` (`bytes`), and one within them uses them up. Null where the account has
+  /// no cap.
+  int? accountRoom;
+
+  /// Whether the server states its room beside the generation and a replacement ([statedRoom]); false is a Worker
+  /// that states none.
+  bool statesRoom = true;
+
+  /// How many puts of new bytes, bodies or an image, the server refused for room ([noRoom], [accountRoom]).
   int refusedForRoom = 0;
+
+  /// The names of every put of bodies asked of the server, in order, as it arrives — refused ones included.
+  final bodiesAsked = <List<String>>[];
+
+  /// The room the server states ([SyncRoom]): null where it states none ([statesRoom]); else none of the kind [noRoom]
+  /// names, and [accountRoom] of the account's — and a room far larger than any test puts where it has no cap.
+  SyncRoom? get statedRoom => statesRoom
+      ? (
+          account: noRoom == 'account_limit' || noRoom == 'hidden_limit' ? 0 : accountRoom ?? 1 << 40,
+          service: noRoom == 'storage_full' || noRoom == 'database_full' ? 0 : 1 << 40,
+        )
+      : null;
+
+  /// Takes a put of [bytes] new bytes into the room ([noRoom], [accountRoom]), or refuses it `507`.
+  void _admitRoom(int bytes) {
+    if (noRoom case final error?) {
+      refusedForRoom++;
+      throw SyncRefusal(507, error);
+    }
+    if (accountRoom case final left? when bytes > left) {
+      refusedForRoom++;
+      throw const SyncRefusal(507, 'account_limit', 'bytes');
+    }
+    if (accountRoom case final left?) accountRoom = left - bytes;
+  }
 
   /// The UTC day of the clock the app writes by ([valueWriteClock]) whose daily limit is all but used up
   /// ([limitTheDay]), and how many puts of new bytes it takes still; none where no day is limited.
@@ -649,10 +685,10 @@ class FakeSyncServer implements SyncServer {
   bool offline = false;
 
   @override
-  Future<({int generation, String? root})> readGeneration() async {
+  Future<({int generation, String? root, SyncRoom? room})> readGeneration() async {
     if (offline) throw const SocketException('the network is unreachable');
     if (paused) throw const SyncRefusal(503, 'sync_paused');
-    return (generation: generation, root: rootName);
+    return (generation: generation, root: rootName, room: statedRoom);
   }
 
   /// How many times a root was read: a round reads the list only where the generation moved from its base's.
@@ -683,6 +719,7 @@ class FakeSyncServer implements SyncServer {
   /// `POST /api/sync/bodies`.
   @override
   Future<List<String>> putBodies(List<({String name, String body})> bodies) async {
+    bodiesAsked.add([for (final body in bodies) body.name]);
     if (bodies.isEmpty || bodies.length > 10) throw const SyncRefusal(400, 'invalid_payload', 'bodies');
     for (final (i, body) in bodies.indexed) {
       if (body.name != _nameOf(body.body)) throw SyncRefusal(400, 'invalid_payload', 'bodies[$i].name');
@@ -694,10 +731,13 @@ class FakeSyncServer implements SyncServer {
       }
     }
     if (bodies.any((body) => !_bodies.containsKey(body.name))) {
-      if (noRoom case final error?) {
-        refusedForRoom++;
-        throw SyncRefusal(507, error);
-      }
+      // The new bytes, as the Worker counts them: the UTF-8 bytes of each body it does not hold.
+      _admitRoom(
+        {
+          for (final body in bodies)
+            if (!_bodies.containsKey(body.name)) body.name: utf8.encode(body.body).length,
+        }.values.fold(0, (a, b) => a + b),
+      );
       _countPut();
     }
     return [for (final body in bodies) _storeBody(body.name, body.body)];
@@ -762,9 +802,9 @@ class FakeSyncServer implements SyncServer {
     return status;
   }
 
-  /// `POST /api/sync/root`; answers the new generation.
+  /// `POST /api/sync/root`; answers the new generation, and the room the server states after it ([statedRoom]).
   @override
-  Future<int> replaceRoot(int from, String name, String text) async {
+  Future<({int generation, SyncRoom? room})> replaceRoot(int from, String name, String text) async {
     replacementsAsked++;
     await beforeReplace?.call();
     if (refuseAsStale > 0) {
@@ -804,7 +844,7 @@ class FakeSyncServer implements SyncServer {
       loseAnswer = false;
       throw FakeSyncAnswerLost();
     }
-    return generation;
+    return (generation: generation, room: statedRoom);
   }
 
   /// The part in the slot [slot] of the current root written again as [rewrite] makes its text, the root naming it in
@@ -871,6 +911,7 @@ class FakeSyncServer implements SyncServer {
       if (form == 'none' && !(jpeg && _replacements().contains(name))) {
         throw const SyncRefusal(409, 'images_not_synced');
       }
+      _admitRoom(bytes.length);
       _countPut();
       images[name] = bytes;
     }

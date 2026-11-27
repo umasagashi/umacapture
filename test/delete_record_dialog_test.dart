@@ -14,7 +14,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/chara_detail/record_sync.dart' show syncOnProvider;
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
-import 'package:umacapture/src/chara_detail/record_sync_round.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -374,18 +373,6 @@ void main() {
     await tester.pump();
     expect(find.byType(BulkDeleteRecordDialog), findsNothing);
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a delete that removed records lowers the device\'s mark of being stopped for room ([N1-22])', (
-    tester,
-  ) async {
-    final h = await _pump(tester);
-    final roomStop = h.container.read(syncRoomStopProvider)..raise(SyncServerStop.accountRoom);
-
-    h.storage.settle();
-    await tester.pump();
-    expect(h.storage.reported.single.succeeded, {'a', 'b'});
-    expect(roomStop.up, isFalse, reason: 'the next round asks the server to put again');
   });
 
   testWidgets('a plain tap on the confirm deletes nothing; only the long press does', (tester) async {

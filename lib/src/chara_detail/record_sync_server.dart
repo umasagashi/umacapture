@@ -177,10 +177,20 @@ class HttpSyncServer implements SyncServer {
   static T _field<T>(Map<String, Object?> answer, String key) =>
       answer[key] is T ? answer[key] as T : throw const SyncAnswerLost(200);
 
+  /// The room an answer states (`room`: `account` and `service`, each an integer of 0 or more); null where it states
+  /// none, or one of another shape — the room only helps a round choose, so an answer is not lost for it.
+  static SyncRoom? _room(Map<String, Object?> answer) => switch (answer['room']) {
+    {'account': final int account, 'service': final int service} when account >= 0 && service >= 0 => (
+      account: account,
+      service: service,
+    ),
+    _ => null,
+  };
+
   @override
-  Future<({int generation, String? root})> readGeneration() async {
+  Future<({int generation, String? root, SyncRoom? room})> readGeneration() async {
     final answer = await _object('GET', '/api/sync/generation');
-    return (generation: _field<int>(answer, 'generation'), root: _field<String?>(answer, 'root'));
+    return (generation: _field<int>(answer, 'generation'), root: _field<String?>(answer, 'root'), room: _room(answer));
   }
 
   @override
@@ -217,10 +227,14 @@ class HttpSyncServer implements SyncServer {
       _object('POST', '/api/sync/parts', json: {'name': name, 'part': text});
 
   @override
-  Future<int> replaceRoot(int generation, String name, String text) async => _field<int>(
-    await _object('POST', '/api/sync/root', json: {'generation': generation, 'name': name, 'root': text}),
-    'generation',
-  );
+  Future<({int generation, SyncRoom? room})> replaceRoot(int generation, String name, String text) async {
+    final answer = await _object(
+      'POST',
+      '/api/sync/root',
+      json: {'generation': generation, 'name': name, 'root': text},
+    );
+    return (generation: _field<int>(answer, 'generation'), room: _room(answer));
+  }
 
   @override
   Future<String> imageForm() async => _field<String>(await _object('GET', '/api/sync/settings'), 'image_form');

@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/record_sync.dart' show syncOnProvider;
 import '/src/chara_detail/record_sync_edits.dart';
-import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/storage/long_read_registry.dart';
@@ -179,7 +178,6 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     }
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
-    final roomStop = ref.read(syncRoomStopProvider);
     final edits = ref.read(syncLocalEditsProvider.notifier);
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
@@ -188,11 +186,9 @@ class _BulkDeleteRecordDialogState extends ConsumerState<BulkDeleteRecordDialog>
     var notStarted = false;
     try {
       final deleted = await storage.deleteAllAsync(widget.recordIds, effects: effects);
-      // A delete the user made lowers the device's mark of being stopped for
-      // room ([N1-22]), and is an edit of what sync carries; a round of sync
+      // A delete the user made is an edit of what sync carries; a round of sync
       // deletes through the store, not here.
       if (deleted.succeeded.isNotEmpty) {
-        roomStop.lower();
         edits.edited();
       }
     } on LongReadNotStartedException catch (exception) {
@@ -323,7 +319,6 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
   Future<void> _confirm() async {
     final storage = recordStorageFor(ref, widget.source);
     final effects = recordDeleteDialogEffects(ref.read(containerRefProvider));
-    final roomStop = ref.read(syncRoomStopProvider);
     final edits = ref.read(syncLocalEditsProvider.notifier);
     final dialogs = ref.read(dialogBuilderProvider.notifier);
     final token = dialogs.currentToken;
@@ -332,9 +327,8 @@ class _DeleteRecordDialogState extends ConsumerState<DeleteRecordDialog> {
     var notStarted = false;
     try {
       final deleted = await storage.deleteAsync(widget.recordId, effects: effects);
-      // Lowers the mark of being stopped for room, and is an edit, as the bulk delete does.
+      // An edit, as the bulk delete is.
       if (deleted.succeeded.isNotEmpty) {
-        roomStop.lower();
         edits.edited();
       }
     } on LongReadNotStartedException catch (exception) {

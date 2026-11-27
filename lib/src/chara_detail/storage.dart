@@ -20,7 +20,6 @@ import '/src/chara_detail/record_notes.dart';
 import '/src/chara_detail/record_share.dart' show recordSharesProvider;
 import '/src/chara_detail/record_share_session.dart' show recordShareSessionProvider;
 import '/src/chara_detail/record_sync_edits.dart';
-import '/src/chara_detail/record_sync_round.dart' show syncRoomStopProvider;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/fs/record_mutation_lock.dart';
@@ -3558,10 +3557,9 @@ class CharaArchiveController extends Notifier<Progress> {
       );
       effects.totals.apply(TotalsScope.recordRoot(pathInfo));
     }
-    // An archive the user made lowers the device's mark of being stopped for room ([N1-22]), and is an edit of what
-    // sync carries; a round of sync archives through its own place, not here.
+    // An archive the user made is an edit of what sync carries; a round of sync archives through its own place, not
+    // here.
     if (archived.isNotEmpty && ref.mounted) {
-      ref.read(syncRoomStopProvider).lower();
       ref.read(syncLocalEditsProvider.notifier).edited();
     }
     if (archived.isNotEmpty) {

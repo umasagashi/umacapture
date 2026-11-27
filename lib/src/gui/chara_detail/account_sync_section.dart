@@ -69,7 +69,7 @@ class _AccountSyncCardState extends ConsumerState<AccountSyncCard> {
   void _syncNow() => unawaited(
     ref
         .read(recordSyncProvider.notifier)
-        .syncNow()
+        .round()
         .then<void>(
           (_) {},
           onError: (Object error, StackTrace stackTrace) => logger.e('A sync round failed.', error, stackTrace),

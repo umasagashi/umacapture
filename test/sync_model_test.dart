@@ -559,7 +559,6 @@ void main() {
             SyncRound('A'),
             SyncRound('B'),
           ]);
-        expect(w.devices['A']!.paused, isTrue);
         expect(w.devices['A']!.store.dismissed, {'R1+R3'});
         expect(w.server.list.records.keys.toSet(), {'R1', 'R2', 'R3'});
         expect(w.devices['B']!.store.dismissed, w.server.list.dismissed);
